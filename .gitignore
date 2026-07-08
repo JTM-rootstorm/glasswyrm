@@ -1,0 +1,13 @@
+# Meson build directories
+/build/
+/build-*/
+/build_*/
+
+# Meson generated metadata
+/meson-logs/
+/meson-info/
+
+# Editor and local machine noise
+*.swp
+*~
+.cache/
