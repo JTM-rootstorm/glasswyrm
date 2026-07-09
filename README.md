@@ -4,17 +4,17 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently at Milestone 0: repository skeleton. The initial goal
-is a buildable, testable base for bringing up the core server, protocol parser,
-headless compositor, and software renderer without requiring real DRM/KMS
-hardware.
+The project is currently at Milestone 0: repository skeleton. This milestone
+establishes only the build, target layout, process names, and stub test harness.
+There is no X11 handshake, IPC contract, window-management policy, compositor,
+renderer, input path, or display backend yet.
 
 ## Build
 
 Glasswyrm uses Meson and Ninja.
 
 ```sh
-meson setup build -Dheadless_backend=true -Drender_software=true
+meson setup build
 meson compile -C build
 meson test -C build
 ```
@@ -22,37 +22,55 @@ meson test -C build
 For an early sanitizer build:
 
 ```sh
-meson setup build-asan -Dheadless_backend=true -Drender_software=true -Dasan=true -Dubsan=true
+meson setup build-asan -Dasan=true -Dubsan=true
+meson compile -C build-asan
 meson test -C build-asan
 ```
 
+The three runtime processes and the tool bundle can be selected independently:
+
+```sh
+meson setup build-gwm \
+  -Dglasswyrmd=false \
+  -Dgwm=true \
+  -Dgwcomp=false \
+  -Dtools=false
+meson compile -C build-gwm
+```
+
+Meson's built-in `werror` option is available for strict builds. The spec's
+backend, renderer, IPC tracing, built-in policy, assembly, and experimental
+switches are accepted as reserved configuration at Milestone 0. They do not
+enable runtime behavior until their implementation milestones land.
+
 ## Current binaries
 
-- `glasswyrmd`: placeholder X11-compatible display server entry point.
-- `gwm`: planned or placeholder window manager and policy process.
-- `gwcomp`: planned or placeholder compositor, renderer, and display authority process.
-- `gwctl`: placeholder runtime control utility.
-- `gwinfo`: placeholder diagnostics utility.
-- `gwtrace`: placeholder protocol/event tracing utility.
-- `gwout`: placeholder output configuration utility.
+- `glasswyrmd`: future owner of X11 protocol truth.
+- `gwm`: future owner of window-management policy truth.
+- `gwcomp`: future owner of composition and final display authority.
+- `gwctl`: future runtime control utility.
+- `gwinfo`: future diagnostics utility.
+- `gwtrace`: future protocol/event tracing utility.
+- `gwout`: future output configuration utility.
+- `gwbench`: future rendering/compositor benchmark utility.
 
-These commands intentionally report scaffold status only until each process has
-its bring-up milestone implemented. They do not yet start a usable
-X11-compatible session.
+Every command currently prints its Milestone 0 placeholder status and exits.
+The runtime placeholders do not communicate with one another, open sockets,
+accept clients, create framebuffers, or access hardware.
 
 ## Project Layout
 
-- `include/glasswyrm/`: public C++ headers for the early skeleton libraries.
-- `src/core/`: shared identity, feature options, and common state primitives.
+- `include/glasswyrm/`: C++ header namespace; no installed library ABI exists yet.
+- `src/scaffold/`: shared placeholder identity and output used only at Milestone 0.
 - `src/glasswyrmd/`: X11-compatible server process code.
 - `src/gwm/`: window manager and window-policy process code.
 - `src/gwcomp/`: compositor, renderer, and display authority process code.
-- `src/ipc/`: internal IPC contracts shared by `glasswyrmd`, `gwm`, and `gwcomp`.
-- `src/protocol/`: protocol-facing support that will grow into X11 decoding.
-- `src/compositor/`: scene and headless compositor scaffolding consumed by `gwcomp`.
-- `src/backends/`: platform backend stubs, including headless and DRM/KMS paths.
-- `src/input/`: input routing scaffolding.
-- `src/render/`: renderer abstractions and software renderer scaffolding.
+- `src/ipc/`: reserved for versioned internal contracts starting at Milestone 3.
+- `src/protocol/`: reserved for X11 decoding beginning at Milestone 1.
+- `src/compositor/`: reserved for `gwcomp` scene and composition code.
+- `src/backends/`: reserved for headless, DRM/KMS, and possible nested backends.
+- `src/input/`: reserved for `glasswyrmd` input routing.
+- `src/render/`: reserved for renderer implementations owned by `gwcomp`.
 - `tools/`: developer and runtime command-line tools.
 - `tests/`: unit and headless integration tests.
 - `docs/`: specification, architecture notes, protocol notes, and decisions.
@@ -60,8 +78,9 @@ X11-compatible session.
 ## Gentoo packaging
 
 Gentoo packaging should keep the source tree coherent while allowing runtime
-components to be built, installed, and updated independently once Meson targets
-support that split.
+components to be built, installed, and updated independently. Milestone 0
+provides narrow Meson switches for the three runtime placeholders and tools;
+the overlay and ebuilds remain future packaging work.
 
 The intended package shape is:
 
