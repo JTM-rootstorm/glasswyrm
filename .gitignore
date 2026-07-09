@@ -11,3 +11,10 @@
 *.swp
 *~
 .cache/
+
+# VM validation artifacts
+/artifacts/vm/*
+!/artifacts/vm/.gitkeep
+
+# Local VM configuration
+/tools/gw-vm.d/config.toml
