@@ -287,36 +287,74 @@ The project should document exactly which clients and features work. Do not clai
 
 ## 10. Architecture overview
 
-Glasswyrm should be an integrated X11-compatible compositor/server.
+Glasswyrm should be a co-developed, split-process X11-compatible display stack with an X11 server process and a Glasswyrm compositor process.
+
+The split is an internal architecture choice, not a return to the old X server / window manager / external compositor model. The two processes should be designed together, versioned together, and tested together. Their boundary must preserve modern display metadata rather than reducing windows to anonymous legacy pixmaps.
 
 External model:
 
 ```text
 X11 clients
   -> libX11 / XCB / toolkit
-  -> Glasswyrm X11-compatible protocol server
-  -> Glasswyrm compositor and policy engine
-  -> DRM/KMS, libinput, render backend
-  -> displays and input devices
+  -> glasswyrmd, the Glasswyrm X11-compatible protocol server
+  -> Glasswyrm server/compositor IPC
+  -> gwcomp, the Glasswyrm compositor and display policy engine
+  -> renderer and DRM/KMS backend
+  -> displays
+
+input devices
+  -> libinput / platform backend
+  -> glasswyrmd input routing
+  -> X11 client events
 ```
 
-Internal model:
+Internal process model:
 
 ```text
 glasswyrmd
   core server loop
   client connection manager
-  protocol decoder/dispatcher
-  resource table
-  window/surface model
-  compositor scene graph
+  X11 protocol decoder/dispatcher
+  X11 resource table
+  window/surface protocol model
   input router
+  legacy compatibility policy
+  server side of gwcomp IPC
+
+gwcomp
+  compositor side of gwcomp IPC
+  surface state importer
+  compositor scene graph
   output manager
+  frame scheduler
   render backend
-  platform backend
+  DRM/KMS backend
+  HDR/color/VRR/scaling policy
 ```
 
-Glasswyrm should not internally reproduce the traditional X server / window manager / compositor split unless there is a strong reason. Owning final composition is essential for HDR, VRR, and scaling policy.
+`glasswyrmd` should own X11 protocol semantics, client/resource lifetime, compatibility behavior, selections, atoms, window IDs, and input event delivery.
+
+`gwcomp` should own final composition, frame scheduling, scanout decisions, output configuration, HDR/color transforms, VRR policy, per-output scaling, presentation timing, and DRM/KMS state.
+
+The server/compositor boundary must carry explicit metadata. It is not acceptable for `glasswyrmd` to send only "draw this window here" information. The compositor-facing surface contract should include at least:
+
+- Surface identity and parent/window association.
+- Buffer handle or storage reference.
+- Buffer format and modifier when applicable.
+- Damage region.
+- Transform, opacity, clipping, and stacking state.
+- Synchronization/fence state when applicable.
+- Scale metadata.
+- Color space, transfer function, primaries, and luminance metadata.
+- HDR metadata such as mastering display data, MaxCLL, and MaxFALL when available.
+- Presentation timing hints.
+- Fullscreen/direct-scanout eligibility hints.
+
+The compositor should be able to reject, downgrade, or log incomplete metadata rather than silently guessing for modern display features.
+
+Owning final composition remains essential for HDR, VRR, and scaling policy. The architectural rule is:
+
+> The X11 server owns protocol truth. The compositor owns photons.
 
 ## 11. Protocol strategy
 
@@ -387,6 +425,10 @@ Suggested concepts:
 - `gw_output`: physical/logical display output.
 - `gw_seat`: input seat.
 
+In the split architecture, `gw_window` is owned by `glasswyrmd`, while `gw_surface`, `gw_buffer`, `gw_scene`, and `gw_output` state are consumed or owned by `gwcomp`. Shared structures and messages must be treated as versioned API contracts across the compositor boundary rather than convenient private implementation details.
+
+The first implementation may keep the boundary simple for development, but it must not bake X11 protocol handling directly into final composition policy. `gwcomp` should remain separable from `glasswyrmd` without changing X11-visible behavior.
+
 The scene graph should support:
 
 - Window stacking.
@@ -395,6 +437,8 @@ The scene graph should support:
 - Per-output transforms.
 - Per-surface scale metadata.
 - Per-surface color metadata.
+- Per-surface presentation metadata from `glasswyrmd`.
+- Import/update events from the server/compositor boundary.
 - Frame scheduling.
 
 ## 13. Output model
@@ -445,22 +489,27 @@ Early `GW_SCALE` design should prefer simple, testable semantics over perfect to
 
 HDR is a first-class long-term goal, but initial work should focus on a safe SDR pipeline and explicit metadata plumbing.
 
+The compositor split does not make HDR harder by itself. It does make the boundary more important: every HDR-relevant surface attribute must be explicit, versioned, testable, and visible to tracing tools.
+
 Recommended HDR stages:
 
-1. SDR-only software compositor.
-2. Output capability discovery.
-3. Color metadata structures internally.
-4. `GW_COLOR` / `GW_HDR` protocol sketches.
-5. Fullscreen HDR passthrough experiment.
-6. Composited HDR experiment.
-7. SDR-to-HDR tone mapping.
-8. Client/toolkit integration work.
+1. SDR-only software compositor in `gwcomp`.
+2. Output capability discovery in `gwcomp`.
+3. Color metadata structures shared across the server/compositor contract.
+4. IPC transport for per-surface color/HDR metadata, buffer format, modifier, damage, and presentation state.
+5. `GW_COLOR` / `GW_HDR` protocol sketches.
+6. Fullscreen HDR passthrough experiment.
+7. Composited HDR experiment with mixed SDR/HDR surfaces.
+8. SDR-to-HDR tone mapping.
+9. Client/toolkit integration work.
 
 Surface metadata should eventually include:
 
 - Color space.
 - Transfer function.
 - Primaries.
+- Buffer format, bit depth, and modifier when applicable.
+- Alpha semantics.
 - Luminance information.
 - Mastering display metadata where applicable.
 - MaxCLL / MaxFALL where applicable.
@@ -474,7 +523,7 @@ Output metadata should eventually include:
 - Current output transform.
 - Current HDR metadata state.
 
-Do not claim full desktop HDR until SDR/HDR composition, tone mapping, metadata propagation, and output behavior are tested on real HDR displays.
+Do not claim full desktop HDR until SDR/HDR composition, tone mapping, metadata propagation across the server/compositor boundary, and output behavior are tested on real HDR displays.
 
 ## 16. VRR model
 
