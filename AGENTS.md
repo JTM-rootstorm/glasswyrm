@@ -230,6 +230,13 @@ Update documentation when changing:
 
 Prefer design notes under `docs/decisions/` for choices that could plausibly change later.
 
+## Local plans
+
+Keep `Plans/` and everything under it untracked. Do not add `Plans/` to
+`.gitignore`, `.git/info/exclude`, or any other Git exclusion mechanism; it
+should remain visible in `git status`. Never stage or commit its contents unless
+Mike explicitly requests that for a specific plan.
+
 ## Compatibility policy
 
 Do not claim broad X11 compatibility without tests.
