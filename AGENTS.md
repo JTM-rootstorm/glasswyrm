@@ -159,6 +159,9 @@ Rules:
 - If a task touches unrelated areas, use separate commits.
 - Keep build fixes separate from feature commits when practical.
 - Keep documentation updates near the code they explain.
+- Co-author every AI-assisted commit so it shows both Mike and the assistant as authors.
+- Use Mike's configured Git identity as the primary author unless he explicitly asks otherwise.
+- Add a `Co-authored-by:` trailer for the assistant identity on every AI-assisted commit; if no assistant identity is configured, ask Mike for the preferred co-author name and email before committing.
 - Do not squash away useful history unless explicitly instructed.
 - Do not rewrite history unless explicitly instructed.
 - Do not force-push unless explicitly instructed.
