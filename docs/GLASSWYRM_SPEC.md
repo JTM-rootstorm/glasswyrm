@@ -668,8 +668,9 @@ Recommended Gentoo plan:
 
 - Keep upstream project source clean first.
 - Add `packaging/gentoo` once the basic build works.
-- Create a separate overlay later if useful.
+- Maintain a local overlay under `packaging/gentoo/overlay/` once ebuild work begins.
 - Provide live ebuilds only after Meson options stabilize.
+- Prefer release-tarball ebuilds for reproducible VM tests once releases exist.
 - Do not replace system Xorg automatically.
 - Provide clear install/remove/rollback notes.
 - Keep experimental USE flags explicit.
@@ -680,16 +681,118 @@ Recommended Gentoo plan:
 Possible packages:
 
 ```text
-x11-base/glasswyrm
-x11-apps/gw-tools
-x11-wm/gwm
-x11-base/gwcomp
-gui-libs/libgwproto
-gui-libs/libgwrender
-gui-libs/libgwipc
+x11-base/glasswyrm       # metapackage or session bundle
+x11-base/glasswyrmd      # X11-compatible server process
+x11-wm/gwm               # Glasswyrm window manager and policy process
+x11-base/gwcomp          # compositor, renderer, and display authority process
+x11-apps/gw-tools        # gwctl, gwinfo, gwtrace, gwout, gwbench
+gui-libs/libgwipc        # internal IPC contracts shared by runtime components
+gui-libs/libgwproto      # protocol helpers, if installed as a shared library
+gui-libs/libgwrender     # renderer helpers, if installed as a shared library
 ```
 
 The final category split can be changed once the repository structure settles.
+
+### 20.1 Split package semantics
+
+The package split should reduce rebuild, install, and update scope. It should
+not be treated as a guarantee that Portage fetches less source by itself.
+Multiple ebuilds may still consume the same upstream source tree. Use a shared
+release tarball, shared `DISTDIR`, or intentional local git cache/mirror when
+multiple packages are built from the same revision.
+
+The first split worth preserving is the runtime authority split:
+
+- `glasswyrmd` for X11 protocol/server behavior.
+- `gwm` for window-management policy.
+- `gwcomp` for final composition and display authority.
+- `libgwipc` for versioned process-boundary contracts.
+
+`gwm` and `gwcomp` should be separately buildable and installable because they
+will likely churn for different reasons. A window-manager policy update should
+not rebuild the compositor or server unless an installed shared library or IPC
+ABI changed. A compositor renderer/KMS update should not rebuild `gwm` unless
+WM/compositor policy contracts changed.
+
+The split is not complete until Meson exposes narrow build/install targets or
+options for `glasswyrmd`, `gwm`, `gwcomp`, tools, and installed libraries.
+Component ebuilds should use those targets instead of compiling the full stack
+and discarding unrelated install artifacts.
+
+`libgwipc` should be treated as the first serious ABI-bearing library. Until the
+contract stabilizes, runtime components should depend on a matching version of
+`libgwipc`. Once ABI rules are real, use Gentoo slot or subslot semantics rather
+than allowing silent drift.
+
+Avoid splitting every internal helper library before APIs harden. `libgwproto`
+and `libgwrender` may become packages if they are installed and shared by more
+than one component; otherwise they can remain internal implementation details.
+
+### 20.2 Local overlay and fresh VM validation
+
+Codex should maintain a local ebuild repository that can be handed to a fresh
+Gentoo VM. The recommended in-repo shape is:
+
+```text
+packaging/gentoo/overlay/
+  profiles/
+    repo_name
+  metadata/
+    layout.conf
+  x11-base/
+    glasswyrm/
+    glasswyrmd/
+    gwcomp/
+  x11-wm/
+    gwm/
+  x11-apps/
+    gw-tools/
+  gui-libs/
+    libgwipc/
+    libgwproto/
+    libgwrender/
+```
+
+The VM should consume that overlay through `repos.conf`, not by copying files
+into the main Gentoo repository. A typical manual registration is:
+
+```sh
+mkdir -p /etc/portage/repos.conf
+cat >/etc/portage/repos.conf/glasswyrm-local.conf <<'EOF'
+[glasswyrm-local]
+location = /mnt/shared/glasswyrm-overlay
+masters = gentoo
+auto-sync = no
+EOF
+emerge --metadata
+```
+
+A shared directory is useful for passing the overlay, source tarballs, distfiles,
+binary packages, logs, and test reports into or out of the VM. It must not be
+the only validation path. The fresh VM test should exercise Portage dependency
+resolution, USE flags, Meson component options, install paths, service/session
+files, and uninstall behavior.
+
+Recommended VM checks:
+
+```sh
+emerge --pretend --verbose --tree x11-base/glasswyrm
+emerge -av x11-base/glasswyrm
+emerge --pretend --verbose --tree x11-wm/gwm
+emerge -1av x11-wm/gwm
+emerge -C x11-wm/gwm
+```
+
+For narrow-update tests, bump only the target component ebuild revision and run
+`emerge --pretend --verbose --tree` before building. A `gwm` revision bump should
+not rebuild `glasswyrmd` or `gwcomp` unless `libgwipc` or another shared ABI has
+changed. If binary packages are tested, generate them through Portage, for
+example with `FEATURES=buildpkg`, rather than copying untracked binaries into
+the VM.
+
+Live ebuilds should pin `EGIT_COMMIT` for reproducible VM validation unless the
+test is explicitly about current `main`. Release ebuilds should prefer a shared
+source tarball so split packages reuse the same cached distfile.
 
 ## 21. Testing strategy
 
@@ -710,6 +813,8 @@ Test layers:
 - Headless compositor tests.
 - Fuzzing for protocol decoders.
 - Sanitizer builds.
+- Fresh Gentoo VM packaging tests through a local overlay.
+- Narrow component-update tests for `gwm`, `gwcomp`, and `libgwipc`.
 
 Recommended early commands:
 
@@ -719,6 +824,11 @@ meson test -C build
 ```
 
 Real DRM/KMS tests should not be required for normal CI-style validation. They should be explicit hardware tests.
+
+Gentoo packaging tests should not be replaced by shared-directory artifact
+copies. Shared directories may provide an overlay, distfiles, binary packages,
+and logs, but at least one fresh VM path should run `emerge` against the local
+overlay so the ebuilds, dependencies, USE flags, and install layout are tested.
 
 ## 22. Logging, diagnostics, and tracing
 
@@ -944,4 +1054,6 @@ These should be resolved through future design notes or implementation experienc
 - Exact configuration format.
 - How much ICCCM/EWMH behavior to implement before toolkit work.
 - How to handle XKB compatibility without swallowing the whole swamp at once.
+- Exact Gentoo split-package versioning and slot/subslot policy.
+- Whether release tarballs, pinned live ebuilds, or both should be the primary VM test path.
 - Long-term security model beyond local-only X11-compatible behavior.
