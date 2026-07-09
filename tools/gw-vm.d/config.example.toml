@@ -1,0 +1,27 @@
+[libvirt]
+uri = "qemu:///system"
+domain = ""
+
+[snapshot]
+name = "clean-base"
+enabled = true
+
+[guest]
+ssh_host = "glasswyrm-vm"
+ssh_user = "root"
+ssh_port = 22
+shared_overlay_path = "/mnt/shared/glasswyrm-overlay"
+shared_artifacts_path = "/mnt/shared/glasswyrm-artifacts"
+
+[paths]
+overlay = "packaging/gentoo/overlay"
+artifacts = "artifacts/vm/latest"
+
+[portage]
+overlay_name = "glasswyrm-local"
+repos_conf_path = "/etc/portage/repos.conf/glasswyrm-local.conf"
+default_package = "x11-base/glasswyrm"
+
+[safety]
+allow_destructive = false
+allow_arbitrary_ssh = false
