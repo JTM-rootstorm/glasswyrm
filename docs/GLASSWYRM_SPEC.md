@@ -174,6 +174,11 @@ The build should provide options similar to:
 ```meson
 -Dbackend_headless=true
 -Dbackend_drm=true
+-Dgwm=true
+-Dgwcomp=true
+-Dbuiltin_wm_policy=false
+-Dsingle_process_debug=false
+-Dipc_trace=false
 -Drender_software=true
 -Drender_gl=false
 -Drender_vulkan=false
@@ -186,6 +191,12 @@ The build should provide options similar to:
 ```
 
 Early development should support both GCC and Clang where practical. CI or local test scripts should build at least one strict configuration and one sanitizer configuration.
+
+Split-process options must not blur authority boundaries. A built-in WM policy
+mode is acceptable only as an explicitly labeled development/test path; it must
+not make `gwcomp` own X11 protocol semantics. A single-process debug build may
+host multiple components in one process for tests, but it should still exercise
+the same `libgwipc` message contracts used by the real split.
 
 ## 7. Repository layout
 
@@ -208,7 +219,11 @@ Recommended initial repository layout:
     x11/
     gw/
   src/
+    glasswyrmd/
+    gwm/
+    gwcomp/
     core/
+    ipc/
     protocol/
     compositor/
     backends/
@@ -227,8 +242,11 @@ Recommended initial repository layout:
     gwinfo/
     gwtrace/
     gwout/
+    gwbench/
   tests/
     unit/
+      wm/
+      ipc/
     integration/
     protocol/
     pixel/
@@ -240,7 +258,11 @@ Recommended initial repository layout:
     gentoo/
 ```
 
-Nested and GL/Vulkan backends may remain placeholders until their phase begins.
+Process-specific directories may start as stubs. `src/compositor/`,
+`src/backends/`, and `src/render/` are `gwcomp`-facing implementation areas
+unless tests use them in isolation. `src/ipc/` owns versioned message contracts
+shared across `glasswyrmd`, `gwm`, and `gwcomp`. Nested and GL/Vulkan backends
+may remain placeholders until their phase begins.
 
 ## 8. Component names
 
@@ -660,8 +682,11 @@ Possible packages:
 ```text
 x11-base/glasswyrm
 x11-apps/gw-tools
+x11-wm/gwm
+x11-base/gwcomp
 gui-libs/libgwproto
 gui-libs/libgwrender
+gui-libs/libgwipc
 ```
 
 The final category split can be changed once the repository structure settles.
@@ -833,19 +858,21 @@ Success criteria:
 - Toy client can create and destroy resources.
 - Resource leaks are detectable in tests.
 
-### Milestone 3: Headless compositor
+### Milestone 3: Headless compositor and IPC scaffold
 
 Deliverables:
 
-- Headless output.
+- `libgwipc` skeleton for versioned server/WM/compositor messages.
+- `gwcomp` headless output.
 - Software framebuffer.
-- Window mapping.
-- Expose/configure events.
+- Synthetic surface import/update path.
 - Pixel dump tests.
 
 Success criteria:
 
-- A simple window appears in a framebuffer dump.
+- `gwcomp` imports a synthetic surface and presents it in a framebuffer dump.
+- Missing required surface metadata is rejected or logged instead of silently
+  guessed.
 - Pixel tests are deterministic.
 
 ### Milestone 4: Simple real X clients
@@ -854,7 +881,7 @@ Deliverables:
 
 - Enough protocol support for simple clients.
 - Basic input events.
-- Minimal `gwm` process or policy module for placement and focus.
+- Minimal `gwm` process, or an explicitly labeled built-in test policy mode, for placement and focus.
 - Basic window management policy.
 - Server/WM/compositor IPC path for mapped windows.
 
