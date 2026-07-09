@@ -19,6 +19,12 @@ If the spec and code disagree, prefer the current code only when it clearly refl
 
 Glasswyrm is X11-compatible where useful, not Xorg-compatible by default.
 
+Current architecture is a traditional X11-shaped split with Glasswyrm-owned
+processes: `glasswyrmd` for protocol truth, `gwm` for window-management policy
+truth, and `gwcomp` for final display authority. Keep those boundaries
+explicit. `gwcomp` must not become an ordinary X11 client or a legacy external
+compositor that merely assembles redirected pixmaps.
+
 Do not drag legacy behavior into the project without a specific compatibility target and test. Favor clean internal architecture, headless testing, and explicit compatibility tiers.
 
 Primary target:
@@ -39,7 +45,7 @@ Allowed implementation languages:
 
 Do not introduce Rust, Go, Zig, Java, C#, Python runtime components, or other implementation languages unless explicitly instructed by the user.
 
-Python, shell, or similar scripting is acceptable for build helpers, generators, and tests when justified, but the server stack itself should remain C/C++/assembly.
+Python, shell, or similar scripting is acceptable for build helpers, generators, and tests when justified, but the Glasswyrm runtime stack itself should remain C/C++/assembly.
 
 ### C rules
 
@@ -47,7 +53,9 @@ Use C for low-level platform boundaries, DRM/KMS, libinput, udev, C ABI boundari
 
 ### C++ rules
 
-Use C++ for architecture-heavy code: server state, resources, windows, compositor scene graph, output policy, event routing, and renderer abstraction.
+Use C++ for architecture-heavy code: server state, resources, windows, window
+manager policy, IPC contracts, compositor scene graph, output policy, event
+routing, and renderer abstraction.
 
 Prefer:
 
@@ -83,7 +91,9 @@ Assembly is not appropriate for:
 
 - protocol semantics
 - window/resource lifetime
+- window manager policy
 - compositor policy
+- IPC contract semantics
 - KMS state management
 - input routing
 - selections/clipboard
@@ -132,11 +142,13 @@ Tests are mandatory for new behavior unless there is a documented reason they ar
 Preferred test order:
 
 1. Unit tests
-2. Headless integration tests
-3. Pixel/golden tests
-4. Protocol parser tests
-5. Fuzz or malformed-input tests where appropriate
-6. Real DRM/KMS tests only as explicit hardware tests
+2. Protocol parser tests
+3. Window-manager policy tests
+4. IPC contract and metadata round-trip tests
+5. Headless integration tests
+6. Pixel/golden tests
+7. Fuzz or malformed-input tests where appropriate
+8. Real DRM/KMS tests only as explicit hardware tests
 
 Do not make real hardware access required for normal development tests.
 
@@ -144,9 +156,11 @@ Before completing a task, run the relevant build and test commands. If commands 
 
 ## Headless-first rule
 
-New protocol, compositor, render, and input behavior should be testable without real hardware whenever possible.
+New protocol, window-manager, IPC, compositor, render, and input behavior should
+be testable without real hardware whenever possible.
 
-Prefer a headless backend and synthetic clients before touching DRM/KMS. Real hardware work must include rollback/recovery notes when appropriate.
+Prefer synthetic clients, a headless `gwcomp` backend, and explicit IPC fixtures
+before touching DRM/KMS. Real hardware work must include rollback/recovery notes when appropriate.
 
 ## Commit workflow
 
@@ -180,8 +194,10 @@ Examples:
 ```text
 protocol: add setup handshake parser
 core: add resource table ownership checks
+wm: add initial focus policy
+ipc: define surface metadata messages
 compositor: add headless framebuffer target
-render: add ARGB over XRGB reference blend
+render: add ARGB over XRGB reference blend path
 docs: record initial compatibility tiers
 ```
 
@@ -202,6 +218,7 @@ If operating through a tool that cannot create local commits, produce patch file
 Update documentation when changing:
 
 - architecture
+- server/WM/compositor IPC contracts
 - public tool behavior
 - protocol behavior
 - compatibility tiers
@@ -233,16 +250,18 @@ HDR, VRR, and per-output scaling are core goals, but they should not destabilize
 Recommended order:
 
 1. core protocol/server
-2. headless compositor
-3. software renderer
-4. simple X clients
-5. DRM/KMS backend
-6. per-output metadata/scaling prototypes
-7. VRR policy prototypes
-8. HDR/color metadata prototypes
-9. accelerated and fullscreen paths
+2. `libgwipc` contract skeleton
+3. headless `gwcomp` compositor
+4. minimal `gwm` placement/focus policy
+5. software renderer
+6. simple X clients
+7. DRM/KMS backend
+8. per-output metadata/scaling prototypes
+9. VRR policy prototypes
+10. HDR/color metadata prototypes
+11. accelerated and fullscreen paths
 
-Do not start with HDR or VRR before the server and compositor foundation can be tested.
+Do not start with HDR or VRR before the server, window manager, compositor, and IPC foundation can be tested.
 
 ## Security policy
 
