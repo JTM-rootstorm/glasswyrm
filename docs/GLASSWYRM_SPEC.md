@@ -32,6 +32,7 @@ The stack should initially target modern local desktop use only. It should not p
 - Local-first desktop stack.
 - Modern Linux first.
 - Gentoo first.
+- Usable on both systemd and OpenRC systems.
 - x86_64 first.
 - C, C++, and selective x86_64 assembly.
 - Clean internal compositor-centric architecture.
@@ -546,7 +547,7 @@ Rules:
 - Disable TCP listening by default.
 - Do not install setuid binaries.
 - Do not require root to run long-term.
-- Prefer logind/seatd-style permission handling later if needed.
+- Support both systemd-logind and non-systemd permission paths such as seatd, udev rules, or explicit launcher-mediated device access.
 - Treat X11-compatible behavior as inherently permissive; document this honestly.
 - Do not claim Wayland-like isolation without an explicit security design.
 
@@ -565,6 +566,9 @@ Recommended Gentoo plan:
 - Do not replace system Xorg automatically.
 - Provide clear install/remove/rollback notes.
 - Keep experimental USE flags explicit.
+- Keep runtime and packaging usable with both systemd and OpenRC.
+- Do not make systemd a hard runtime dependency; systemd units may be provided only alongside equivalent OpenRC init/session guidance.
+- Test or document both init-system paths before claiming Gentoo desktop usability.
 
 Possible packages:
 
