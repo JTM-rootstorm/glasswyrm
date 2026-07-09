@@ -1,9 +1,6 @@
-#include <iostream>
-
-#include <glasswyrm/core/server.hpp>
+#include <glasswyrm/scaffold/component.hpp>
 
 int main() {
-  const glasswyrm::core::Server server;
-  std::cout << "gwctl scaffold: " << server.describe() << '\n';
-  return 0;
+  return glasswyrm::scaffold::run_placeholder(
+      glasswyrm::scaffold::Component::ControlTool);
 }
