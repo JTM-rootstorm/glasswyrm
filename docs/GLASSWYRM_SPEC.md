@@ -249,6 +249,8 @@ Recommended names:
 | Component | Purpose |
 |---|---|
 | `glasswyrmd` | Full daemon name for the display server. |
+| `gwm` | Glasswyrm window manager and window-policy process. |
+| `gwcomp` | Glasswyrm compositor, renderer, and display authority process. |
 | `gwd` | Short daemon alias if desired. |
 | `gwctl` | Runtime control utility. |
 | `gwinfo` | Diagnostics and capability report tool. |
@@ -258,6 +260,7 @@ Recommended names:
 | `libgwcore` | Core server utilities and platform wrappers. |
 | `libgwproto` | Protocol encoding/decoding helpers. |
 | `libgwrender` | Renderer abstractions and software paths. |
+| `libgwipc` | Internal IPC contracts shared by `glasswyrmd`, `gwm`, and `gwcomp`. |
 
 Experimental X11 extension names:
 
@@ -287,9 +290,9 @@ The project should document exactly which clients and features work. Do not clai
 
 ## 10. Architecture overview
 
-Glasswyrm should be a co-developed, split-process X11-compatible display stack with an X11 server process and a Glasswyrm compositor process.
+Glasswyrm should use a traditional X11-shaped process split for policy boundaries: an X11-compatible server, a window manager, and a compositor. The split is traditional in shape, but modern in display authority.
 
-The split is an internal architecture choice, not a return to the old X server / window manager / external compositor model. The two processes should be designed together, versioned together, and tested together. Their boundary must preserve modern display metadata rather than reducing windows to anonymous legacy pixmaps.
+The goal is to keep X11 protocol compatibility, window-management policy, and final display presentation independently testable without recreating the historical failure mode where the server owns too much display truth and the compositor is only an X client assembling redirected pixmaps.
 
 External model:
 
@@ -297,15 +300,22 @@ External model:
 X11 clients
   -> libX11 / XCB / toolkit
   -> glasswyrmd, the Glasswyrm X11-compatible protocol server
-  -> Glasswyrm server/compositor IPC
-  -> gwcomp, the Glasswyrm compositor and display policy engine
-  -> renderer and DRM/KMS backend
+  -> Glasswyrm internal IPC
+
+gwm, the Glasswyrm window manager
+  -> focus, placement, stacking, workspaces, decorations
+  -> ICCCM/EWMH-style policy decisions
+  -> policy hints back to glasswyrmd and gwcomp
+
+gwcomp, the Glasswyrm compositor and display authority
+  -> surface import, scene graph, renderer, presentation timing
+  -> DRM/KMS backend
   -> displays
 
 input devices
   -> libinput / platform backend
   -> glasswyrmd input routing
-  -> X11 client events
+  -> X11 client events and WM policy events
 ```
 
 Internal process model:
@@ -319,11 +329,20 @@ glasswyrmd
   window/surface protocol model
   input router
   legacy compatibility policy
-  server side of gwcomp IPC
+  server side of internal IPC
+
+gwm
+  internal IPC client/server role
+  window management policy
+  focus, raise/lower, placement, and workspace state
+  decoration policy
+  fullscreen, maximize, and override-redirect decisions
+  ICCCM/EWMH compatibility policy
 
 gwcomp
-  compositor side of gwcomp IPC
+  compositor side of internal IPC
   surface state importer
+  WM policy/state consumer
   compositor scene graph
   output manager
   frame scheduler
@@ -332,13 +351,26 @@ gwcomp
   HDR/color/VRR/scaling policy
 ```
 
-`glasswyrmd` should own X11 protocol semantics, client/resource lifetime, compatibility behavior, selections, atoms, window IDs, and input event delivery.
+`glasswyrmd` should own X11 protocol semantics, client/resource lifetime, compatibility behavior, selections, atoms, window IDs, raw window state, and input event delivery.
 
-`gwcomp` should own final composition, frame scheduling, scanout decisions, output configuration, HDR/color transforms, VRR policy, per-output scaling, presentation timing, and DRM/KMS state.
+`gwm` should own window-management policy: focus, stacking, placement, workspaces, decorations, reparenting or frame-window behavior if used, fullscreen/maximize interpretation, and ICCCM/EWMH-style decisions. It may produce policy hints that affect presentation, such as fullscreen or direct-scanout eligibility, but it must not own rendering, KMS state, HDR transforms, color interpretation, VRR, or final presentation timing.
 
-The server/compositor boundary must carry explicit metadata. It is not acceptable for `glasswyrmd` to send only "draw this window here" information. The compositor-facing surface contract should include at least:
+`gwcomp` should own final display authority: final composition, frame scheduling, scanout decisions, output configuration, HDR/color transforms, VRR policy, per-output scaling, presentation timing, and DRM/KMS state.
+
+The process boundaries must carry explicit metadata. It is not acceptable for `glasswyrmd` or `gwm` to reduce a surface to only "draw this window here" information.
+
+The server/WM policy contract should include at least:
+
+- Map, unmap, configure, focus, stacking, and visibility state.
+- Window type, transient relationship, override-redirect state, and decoration eligibility.
+- Fullscreen, maximize, minimize, workspace, and attention/urgency state.
+- Client geometry requests and WM-applied geometry decisions.
+- Presentation-relevant policy hints, such as fullscreen and direct-scanout eligibility.
+
+The compositor-facing surface contract should include at least:
 
 - Surface identity and parent/window association.
+- WM-applied stacking, clipping, decoration, and visibility state.
 - Buffer handle or storage reference.
 - Buffer format and modifier when applicable.
 - Damage region.
@@ -352,9 +384,11 @@ The server/compositor boundary must carry explicit metadata. It is not acceptabl
 
 The compositor should be able to reject, downgrade, or log incomplete metadata rather than silently guessing for modern display features.
 
-Owning final composition remains essential for HDR, VRR, and scaling policy. The architectural rule is:
+Traditional split must not mean `gwcomp` is an ordinary X11 client that draws into a server-owned output. `gwcomp` is a privileged, co-developed display engine. Owning final composition remains essential for HDR, VRR, and scaling policy.
 
-> The X11 server owns protocol truth. The compositor owns photons.
+The architectural rule is:
+
+> The X11 server owns protocol truth. The window manager owns policy truth. The compositor owns photons.
 
 ## 11. Protocol strategy
 
@@ -425,20 +459,22 @@ Suggested concepts:
 - `gw_output`: physical/logical display output.
 - `gw_seat`: input seat.
 
-In the split architecture, `gw_window` is owned by `glasswyrmd`, while `gw_surface`, `gw_buffer`, `gw_scene`, and `gw_output` state are consumed or owned by `gwcomp`. Shared structures and messages must be treated as versioned API contracts across the compositor boundary rather than convenient private implementation details.
+In the traditional Glasswyrm split, `gw_window` is owned by `glasswyrmd`. `gwm` consumes window state and produces policy decisions for focus, stacking, placement, workspaces, and decorations. `gwcomp` consumes surface, buffer, output, and WM policy state to build the final scene and present it.
 
-The first implementation may keep the boundary simple for development, but it must not bake X11 protocol handling directly into final composition policy. `gwcomp` should remain separable from `glasswyrmd` without changing X11-visible behavior.
+Shared structures and messages must be treated as versioned API contracts across process boundaries rather than convenient private implementation details. The first implementation may keep the boundary simple for development, but it must not bake X11 protocol handling or WM policy directly into final composition policy.
+
+`gwcomp` should remain separable from `glasswyrmd` and `gwm` without changing X11-visible behavior, apart from explicit policy differences selected by the active window manager.
 
 The scene graph should support:
 
-- Window stacking.
+- Window stacking after WM policy is applied.
 - Damage tracking.
 - Output assignment.
 - Per-output transforms.
 - Per-surface scale metadata.
 - Per-surface color metadata.
-- Per-surface presentation metadata from `glasswyrmd`.
-- Import/update events from the server/compositor boundary.
+- Per-surface presentation metadata from `glasswyrmd` and `gwm`.
+- Import/update events from the server/WM/compositor boundary.
 - Frame scheduling.
 
 ## 13. Output model
@@ -489,14 +525,14 @@ Early `GW_SCALE` design should prefer simple, testable semantics over perfect to
 
 HDR is a first-class long-term goal, but initial work should focus on a safe SDR pipeline and explicit metadata plumbing.
 
-The compositor split does not make HDR harder by itself. It does make the boundary more important: every HDR-relevant surface attribute must be explicit, versioned, testable, and visible to tracing tools.
+The traditional server/WM/compositor split does not make HDR harder by itself as long as `gwcomp` remains the only final display authority. It does make every boundary more important: HDR-relevant surface attributes must flow through or around WM policy without being flattened into legacy pixmaps, guessed from window type, or hidden from tracing tools.
 
 Recommended HDR stages:
 
 1. SDR-only software compositor in `gwcomp`.
 2. Output capability discovery in `gwcomp`.
-3. Color metadata structures shared across the server/compositor contract.
-4. IPC transport for per-surface color/HDR metadata, buffer format, modifier, damage, and presentation state.
+3. Color metadata structures shared across the server/WM/compositor contracts.
+4. IPC transport for per-surface color/HDR metadata, buffer format, modifier, damage, presentation state, and WM policy hints that may affect fullscreen or direct scanout without changing color interpretation.
 5. `GW_COLOR` / `GW_HDR` protocol sketches.
 6. Fullscreen HDR passthrough experiment.
 7. Composited HDR experiment with mixed SDR/HDR surfaces.
@@ -523,7 +559,7 @@ Output metadata should eventually include:
 - Current output transform.
 - Current HDR metadata state.
 
-Do not claim full desktop HDR until SDR/HDR composition, tone mapping, metadata propagation across the server/compositor boundary, and output behavior are tested on real HDR displays.
+Do not claim full desktop HDR until SDR/HDR composition, tone mapping, metadata propagation across the server/WM/compositor boundaries, WM fullscreen/direct-scanout policy, and output behavior are tested on real HDR displays.
 
 ## 16. VRR model
 
@@ -639,6 +675,9 @@ Test layers:
 - Unit tests for protocol packet parsing.
 - Unit tests for resource table behavior.
 - Unit tests for event masks and dispatch.
+- Unit tests for `gwm` policy decisions.
+- IPC contract tests between `glasswyrmd`, `gwm`, and `gwcomp`.
+- Metadata round-trip tests for scale, color, HDR, and presentation state.
 - Pixel tests for software compositor output.
 - Golden tests for C/C++ reference render paths.
 - Golden tests for assembly render paths.
@@ -666,7 +705,9 @@ Recommended log areas:
 - `client`
 - `resource`
 - `window`
+- `wm`
 - `compositor`
+- `ipc`
 - `render`
 - `input`
 - `output`
@@ -680,6 +721,9 @@ Recommended log areas:
 - Client connection tracing.
 - Request/reply/event traces.
 - Resource lifetime traces.
+- WM policy decision traces.
+- Server/WM/compositor IPC traces.
+- Surface metadata snapshots.
 - Frame scheduling traces.
 - Damage visualization.
 - VRR eligibility logs.
@@ -698,6 +742,7 @@ Configuration should eventually include:
 - Enabled backend.
 - Output layout.
 - Output scale.
+- Window manager selection or built-in policy mode.
 - VRR policy.
 - HDR policy.
 - Renderer selection.
@@ -809,12 +854,15 @@ Deliverables:
 
 - Enough protocol support for simple clients.
 - Basic input events.
+- Minimal `gwm` process or policy module for placement and focus.
 - Basic window management policy.
+- Server/WM/compositor IPC path for mapped windows.
 
 Success criteria:
 
 - Run simple XCB clients.
 - Run `xeyes` or `xclock` if practical.
+- Map, place, focus, and restack simple windows through `gwm` without making `gwcomp` own X11 protocol semantics.
 
 ### Milestone 5: DRM/KMS backend
 
@@ -837,10 +885,11 @@ Deliverables:
 - `GW_SCALE` sketch and prototype.
 - VRR capability discovery and policy sketch.
 - HDR/color metadata internal structs.
+- Server/WM/compositor metadata contract for scale, color, HDR, presentation, and fullscreen/direct-scanout policy.
 
 Success criteria:
 
-- Modern-display features have explicit prototypes without destabilizing the core server.
+- Modern-display features have explicit prototypes without destabilizing the core server, window manager, or compositor authority boundaries.
 
 ## 26. Definition of done
 
