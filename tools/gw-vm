@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GW_VM_DIR="$SCRIPT_DIR/gw-vm.d"
+
+# shellcheck source=gw-vm.d/lib/common.sh
+source "$GW_VM_DIR/lib/common.sh"
+# shellcheck source=gw-vm.d/lib/config.sh
+source "$GW_VM_DIR/lib/config.sh"
+# shellcheck source=gw-vm.d/lib/guest.sh
+source "$GW_VM_DIR/lib/guest.sh"
+# shellcheck source=gw-vm.d/lib/libvirt.sh
+source "$GW_VM_DIR/lib/libvirt.sh"
+# shellcheck source=gw-vm.d/lib/report.sh
+source "$GW_VM_DIR/lib/report.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ./tools/gw-vm [--config PATH] COMMAND [ARGS]
+
+Commands:
+  help                              Show this help.
+  doctor                            Check host tools, paths, and configuration.
+  config                            Print the resolved non-secret configuration.
+  status                            Show VM and harness status.
+  boot                              Start the configured VM if needed.
+  shutdown                          Request a graceful VM shutdown.
+  reset --yes                       Revert the configured clean snapshot.
+  push-overlay                      Synchronize the local overlay to the guest.
+  register-overlay                  Register the overlay through repos.conf.
+  metadata                          Run emerge --metadata in the guest.
+  pretend PACKAGE                   Show the Portage transaction plan.
+  emerge PACKAGE --yes              Install a package in the guest.
+  unmerge PACKAGE --yes             Uninstall a package in the guest.
+  narrow-test gwm [--allow-abi-rebuild]
+                                    Check that a gwm update stays narrow.
+  collect                           Collect guest Portage diagnostics.
+  full-packaging-test --yes         Run the canonical fresh-VM scenario.
+  scenario NAME [ARGS]              Run a fixed named scenario.
+
+Examples:
+  ./tools/gw-vm doctor
+  GLASSWYRM_VM_NAME=gentoo-test ./tools/gw-vm status
+  ./tools/gw-vm pretend x11-base/glasswyrm
+  ./tools/gw-vm full-packaging-test --yes
+
+Generated output is written beneath artifacts/vm/.
+EOF
+}
+
+doctor() {
+  local failed=0 tool path
+  for tool in bash ssh rsync virsh python3; do
+    if command_exists "$tool"; then
+      printf '[ok] %s\n' "$tool"
+    else
+      printf '[missing] %s\n' "$tool"
+      failed=1
+    fi
+  done
+  printf '[ok] TOML strategy: dependency-free parser for the fixed config schema\n'
+
+  for path in \
+    "$LOCAL_OVERLAY_PATH_ABS" \
+    "$GW_VM_DIR/config.example.toml" \
+    "$REPO_ROOT/artifacts/vm"; do
+    if [[ -e "$path" ]]; then
+      printf '[ok] %s\n' "$path"
+    else
+      printf '[missing] %s\n' "$path"
+      failed=1
+    fi
+  done
+
+  if [[ -z "$VM_DOMAIN" ]]; then
+    printf '[configure] No VM domain configured.\n'
+    printf '%s\n' 'Set GLASSWYRM_VM_NAME or copy tools/gw-vm.d/config.example.toml to tools/gw-vm.d/config.toml and set [libvirt].domain.'
+    failed=1
+  else
+    printf '[ok] VM domain: %s\n' "$VM_DOMAIN"
+  fi
+  printf '[ok] SSH target: %s@%s:%s\n' "$SSH_USER" "$SSH_HOST" "$SSH_PORT"
+
+  if mkdir -p "$ARTIFACTS_PATH_ABS" && [[ -w "$ARTIFACTS_PATH_ABS" ]]; then
+    printf '[ok] artifacts writable: %s\n' "$ARTIFACTS_PATH_DISPLAY"
+  else
+    printf '[failed] artifacts not writable: %s\n' "$ARTIFACTS_PATH_DISPLAY"
+    failed=1
+  fi
+  return "$failed"
+}
+
+print_config() {
+  cat <<EOF
+config = $CONFIG_PATH
+libvirt.uri = $LIBVIRT_URI
+libvirt.domain = $VM_DOMAIN
+snapshot.name = $SNAPSHOT_NAME
+snapshot.enabled = $SNAPSHOT_ENABLED
+guest.ssh = $SSH_USER@$SSH_HOST:$SSH_PORT
+guest.shared_overlay_path = $GUEST_OVERLAY_PATH
+guest.shared_artifacts_path = $GUEST_ARTIFACTS_PATH
+paths.overlay = $OVERLAY_PATH_DISPLAY
+paths.artifacts = $ARTIFACTS_PATH_DISPLAY
+portage.overlay_name = $OVERLAY_NAME
+portage.repos_conf_path = $REPOS_CONF_PATH
+portage.default_package = $DEFAULT_PACKAGE
+safety.allow_destructive = $ALLOW_DESTRUCTIVE
+safety.allow_arbitrary_ssh = $ALLOW_ARBITRARY_SSH
+EOF
+}
+
+narrow_test_gwm() {
+  local allow_rebuild=false
+  if (($# > 0)); then
+    [[ "$1" == "--allow-abi-rebuild" ]] || die "Unknown narrow-test option: $1"
+    allow_rebuild=true
+    shift
+  fi
+  require_no_extra_args "narrow-test gwm" "$@"
+  init_artifacts
+  local pretend_log="$ARTIFACTS_PATH_ABS/pretend-x11-wm-gwm.log"
+  local report_log="$ARTIFACTS_PATH_ABS/narrow-test-gwm.log"
+  local matches=()
+
+  if ! portage_action pretend x11-wm/gwm; then
+    printf 'Pretend failed; narrow update could not be evaluated.\n' >"$report_log" || return
+    write_narrow_report false "$allow_rebuild" || return
+    record_scenario "narrow-test-gwm" "failed" "$report_log"
+    return 1
+  fi
+
+  while IFS= read -r package; do
+    [[ -n "$package" ]] || continue
+    if [[ ! " ${matches[*]} " == *" $package "* ]]; then
+      matches+=("$package")
+    fi
+  done < <(
+    awk '/^[[:space:]]*\[(ebuild|binary)[^]]*\]/ { print }' "$pretend_log" |
+      grep -oE 'x11-base/(glasswyrmd|gwcomp)(-[0-9][^[:space:]]*|:[^[:space:]]*)?' |
+      sed -E 's/(-[0-9].*|:.*)$//' || true
+  )
+
+  {
+    printf 'Scenario: narrow-test-gwm\n'
+    printf 'Package: x11-wm/gwm\n'
+    if ((${#matches[@]} == 0)); then
+      printf 'Unexpected rebuilds: none\n'
+    else
+      printf 'Detected rebuilds:\n'
+      printf '  %s\n' "${matches[@]}"
+    fi
+  } >"$report_log" || return
+
+  if ((${#matches[@]} > 0)) && [[ "$allow_rebuild" != "true" ]]; then
+    write_narrow_report false false "${matches[@]}" || return
+    record_scenario "narrow-test-gwm" "failed" "$report_log"
+    cat "$report_log" >&2
+    print_artifacts >&2
+    return 1
+  fi
+  write_narrow_report true "$allow_rebuild" "${matches[@]}" || return
+  record_scenario "narrow-test-gwm" "passed" "$report_log"
+}
+
+full_packaging_test() {
+  local approved="$1"
+  require_approval "full-packaging-test" "$approved"
+  require_vm_domain
+  is_true "$SNAPSHOT_ENABLED" || die "full-packaging-test requires snapshot.enabled = true to validate a fresh VM."
+  init_artifacts
+  SCENARIO_RECORDS=()
+  local failure="" status=0
+
+  if vm_reset true; then :; else status=$?; failure="reset"; fi
+  if [[ -z "$failure" ]]; then
+    if vm_boot; then :; else status=$?; failure="boot"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if push_overlay; then :; else status=$?; failure="push-overlay"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if register_overlay; then :; else status=$?; failure="register-overlay"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if portage_action metadata; then :; else status=$?; failure="metadata"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if portage_action pretend "$DEFAULT_PACKAGE"; then :; else status=$?; failure="pretend $DEFAULT_PACKAGE"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if portage_action emerge "$DEFAULT_PACKAGE"; then :; else status=$?; failure="emerge $DEFAULT_PACKAGE"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if narrow_test_gwm; then :; else status=$?; failure="narrow-test gwm"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if portage_action emerge x11-wm/gwm; then :; else status=$?; failure="emerge x11-wm/gwm"; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if portage_action unmerge x11-wm/gwm; then :; else status=$?; failure="unmerge x11-wm/gwm"; fi
+  fi
+
+  if ! collect_logs; then
+    if [[ -z "$failure" ]]; then
+      failure="collect"
+      status=1
+    fi
+  fi
+
+  if [[ -n "$failure" ]]; then
+    write_summary false "$failure" || return 1
+    printf 'VM packaging test failed during: %s\n' "$failure" >&2
+    print_artifacts >&2
+    return "${status:-1}"
+  fi
+  write_summary true "" || return 1
+  printf 'VM packaging test passed.\n'
+  print_artifacts
+}
+
+run_named_scenario() {
+  local name="${1:-}"
+  [[ -n "$name" ]] || die "scenario requires a fixed scenario name."
+  shift
+  case "$name" in
+    register-overlay) require_no_extra_args "$name" "$@"; register_overlay ;;
+    emerge-metadata) require_no_extra_args "$name" "$@"; portage_action metadata ;;
+    pretend-glasswyrm) require_no_extra_args "$name" "$@"; portage_action pretend "$DEFAULT_PACKAGE" ;;
+    emerge-glasswyrm) action_emerge "$DEFAULT_PACKAGE" "$@" ;;
+    pretend-gwm) require_no_extra_args "$name" "$@"; portage_action pretend x11-wm/gwm ;;
+    emerge-gwm) action_emerge x11-wm/gwm "$@" ;;
+    unmerge-gwm) action_unmerge x11-wm/gwm "$@" ;;
+    narrow-test-gwm) narrow_test_gwm "$@" ;;
+    collect-logs) require_no_extra_args "$name" "$@"; collect_logs ;;
+    full-packaging-test) action_full "$@" ;;
+    *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
+  esac
+}
+
+action_emerge() {
+  local package="$1"
+  shift
+  validate_package "$package"
+  local approved
+  approved="$(parse_yes_only "$@")"
+  require_approval "emerge" "$approved"
+  portage_action emerge "$package"
+}
+
+action_unmerge() {
+  local package="$1"
+  shift
+  validate_package "$package"
+  local approved
+  approved="$(parse_yes_only "$@")"
+  require_approval "unmerge" "$approved"
+  portage_action unmerge "$package"
+}
+
+action_full() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  full_packaging_test "$approved"
+}
+
+main() {
+  if [[ "${1:-}" == "--config" ]]; then
+    (($# >= 2)) || die "--config requires a path."
+    GW_VM_CONFIG_CLI="$2"
+    shift 2
+  fi
+
+  local command="${1:-help}"
+  (($# == 0)) || shift
+  if [[ "$command" == "help" || "$command" == "--help" || "$command" == "-h" ]]; then
+    require_no_extra_args "help" "$@"
+    usage
+    return 0
+  fi
+
+  load_config
+  case "$command" in
+    doctor) require_no_extra_args doctor "$@"; doctor ;;
+    config) require_no_extra_args config "$@"; print_config ;;
+    status) require_no_extra_args status "$@"; vm_status ;;
+    boot) require_no_extra_args boot "$@"; vm_boot ;;
+    shutdown) require_no_extra_args shutdown "$@"; vm_shutdown ;;
+    reset)
+      local approved
+      approved="$(parse_yes_only "$@")"
+      vm_reset "$approved"
+      ;;
+    push-overlay) require_no_extra_args push-overlay "$@"; push_overlay ;;
+    register-overlay) require_no_extra_args register-overlay "$@"; register_overlay ;;
+    metadata) require_no_extra_args metadata "$@"; portage_action metadata ;;
+    pretend)
+      (($# == 1)) || die "pretend requires exactly one package."
+      validate_package "$1"
+      portage_action pretend "$1"
+      ;;
+    emerge)
+      (($# >= 1)) || die "emerge requires a package."
+      local package="$1"
+      shift
+      action_emerge "$package" "$@"
+      ;;
+    unmerge)
+      (($# >= 1)) || die "unmerge requires a package."
+      local package="$1"
+      shift
+      action_unmerge "$package" "$@"
+      ;;
+    narrow-test)
+      (($# >= 1)) || die "narrow-test requires a component name."
+      [[ "$1" == "gwm" ]] || die "Only the 'gwm' narrow test is defined."
+      shift
+      narrow_test_gwm "$@"
+      ;;
+    collect) require_no_extra_args collect "$@"; collect_logs ;;
+    full-packaging-test) action_full "$@" ;;
+    scenario) run_named_scenario "$@" ;;
+    *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
+  esac
+}
+
+main "$@"
