@@ -57,6 +57,35 @@ X11-compatible session.
 - `tests/`: unit and headless integration tests.
 - `docs/`: specification, architecture notes, protocol notes, and decisions.
 
+## Gentoo packaging
+
+Gentoo packaging should keep the source tree coherent while allowing runtime
+components to be built, installed, and updated independently once Meson targets
+support that split.
+
+The intended package shape is:
+
+```text
+x11-base/glasswyrm       # metapackage or session bundle
+x11-base/glasswyrmd      # X11-compatible server
+x11-wm/gwm               # Glasswyrm window manager and policy process
+x11-base/gwcomp          # compositor and display authority
+x11-apps/gw-tools        # gwctl, gwinfo, gwtrace, gwout, gwbench
+gui-libs/libgwipc        # shared IPC contract library
+gui-libs/libgwproto      # protocol helpers, if installed as a shared library
+gui-libs/libgwrender     # renderer helpers, if installed as a shared library
+```
+
+Split packages are meant to reduce rebuild and install scope, especially for
+`gwm` and `gwcomp`. They should not be assumed to prevent source fetching by
+themselves. Use a shared release tarball, local distfile cache, or local git
+cache when multiple ebuilds consume the same upstream source.
+
+Fresh Gentoo VM testing should use a local overlay under `packaging/gentoo/` and
+exercise `emerge`. Shared folders may provide the overlay, distfiles, and binary
+packages, but copying built artifacts directly into the VM is not a substitute
+for validating the ebuild path.
+
 ## Compatibility
 
 Glasswyrm does not currently claim X11 client compatibility. Compatibility will

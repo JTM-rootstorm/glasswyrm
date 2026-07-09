@@ -269,6 +269,61 @@ Early Glasswyrm is local-only.
 
 Do not add TCP listening by default. Do not add setuid requirements. Do not claim Wayland-like client isolation. Document security limitations honestly.
 
+## Gentoo packaging and VM validation
+
+When touching packaging, preserve both the component split and the fresh-VM test
+path. The expected runtime split is:
+
+```text
+x11-base/glasswyrm       # metapackage or session bundle
+x11-base/glasswyrmd      # protocol/server process
+x11-wm/gwm               # window-manager policy process
+x11-base/gwcomp          # compositor/display authority process
+x11-apps/gw-tools        # developer and runtime tools
+gui-libs/libgwipc        # shared IPC contracts
+gui-libs/libgwproto      # protocol helpers, if installed separately
+gui-libs/libgwrender     # renderer helpers, if installed separately
+```
+
+Split packages should reduce rebuild and install scope. They do not, by
+themselves, guarantee that Portage fetches less source. Prefer a shared release
+tarball, shared `DISTDIR`, or an intentional local git cache/mirror for multiple
+ebuilds that consume the same upstream tree. Live ebuilds should pin a commit
+for reproducible VM tests unless the test is explicitly about latest `main`.
+
+Maintain a local Gentoo overlay under `packaging/gentoo/overlay/` once packaging
+begins. The overlay should be usable by a fresh Gentoo VM without editing the
+upstream checkout. At minimum it should contain `profiles/repo_name`, package
+categories, ebuilds, metadata, and any package.mask/package.use guidance needed
+for experimental features.
+
+For VM validation, Codex should provide the VM with the overlay through a shared
+folder, tarball, rsync, or scp, then register it through repos.conf. A typical
+manual shape is:
+
+```sh
+mkdir -p /etc/portage/repos.conf
+cat >/etc/portage/repos.conf/glasswyrm-local.conf <<'EOF'
+[glasswyrm-local]
+location = /mnt/shared/glasswyrm-overlay
+masters = gentoo
+auto-sync = no
+EOF
+emerge --metadata
+emerge --pretend --verbose --tree x11-base/glasswyrm
+emerge -av x11-base/glasswyrm
+```
+
+Shared directories are useful for the overlay, distfiles, logs, and binary
+packages. Do not use copied runtime artifacts as the only packaging test. The
+fresh VM should exercise Portage dependency resolution, USE flags, Meson options,
+install paths, service/session files, and uninstall behavior.
+
+When testing narrow updates, verify the pretend output before emerging. A `gwm`
+revision bump should not rebuild `gwcomp` or `glasswyrmd` unless a shared library
+or IPC ABI change requires it. If `libgwipc` changes ABI, prefer explicit
+same-version dependencies or subslot-driven rebuilds rather than silent drift.
+
 ## Code review checklist
 
 Before considering a task complete, verify:
