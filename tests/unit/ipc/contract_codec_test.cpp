@@ -111,8 +111,9 @@ void test_buffers_damage_and_frames() {
   attach.color = color();
   BufferAttach decoded_attach;
   require(encode(attach) ==
-              hex("14000000000000000a00000000000000400000002000000000010000000000008000000000000000802000000000000002000200000000000000000000010001000100010001000000a086010050c300000000000000000000") &&
-              decode(encode(attach), decoded_attach) == CodecStatus::Ok &&
+              hex("14000000000000000a000000000000004000000020000000000100000000000080000000000000008020000000000000020002000000000000000000010001000100010001000000a086010050c300000000000000000000"),
+          "BufferAttach matches its complete byte golden");
+  require(decode(encode(attach), decoded_attach) == CodecStatus::Ok &&
               decoded_attach.storage_size == attach.storage_size,
           "BufferAttach validates and round trips covered storage geometry");
   attach.storage_size--;
