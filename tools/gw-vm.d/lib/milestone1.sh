@@ -48,14 +48,20 @@ touch "$runtime_log" "$meson_log" "$xcb_log" "$journal_log"
 exec > >(tee -a "$runtime_log") 2>&1
 
 record_facts() {
-  local status=$?
+  local status=$? journal_status=0
   set +e
   systemctl stop "$unit" >/dev/null 2>&1
   if [[ -n "$unit_invocation_id" ]]; then
     journalctl "_SYSTEMD_INVOCATION_ID=$unit_invocation_id" --no-pager \
-      >"$journal_log" 2>&1
+      >"$journal_log" 2>&1 || journal_status=$?
+    [[ -s "$journal_log" ]] || journal_status=1
   else
     printf '%s\n' 'systemd invocation ID was not recorded' >"$journal_log"
+    journal_status=1
+  fi
+  if ((status == 0 && journal_status != 0)); then
+    status=$journal_status
+    failure_stage=journal-collection
   fi
   {
     printf 'failure_stage=%s\n' "$failure_stage"
@@ -237,6 +243,29 @@ if path.is_file():
         if separator and key.replace("_", "").isalnum():
             facts[key] = value
 
+journal_path = path.with_name("milestone1-journal.log")
+evidence_errors = []
+required_passed = {
+    "scenario_exit": "0",
+    "meson_tests": "passed",
+    "raw_clients": "passed",
+    "xcb_probe": "passed",
+    "systemd_runtime": "passed",
+    "x_servers_absent": "true",
+}
+for key, expected in required_passed.items():
+    if facts.get(key) != expected:
+        evidence_errors.append(f"{key} must be {expected}")
+if facts.get("sanitizer") not in {"passed", "unavailable"}:
+    evidence_errors.append("sanitizer must be passed or unavailable")
+for key in ("compiler_c", "compiler_cxx", "meson_version", "ninja_version", "systemd_version"):
+    if not facts.get(key) or facts.get(key) == "unavailable":
+        evidence_errors.append(f"{key} is missing")
+if not journal_path.is_file() or journal_path.stat().st_size == 0:
+    evidence_errors.append("current invocation journal is missing or empty")
+
+requested_pass = passed == "true"
+evidence_valid = not evidence_errors
 payload = {
     "base_commit": base_commit,
     "tested_commit": tested_commit,
@@ -256,17 +285,22 @@ payload = {
         "xcb_probe": facts.get("xcb_probe", "unknown"),
         "systemd_runtime": facts.get("systemd_runtime", "unknown"),
     },
-    "passed": passed == "true",
+    "passed": requested_pass and evidence_valid,
 }
 
 effective_failure = failure or facts.get("failure_stage", "")
+if requested_pass and not evidence_valid:
+    effective_failure = effective_failure or "evidence-validation"
+    payload["evidence_errors"] = evidence_errors
 if effective_failure:
     payload["failure_stage"] = effective_failure
 pathlib.Path(output_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+if requested_pass and not evidence_valid:
+    raise SystemExit(2)
 PY
 }
 
-prepare_milestone1_evidence() {
+verify_milestone1_source_identity() {
   local source_status unexpected_status= line
   source_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" || return
   while IFS= read -r line; do
@@ -281,7 +315,17 @@ prepare_milestone1_evidence() {
     printf '%s\n' "$unexpected_status" >&2
     return 1
   fi
+  local current_commit
+  current_commit="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return
+  if [[ -n "$M1_TESTED_COMMIT" && "$current_commit" != "$M1_TESTED_COMMIT" ]]; then
+    printf '%s\n' 'Milestone 1 source commit changed during acceptance.' >&2
+    return 1
+  fi
+}
+
+prepare_milestone1_evidence() {
   M1_TESTED_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return
+  verify_milestone1_source_identity || return
   git -C "$REPO_ROOT" merge-base --is-ancestor \
     "$M1_REQUIRED_BASE_COMMIT" "$M1_TESTED_COMMIT" || {
       printf 'HEAD is not based on required Milestone 1 commit %s\n' \
@@ -323,7 +367,13 @@ milestone1_runtime_test() {
     fi
   fi
   if [[ -z "$failure" ]]; then
-    if push_source; then :; else status=$?; failure=push-source; fi
+    if verify_milestone1_source_identity && push_source &&
+      verify_milestone1_source_identity; then
+      :
+    else
+      status=$?
+      failure=push-source
+    fi
   fi
   if [[ -z "$failure" ]]; then
     script="$(milestone1_guest_script)"
@@ -351,7 +401,8 @@ milestone1_runtime_test() {
     return "${status:-1}"
   fi
   current_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf changed)"
-  if [[ "$current_commit" != "$M1_TESTED_COMMIT" ]]; then
+  if [[ "$current_commit" != "$M1_TESTED_COMMIT" ]] ||
+    ! verify_milestone1_source_identity; then
     write_milestone1_summary false source-identity-changed || return 1
     printf '%s\n' 'Milestone 1 source identity changed during VM acceptance.' >&2
     return 1
