@@ -61,6 +61,7 @@ if get_option('glasswyrmd')
     'x11-fake-client',
     files(
       'helpers/x11_fake_client.cpp',
+      'helpers/x11_request_builder.cpp',
       'integration/server_fixture.cpp',
     ),
     dependencies: gw_x11_setup_dep,
@@ -76,6 +77,7 @@ if get_option('glasswyrmd')
     ['glasswyrmd-handshake', 'glasswyrmd_handshake_test.cpp'],
     ['glasswyrmd-malformed-client', 'glasswyrmd_malformed_client_test.cpp'],
     ['glasswyrmd-lifecycle', 'glasswyrmd_lifecycle_test.cpp'],
+    ['glasswyrmd-core-requests', 'glasswyrmd_core_requests_test.cpp'],
   ]
     integration_program = executable(
       integration_case[0],

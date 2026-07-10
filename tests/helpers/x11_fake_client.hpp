@@ -31,6 +31,8 @@ class X11FakeClient {
                 std::size_t fragment_size = static_cast<std::size_t>(-1));
   std::vector<std::uint8_t> receive_setup_reply(
       protocol::x11::ByteOrder order, int timeout_ms = 2000);
+  std::vector<std::uint8_t> receive_server_packet(
+      protocol::x11::ByteOrder order, int timeout_ms = 2000);
   [[nodiscard]] bool peer_closed(int timeout_ms = 2000) const;
   [[nodiscard]] int descriptor() const { return descriptor_; }
 

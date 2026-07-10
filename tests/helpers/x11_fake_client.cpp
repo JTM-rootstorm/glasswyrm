@@ -33,6 +33,20 @@ std::uint16_t read_u16(const std::uint8_t* bytes,
          static_cast<std::uint16_t>(bytes[1]);
 }
 
+std::uint32_t read_u32(const std::uint8_t* bytes,
+                       protocol::x11::ByteOrder order) {
+  if (order == protocol::x11::ByteOrder::LittleEndian) {
+    return static_cast<std::uint32_t>(bytes[0]) |
+           (static_cast<std::uint32_t>(bytes[1]) << 8U) |
+           (static_cast<std::uint32_t>(bytes[2]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[3]) << 24U);
+  }
+  return (static_cast<std::uint32_t>(bytes[0]) << 24U) |
+         (static_cast<std::uint32_t>(bytes[1]) << 16U) |
+         (static_cast<std::uint32_t>(bytes[2]) << 8U) |
+         static_cast<std::uint32_t>(bytes[3]);
+}
+
 void append_padded(std::vector<std::uint8_t>& output,
                    std::span<const std::uint8_t> bytes) {
   output.insert(output.end(), bytes.begin(), bytes.end());
@@ -161,6 +175,37 @@ std::vector<std::uint8_t> X11FakeClient::receive_setup_reply(
     output.insert(output.end(), buffer, buffer + size);
     if (output.size() >= 8 && expected == 8) {
       expected = 8 + static_cast<std::size_t>(read_u16(output.data() + 6, order)) * 4;
+    }
+  }
+  return output;
+}
+
+std::vector<std::uint8_t> X11FakeClient::receive_server_packet(
+    protocol::x11::ByteOrder order, int timeout_ms) {
+  std::vector<std::uint8_t> output;
+  std::size_t expected = 32;
+  while (output.size() < expected) {
+    pollfd descriptor{descriptor_, POLLIN, 0};
+    int result;
+    do {
+      result = ::poll(&descriptor, 1, timeout_ms);
+    } while (result < 0 && errno == EINTR);
+    if (result <= 0) {
+      throw std::runtime_error(result == 0 ? "packet timeout"
+                                           : std::strerror(errno));
+    }
+    std::uint8_t buffer[4096];
+    const ssize_t size = ::recv(
+        descriptor_, buffer, std::min(sizeof(buffer), expected - output.size()),
+        0);
+    if (size <= 0) {
+      throw std::runtime_error("connection closed before complete packet");
+    }
+    output.insert(output.end(), buffer, buffer + size);
+    if (output.size() >= 8 && output.front() == 1 && expected == 32) {
+      expected = 32 +
+                 static_cast<std::size_t>(read_u32(output.data() + 4, order)) *
+                     4;
     }
   }
   return output;
