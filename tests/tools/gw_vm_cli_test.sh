@@ -196,6 +196,14 @@ raw_clients=passed
 xcb_probe=passed
 systemd_runtime=passed
 FACTS
+      if [[ ${GW_VM_TEST_BAD_FACTS:-0} == 1 ]]; then
+        printf 'x_servers_absent=false\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone1-journal.log)
+      if [[ ${GW_VM_TEST_EMPTY_JOURNAL:-0} != 1 ]]; then
+        printf 'collected current invocation journal\n'
+      fi
       ;;
     milestone1-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
@@ -477,6 +485,15 @@ done
 assert_contains "$artifact_dir/milestone1-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone1-summary.json" '"sanitizer": "passed"'
 assert_contains "$artifact_dir/milestone1-summary.json" '"xorg_xwayland_absent": true'
+
+run_failure "$work_dir/milestone1-bad-facts.out" \
+  env GW_VM_TEST_BAD_FACTS=1 "$gw_vm" milestone1-runtime-test --yes
+assert_contains "$artifact_dir/milestone1-summary.json" '"passed": false'
+assert_contains "$artifact_dir/milestone1-summary.json" '"evidence_errors"'
+
+run_failure "$work_dir/milestone1-empty-journal.out" \
+  env GW_VM_TEST_EMPTY_JOURNAL=1 "$gw_vm" milestone1-runtime-test --yes
+assert_contains "$artifact_dir/milestone1-summary.json" 'current invocation journal is missing or empty'
 
 run_success "$work_dir/milestone1-wrapper.out" \
   "$repo_root/tools/gw-vm.d/scenarios/milestone1-runtime-test.sh" --yes

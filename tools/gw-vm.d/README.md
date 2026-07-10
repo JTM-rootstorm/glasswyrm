@@ -140,8 +140,9 @@ destroy a running domain by default.
 Arbitrary SSH is outside the interface. The first-pass harness provides no
 general remote-command or interactive SSH command.
 
-The harness never replaces system Xorg automatically and does not require
-systemd in the guest.
+The harness never replaces system Xorg automatically. General lifecycle and
+packaging operations do not require systemd, but `milestone1-runtime-test`
+requires it for the transient runtime acceptance unit.
 
 ## Reports
 
