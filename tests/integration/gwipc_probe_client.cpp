@@ -226,13 +226,6 @@ int main(int argc, char** argv) {
     damage.rectangles.push_back({0, 0, 8, 8});
     contracts.emplace_back(GWIPC_MESSAGE_SURFACE_DAMAGE,
                            gw::ipc::wire::encode(damage));
-    contracts.emplace_back(
-        GWIPC_MESSAGE_FRAME_COMMIT,
-        gw::ipc::wire::encode(gw::ipc::wire::FrameCommit{4, 1, 1, 0}));
-    contracts.emplace_back(
-        GWIPC_MESSAGE_FRAME_ACKNOWLEDGED,
-        gw::ipc::wire::encode(gw::ipc::wire::FrameAcknowledged{
-            4, 1, 1, gw::ipc::wire::FrameResult::Accepted}));
     for (const auto& [type, payload] : contracts) {
       if (enqueue(connection.get(), type, GWIPC_FLAG_ACK_REQUIRED, payload) !=
           GWIPC_STATUS_OK)
@@ -246,6 +239,26 @@ int main(int argc, char** argv) {
       gwipc_message_destroy(reply);
       if (!matched) return 1;
     }
+    const auto frame =
+        gw::ipc::wire::encode(gw::ipc::wire::FrameCommit{4, 1, 1, 0});
+    if (enqueue(connection.get(), GWIPC_MESSAGE_FRAME_COMMIT,
+                GWIPC_FLAG_ACK_REQUIRED, frame) != GWIPC_STATUS_OK)
+      return 1;
+    auto* frame_reply =
+        wait_message(connection.get(), GWIPC_MESSAGE_FRAME_ACKNOWLEDGED);
+    if (!frame_reply) return 1;
+    std::size_t frame_reply_size = 0;
+    const auto* frame_reply_bytes =
+        gwipc_message_payload(frame_reply, &frame_reply_size);
+    gw::ipc::wire::FrameAcknowledged acknowledged;
+    const bool frame_matched =
+        gw::ipc::wire::decode({frame_reply_bytes, frame_reply_size},
+                              acknowledged) ==
+            gw::ipc::wire::CodecStatus::Ok &&
+        acknowledged.commit_id == 4 &&
+        gwipc_message_reply_to(frame_reply) != 0;
+    gwipc_message_destroy(frame_reply);
+    if (!frame_matched) return 1;
   } else if (mode == "ping-pong") {
     if (enqueue(connection.get(), GWIPC_MESSAGE_PING, GWIPC_FLAG_ACK_REQUIRED,
                 gw::ipc::wire::encode(gw::ipc::wire::Ping{99})) !=

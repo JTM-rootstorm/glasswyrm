@@ -80,15 +80,81 @@ bool supported_established_type(std::uint16_t type) noexcept {
   }
 }
 
+std::uint16_t read_u16(const std::uint8_t* bytes) noexcept {
+  return static_cast<std::uint16_t>(bytes[0]) |
+         (static_cast<std::uint16_t>(bytes[1]) << 8U);
+}
+
+std::uint32_t read_u32(const std::uint8_t* bytes) noexcept {
+  return static_cast<std::uint32_t>(read_u16(bytes)) |
+         (static_cast<std::uint32_t>(read_u16(bytes + 2)) << 16U);
+}
+
+std::uint64_t read_u64(const std::uint8_t* bytes) noexcept {
+  return static_cast<std::uint64_t>(read_u32(bytes)) |
+         (static_cast<std::uint64_t>(read_u32(bytes + 4)) << 32U);
+}
+
+bool parse_error_context(std::span<const std::uint8_t> record,
+                         wire::Envelope& envelope) noexcept {
+  if (record.size() < wire::kEnvelopeSize || record[0] != 'G' ||
+      record[1] != 'W' || record[2] != 'I' || record[3] != 'P' ||
+      read_u16(record.data() + 4) != wire::kEnvelopeSize ||
+      read_u16(record.data() + 22) != 0)
+    return false;
+  envelope.major = read_u16(record.data() + 6);
+  envelope.minor = read_u16(record.data() + 8);
+  envelope.type = static_cast<MessageType>(read_u16(record.data() + 10));
+  envelope.flags = read_u32(record.data() + 12);
+  envelope.payload_size = read_u32(record.data() + 16);
+  envelope.fd_count = read_u16(record.data() + 20);
+  envelope.sequence = read_u64(record.data() + 24);
+  envelope.reply_to = read_u64(record.data() + 32);
+  return envelope.sequence != 0;
+}
+
 void set_closed(gwipc_connection& connection) noexcept {
   if (connection.state != GWIPC_CONNECTION_CLOSED)
     std::fprintf(stderr, "gwipc: disconnected connection=%llu\n",
                  static_cast<unsigned long long>(connection.peer.connection_id));
-  if (connection.incoming_snapshot.active) connection.snapshot_aborted = true;
+  if (connection.incoming_snapshot.active || connection.outgoing_snapshot.active)
+    connection.snapshot_aborted = true;
   close_fd(connection.fd);
   connection.state = GWIPC_CONNECTION_CLOSED;
   connection.outgoing.clear();
   connection.queued_bytes = 0;
+}
+
+gwipc_status protocol_failure(gwipc_connection& connection,
+                              wire::ProtocolErrorCode code,
+                              const wire::Envelope& offending,
+                              const char* detail,
+                              gwipc_status result = GWIPC_STATUS_PROTOCOL_ERROR) {
+  std::fprintf(stderr,
+               "gwipc: protocol error code=%u type=%u sequence=%llu\n",
+               static_cast<unsigned>(code),
+               static_cast<unsigned>(offending.type),
+               static_cast<unsigned long long>(offending.sequence));
+  if (connection.state != GWIPC_CONNECTION_ESTABLISHED) {
+    set_closed(connection);
+    return result;
+  }
+  wire::ProtocolError error;
+  error.code = code;
+  error.offending_type = offending.type;
+  error.offending_sequence = offending.sequence;
+  error.detail = detail;
+  const auto payload = wire::encode(error);
+  const auto queued = queue_internal(
+      connection, GWIPC_MESSAGE_PROTOCOL_ERROR,
+      GWIPC_FLAG_REPLY | GWIPC_FLAG_ERROR, offending.sequence, payload);
+  if (queued != GWIPC_STATUS_OK) {
+    set_closed(connection);
+    return result;
+  }
+  connection.state = GWIPC_CONNECTION_CLOSING;
+  connection.close_after_flush = true;
+  return result;
 }
 
 gwipc_status duplicate_fds(std::span<const int> source,
@@ -232,11 +298,14 @@ gwipc_status validate_application(gwipc_connection& connection,
     case GWIPC_MESSAGE_FRAME_COMMIT: {
       wire::FrameCommit value;
       codec = wire::decode(payload, value);
+      if (flags != GWIPC_FLAG_ACK_REQUIRED)
+        return GWIPC_STATUS_PROTOCOL_ERROR;
       break;
     }
     case GWIPC_MESSAGE_FRAME_ACKNOWLEDGED: {
       wire::FrameAcknowledged value;
       codec = wire::decode(payload, value);
+      if (flags != GWIPC_FLAG_REPLY) return GWIPC_STATUS_PROTOCOL_ERROR;
       break;
     }
     case GWIPC_MESSAGE_PONG: {
@@ -544,25 +613,54 @@ gwipc_status receive_one(gwipc_connection& connection) {
   auto close_received = [&] {
     for (auto& fd : fds) close_fd(fd);
   };
+  const auto record_size = std::min<std::size_t>(
+      received > 0 ? static_cast<std::size_t>(received) : 0, bytes.size());
+  wire::Envelope error_context;
+  const bool has_error_context =
+      parse_error_context(std::span(bytes).first(record_size), error_context);
   if (ancillary_invalid || (message.msg_flags & MSG_TRUNC) != 0 ||
       static_cast<std::size_t>(received) > bytes.size() ||
       fds.size() > maximum_fds) {
     close_received();
+    if (has_error_context) {
+      const auto code = ancillary_invalid || fds.size() > maximum_fds
+                            ? wire::ProtocolErrorCode::InvalidDescriptorCount
+                            : wire::ProtocolErrorCode::LimitExceeded;
+      return protocol_failure(connection, code, error_context,
+                              "record or descriptor limit exceeded");
+    }
     set_closed(connection);
     return GWIPC_STATUS_PROTOCOL_ERROR;
   }
   bytes.resize(static_cast<std::size_t>(received));
   wire::Envelope envelope;
-  if (wire::decode_envelope(bytes, fds.size(), maximum_payload, envelope) !=
-          wire::CodecStatus::Ok ||
-      envelope.sequence != connection.next_receive_sequence) {
+  const auto envelope_status =
+      wire::decode_envelope(bytes, fds.size(), maximum_payload, envelope);
+  if (envelope_status != wire::CodecStatus::Ok) {
     close_received();
+    if (has_error_context) {
+      const auto code = error_context.fd_count != fds.size()
+                            ? wire::ProtocolErrorCode::InvalidDescriptorCount
+                        : envelope_status == wire::CodecStatus::LimitExceeded
+                            ? wire::ProtocolErrorCode::LimitExceeded
+                            : wire::ProtocolErrorCode::MalformedEnvelope;
+      return protocol_failure(connection, code, error_context,
+                              "malformed message envelope");
+    }
     set_closed(connection);
     return GWIPC_STATUS_PROTOCOL_ERROR;
   }
+  if (envelope.sequence != connection.next_receive_sequence) {
+    close_received();
+    return protocol_failure(connection,
+                            wire::ProtocolErrorCode::OutOfOrderSequence,
+                            envelope, "out-of-order sequence");
+  }
 #ifdef GWIPC_TRACE
   std::fprintf(stderr,
-               "gwipc: receive type=%u sequence=%llu reply_to=%llu payload=%u fds=%u\n",
+               "gwipc: receive role=%u capabilities=0x%llx type=%u sequence=%llu reply_to=%llu payload=%u fds=%u\n",
+               static_cast<unsigned>(connection.peer.role),
+               static_cast<unsigned long long>(connection.peer.capabilities),
                static_cast<unsigned>(envelope.type),
                static_cast<unsigned long long>(envelope.sequence),
                static_cast<unsigned long long>(envelope.reply_to),
@@ -593,8 +691,9 @@ gwipc_status receive_one(gwipc_connection& connection) {
       envelope.type == MessageType::Welcome ||
       envelope.type == MessageType::Reject) {
     close_received();
-    set_closed(connection);
-    return GWIPC_STATUS_PROTOCOL_ERROR;
+    return protocol_failure(connection,
+                            wire::ProtocolErrorCode::MalformedEnvelope,
+                            envelope, "invalid established message envelope");
   }
   if (wire::has_flag(envelope.flags, MessageFlag::Reply)) {
     if (envelope.type == MessageType::Pong) {
@@ -604,18 +703,35 @@ gwipc_status receive_one(gwipc_connection& connection) {
           wire::decode(payload, pong) != wire::CodecStatus::Ok ||
           pong.nonce != expected->second) {
         close_received();
-        set_closed(connection);
-        return GWIPC_STATUS_PROTOCOL_ERROR;
+        return protocol_failure(connection,
+                                wire::ProtocolErrorCode::UnexpectedReply,
+                                envelope, "unexpected pong reply");
       }
       connection.pending_ping_nonces.erase(expected);
+    }
+    if (envelope.type == MessageType::FrameAcknowledged) {
+      wire::FrameAcknowledged acknowledged;
+      const auto expected =
+          connection.pending_frame_commits.find(envelope.reply_to);
+      if (expected == connection.pending_frame_commits.end() ||
+          wire::decode(payload, acknowledged) != wire::CodecStatus::Ok ||
+          acknowledged.commit_id != expected->second) {
+        close_received();
+        return protocol_failure(connection,
+                                wire::ProtocolErrorCode::UnexpectedReply,
+                                envelope,
+                                "frame acknowledgement does not match commit");
+      }
+      connection.pending_frame_commits.erase(expected);
     }
     const bool protocol_error = envelope.type == MessageType::ProtocolError;
     if (connection.pending_replies.erase(envelope.reply_to) == 0 &&
         !(protocol_error && envelope.reply_to > 0 &&
           envelope.reply_to < connection.next_send_sequence)) {
       close_received();
-      set_closed(connection);
-      return GWIPC_STATUS_PROTOCOL_ERROR;
+      return protocol_failure(connection,
+                              wire::ProtocolErrorCode::UnexpectedReply,
+                              envelope, "unexpected reply correlation");
     }
   }
   if (envelope.type == MessageType::Ping) {
@@ -623,8 +739,11 @@ gwipc_status receive_one(gwipc_connection& connection) {
     if (envelope.flags != GWIPC_FLAG_ACK_REQUIRED || envelope.reply_to != 0 ||
         !fds.empty() || wire::decode(payload, ping) != wire::CodecStatus::Ok) {
       close_received();
-      set_closed(connection);
-      return GWIPC_STATUS_PROTOCOL_ERROR;
+      return protocol_failure(
+          connection,
+          !fds.empty() ? wire::ProtocolErrorCode::InvalidDescriptorCount
+                       : wire::ProtocolErrorCode::MalformedPayload,
+          envelope, "invalid ping message");
     }
     close_received();
     const auto pong = wire::encode(wire::Pong{ping.nonce});
@@ -662,17 +781,48 @@ gwipc_status receive_one(gwipc_connection& connection) {
       payload, fds, connection.incoming_snapshot);
   if (application_status != GWIPC_STATUS_OK) {
     close_received();
-    set_closed(connection);
-    return application_status;
+    wire::ProtocolErrorCode code = wire::ProtocolErrorCode::MalformedPayload;
+    if (application_status == GWIPC_STATUS_CAPABILITY_MISMATCH) {
+      code = wire::ProtocolErrorCode::MissingCapability;
+    } else if (snapshot_control(static_cast<std::uint16_t>(envelope.type)) ||
+               wire::has_flag(envelope.flags, MessageFlag::SnapshotItem)) {
+      code = wire::ProtocolErrorCode::SnapshotViolation;
+    } else if (envelope.type == MessageType::BufferAttach) {
+      code = fds.size() == 1 ? wire::ProtocolErrorCode::InvalidDescriptor
+                             : wire::ProtocolErrorCode::InvalidDescriptorCount;
+    }
+    return protocol_failure(connection, code, envelope,
+                            "invalid application message", application_status);
+  }
+  bool tracked_frame_commit = false;
+  if (envelope.type == MessageType::FrameCommit) {
+    wire::FrameCommit commit;
+    if (wire::decode(payload, commit) != wire::CodecStatus::Ok ||
+        connection.incoming_frame_commits.size() >=
+            connection.config.maximum_queued_messages) {
+      close_received();
+      return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded,
+                              envelope,
+                              "frame acknowledgement tracking limit exceeded",
+                              GWIPC_STATUS_LIMIT_EXCEEDED);
+    }
+    connection.incoming_frame_commits.emplace(envelope.sequence,
+                                               commit.commit_id);
+    tracked_frame_commit = true;
   }
   if (connection.incoming.size() >= connection.config.maximum_queued_messages) {
+    if (tracked_frame_commit)
+      connection.incoming_frame_commits.erase(envelope.sequence);
     close_received();
-    set_closed(connection);
-    return GWIPC_STATUS_LIMIT_EXCEEDED;
+    return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded,
+                            envelope, "incoming queue limit exceeded",
+                            GWIPC_STATUS_LIMIT_EXCEEDED);
   }
   auto received_message = std::unique_ptr<gwipc_message>(
       new (std::nothrow) gwipc_message);
   if (!received_message) {
+    if (tracked_frame_commit)
+      connection.incoming_frame_commits.erase(envelope.sequence);
     close_received();
     return GWIPC_STATUS_OUT_OF_MEMORY;
   }
@@ -685,6 +835,8 @@ gwipc_status receive_one(gwipc_connection& connection) {
     received_message->fds = std::move(fds);
     connection.incoming.push_back(received_message.release());
   } catch (...) {
+    if (tracked_frame_commit)
+      connection.incoming_frame_commits.erase(envelope.sequence);
     close_received();
     return GWIPC_STATUS_OUT_OF_MEMORY;
   }
@@ -733,7 +885,9 @@ gwipc_status queue_internal(gwipc_connection& connection, std::uint16_t type,
   envelope.reply_to = reply_to;
 #ifdef GWIPC_TRACE
   std::fprintf(stderr,
-               "gwipc: send type=%u sequence=%llu reply_to=%llu payload=%zu fds=%zu\n",
+               "gwipc: send role=%u capabilities=0x%llx type=%u sequence=%llu reply_to=%llu payload=%zu fds=%zu\n",
+               static_cast<unsigned>(connection.peer.role),
+               static_cast<unsigned long long>(connection.peer.capabilities),
                static_cast<unsigned>(type),
                static_cast<unsigned long long>(envelope.sequence),
                static_cast<unsigned long long>(reply_to), payload.size(),
@@ -891,6 +1045,8 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
       snapshot);
   if (validation != GWIPC_STATUS_OK) return validation;
   bool ping_inserted = false;
+  bool frame_commit_inserted = false;
+  bool frame_acknowledges_incoming = false;
   const auto pending_sequence = connection->next_send_sequence;
   if (message->type == GWIPC_MESSAGE_PING) {
     gw::ipc::wire::Ping ping;
@@ -900,6 +1056,29 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
     connection->pending_ping_nonces.emplace(pending_sequence, ping.nonce);
     ping_inserted = true;
   }
+  if (message->type == GWIPC_MESSAGE_FRAME_COMMIT) {
+    gw::ipc::wire::FrameCommit commit;
+    if (gw::ipc::wire::decode(payload, commit) !=
+        gw::ipc::wire::CodecStatus::Ok)
+      return GWIPC_STATUS_PROTOCOL_ERROR;
+    if (connection->pending_frame_commits.size() >=
+        connection->config.maximum_queued_messages)
+      return GWIPC_STATUS_LIMIT_EXCEEDED;
+    connection->pending_frame_commits.emplace(pending_sequence,
+                                              commit.commit_id);
+    frame_commit_inserted = true;
+  }
+  if (message->type == GWIPC_MESSAGE_FRAME_ACKNOWLEDGED) {
+    gw::ipc::wire::FrameAcknowledged acknowledged;
+    const auto expected = connection->incoming_frame_commits.find(
+        message->reply_to);
+    if (gw::ipc::wire::decode(payload, acknowledged) !=
+            gw::ipc::wire::CodecStatus::Ok ||
+        expected == connection->incoming_frame_commits.end() ||
+        expected->second != acknowledged.commit_id)
+      return GWIPC_STATUS_INVALID_STATE;
+    frame_acknowledges_incoming = true;
+  }
   gwipc_status status = GWIPC_STATUS_SYSTEM_ERROR;
   try {
     status = gw::ipc::queue_internal(*connection, message->type,
@@ -908,13 +1087,19 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
   } catch (...) {
     if (ping_inserted)
       connection->pending_ping_nonces.erase(pending_sequence);
+    if (frame_commit_inserted)
+      connection->pending_frame_commits.erase(pending_sequence);
     throw;
   }
   if (status == GWIPC_STATUS_OK) {
     connection->outgoing_snapshot = snapshot;
+    if (frame_acknowledges_incoming)
+      connection->incoming_frame_commits.erase(message->reply_to);
   } else if (ping_inserted) {
     connection->pending_ping_nonces.erase(pending_sequence);
   }
+  if (status != GWIPC_STATUS_OK && frame_commit_inserted)
+    connection->pending_frame_commits.erase(pending_sequence);
   return status;
   } catch (const std::bad_alloc&) {
     return GWIPC_STATUS_OUT_OF_MEMORY;

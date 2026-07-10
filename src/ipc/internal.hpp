@@ -105,6 +105,8 @@ struct gwipc_connection {
   std::deque<gwipc_message*> incoming;
   std::unordered_set<std::uint64_t> pending_replies;
   std::unordered_map<std::uint64_t, std::uint64_t> pending_ping_nonces;
+  std::unordered_map<std::uint64_t, std::uint64_t> pending_frame_commits;
+  std::unordered_map<std::uint64_t, std::uint64_t> incoming_frame_commits;
   gw::ipc::SnapshotState outgoing_snapshot;
   gw::ipc::SnapshotState incoming_snapshot;
 

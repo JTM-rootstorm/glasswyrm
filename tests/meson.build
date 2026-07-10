@@ -68,6 +68,17 @@ if get_option('libgwipc')
   )
   test('gwipc-fault-atomicity', gwipc_fault_test, timeout: 10)
 
+  gwipc_protocol_edge_test = executable(
+    'gwipc_protocol_edge_test',
+    files(
+      'integration/gwipc_protocol_edge_test.cpp',
+      '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-protocol-edges', gwipc_protocol_edge_test, timeout: 10)
+
   gwipc_probe_server = executable(
     'gwipc_probe_server',
     files('integration/gwipc_probe_server.cpp'),

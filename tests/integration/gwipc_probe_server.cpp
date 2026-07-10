@@ -122,6 +122,20 @@ int main(int argc, char** argv) {
             enqueue_reply(connection, message, GWIPC_MESSAGE_BUFFER_RELEASE,
                           gw::ipc::wire::encode(release));
           }
+        } else if (type == GWIPC_MESSAGE_FRAME_COMMIT) {
+          std::size_t size = 0;
+          const auto* data = gwipc_message_payload(message, &size);
+          gw::ipc::wire::FrameCommit commit;
+          if (gw::ipc::wire::decode({data, size}, commit) ==
+              gw::ipc::wire::CodecStatus::Ok) {
+            gw::ipc::wire::FrameAcknowledged acknowledged;
+            acknowledged.commit_id = commit.commit_id;
+            acknowledged.output_id = commit.output_id;
+            acknowledged.presented_generation = commit.producer_generation;
+            enqueue_reply(connection, message,
+                          GWIPC_MESSAGE_FRAME_ACKNOWLEDGED,
+                          gw::ipc::wire::encode(acknowledged));
+          }
         } else if ((gwipc_message_flags(message) & GWIPC_FLAG_ACK_REQUIRED) !=
                    0) {
           std::size_t size = 0;
