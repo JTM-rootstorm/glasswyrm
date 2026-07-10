@@ -117,8 +117,10 @@ validate_config() {
     die "snapshot.enabled must be true or false."
   [[ "$SSH_HOST" =~ ^[A-Za-z0-9_.:-]+$ && "$SSH_HOST" != -* ]] || die "Invalid SSH host."
   [[ "$SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]] || die "Invalid SSH user."
-  [[ "$SSH_PORT" =~ ^[0-9]+$ ]] && ((10#$SSH_PORT >= 1 && 10#$SSH_PORT <= 65535)) ||
+  if [[ ! "$SSH_PORT" =~ ^[0-9]+$ ]] ||
+    ((10#$SSH_PORT < 1 || 10#$SSH_PORT > 65535)); then
     die "Invalid SSH port."
+  fi
   [[ "$GUEST_OVERLAY_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$GUEST_OVERLAY_PATH" != "/" && "$GUEST_OVERLAY_PATH" != *".."* ]] ||
     die "Guest overlay path must be a safe absolute path."
   [[ "$GUEST_ARTIFACTS_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$GUEST_ARTIFACTS_PATH" != "/" && "$GUEST_ARTIFACTS_PATH" != *".."* ]] ||

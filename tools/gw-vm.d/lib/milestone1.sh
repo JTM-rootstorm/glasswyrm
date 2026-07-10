@@ -301,7 +301,7 @@ PY
 }
 
 verify_milestone1_source_identity() {
-  local source_status unexpected_status= line
+  local source_status unexpected_status='' line=''
   source_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" || return
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
@@ -351,7 +351,7 @@ milestone1_runtime_test() {
   require_vm_domain
   init_artifacts
   SCENARIO_RECORDS=()
-  local failure= status=0 collection_status=0 script current_commit
+  local failure='' status=0 collection_status=0 script current_commit
   local artifacts_prepared=false
 
   if prepare_milestone1_evidence; then :; else status=$?; failure=source-evidence; fi

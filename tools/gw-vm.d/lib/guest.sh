@@ -27,7 +27,7 @@ wait_for_guest() {
   fi
   local attempt
   SSH_TARGET="$SSH_USER@$SSH_HOST"
-  for attempt in {1..15}; do
+  for _ in {1..15}; do
     if ssh -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=2 \
       "$SSH_TARGET" true </dev/null >/dev/null 2>&1; then
       return 0
