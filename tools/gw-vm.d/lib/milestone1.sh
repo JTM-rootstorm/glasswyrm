@@ -36,6 +36,7 @@ raw_client_result=not-run
 xcb_probe_result=not-run
 unit_result=not-run
 meson_result=not-run
+unit_invocation_id=
 
 package_installed() {
   [[ -n "$(portageq match / "$1" 2>/dev/null)" ]]
@@ -50,7 +51,12 @@ record_facts() {
   local status=$?
   set +e
   systemctl stop "$unit" >/dev/null 2>&1
-  journalctl -u "$unit" --no-pager >"$journal_log" 2>&1
+  if [[ -n "$unit_invocation_id" ]]; then
+    journalctl "_SYSTEMD_INVOCATION_ID=$unit_invocation_id" --no-pager \
+      >"$journal_log" 2>&1
+  else
+    printf '%s\n' 'systemd invocation ID was not recorded' >"$journal_log"
+  fi
   {
     printf 'failure_stage=%s\n' "$failure_stage"
     printf 'scenario_exit=%s\n' "$status"
@@ -148,6 +154,11 @@ systemd-run --unit="$unit" \
   --property=AmbientCapabilities= \
   --property=Restart=no \
   "$daemon" --display 99
+unit_invocation_id="$(systemctl show "$unit" -p InvocationID --value)"
+[[ "$unit_invocation_id" =~ ^[0-9a-f]{32}$ ]] || {
+  echo "Unable to record the systemd invocation ID for $unit" >&2
+  exit 1
+}
 
 for _ in {1..100}; do
   [[ -S /tmp/.X11-unix/X99 ]] && break

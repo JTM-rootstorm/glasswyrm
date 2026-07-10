@@ -463,6 +463,7 @@ run_success "$work_dir/milestone1.out" "$gw_vm" milestone1-runtime-test --yes
 assert_contains "$command_log" '.glasswyrm-vm-source'
 assert_contains "$command_log" 'systemd-run --unit="$unit"'
 assert_contains "$command_log" 'portageq match / "$1"'
+assert_contains "$command_log" '_SYSTEMD_INVOCATION_ID=$unit_invocation_id'
 assert_contains "$command_log" 'x11_setup_probe'
 assert_contains "$command_log" 'xcb_setup_probe'
 for artifact in \
