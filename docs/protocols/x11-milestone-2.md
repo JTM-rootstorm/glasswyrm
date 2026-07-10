@@ -12,6 +12,8 @@ tests and fixed raw/libxcb probes.
 - One deterministic synthetic screen and root window
 - Incremental, pipelined ordinary request framing
 - Core replies and errors in the client's byte order
+- 65,535-unit ordinary request maximum
+- 1 MiB per-client queued-output cap
 
 ## Supported core requests
 
@@ -35,6 +37,23 @@ tree, disconnect cleanup, all predefined core atoms, dynamic atoms shared by
 clients, and byte-order-independent storage for format-16 and format-32
 properties. Unsupported core opcodes return `BadRequest`; recoverable request
 errors do not close the connection.
+
+Format-8 property values are stored as bytes. Format-16 and format-32 values
+are stored as canonical typed units and encoded in the receiving client's byte
+order. A property is limited to 4 MiB, a window to 4,096 properties, and total
+server property data to 64 MiB.
+
+The repository-owned proof commands are:
+
+```sh
+./build/tests/x11_milestone2_probe --display :99 --byte-order little --basic
+./build/tests/x11_milestone2_probe --display :99 --byte-order big --basic
+./build/tests/x11_milestone2_probe --display :99 --errors
+./build/tests/x11_milestone2_probe --display :99 --cleanup
+./build/tests/x11_milestone2_probe --display :99 --cross-endian
+DISPLAY=:99 XAUTHORITY=/dev/null ./build/tests/xcb_milestone2_probe
+./tools/gw-vm milestone2-runtime-test --yes
+```
 
 ## Unsupported
 
