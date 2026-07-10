@@ -41,6 +41,22 @@ x11_reply_atom_test = executable(
 test('x11-reply-atom', x11_reply_atom_test, timeout: 10)
 
 if get_option('glasswyrmd')
+  foreach unit_case : [
+    ['resource-id', 'resource_id_test.cpp'],
+    ['resource-table', 'resource_table_test.cpp'],
+    ['window-tree', 'window_tree_test.cpp'],
+    ['atom-table', 'atom_table_test.cpp'],
+    ['property-store', 'property_store_test.cpp'],
+  ]
+    unit_program = executable(
+      unit_case[0],
+      files('unit/' + unit_case[1]),
+      dependencies: gw_server_state_dep,
+      include_directories: test_source_root_include,
+    )
+    test(unit_case[0], unit_program, timeout: 10)
+  endforeach
+
   x11_fake_client_lib = static_library(
     'x11-fake-client',
     files(
