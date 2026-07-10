@@ -164,7 +164,8 @@ if printf 'int main(void) { return 0; }\n' | \
       >>"$meson_log" 2>&1 && "$sanitizer_probe" >>"$meson_log" 2>&1; then
   rm -f "$sanitizer_probe"
   {
-    meson setup "$sanitizer_build_dir" "$source_dir" -Dlibgwipc=true -Dasan=true -Dubsan=true
+    meson setup "$sanitizer_build_dir" "$source_dir" -Dwerror=true \
+      -Dlibgwipc=true -Dasan=true -Dubsan=true
     meson compile -C "$sanitizer_build_dir"
     meson test -C "$sanitizer_build_dir" --print-errorlogs
   } 2>&1 | tee -a "$meson_log"
@@ -186,19 +187,33 @@ ipc_only_result=passed
 
 failure_stage=install-and-consumers
 DESTDIR="$install_root" meson install -C "$ipc_build_dir" 2>&1 | tee -a "$install_log"
-test -e "$install_root/usr/lib64/libgwipc.so.0" || test -e "$install_root/usr/lib/libgwipc.so.0"
-test -d "$install_root/usr/include/glasswyrm/ipc"
-test -e "$install_root/usr/lib64/pkgconfig/gwipc.pc" || test -e "$install_root/usr/lib/pkgconfig/gwipc.pc"
+staged_lib_dir="$install_root/usr/lib64"
+[[ -d "$staged_lib_dir" ]] || staged_lib_dir="$install_root/usr/lib"
+test -f "$staged_lib_dir/libgwipc.so.0.1.0"
+test -L "$staged_lib_dir/libgwipc.so.0"
+test -L "$staged_lib_dir/libgwipc.so"
+[[ "$(readlink "$staged_lib_dir/libgwipc.so.0")" == libgwipc.so.0.1.0 ]]
+[[ "$(readlink "$staged_lib_dir/libgwipc.so")" == libgwipc.so.0 ]]
+actual_headers="$(find "$install_root/usr/include/glasswyrm" -type f \
+  -printf '%P\n' | LC_ALL=C sort)"
+expected_headers="$(printf '%s\n' \
+  ipc.h ipc.hpp ipc/connection.h ipc/contracts.h ipc/listener.h \
+  ipc/message.h ipc/types.h ipc/version.h | LC_ALL=C sort)"
+[[ "$actual_headers" == "$expected_headers" ]] || {
+  printf 'Unexpected installed header set:\n%s\n' "$actual_headers" >&2
+  exit 1
+}
+test -f "$staged_lib_dir/pkgconfig/gwipc.pc"
+PKG_CONFIG_PATH="$staged_lib_dir/pkgconfig" \
+  pkg-config --modversion gwipc | grep -Fx 0.1.0
 if find "$install_root" -type f \( -name glasswyrmd -o -name gwm -o -name gwcomp \) | grep -q .; then
   echo 'IPC-only install unexpectedly contains a runtime process' >&2
   exit 1
 fi
 install_layout_result=passed
 
-pkgconfig_dir="$install_root/usr/lib64/pkgconfig"
-lib_dir="$install_root/usr/lib64"
-if [[ ! -d "$pkgconfig_dir" ]]; then pkgconfig_dir="$install_root/usr/lib/pkgconfig"; fi
-if [[ ! -d "$lib_dir" ]]; then lib_dir="$install_root/usr/lib"; fi
+pkgconfig_dir="$staged_lib_dir/pkgconfig"
+lib_dir="$staged_lib_dir"
 export PKG_CONFIG_PATH="$pkgconfig_dir"
 export PKG_CONFIG_SYSROOT_DIR="$install_root"
 export LD_LIBRARY_PATH="$lib_dir"
