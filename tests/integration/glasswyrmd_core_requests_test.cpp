@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <sys/socket.h>
 #include <vector>
 
 namespace {
@@ -160,6 +161,8 @@ void exercise_pipeline(const std::string& socket) {
   bytes.insert(bytes.end(), unsupported.begin(), unsupported.end());
   bytes.insert(bytes.end(), focus.begin(), focus.end());
   client.send_all(bytes, 1);
+  gw::test::require(::shutdown(client.descriptor(), SHUT_WR) == 0,
+                    "pipeline client half-closes its request stream");
   gw::test::require(
       client.receive_setup_reply(x11::ByteOrder::LittleEndian)[0] == 1,
       "setup remains first for pipelined input");
