@@ -175,6 +175,23 @@ void exercise_pipeline(const std::string& socket) {
                     "pipelined error and reply preserve order");
 }
 
+void exercise_output_cap_isolation(const std::string& socket) {
+  Session abusive(socket, x11::ByteOrder::LittleEndian);
+  const std::string large_name(65000, 'A');
+  const auto atom = intern(abusive, large_name);
+  const auto request = abusive.requests.get_atom_name(atom);
+  std::vector<std::uint8_t> pipeline;
+  for (int index = 0; index < 17; ++index) {
+    pipeline.insert(pipeline.end(), request.begin(), request.end());
+  }
+  abusive.client.send_all(pipeline);
+  gw::test::require(abusive.client.peer_closed(),
+                    "non-reading client is closed at output cap");
+
+  Session healthy(socket, x11::ByteOrder::BigEndian);
+  healthy.sync();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -184,5 +201,6 @@ int main(int argc, char** argv) {
   exercise_windows(server.socket_path(), x11::ByteOrder::LittleEndian);
   exercise_windows(server.socket_path(), x11::ByteOrder::BigEndian);
   exercise_atoms_and_properties(server.socket_path());
+  exercise_output_cap_isolation(server.socket_path());
   return 0;
 }
