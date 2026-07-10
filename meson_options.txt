@@ -2,6 +2,7 @@ option('glasswyrmd', type: 'boolean', value: true, description: 'Build the X11 p
 option('gwm', type: 'boolean', value: true, description: 'Build the window manager placeholder.')
 option('gwcomp', type: 'boolean', value: true, description: 'Build the compositor placeholder.')
 option('tools', type: 'boolean', value: true, description: 'Build the developer tool placeholders.')
+option('libgwipc', type: 'boolean', value: true, description: 'Build and install the versioned local IPC library.')
 option('builtin_wm_policy', type: 'boolean', value: false, description: 'Reserve the built-in WM policy development mode.')
 option('single_process_debug', type: 'boolean', value: false, description: 'Reserve the single-process debug mode.')
 option('ipc_trace', type: 'boolean', value: false, description: 'Reserve internal IPC tracing support.')

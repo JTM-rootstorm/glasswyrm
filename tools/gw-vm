@@ -16,6 +16,8 @@ source "$GW_VM_DIR/lib/libvirt.sh"
 source "$GW_VM_DIR/lib/milestone1.sh"
 # shellcheck source=gw-vm.d/lib/milestone2.sh
 source "$GW_VM_DIR/lib/milestone2.sh"
+# shellcheck source=gw-vm.d/lib/milestone3.sh
+source "$GW_VM_DIR/lib/milestone3.sh"
 # shellcheck source=gw-vm.d/lib/report.sh
 source "$GW_VM_DIR/lib/report.sh"
 
@@ -44,6 +46,7 @@ Commands:
   full-packaging-test --yes         Run the canonical fresh-VM scenario.
   milestone1-runtime-test --yes     Build and exercise M1 in the Gentoo VM.
   milestone2-runtime-test --yes     Build and exercise M2 in the Gentoo VM.
+  milestone3-runtime-test --yes     Build and exercise M3 IPC in the Gentoo VM.
   scenario NAME [ARGS]              Run a fixed named scenario.
 
 Examples:
@@ -53,6 +56,7 @@ Examples:
   ./tools/gw-vm full-packaging-test --yes
   ./tools/gw-vm milestone1-runtime-test --yes
   ./tools/gw-vm milestone2-runtime-test --yes
+  ./tools/gw-vm milestone3-runtime-test --yes
 
 Generated output is written beneath artifacts/vm/.
 EOF
@@ -249,6 +253,7 @@ run_named_scenario() {
     full-packaging-test) action_full "$@" ;;
     milestone1-runtime-test) action_milestone1 "$@" ;;
     milestone2-runtime-test) action_milestone2 "$@" ;;
+    milestone3-runtime-test) action_milestone3 "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
 }
@@ -289,6 +294,12 @@ action_milestone2() {
   local approved
   approved="$(parse_yes_only "$@")"
   milestone2_runtime_test "$approved"
+}
+
+action_milestone3() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone3_runtime_test "$approved"
 }
 
 main() {
@@ -349,6 +360,7 @@ main() {
     full-packaging-test) action_full "$@" ;;
     milestone1-runtime-test) action_milestone1 "$@" ;;
     milestone2-runtime-test) action_milestone2 "$@" ;;
+    milestone3-runtime-test) action_milestone3 "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
   esac

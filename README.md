@@ -4,11 +4,13 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently at Milestone 2. `glasswyrmd` implements local X11 11.0
-setup plus a bounded headless core request subset for unmapped window records,
-atoms, and typed properties. `gwm`, `gwcomp`, and the runtime tools remain
-Milestone 0 placeholders. There is no mapping, event delivery, input, IPC
-contract, window-management policy, compositor, renderer, or display backend.
+The project is currently at Milestone 3. `glasswyrmd` retains its tested
+Milestone 2 local X11 setup and bounded headless core request behavior.
+`libgwipc` now provides an independently tested and installable versioned local
+IPC foundation. `gwm`, `gwcomp`, and the runtime tools remain Milestone 0
+placeholders, and no production process uses IPC yet. There is no mapping,
+event delivery, input, window-management policy, compositor, renderer, or
+display backend.
 
 ## Build
 
@@ -28,7 +30,8 @@ meson compile -C build-asan
 meson test -C build-asan
 ```
 
-The three runtime processes and the tool bundle can be selected independently:
+The three runtime processes, IPC library, and tool bundle can be selected
+independently:
 
 ```sh
 meson setup build-gwm \
@@ -39,10 +42,20 @@ meson setup build-gwm \
 meson compile -C build-gwm
 ```
 
+An IPC-only build excludes every runtime process and tool:
+
+```sh
+meson setup build-ipc-only \
+  -Dlibgwipc=true \
+  -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false
+meson compile -C build-ipc-only
+meson test -C build-ipc-only --print-errorlogs
+```
+
 Meson's built-in `werror` option is available for strict builds. The spec's
-backend, renderer, IPC tracing, built-in policy, assembly, and experimental
-switches are accepted as reserved configuration at Milestone 0. They do not
-enable runtime behavior until their implementation milestones land.
+backend, renderer, built-in policy, assembly, and experimental switches are
+accepted as reserved configuration. IPC tracing applies only to `libgwipc`;
+the other switches do not enable runtime behavior until their milestones land.
 
 `compile_commands.json` is generated in each Meson build directory.
 
@@ -129,18 +142,24 @@ core error. It never maps or displays the window.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
+The installed `libgwipc.so.0` C ABI uses nonblocking local
+`AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
+credentials, bounded queues, descriptor passing, snapshots, and the first
+output/surface/buffer/damage/frame contract vocabulary. See
+[`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
+
 `gwm`, `gwcomp`, and every runtime tool currently print their Milestone 0
 placeholder status and exit. They do not communicate with `glasswyrmd`, create
 framebuffers, or access hardware.
 
 ## Project Layout
 
-- `include/glasswyrm/`: C++ header namespace; no installed library ABI exists yet.
+- `include/glasswyrm/ipc*`: installed opaque C ABI and thin C++ RAII wrappers.
 - `src/scaffold/`: shared placeholder identity and output used only at Milestone 0.
 - `src/glasswyrmd/`: X11-compatible server process code.
 - `src/gwm/`: window manager and window-policy process code.
 - `src/gwcomp/`: compositor, renderer, and display authority process code.
-- `src/ipc/`: reserved for versioned internal contracts starting at Milestone 3.
+- `src/ipc/`: versioned wire codecs and local seqpacket transport.
 - `src/protocol/`: endian-safe, bounded X11 setup and core wire codecs.
 - `src/compositor/`: reserved for `gwcomp` scene and composition code.
 - `src/backends/`: reserved for headless, DRM/KMS, and possible nested backends.
@@ -186,13 +205,13 @@ first ebuilds:
 ```sh
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
+./tools/gw-vm milestone3-runtime-test --yes
 ```
 
-The fixed M2 scenario synchronizes an owned source tree, runs strict and
-sanitizer builds, supervises display `:99` with a transient hardened systemd
-unit, runs both M1 setup probes and all raw/libxcb M2 probes, and writes its
-reports under `artifacts/vm/latest/`. The separate `full-packaging-test` remains
-unavailable until real ebuilds land.
+The fixed M3 scenario additionally runs an IPC-only build, staged install and
+C/C++ consumers, then supervises the process probes through a transient
+hardened systemd service. Reports are written under `artifacts/vm/latest/`.
+The separate `full-packaging-test` remains unavailable until real ebuilds land.
 
 ## Compatibility
 
