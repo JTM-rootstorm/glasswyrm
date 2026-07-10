@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+
+if [[ -n "${GW_VM_MILESTONE1_LOADED:-}" ]]; then
+  return 0
+fi
+GW_VM_MILESTONE1_LOADED=1
+
+M1_GUEST_ARTIFACT_DIR="/var/tmp/glasswyrm-m1-artifacts"
+M1_ARTIFACT_NAMES=(
+  milestone1-runtime-test.log
+  milestone1-meson-test.log
+  milestone1-xcb-probe.log
+  milestone1-journal.log
+  milestone1-facts.env
+)
+
+milestone1_guest_script() {
+  cat <<'GUEST_SCRIPT'
+set -euo pipefail
+
+source_dir=$1
+artifact_dir=$2
+build_dir=/var/tmp/glasswyrm-build
+sanitizer_build_dir=/var/tmp/glasswyrm-build-asan
+unit=glasswyrmd-m1.service
+runtime_log="$artifact_dir/milestone1-runtime-test.log"
+meson_log="$artifact_dir/milestone1-meson-test.log"
+xcb_log="$artifact_dir/milestone1-xcb-probe.log"
+journal_log="$artifact_dir/milestone1-journal.log"
+facts="$artifact_dir/milestone1-facts.env"
+failure_stage=dependency-preparation
+sanitizer_result=not-run
+raw_client_result=not-run
+xcb_probe_result=not-run
+unit_result=not-run
+meson_result=not-run
+
+mkdir -p "$artifact_dir"
+rm -f "$artifact_dir"/milestone1-*.log "$facts"
+touch "$runtime_log" "$meson_log" "$xcb_log" "$journal_log"
+exec > >(tee -a "$runtime_log") 2>&1
+
+record_facts() {
+  local status=$?
+  set +e
+  systemctl stop "$unit" >/dev/null 2>&1
+  journalctl -u "$unit" --no-pager >"$journal_log" 2>&1
+  {
+    printf 'failure_stage=%s\n' "$failure_stage"
+    printf 'scenario_exit=%s\n' "$status"
+    printf 'compiler_c=%s\n' "$(cc --version 2>/dev/null | head -n 1 || printf unavailable)"
+    printf 'compiler_cxx=%s\n' "$(c++ --version 2>/dev/null | head -n 1 || printf unavailable)"
+    printf 'meson_version=%s\n' "$(meson --version 2>/dev/null || printf unavailable)"
+    printf 'ninja_version=%s\n' "$(ninja --version 2>/dev/null || printf unavailable)"
+    printf 'systemd_version=%s\n' "$(systemctl --version 2>/dev/null | head -n 1 || printf unavailable)"
+    if has_version x11-base/xorg-server || has_version x11-base/xwayland; then
+      printf 'x_servers_absent=false\n'
+    else
+      printf 'x_servers_absent=true\n'
+    fi
+    printf 'meson_tests=%s\n' "$meson_result"
+    printf 'sanitizer=%s\n' "$sanitizer_result"
+    printf 'raw_clients=%s\n' "$raw_client_result"
+    printf 'xcb_probe=%s\n' "$xcb_probe_result"
+    printf 'systemd_runtime=%s\n' "$unit_result"
+  } >"$facts"
+  exit "$status"
+}
+trap record_facts EXIT
+
+[[ -f "$source_dir/.glasswyrm-vm-source" ]] || {
+  echo "Owned source marker is missing: $source_dir/.glasswyrm-vm-source" >&2
+  exit 1
+}
+
+export NOCOLOR=1
+emerge --verbose --noreplace --color=n \
+  sys-devel/gcc \
+  dev-build/meson \
+  dev-build/ninja \
+  virtual/pkgconfig \
+  x11-libs/libxcb \
+  x11-base/xcb-proto
+
+failure_stage=meson-build-and-test
+rm -rf "$build_dir" "$sanitizer_build_dir"
+{
+  meson setup "$build_dir" "$source_dir" -Dwerror=true
+  meson compile -C "$build_dir"
+  meson test -C "$build_dir" --print-errorlogs
+} 2>&1 | tee -a "$meson_log"
+meson_result=passed
+
+failure_stage=sanitizer-build-and-test
+sanitizer_probe=/var/tmp/glasswyrm-sanitizer-probe
+if printf 'int main(void) { return 0; }\n' | \
+    cc -x c - -fsanitize=address,undefined -o "$sanitizer_probe" \
+      >>"$meson_log" 2>&1 && "$sanitizer_probe" >>"$meson_log" 2>&1; then
+  rm -f "$sanitizer_probe"
+  {
+    meson setup "$sanitizer_build_dir" "$source_dir" -Dasan=true -Dubsan=true
+    meson compile -C "$sanitizer_build_dir"
+    meson test -C "$sanitizer_build_dir" --print-errorlogs
+  } 2>&1 | tee -a "$meson_log"
+  sanitizer_result=passed
+else
+  rm -f "$sanitizer_probe"
+  sanitizer_result=unavailable
+  echo 'Sanitizer limitation: the guest compiler/runtime cannot execute an ASan+UBSan probe.' | tee -a "$meson_log"
+fi
+
+daemon="$build_dir/src/glasswyrmd"
+raw_probe="$build_dir/tests/x11_setup_probe"
+xcb_probe="$build_dir/tests/xcb_setup_probe"
+for executable in "$daemon" "$raw_probe" "$xcb_probe"; do
+  [[ -x "$executable" ]] || {
+    echo "Required Milestone 1 executable is missing: $executable" >&2
+    exit 1
+  }
+done
+
+failure_stage=systemd-runtime
+[[ ! -e /tmp/.X11-unix/X99 ]] || {
+  echo '/tmp/.X11-unix/X99 already exists' >&2
+  exit 1
+}
+systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+systemd-run --unit="$unit" \
+  --property=Type=exec \
+  --property=PrivateTmp=no \
+  --property=NoNewPrivileges=yes \
+  --property=PrivateDevices=yes \
+  --property=RestrictAddressFamilies=AF_UNIX \
+  --property=CapabilityBoundingSet= \
+  --property=AmbientCapabilities= \
+  --property=Restart=no \
+  "$daemon" --display 99
+
+for _ in {1..100}; do
+  [[ -S /tmp/.X11-unix/X99 ]] && break
+  systemctl is-failed --quiet "$unit" && {
+    echo "$unit failed before creating its socket" >&2
+    exit 1
+  }
+  sleep 0.1
+done
+[[ -S /tmp/.X11-unix/X99 ]] || {
+  echo 'Timed out waiting for /tmp/.X11-unix/X99' >&2
+  exit 1
+}
+
+failure_stage=raw-client-probes
+"$raw_probe" --display :99 --byte-order little
+"$raw_probe" --display :99 --byte-order big
+"$raw_probe" --display :99 --malformed
+systemctl is-active --quiet "$unit"
+raw_client_result=passed
+
+failure_stage=xcb-probe
+DISPLAY=:99 XAUTHORITY=/dev/null "$xcb_probe" 2>&1 | tee -a "$xcb_log"
+xcb_probe_result=passed
+systemctl is-active --quiet "$unit"
+
+failure_stage=systemd-shutdown
+systemctl stop "$unit"
+systemctl show "$unit" -p Result --value | grep -Fx success
+[[ ! -e /tmp/.X11-unix/X99 ]] || {
+  echo '/tmp/.X11-unix/X99 remained after service shutdown' >&2
+  exit 1
+}
+unit_result=passed
+failure_stage=
+GUEST_SCRIPT
+}
+
+collect_milestone1_artifacts() {
+  local name path status failed=0
+  init_artifacts
+  for name in "${M1_ARTIFACT_NAMES[@]}"; do
+    path="$ARTIFACTS_PATH_ABS/$name"
+    set +e
+    guest_run_script 'set -euo pipefail; cat "$1"' "$M1_GUEST_ARTIFACT_DIR/$name" >"$path" 2>&1
+    status=$?
+    set -e
+    if ((status != 0)); then
+      failed=1
+      printf 'Unable to collect guest artifact: %s\n' "$name" >>"$path"
+    fi
+  done
+  return "$failed"
+}
+
+write_milestone1_summary() {
+  local passed=$1
+  local failure_stage=${2:-}
+  local tested_commit base_commit facts summary
+  tested_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf unknown)"
+  base_commit="$(git -C "$REPO_ROOT" merge-base HEAD 429b1847367d08ffe628a8ac05423813db30ee9d 2>/dev/null || printf unknown)"
+  facts="$ARTIFACTS_PATH_ABS/milestone1-facts.env"
+  summary="$ARTIFACTS_PATH_ABS/milestone1-summary.json"
+  require_command python3
+  python3 - "$facts" "$summary" "$passed" "$failure_stage" "$base_commit" "$tested_commit" <<'PY'
+import json
+import pathlib
+import sys
+
+facts_path, output_path, passed, failure, base_commit, tested_commit = sys.argv[1:]
+facts = {}
+path = pathlib.Path(facts_path)
+if path.is_file():
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.replace("_", "").isalnum():
+            facts[key] = value
+
+payload = {
+    "base_commit": base_commit,
+    "tested_commit": tested_commit,
+    "guest_versions": {
+        "c_compiler": facts.get("compiler_c", "unknown"),
+        "cxx_compiler": facts.get("compiler_cxx", "unknown"),
+        "meson": facts.get("meson_version", "unknown"),
+        "ninja": facts.get("ninja_version", "unknown"),
+        "systemd": facts.get("systemd_version", "unknown"),
+    },
+    "xorg_xwayland_absent": facts.get("x_servers_absent") == "true",
+    "results": {
+        "unit": facts.get("meson_tests", "unknown"),
+        "integration": facts.get("meson_tests", "unknown"),
+        "sanitizer": facts.get("sanitizer", "unknown"),
+        "raw_client": facts.get("raw_clients", "unknown"),
+        "xcb_probe": facts.get("xcb_probe", "unknown"),
+        "systemd_runtime": facts.get("systemd_runtime", "unknown"),
+    },
+    "passed": passed == "true",
+}
+effective_failure = failure or facts.get("failure_stage", "")
+if effective_failure:
+    payload["failure_stage"] = effective_failure
+pathlib.Path(output_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY
+}
+
+milestone1_runtime_test() {
+  local approved=$1
+  require_approval "milestone1-runtime-test" "$approved"
+  require_vm_domain
+  init_artifacts
+  SCENARIO_RECORDS=()
+  local failure= status=0 collection_status=0 script
+
+  if vm_boot; then :; else status=$?; failure=boot; fi
+  if [[ -z "$failure" ]]; then
+    if push_source; then :; else status=$?; failure=push-source; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    script="$(milestone1_guest_script)"
+    if capture_guest_action milestone1-runtime-test \
+      "$ARTIFACTS_PATH_ABS/milestone1-runtime-test.log" \
+      "$script" "$GUEST_SOURCE_PATH" "$M1_GUEST_ARTIFACT_DIR"; then
+      :
+    else
+      status=$?
+      failure=guest-runtime
+    fi
+  fi
+
+  collect_milestone1_artifacts || collection_status=$?
+  if ((collection_status != 0)) && [[ -z "$failure" ]]; then
+    status=$collection_status
+    failure=artifact-collection
+  fi
+  if [[ -n "$failure" ]]; then
+    write_milestone1_summary false "$failure" || return 1
+    printf 'Milestone 1 VM runtime test failed during: %s\n' "$failure" >&2
+    print_artifacts >&2
+    return "${status:-1}"
+  fi
+  write_milestone1_summary true "" || return 1
+  printf 'Milestone 1 VM runtime test passed.\n'
+  print_artifacts
+}

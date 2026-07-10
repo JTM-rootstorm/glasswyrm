@@ -12,6 +12,8 @@ source "$GW_VM_DIR/lib/config.sh"
 source "$GW_VM_DIR/lib/guest.sh"
 # shellcheck source=gw-vm.d/lib/libvirt.sh
 source "$GW_VM_DIR/lib/libvirt.sh"
+# shellcheck source=gw-vm.d/lib/milestone1.sh
+source "$GW_VM_DIR/lib/milestone1.sh"
 # shellcheck source=gw-vm.d/lib/report.sh
 source "$GW_VM_DIR/lib/report.sh"
 
@@ -28,6 +30,7 @@ Commands:
   shutdown                          Request a graceful VM shutdown.
   reset --yes                       Revert the configured clean snapshot.
   push-overlay                      Synchronize the local overlay to the guest.
+  push-source                       Synchronize owned source to the guest.
   register-overlay                  Register the overlay through repos.conf.
   metadata                          Run emerge --metadata in the guest.
   pretend PACKAGE                   Show the Portage transaction plan.
@@ -37,6 +40,7 @@ Commands:
                                     Check that a gwm update stays narrow.
   collect                           Collect guest Portage diagnostics.
   full-packaging-test --yes         Run the canonical fresh-VM scenario.
+  milestone1-runtime-test --yes     Build and exercise M1 in the Gentoo VM.
   scenario NAME [ARGS]              Run a fixed named scenario.
 
 Examples:
@@ -44,6 +48,7 @@ Examples:
   GLASSWYRM_VM_NAME=gentoo-test ./tools/gw-vm status
   ./tools/gw-vm pretend x11-base/glasswyrm
   ./tools/gw-vm full-packaging-test --yes
+  ./tools/gw-vm milestone1-runtime-test --yes
 
 Generated output is written beneath artifacts/vm/.
 EOF
@@ -63,6 +68,7 @@ doctor() {
 
   for path in \
     "$LOCAL_OVERLAY_PATH_ABS" \
+    "$LOCAL_SOURCE_PATH_ABS" \
     "$GW_VM_DIR/config.example.toml" \
     "$REPO_ROOT/artifacts/vm"; do
     if [[ -e "$path" ]]; then
@@ -101,8 +107,10 @@ snapshot.enabled = $SNAPSHOT_ENABLED
 guest.ssh = $SSH_USER@$SSH_HOST:$SSH_PORT
 guest.shared_overlay_path = $GUEST_OVERLAY_PATH
 guest.shared_artifacts_path = $GUEST_ARTIFACTS_PATH
+guest.shared_source_path = $GUEST_SOURCE_PATH
 paths.overlay = $OVERLAY_PATH_DISPLAY
 paths.artifacts = $ARTIFACTS_PATH_DISPLAY
+paths.source = $LOCAL_SOURCE_PATH
 portage.overlay_name = $OVERLAY_NAME
 portage.repos_conf_path = $REPOS_CONF_PATH
 portage.default_package = $DEFAULT_PACKAGE
@@ -235,6 +243,7 @@ run_named_scenario() {
     narrow-test-gwm) narrow_test_gwm "$@" ;;
     collect-logs) require_no_extra_args "$name" "$@"; collect_logs ;;
     full-packaging-test) action_full "$@" ;;
+    milestone1-runtime-test) action_milestone1 "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
 }
@@ -265,6 +274,12 @@ action_full() {
   full_packaging_test "$approved"
 }
 
+action_milestone1() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone1_runtime_test "$approved"
+}
+
 main() {
   if [[ "${1:-}" == "--config" ]]; then
     (($# >= 2)) || die "--config requires a path."
@@ -293,6 +308,7 @@ main() {
       vm_reset "$approved"
       ;;
     push-overlay) require_no_extra_args push-overlay "$@"; push_overlay ;;
+    push-source) require_no_extra_args push-source "$@"; push_source ;;
     register-overlay) require_no_extra_args register-overlay "$@"; register_overlay ;;
     metadata) require_no_extra_args metadata "$@"; portage_action metadata ;;
     pretend)
@@ -320,6 +336,7 @@ main() {
       ;;
     collect) require_no_extra_args collect "$@"; collect_logs ;;
     full-packaging-test) action_full "$@" ;;
+    milestone1-runtime-test) action_milestone1 "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
   esac
