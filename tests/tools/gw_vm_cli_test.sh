@@ -240,6 +240,48 @@ FACTS
       fi
       ;;
     milestone2-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone3-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+api_version=0.1.0
+soversion=0
+wire_version=1.0
+x_servers_absent=true
+full_tests=passed
+sanitizer=passed
+ipc_only=passed
+install_layout=passed
+c_consumer=passed
+cpp_consumer=passed
+handshake=passed
+ping_pong=passed
+contract_roundtrip=passed
+fd_transfer=passed
+snapshot=passed
+version_rejection=passed
+role_rejection=passed
+capability_rejection=passed
+malformed_isolation=passed
+sequence_isolation=passed
+limit_isolation=passed
+systemd_runtime=passed
+FACTS
+      if [[ ${GW_VM_TEST_BAD_M3_FACTS:-0} == 1 ]]; then
+        printf 'sequence_isolation=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone3-journal.log)
+      if [[ ${GW_VM_TEST_EMPTY_M3_JOURNAL:-0} != 1 ]]; then
+        printf 'collected current M3 invocation journal\n'
+      fi
+      ;;
+    milestone3-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -312,7 +354,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -348,6 +390,9 @@ assert_contains "$work_dir/scenario-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m2-injection.out" "$gw_vm" scenario 'milestone2-runtime-test;touch'
 assert_contains "$work_dir/scenario-m2-injection.out" 'Scenario names are fixed'
+
+run_failure "$work_dir/scenario-m3-injection.out" "$gw_vm" scenario 'milestone3-runtime-test;touch'
+assert_contains "$work_dir/scenario-m3-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -617,5 +662,79 @@ run_failure "$work_dir/milestone2-error.out" \
 assert_contains "$work_dir/milestone2-error.out" 'failed during: guest-runtime'
 assert_contains "$artifact_dir/milestone2-summary.json" '"passed": false'
 assert_contains "$command_log" 'milestone2-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone3-gate.out" "$gw_vm" milestone3-runtime-test
+assert_contains "$work_dir/milestone3-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone3-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$work_dir/milestone3-bad-base.out" \
+  'HEAD is not based on required Milestone 3 commit d6816484f0293b8b47edf0f13e5da691014e3e7c'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone3-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$work_dir/milestone3-dirty-source.out" 'requires committed source outside Plans/'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_success "$work_dir/milestone3.out" "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$command_log" '.glasswyrm-vm-source'
+assert_contains "$command_log" 'build_dir=/var/tmp/glasswyrm-build-m3'
+assert_contains "$command_log" 'sanitizer_build_dir=/var/tmp/glasswyrm-build-m3-asan'
+assert_contains "$command_log" 'ipc_build_dir=/var/tmp/glasswyrm-build-m3-ipc-only'
+assert_contains "$command_log" 'install_root=/var/tmp/glasswyrm-m3-install'
+assert_contains "$command_log" 'unit=gwipc-m3.service'
+assert_contains "$command_log" '--property=RuntimeDirectory=glasswyrm-m3'
+assert_contains "$command_log" '-Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false'
+assert_contains "$command_log" 'DESTDIR="$install_root" meson install'
+for mode in roundtrip ping-pong contract-roundtrip fd-transfer snapshot \
+  incompatible-version wrong-role missing-capability malformed-envelope \
+  sequence-violation limit; do
+  assert_contains "$command_log" "run_client $mode"
+done
+for artifact in \
+  milestone3-runtime-test.log \
+  milestone3-meson-test.log \
+  milestone3-install-test.log \
+  milestone3-handshake.log \
+  milestone3-fd-transfer.log \
+  milestone3-snapshot.log \
+  milestone3-malformed.log \
+  milestone3-journal.log \
+  milestone3-facts.env \
+  milestone3-summary.json; do
+  [[ -f $artifact_dir/$artifact ]] || fail "milestone3 scenario did not create $artifact"
+done
+assert_contains "$artifact_dir/milestone3-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone3-summary.json" \
+  '"required_base_commit": "d6816484f0293b8b47edf0f13e5da691014e3e7c"'
+assert_contains "$artifact_dir/milestone3-summary.json" '"api_version": "0.1.0"'
+assert_contains "$artifact_dir/milestone3-summary.json" '"wire_version": "1.0"'
+assert_contains "$artifact_dir/milestone3-summary.json" '"contract_roundtrip": "passed"'
+assert_contains "$artifact_dir/milestone3-summary.json" '"xorg_xwayland_absent": true'
+
+run_failure "$work_dir/milestone3-bad-facts.out" \
+  env GW_VM_TEST_BAD_M3_FACTS=1 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$artifact_dir/milestone3-summary.json" '"passed": false'
+assert_contains "$artifact_dir/milestone3-summary.json" 'sequence_isolation must be passed'
+
+run_failure "$work_dir/milestone3-empty-journal.out" \
+  env GW_VM_TEST_EMPTY_M3_JOURNAL=1 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$artifact_dir/milestone3-summary.json" 'current invocation journal is missing or empty'
+
+run_success "$work_dir/milestone3-wrapper.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone3-runtime-test.sh" --yes
+
+: >"$command_log"
+run_failure "$work_dir/milestone3-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='unit=gwipc-m3.service' "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$work_dir/milestone3-error.out" 'failed during: guest-runtime'
+assert_contains "$artifact_dir/milestone3-summary.json" '"passed": false'
+assert_contains "$command_log" 'milestone3-journal.log'
 
 printf 'gw-vm CLI tests passed\n'

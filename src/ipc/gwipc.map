@@ -1,0 +1,6 @@
+GWIPC_0.1 {
+  global:
+    gwipc_*;
+  local:
+    *;
+};
