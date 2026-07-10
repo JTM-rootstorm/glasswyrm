@@ -90,6 +90,12 @@ int ServerProcess::stop(int signal_number) {
   throw std::runtime_error("server failed to stop within timeout");
 }
 
+std::string ServerProcess::log_contents() const {
+  std::ifstream log(log_path_);
+  return std::string(std::istreambuf_iterator<char>(log),
+                     std::istreambuf_iterator<char>());
+}
+
 ServerProcess::~ServerProcess() {
   if (pid_ >= 0) {
     try {

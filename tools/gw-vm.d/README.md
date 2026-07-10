@@ -81,6 +81,7 @@ actions:
 ./tools/gw-vm collect
 ./tools/gw-vm full-packaging-test --yes
 ./tools/gw-vm milestone1-runtime-test --yes
+./tools/gw-vm milestone2-runtime-test --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -129,20 +130,35 @@ sanitizer Meson tests, and exercises `glasswyrmd` under a transient systemd unit
 with raw and XCB setup probes. It does not install Xorg, Xwayland, a desktop
 environment, display manager, compositor, or window manager.
 
+Milestone 2 has its own fixed source/runtime scenario and leaves the accepted
+Milestone 1 command and artifacts unchanged:
+
+```sh
+./tools/gw-vm milestone2-runtime-test --yes
+```
+
+It requires the tested commit to descend from
+`4e219a8093c2b79857efc046c3bf0948cc7704f8`, builds in dedicated M2 strict and
+sanitizer directories, and runs the M1 setup probes plus fixed little-endian,
+big-endian, error-continuation, cleanup/reuse, cross-endian property, and XCB
+M2 probes against `glasswyrmd-m2.service`. The scenario remains headless and
+does not install Xorg, Xwayland, a desktop environment, display manager,
+window manager, or compositor.
+
 ## Safety
 
 Snapshot reset, emerge, unmerge, and the complete packaging test change guest
-state. The Milestone 1 runtime test can also install missing fixed dependencies.
-These operations require `--yes` unless the relevant safety setting explicitly
-allows them. Shutdown requests a graceful guest shutdown; the harness does not
-destroy a running domain by default.
+state. The Milestone 1 and Milestone 2 runtime tests can also install missing
+fixed dependencies. These operations require `--yes` unless the relevant
+safety setting explicitly allows them. Shutdown requests a graceful guest
+shutdown; the harness does not destroy a running domain by default.
 
 Arbitrary SSH is outside the interface. The first-pass harness provides no
 general remote-command or interactive SSH command.
 
 The harness never replaces system Xorg automatically. General lifecycle and
-packaging operations do not require systemd, but `milestone1-runtime-test`
-requires it for the transient runtime acceptance unit.
+packaging operations do not require systemd, but the milestone runtime tests
+require it for their transient acceptance units.
 
 ## Reports
 
@@ -155,3 +171,11 @@ Milestone 1 acceptance writes `milestone1-runtime-test.log`,
 `milestone1-meson-test.log`, `milestone1-xcb-probe.log`,
 `milestone1-journal.log`, and `milestone1-summary.json` beneath the configured
 artifact directory.
+
+Milestone 2 acceptance writes `milestone2-runtime-test.log`,
+`milestone2-meson-test.log`, `milestone2-raw-probe.log`,
+`milestone2-xcb-probe.log`, `milestone2-journal.log`,
+`milestone2-facts.env`, and `milestone2-summary.json`. The summary can pass only
+when its collected evidence proves the required base, toolchain, X server
+absence, M1 regression, M2 tests, sanitizer status, every fixed raw and XCB
+probe, systemd shutdown, and current-invocation journal gates.

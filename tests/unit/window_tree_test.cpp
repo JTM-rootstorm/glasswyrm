@@ -1,0 +1,82 @@
+#include "glasswyrmd/resource_table.hpp"
+
+namespace {
+
+glasswyrm::server::WindowCreateSpec make_window(std::uint32_t xid,
+                                                std::uint32_t parent) {
+  glasswyrm::server::WindowCreateSpec result;
+  result.xid = xid;
+  result.parent = parent;
+  result.x = -4;
+  result.y = 7;
+  result.width = 80;
+  result.height = 60;
+  return result;
+}
+
+}  // namespace
+
+int main() {
+  using namespace glasswyrm::server;
+  constexpr std::uint32_t base = 0x00400000;
+  constexpr std::uint32_t mask = 0x001fffff;
+  ResourceTable table;
+  if (table.create_window(1, base, mask, make_window(base + 1, 1)) !=
+          CreateWindowStatus::Success ||
+      table.create_window(1, base, mask,
+                          make_window(base + 2, base + 1)) !=
+          CreateWindowStatus::Success ||
+      table.create_window(1, base, mask, make_window(base + 3, 1)) !=
+          CreateWindowStatus::Success) {
+    return 1;
+  }
+  const auto* root = table.find_window(1);
+  if (root == nullptr ||
+      root->children != std::vector<std::uint32_t>{base + 1, base + 3}) {
+    return 2;
+  }
+  CleanupResult cleanup;
+  if (table.destroy_window(base + 1, &cleanup) !=
+          DestroyWindowStatus::Success ||
+      cleanup.resources_destroyed != 2 || table.find(base + 2) != nullptr ||
+      table.find_window(1)->children != std::vector<std::uint32_t>{base + 3} ||
+      table.destroy_window(1) != DestroyWindowStatus::RootPreserved ||
+      !table.invariants_hold()) {
+    return 3;
+  }
+
+  ResourceTable deep;
+  constexpr std::uint32_t depth = 25000;
+  std::uint32_t parent = 1;
+  for (std::uint32_t index = 1; index <= depth; ++index) {
+    const auto xid = base + index;
+    if (deep.create_window(1, base, mask, make_window(xid, parent)) !=
+        CreateWindowStatus::Success) {
+      return 4;
+    }
+    parent = xid;
+  }
+  CleanupResult deep_cleanup;
+  if (deep.destroy_window(base + 1, &deep_cleanup) !=
+          DestroyWindowStatus::Success ||
+      deep_cleanup.resources_destroyed != depth ||
+      deep.resource_count(ResourceType::Window) != 1 ||
+      !deep.invariants_hold()) {
+    return 5;
+  }
+
+  ResourceTable wide;
+  for (std::uint32_t index = 1; index <= depth; ++index) {
+    if (wide.create_window(1, base, mask, make_window(base + index, 1)) !=
+        CreateWindowStatus::Success) {
+      return 6;
+    }
+  }
+  const auto wide_cleanup = wide.cleanup_client(1);
+  if (wide_cleanup.resources_destroyed != depth ||
+      wide.resource_count(ResourceType::Window) != 1 ||
+      !wide.invariants_hold()) {
+    return 7;
+  }
+  return 0;
+}

@@ -84,11 +84,17 @@ int main(int argc, char** argv) {
 
   std::vector<std::uint8_t> first;
   std::vector<std::uint8_t> second;
+  gw::test::X11FakeClient first_client(server.socket_path());
+  gw::test::X11FakeClient second_client(server.socket_path());
   std::thread first_thread([&] {
-    first = handshake(server.socket_path(), x11::ByteOrder::LittleEndian, 2);
+    first_client.send_all(
+        gw::test::make_setup_request(x11::ByteOrder::LittleEndian), 2);
+    first = first_client.receive_setup_reply(x11::ByteOrder::LittleEndian);
   });
   std::thread second_thread([&] {
-    second = handshake(server.socket_path(), x11::ByteOrder::BigEndian, 2);
+    second_client.send_all(
+        gw::test::make_setup_request(x11::ByteOrder::BigEndian), 2);
+    second = second_client.receive_setup_reply(x11::ByteOrder::BigEndian);
   });
   first_thread.join();
   second_thread.join();

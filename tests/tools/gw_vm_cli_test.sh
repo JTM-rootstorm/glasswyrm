@@ -207,6 +207,39 @@ FACTS
       fi
       ;;
     milestone1-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone2-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+xcb_proto=x11-base/xcb-proto-1.17.0
+x_servers_absent=true
+m1_regression_tests=passed
+m2_tests=passed
+sanitizer=passed
+raw_little=passed
+raw_big=passed
+error_continuation=passed
+resource_cleanup=passed
+cross_endian_property=passed
+xcb_setup=passed
+xcb_m2=passed
+systemd_runtime=passed
+FACTS
+      if [[ ${GW_VM_TEST_BAD_M2_FACTS:-0} == 1 ]]; then
+        printf 'resource_cleanup=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone2-journal.log)
+      if [[ ${GW_VM_TEST_EMPTY_M2_JOURNAL:-0} != 1 ]]; then
+        printf 'collected current M2 invocation journal\n'
+      fi
+      ;;
+    milestone2-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -260,7 +293,9 @@ case " $* " in
     fi
     ;;
   *' rev-parse HEAD '*) printf '86dab3c000000000000000000000000000000000\n' ;;
-  *' merge-base --is-ancestor '*) exit 0 ;;
+  *' merge-base --is-ancestor '*)
+    [[ ${GW_VM_TEST_BAD_BASE:-0} != 1 ]]
+    ;;
   *) printf 'unexpected fake git command: %s\n' "$*" >&2; exit 45 ;;
 esac
 EOF
@@ -277,7 +312,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -310,6 +345,9 @@ assert_contains "$work_dir/scenario-path.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-injection.out" "$gw_vm" scenario 'milestone1-runtime-test;touch'
 assert_contains "$work_dir/scenario-injection.out" 'Scenario names are fixed'
+
+run_failure "$work_dir/scenario-m2-injection.out" "$gw_vm" scenario 'milestone2-runtime-test;touch'
+assert_contains "$work_dir/scenario-m2-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -505,5 +543,79 @@ run_failure "$work_dir/milestone1-error.out" \
 assert_contains "$work_dir/milestone1-error.out" 'failed during: guest-runtime'
 assert_contains "$artifact_dir/milestone1-summary.json" '"passed": false'
 assert_contains "$command_log" 'milestone1-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone2-gate.out" "$gw_vm" milestone2-runtime-test
+assert_contains "$work_dir/milestone2-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone2-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$work_dir/milestone2-bad-base.out" \
+  'HEAD is not based on required Milestone 2 commit 4e219a8093c2b79857efc046c3bf0948cc7704f8'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone2-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$work_dir/milestone2-dirty-source.out" 'requires committed source outside Plans/'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_success "$work_dir/milestone2.out" "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$command_log" '.glasswyrm-vm-source'
+assert_contains "$command_log" 'unit=glasswyrmd-m2.service'
+assert_contains "$command_log" 'build_dir=/var/tmp/glasswyrm-build-m2'
+assert_contains "$command_log" 'sanitizer_build_dir=/var/tmp/glasswyrm-build-m2-asan'
+assert_contains "$command_log" 'artifact_dir=$2'
+assert_contains "$command_log" 'portageq match / "$1"'
+assert_contains "$command_log" '_SYSTEMD_INVOCATION_ID=$unit_invocation_id'
+assert_contains "$command_log" '"$setup_probe" --display :99 --byte-order little'
+assert_contains "$command_log" '"$setup_probe" --display :99 --byte-order big'
+assert_contains "$command_log" '"$m2_probe" --display :99 --byte-order little --basic'
+assert_contains "$command_log" '"$m2_probe" --display :99 --byte-order big --basic'
+assert_contains "$command_log" '"$m2_probe" --display :99 --errors'
+assert_contains "$command_log" '"$m2_probe" --display :99 --cleanup'
+assert_contains "$command_log" '"$m2_probe" --display :99 --cross-endian'
+assert_contains "$command_log" 'DISPLAY=:99 XAUTHORITY=/dev/null "$xcb_setup_probe"'
+assert_contains "$command_log" 'DISPLAY=:99 XAUTHORITY=/dev/null "$xcb_m2_probe"'
+for artifact in \
+  milestone2-runtime-test.log \
+  milestone2-meson-test.log \
+  milestone2-raw-probe.log \
+  milestone2-xcb-probe.log \
+  milestone2-journal.log \
+  milestone2-facts.env \
+  milestone2-summary.json; do
+  [[ -f $artifact_dir/$artifact ]] || fail "milestone2 scenario did not create $artifact"
+done
+assert_contains "$artifact_dir/milestone2-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone2-summary.json" \
+  '"required_base_commit": "4e219a8093c2b79857efc046c3bf0948cc7704f8"'
+assert_contains "$artifact_dir/milestone2-summary.json" '"m1_regression_tests": "passed"'
+assert_contains "$artifact_dir/milestone2-summary.json" '"cross_endian_property": "passed"'
+assert_contains "$artifact_dir/milestone2-summary.json" '"xcb_m2": "passed"'
+assert_contains "$artifact_dir/milestone2-summary.json" '"xorg_xwayland_absent": true'
+
+run_failure "$work_dir/milestone2-bad-facts.out" \
+  env GW_VM_TEST_BAD_M2_FACTS=1 "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$artifact_dir/milestone2-summary.json" '"passed": false'
+assert_contains "$artifact_dir/milestone2-summary.json" '"evidence_errors"'
+assert_contains "$artifact_dir/milestone2-summary.json" 'resource_cleanup must be passed'
+
+run_failure "$work_dir/milestone2-empty-journal.out" \
+  env GW_VM_TEST_EMPTY_M2_JOURNAL=1 "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$artifact_dir/milestone2-summary.json" 'current invocation journal is missing or empty'
+
+run_success "$work_dir/milestone2-wrapper.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone2-runtime-test.sh" --yes
+
+: >"$command_log"
+run_failure "$work_dir/milestone2-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='unit=glasswyrmd-m2.service' "$gw_vm" milestone2-runtime-test --yes
+assert_contains "$work_dir/milestone2-error.out" 'failed during: guest-runtime'
+assert_contains "$artifact_dir/milestone2-summary.json" '"passed": false'
+assert_contains "$command_log" 'milestone2-journal.log'
 
 printf 'gw-vm CLI tests passed\n'

@@ -4,11 +4,11 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently at Milestone 1. `glasswyrmd` implements the local X11
-11.0 connection setup exchange and nothing beyond it. `gwm`, `gwcomp`, and the
-runtime tools remain Milestone 0 placeholders. There is no normal X11 request
-dispatch, IPC contract, window-management policy, compositor, renderer, input
-path, or display backend yet.
+The project is currently at Milestone 2. `glasswyrmd` implements local X11 11.0
+setup plus a bounded headless core request subset for unmapped window records,
+atoms, and typed properties. `gwm`, `gwcomp`, and the runtime tools remain
+Milestone 0 placeholders. There is no mapping, event delivery, input, IPC
+contract, window-management policy, compositor, renderer, or display backend.
 
 ## Build
 
@@ -63,15 +63,17 @@ The complete command line is:
 glasswyrmd [--display N] [--socket-dir PATH] [--help] [--version]
 ```
 
-Milestone 1 accepts exactly X11 protocol 11.0 with zero-length authorization
+Milestone 2 accepts exactly X11 protocol 11.0 with zero-length authorization
 fields. `MIT-MAGIC-COOKIE-1`, Xauthority, and every other authorization method
 are unsupported; supplied authorization data is rejected rather than ignored.
 Unauthenticated local setup is a research limitation and is unsafe for a real
 multi-user desktop.
 
-After a successful setup reply, a client may inspect the synthetic one-screen
-record and disconnect. Sending any normal X11 request closes that client because
-request dispatch starts in Milestone 2.
+After setup, clients may create and recursively destroy unmapped window records,
+query geometry and the window tree, intern and name atoms, manipulate typed
+window properties, use a synthetic focus reply for synchronization, and send
+no-ops. Unsupported core requests return `BadRequest`; recoverable request
+errors leave the connection usable.
 
 ## Setup probes
 
@@ -93,9 +95,32 @@ That result means only that a libxcb client can complete connection setup,
 inspect the setup record, and disconnect. It does not mean normal XCB or X11
 applications work.
 
+## Milestone 2 probes
+
+With `glasswyrmd` running on display `:99`, the fixed raw modes are:
+
+```sh
+./build/tests/x11_milestone2_probe --display :99 --byte-order little --basic
+./build/tests/x11_milestone2_probe --display :99 --byte-order big --basic
+./build/tests/x11_milestone2_probe --display :99 --errors
+./build/tests/x11_milestone2_probe --display :99 --cleanup
+./build/tests/x11_milestone2_probe --display :99 --cross-endian
+```
+
+When test-only `libxcb` is available:
+
+```sh
+DISPLAY=:99 XAUTHORITY=/dev/null ./build/tests/xcb_milestone2_probe
+```
+
+The libxcb probe creates an unmapped window resource, queries it, manipulates an
+atom and format-8 property, destroys the resource, and verifies the resulting
+core error. It never maps or displays the window.
+
 ## Current binaries
 
-- `glasswyrmd`: owns X11 protocol truth; currently implements local setup only.
+- `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
+  headless request profile.
 - `gwm`: future owner of window-management policy truth.
 - `gwcomp`: future owner of composition and final display authority.
 - `gwctl`: future runtime control utility.
@@ -116,7 +141,7 @@ framebuffers, or access hardware.
 - `src/gwm/`: window manager and window-policy process code.
 - `src/gwcomp/`: compositor, renderer, and display authority process code.
 - `src/ipc/`: reserved for versioned internal contracts starting at Milestone 3.
-- `src/protocol/`: endian-safe, bounded X11 setup codec.
+- `src/protocol/`: endian-safe, bounded X11 setup and core wire codecs.
 - `src/compositor/`: reserved for `gwcomp` scene and composition code.
 - `src/backends/`: reserved for headless, DRM/KMS, and possible nested backends.
 - `src/input/`: reserved for `glasswyrmd` input routing.
@@ -155,19 +180,22 @@ exercise `emerge`. Shared folders may provide the overlay, distfiles, and binary
 packages, but copying built artifacts directly into the VM is not a substitute
 for validating the ebuild path.
 
-Milestone 1 source and runtime acceptance is available before the first ebuilds:
+Milestone 1 and Milestone 2 source/runtime acceptance are available before the
+first ebuilds:
 
 ```sh
 ./tools/gw-vm milestone1-runtime-test --yes
+./tools/gw-vm milestone2-runtime-test --yes
 ```
 
-The fixed scenario synchronizes an owned source tree, runs strict and sanitizer
-builds, supervises display `:99` with a transient hardened systemd unit, runs
-raw and XCB setup probes, and writes its reports under `artifacts/vm/latest/`.
-The separate `full-packaging-test` remains unavailable until real ebuilds land.
+The fixed M2 scenario synchronizes an owned source tree, runs strict and
+sanitizer builds, supervises display `:99` with a transient hardened systemd
+unit, runs both M1 setup probes and all raw/libxcb M2 probes, and writes its
+reports under `artifacts/vm/latest/`. The separate `full-packaging-test` remains
+unavailable until real ebuilds land.
 
 ## Compatibility
 
-Glasswyrm claims only the tested initial setup behavior documented in
-[`docs/protocols/x11-milestone-1.md`](docs/protocols/x11-milestone-1.md). It does
+Glasswyrm claims only the tested behavior documented in
+[`docs/protocols/x11-milestone-2.md`](docs/protocols/x11-milestone-2.md). It does
 not claim compatibility with normal X11 applications.

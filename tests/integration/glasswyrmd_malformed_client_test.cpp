@@ -1,5 +1,6 @@
 #include "helpers/test_support.hpp"
 #include "helpers/x11_fake_client.hpp"
+#include "helpers/x11_request_builder.hpp"
 #include "integration/server_fixture.hpp"
 
 #include <cstdint>
@@ -53,13 +54,25 @@ int main(int argc, char** argv) {
                       "truncated padded authorization body is closed");
   }
   {
-    gw::test::X11FakeClient extra(server.socket_path());
+    gw::test::X11FakeClient recoverable(server.socket_path());
     auto request = gw::test::make_setup_request(ByteOrder::LittleEndian);
-    request.push_back(0);
-    extra.send_all(request);
-    gw::test::require(extra.receive_setup_reply(ByteOrder::LittleEndian)[0] == 1,
-                      "valid setup prefix receives success");
-    gw::test::require(extra.peer_closed(), "post-setup bytes close connection");
+    const gw::test::X11RequestBuilder builder(ByteOrder::LittleEndian);
+    const auto unsupported = builder.raw(2, 0);
+    const auto focus = builder.get_input_focus();
+    request.insert(request.end(), unsupported.begin(), unsupported.end());
+    request.insert(request.end(), focus.begin(), focus.end());
+    recoverable.send_all(request);
+    gw::test::require(
+        recoverable.receive_setup_reply(ByteOrder::LittleEndian)[0] == 1,
+        "valid setup prefix receives success");
+    const auto protocol_error =
+        recoverable.receive_server_packet(ByteOrder::LittleEndian);
+    gw::test::require(protocol_error[0] == 0 && protocol_error[1] == 1,
+                      "unsupported request returns BadRequest");
+    const auto focus_reply =
+        recoverable.receive_server_packet(ByteOrder::LittleEndian);
+    gw::test::require(focus_reply[0] == 1,
+                      "valid request succeeds after recoverable error");
   }
   {
     gw::test::X11FakeClient valid(server.socket_path());

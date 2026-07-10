@@ -9,3 +9,4 @@ behavior is implemented and covered by tests.
 Current compatibility status:
 
 - [X11 Milestone 1 compatibility](x11-milestone-1.md)
+- [X11 Milestone 2 compatibility](x11-milestone-2.md)
