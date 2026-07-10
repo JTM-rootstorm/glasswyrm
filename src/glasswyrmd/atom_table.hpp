@@ -3,6 +3,7 @@
 #include "protocol/x11/atoms.hpp"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -22,7 +23,8 @@ struct InternAtomResult {
 
 class AtomTable {
  public:
-  AtomTable();
+  explicit AtomTable(
+      std::uint32_t maximum_atom = std::numeric_limits<std::uint32_t>::max());
 
   [[nodiscard]] InternAtomResult intern(std::string_view name,
                                         bool only_if_exists);
@@ -38,6 +40,7 @@ class AtomTable {
   std::unordered_map<std::string, std::uint32_t> ids_by_name_;
   std::unordered_map<std::uint32_t, std::string> names_by_id_;
   std::uint32_t next_dynamic_atom_{kHighestPredefinedAtom + 1};
+  std::uint32_t maximum_atom_;
 };
 
 }  // namespace glasswyrm::server

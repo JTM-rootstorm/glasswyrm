@@ -43,5 +43,11 @@ int main() {
       atoms.name(first.atom) != "case-sensitive") {
     return 4;
   }
+  AtomTable limited(69);
+  if (limited.intern("last", false).atom != 69 ||
+      limited.intern("exhausted", false).status !=
+          InternAtomStatus::Exhausted) {
+    return 5;
+  }
   return 0;
 }

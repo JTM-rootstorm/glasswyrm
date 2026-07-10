@@ -4,6 +4,7 @@
 #include "integration/server_fixture.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <sys/socket.h>
@@ -68,6 +69,29 @@ void exercise_windows(const std::string& socket, x11::ByteOrder order) {
   const auto duplicate = session.client.receive_server_packet(order);
   gw::test::require(duplicate[0] == 0 && duplicate[1] == 14,
                     "duplicate XID returns BadIDChoice");
+
+  const std::array<std::uint32_t, 1> invalid_event{0x80000000U};
+  session.client.send_all(session.requests.create_window(
+      window + 1, 1, 0, 0, 10, 10, 1U << 11U, invalid_event));
+  const auto bad_event = session.client.receive_server_packet(order);
+  gw::test::require(bad_event[0] == 0 && bad_event[1] == 2,
+                    "invalid event mask returns BadValue");
+
+  const std::array<std::uint32_t, 1> invalid_propagation{1U << 24U};
+  session.client.send_all(session.requests.create_window(
+      window + 1, 1, 0, 0, 10, 10, 1U << 12U, invalid_propagation));
+  const auto bad_propagation = session.client.receive_server_packet(order);
+  gw::test::require(bad_propagation[0] == 0 && bad_propagation[1] == 2,
+                    "invalid do-not-propagate mask returns BadValue");
+
+  const std::array<std::uint32_t, 1> background_pixel{0};
+  session.client.send_all(session.requests.create_window(
+      window + 1, 1, 0, 0, 10, 10, 1U << 1U, background_pixel, 0, 2, 0,
+      0));
+  const auto bad_input_only = session.client.receive_server_packet(order);
+  gw::test::require(bad_input_only[0] == 0 && bad_input_only[1] == 8,
+                    "forbidden InputOnly attribute returns BadMatch");
+  session.sync();
 
   session.client.send_all(session.requests.destroy_window(1));
   session.sync();

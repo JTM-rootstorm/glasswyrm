@@ -20,7 +20,8 @@ std::size_t window_property_bytes(const WindowResource& window) noexcept {
 
 }  // namespace
 
-ResourceTable::ResourceTable(const ScreenModel screen) : screen_(screen) {
+ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
+    : screen_(screen), limits_(limits) {
   WindowResource root;
   root.width = screen.width_pixels;
   root.height = screen.height_pixels;
@@ -96,7 +97,10 @@ CreateWindowStatus ResourceTable::create_window(
   }
 
   if (window.window_class == WindowClass::InputOnly) {
-    if (spec.depth != 0 || spec.visual != 0 || spec.border_width != 0) {
+    constexpr std::uint32_t kInputOnlyAttributes =
+        (1U << 5U) | (1U << 9U) | (1U << 11U) | (1U << 12U) | (1U << 14U);
+    if (spec.depth != 0 || spec.visual != 0 || spec.border_width != 0 ||
+        (spec.attribute_mask & ~kInputOnlyAttributes) != 0) {
       return CreateWindowStatus::BadMatch;
     }
     window.depth = 0;
@@ -146,7 +150,7 @@ DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
     return DestroyWindowStatus::BadWindow;
   }
   CleanupResult local;
-  destroy_window_recursive(xid, local);
+  destroy_window_tree(xid, local);
   if (result != nullptr) {
     result->resources_destroyed += local.resources_destroyed;
     result->property_bytes_released += local.property_bytes_released;
@@ -154,16 +158,12 @@ DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
   return DestroyWindowStatus::Success;
 }
 
-void ResourceTable::destroy_window_recursive(const std::uint32_t xid,
-                                             CleanupResult& result) {
+void ResourceTable::destroy_leaf(const std::uint32_t xid,
+                                 CleanupResult& result) {
   auto* window = find_window(xid);
   if (window == nullptr || xid == screen_.root_window) {
     return;
   }
-  while (!window->children.empty()) {
-    destroy_window_recursive(window->children.back(), result);
-  }
-
   const std::uint32_t parent_id = window->parent;
   const std::size_t property_bytes = window_property_bytes(*window);
   const auto owner = find(xid)->owner;
@@ -185,6 +185,28 @@ void ResourceTable::destroy_window_recursive(const std::uint32_t xid,
   result.property_bytes_released += property_bytes;
 }
 
+void ResourceTable::destroy_window_tree(const std::uint32_t xid,
+                                        CleanupResult& result) {
+  std::uint32_t current = xid;
+  while (true) {
+    auto* window = find_window(current);
+    if (window == nullptr || current == screen_.root_window) {
+      return;
+    }
+    if (!window->children.empty()) {
+      current = window->children.back();
+      continue;
+    }
+    const std::uint32_t parent = window->parent;
+    const bool finished = current == xid;
+    destroy_leaf(current, result);
+    if (finished) {
+      return;
+    }
+    current = parent;
+  }
+}
+
 CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
   CleanupResult result;
   while (true) {
@@ -192,7 +214,7 @@ CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
     if (iterator == resources_by_owner_.end() || iterator->second.empty()) {
       break;
     }
-    destroy_window_recursive(iterator->second.back(), result);
+    destroy_window_tree(iterator->second.back(), result);
   }
   return result;
 }
@@ -223,9 +245,10 @@ PropertyMutationStatus ResourceTable::change_property(
     }
     const std::size_t old_size = exists ? current->second.byte_size() : 0;
     const std::size_t new_size = replacement.byte_size();
-    if (new_size > kMaximumBytesPerProperty ||
-        (!exists && window->properties.size() >= kMaximumPropertiesPerWindow) ||
-        new_size > kMaximumTotalPropertyBytes -
+    if (new_size > limits_.maximum_bytes_per_property ||
+        (!exists && window->properties.size() >=
+                        limits_.maximum_properties_per_window) ||
+        new_size > limits_.maximum_total_property_bytes -
                        (total_property_bytes_ - old_size)) {
       return PropertyMutationStatus::BadAlloc;
     }
