@@ -177,6 +177,13 @@ void test_malformed_control() {
   require(decode(bytes, decoded) == CodecStatus::TrailingData,
           "Hello trailing data is rejected");
 
+  auto oversized_name = encode(hello);
+  oversized_name[34] =
+      static_cast<std::uint8_t>(kMaximumInstanceLabel + 1);
+  oversized_name[35] = 0;
+  require(decode(oversized_name, decoded) == CodecStatus::LimitExceeded,
+          "oversized Hello labels are rejected before string allocation");
+
   hello.sender_instance_id.fill(0);
   require(decode(encode(hello), decoded) == CodecStatus::InvalidValue,
           "zero Hello instance IDs are rejected");
@@ -192,6 +199,32 @@ void test_malformed_control() {
   SnapshotBegin decoded_begin;
   require(decode(begin, decoded_begin) == CodecStatus::InvalidValue,
           "unknown snapshot flags are rejected");
+
+  auto oversized_reject =
+      encode(Reject{RejectReason::InvalidHello, 1, 0, 1, 0, "x"});
+  oversized_reject[2] = 1;
+  oversized_reject[3] = 1;
+  Reject decoded_reject;
+  require(decode(oversized_reject, decoded_reject) ==
+              CodecStatus::LimitExceeded,
+          "oversized Reject details are rejected before string allocation");
+
+  auto oversized_error = encode(ProtocolError{
+      ProtocolErrorCode::MalformedPayload, MessageType::Hello, 1, "x"});
+  oversized_error[16] = 1;
+  oversized_error[17] = 1;
+  ProtocolError decoded_error;
+  require(decode(oversized_error, decoded_error) ==
+              CodecStatus::LimitExceeded,
+          "oversized protocol-error details are rejected before allocation");
+
+  auto oversized_abort = encode(SnapshotAbort{1, 1, "x"});
+  oversized_abort[10] = 1;
+  oversized_abort[11] = 1;
+  SnapshotAbort decoded_abort;
+  require(decode(oversized_abort, decoded_abort) ==
+              CodecStatus::LimitExceeded,
+          "oversized snapshot-abort details are rejected before allocation");
 }
 
 } // namespace
