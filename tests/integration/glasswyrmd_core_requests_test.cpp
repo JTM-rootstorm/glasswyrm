@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <exception>
+#include <iostream>
 #include <string>
 #include <sys/socket.h>
 #include <vector>
@@ -221,10 +223,16 @@ void exercise_output_cap_isolation(const std::string& socket) {
 int main(int argc, char** argv) {
   gw::test::require(argc == 2, "daemon path argument is required");
   gw::test::ServerProcess server(argv[1]);
-  exercise_pipeline(server.socket_path());
-  exercise_windows(server.socket_path(), x11::ByteOrder::LittleEndian);
-  exercise_windows(server.socket_path(), x11::ByteOrder::BigEndian);
-  exercise_atoms_and_properties(server.socket_path());
-  exercise_output_cap_isolation(server.socket_path());
-  return 0;
+  try {
+    exercise_pipeline(server.socket_path());
+    exercise_windows(server.socket_path(), x11::ByteOrder::LittleEndian);
+    exercise_windows(server.socket_path(), x11::ByteOrder::BigEndian);
+    exercise_atoms_and_properties(server.socket_path());
+    exercise_output_cap_isolation(server.socket_path());
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << "core-test: " << error.what() << "\nserver log:\n"
+              << server.log_contents();
+    return 1;
+  }
 }

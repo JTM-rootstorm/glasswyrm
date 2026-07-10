@@ -17,6 +17,7 @@ class ServerProcess {
   [[nodiscard]] const std::string& socket_dir() const { return socket_dir_; }
   [[nodiscard]] pid_t pid() const { return pid_; }
   [[nodiscard]] const std::string& executable() const { return executable_; }
+  [[nodiscard]] std::string log_contents() const;
   int stop(int signal_number = 15);
 
  private:
