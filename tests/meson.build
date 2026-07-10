@@ -100,11 +100,23 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
 
+  x11_milestone2_probe = executable(
+    'x11_milestone2_probe',
+    files('integration/x11_milestone2_probe.cpp'),
+    dependencies: x11_fake_client_dep,
+    include_directories: test_source_root_include,
+  )
+
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
     xcb_setup_probe = executable(
       'xcb_setup_probe',
       files('xcb/xcb_setup_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
+    xcb_milestone2_probe = executable(
+      'xcb_milestone2_probe',
+      files('xcb/xcb_milestone2_probe.c'),
       dependencies: xcb_test_dependency,
     )
   endif
