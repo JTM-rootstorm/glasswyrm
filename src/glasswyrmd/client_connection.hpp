@@ -15,6 +15,27 @@
 
 namespace glasswyrm::server {
 
+inline constexpr std::size_t kMaximumRequestsPerClientTurn = 64;
+inline constexpr std::size_t kMaximumRequestBytesPerClientTurn = 256U * 1024U;
+
+class RequestWorkBudget {
+ public:
+  [[nodiscard]] bool available() const noexcept {
+    return requests_ < kMaximumRequestsPerClientTurn &&
+           bytes_ < kMaximumRequestBytesPerClientTurn;
+  }
+  void record(std::size_t bytes) noexcept {
+    ++requests_;
+    bytes_ += bytes;
+  }
+  [[nodiscard]] std::size_t requests() const noexcept { return requests_; }
+  [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
+
+ private:
+  std::size_t requests_{0};
+  std::size_t bytes_{0};
+};
+
 class ClientConnection {
  public:
   enum class State {
@@ -55,10 +76,8 @@ class ClientConnection {
 
   void read_input();
   void process_input(std::span<const std::uint8_t> input,
-                     std::size_t& requests_processed,
-                     std::size_t& request_bytes_processed);
-  void process_pending(std::size_t& requests_processed,
-                       std::size_t& request_bytes_processed);
+                     RequestWorkBudget& budget);
+  void process_pending(RequestWorkBudget& budget);
   void write_output();
   void prepare_setup_reply();
   void reject_framing(gw::protocol::x11::CoreErrorCode code,
@@ -70,9 +89,6 @@ class ClientConnection {
   void cleanup_resources();
 
   static constexpr std::size_t kMaximumQueuedOutput = 1024U * 1024U;
-  static constexpr std::size_t kMaximumRequestsPerTurn = 64;
-  static constexpr std::size_t kMaximumRequestBytesPerTurn = 256U * 1024U;
-
   int descriptor_ = -1;
   std::uint64_t identifier_ = 0;
   std::uint32_t resource_id_base_ = 0;

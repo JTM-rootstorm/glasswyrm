@@ -47,6 +47,7 @@ if get_option('glasswyrmd')
     ['window-tree', 'window_tree_test.cpp'],
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
+    ['request-work-budget', 'request_work_budget_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],

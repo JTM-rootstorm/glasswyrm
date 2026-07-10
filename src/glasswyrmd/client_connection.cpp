@@ -148,7 +148,7 @@ void ClientConnection::reject_framing(const x11::CoreErrorCode code,
 
 void ClientConnection::process_input(
     const std::span<const std::uint8_t> input,
-    std::size_t& requests_processed, std::size_t& request_bytes_processed) {
+    RequestWorkBudget& budget) {
   std::size_t consumed = 0;
   while (consumed < input.size() && state_ != State::Closing &&
          state_ != State::Rejecting) {
@@ -174,8 +174,7 @@ void ClientConnection::process_input(
       continue;
     }
 
-    if (requests_processed >= kMaximumRequestsPerTurn ||
-        request_bytes_processed >= kMaximumRequestBytesPerTurn) {
+    if (!budget.available()) {
       pending_input_.insert(pending_input_.end(), input.begin() + consumed,
                             input.end());
       return;
@@ -186,8 +185,7 @@ void ClientConnection::process_input(
       case x11::RequestFrameStatus::NeedMore: break;
       case x11::RequestFrameStatus::Complete: {
         ++request_sequence_;
-        ++requests_processed;
-        request_bytes_processed += request_framer_->request().bytes.size();
+        budget.record(request_framer_->request().bytes.size());
         const DispatchContext context{identifier_, resource_id_base_,
                                       server_state_.screen().resource_id_mask,
                                       request_sequence_, byte_order_};
@@ -215,20 +213,18 @@ void ClientConnection::process_input(
   }
 }
 
-void ClientConnection::process_pending(std::size_t& requests_processed,
-                                       std::size_t& request_bytes_processed) {
+void ClientConnection::process_pending(RequestWorkBudget& budget) {
   if (pending_input_.empty()) {
     return;
   }
   auto pending = std::move(pending_input_);
   pending_input_.clear();
-  process_input(pending, requests_processed, request_bytes_processed);
+  process_input(pending, budget);
 }
 
 void ClientConnection::read_input() {
-  std::size_t requests_processed = 0;
-  std::size_t request_bytes_processed = 0;
-  process_pending(requests_processed, request_bytes_processed);
+  RequestWorkBudget budget;
+  process_pending(budget);
   if (needs_service() || state_ == State::Closing || state_ == State::Rejecting) {
     return;
   }
@@ -239,10 +235,9 @@ void ClientConnection::read_input() {
     if (size > 0) {
       process_input(std::span<const std::uint8_t>(
                         buffer, static_cast<std::size_t>(size)),
-                    requests_processed, request_bytes_processed);
+                    budget);
       if (state_ == State::Closing || state_ == State::Rejecting ||
-          needs_service() || requests_processed >= kMaximumRequestsPerTurn ||
-          request_bytes_processed >= kMaximumRequestBytesPerTurn) {
+          needs_service() || !budget.available()) {
         return;
       }
       continue;

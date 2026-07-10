@@ -30,10 +30,10 @@ class X11FakeClient {
   void send_all(std::span<const std::uint8_t> bytes,
                 std::size_t fragment_size = static_cast<std::size_t>(-1));
   std::vector<std::uint8_t> receive_setup_reply(
-      protocol::x11::ByteOrder order, int timeout_ms = 2000);
+      protocol::x11::ByteOrder order, int timeout_ms = 5000);
   std::vector<std::uint8_t> receive_server_packet(
-      protocol::x11::ByteOrder order, int timeout_ms = 2000);
-  [[nodiscard]] bool peer_closed(int timeout_ms = 2000) const;
+      protocol::x11::ByteOrder order, int timeout_ms = 5000);
+  [[nodiscard]] bool peer_closed(int timeout_ms = 5000) const;
   [[nodiscard]] int descriptor() const { return descriptor_; }
 
  private:

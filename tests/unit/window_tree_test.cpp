@@ -64,5 +64,19 @@ int main() {
       !deep.invariants_hold()) {
     return 5;
   }
+
+  ResourceTable wide;
+  for (std::uint32_t index = 1; index <= depth; ++index) {
+    if (wide.create_window(1, base, mask, make_window(base + index, 1)) !=
+        CreateWindowStatus::Success) {
+      return 6;
+    }
+  }
+  const auto wide_cleanup = wide.cleanup_client(1);
+  if (wide_cleanup.resources_destroyed != depth ||
+      wide.resource_count(ResourceType::Window) != 1 ||
+      !wide.invariants_hold()) {
+    return 7;
+  }
   return 0;
 }
