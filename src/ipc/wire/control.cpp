@@ -111,8 +111,13 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes, Hello &value) {
       !reader.u64(decoded.required_capabilities) ||
       !reader.u32(decoded.maximum_payload) ||
       !reader.u16(decoded.maximum_fd_count) || !reader.u16(name_size) ||
-      !reader.bytes(decoded.sender_instance_id.size(), id) ||
-      !reader.string(name_size, decoded.name)) {
+      !reader.bytes(decoded.sender_instance_id.size(), id)) {
+    return CodecStatus::Truncated;
+  }
+  if (name_size > kMaximumInstanceLabel) {
+    return CodecStatus::LimitExceeded;
+  }
+  if (!reader.string(name_size, decoded.name)) {
     return CodecStatus::Truncated;
   }
   std::copy(id.begin(), id.end(), decoded.sender_instance_id.begin());
@@ -211,8 +216,13 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes, Reject &value) {
       !reader.u16(decoded.supported_minimum_major) ||
       !reader.u16(decoded.supported_minimum_minor) ||
       !reader.u16(decoded.supported_maximum_major) ||
-      !reader.u16(decoded.supported_maximum_minor) || !reader.u32(reserved) ||
-      !reader.string(detail_size, decoded.detail)) {
+      !reader.u16(decoded.supported_maximum_minor) || !reader.u32(reserved)) {
+    return CodecStatus::Truncated;
+  }
+  if (detail_size > kMaximumDiagnosticString) {
+    return CodecStatus::LimitExceeded;
+  }
+  if (!reader.string(detail_size, decoded.detail)) {
     return CodecStatus::Truncated;
   }
   decoded.reason = static_cast<RejectReason>(reason);
@@ -292,7 +302,13 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes,
   std::uint16_t reserved2 = 0;
   if (!reader.u16(code) || !reader.u16(type) || !reader.u32(reserved1) ||
       !reader.u64(decoded.offending_sequence) || !reader.u16(detail_size) ||
-      !reader.u16(reserved2) || !reader.string(detail_size, decoded.detail)) {
+      !reader.u16(reserved2)) {
+    return CodecStatus::Truncated;
+  }
+  if (detail_size > kMaximumDiagnosticString) {
+    return CodecStatus::LimitExceeded;
+  }
+  if (!reader.string(detail_size, decoded.detail)) {
     return CodecStatus::Truncated;
   }
   decoded.code = static_cast<ProtocolErrorCode>(code);
@@ -394,8 +410,13 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes,
   std::uint16_t detail_size = 0;
   std::uint32_t reserved = 0;
   if (!reader.u64(decoded.snapshot_id) || !reader.u16(decoded.reason) ||
-      !reader.u16(detail_size) || !reader.u32(reserved) ||
-      !reader.string(detail_size, decoded.detail)) {
+      !reader.u16(detail_size) || !reader.u32(reserved)) {
+    return CodecStatus::Truncated;
+  }
+  if (detail_size > kMaximumDiagnosticString) {
+    return CodecStatus::LimitExceeded;
+  }
+  if (!reader.string(detail_size, decoded.detail)) {
     return CodecStatus::Truncated;
   }
   if (!reader.done()) {
