@@ -68,6 +68,19 @@ void ClientConnection::close_with_log(const char* reason) {
   cleanup_resources();
 }
 
+void ClientConnection::close_after_output(const char* reason) {
+  std::fprintf(stderr, "glasswyrmd: client %llu: %s\n",
+               static_cast<unsigned long long>(identifier_), reason);
+  pending_input_.clear();
+  if (output_queue_.empty()) {
+    state_ = State::Closing;
+    cleanup_resources();
+    return;
+  }
+  output_queue_.back().close_after = true;
+  state_ = State::Rejecting;
+}
+
 bool ClientConnection::enqueue(std::vector<std::uint8_t> bytes,
                                const bool close_after) {
   if (bytes.size() > kMaximumQueuedOutput - queued_output_bytes_) {
@@ -243,7 +256,7 @@ void ClientConnection::read_input() {
                      x11::RequestFrameStatus::TruncatedInput) {
         close_with_log("connection closed during partial core request");
       } else {
-        close_with_log("client disconnected");
+        close_after_output("client closed its request stream");
       }
       return;
     }

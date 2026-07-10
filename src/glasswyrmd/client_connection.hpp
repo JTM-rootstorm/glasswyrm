@@ -66,6 +66,7 @@ class ClientConnection {
   [[nodiscard]] bool enqueue(std::vector<std::uint8_t> bytes,
                              bool close_after = false);
   void close_with_log(const char* reason);
+  void close_after_output(const char* reason);
   void cleanup_resources();
 
   static constexpr std::size_t kMaximumQueuedOutput = 1024U * 1024U;
