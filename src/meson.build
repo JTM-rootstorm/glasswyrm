@@ -24,6 +24,84 @@ gw_scaffold_dep = declare_dependency(
   include_directories: [gw_include_dir, gw_generated_include_dir],
 )
 
+if get_option('libgwipc')
+  gwipc_cpp_args = ['-DGWIPC_BUILDING_LIBRARY', '-fvisibility-inlines-hidden']
+  if get_option('ipc_trace')
+    gwipc_cpp_args += '-DGWIPC_TRACE'
+  endif
+  gwipc_wire_sources = files(
+    'ipc/wire/envelope.cpp',
+    'ipc/wire/control.cpp',
+    'ipc/wire/compositor_contract.cpp',
+  )
+  gwipc_private_include = include_directories('.')
+  gwipc_wire_lib = static_library(
+    'gwipc-wire',
+    gwipc_wire_sources,
+    include_directories: gwipc_private_include,
+    gnu_symbol_visibility: 'hidden',
+    cpp_args: ['-fvisibility-inlines-hidden'],
+    pic: true,
+    install: false,
+  )
+  gwipc_wire_dep = declare_dependency(
+    link_with: gwipc_wire_lib,
+    include_directories: gwipc_private_include,
+  )
+
+  gwipc_library = shared_library(
+    'gwipc',
+    files(
+      'ipc/public_api.cpp',
+      'ipc/message.cpp',
+      'ipc/endpoint.cpp',
+      'ipc/connection.cpp',
+    ),
+    link_whole: gwipc_wire_lib,
+    include_directories: [
+      gw_include_dir,
+      gwipc_private_include,
+      gw_generated_include_dir,
+    ],
+    cpp_args: gwipc_cpp_args,
+    link_args: [
+      '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
+    ],
+    gnu_symbol_visibility: 'hidden',
+    version: '0.1.0',
+    soversion: '0',
+    install: true,
+  )
+  gwipc_dep = declare_dependency(
+    link_with: gwipc_library,
+    include_directories: gw_include_dir,
+  )
+
+  install_headers(
+    '../include/glasswyrm/ipc.h',
+    '../include/glasswyrm/ipc.hpp',
+    subdir: 'glasswyrm',
+  )
+  install_headers(
+    '../include/glasswyrm/ipc/version.h',
+    '../include/glasswyrm/ipc/types.h',
+    '../include/glasswyrm/ipc/listener.h',
+    '../include/glasswyrm/ipc/connection.h',
+    '../include/glasswyrm/ipc/message.h',
+    '../include/glasswyrm/ipc/contracts.h',
+    subdir: 'glasswyrm/ipc',
+  )
+
+  pkgconfig = import('pkgconfig')
+  pkgconfig.generate(
+    gwipc_library,
+    filebase: 'gwipc',
+    name: 'gwipc',
+    description: 'Glasswyrm versioned local IPC contracts',
+    version: '0.1.0',
+  )
+endif
+
 if get_option('glasswyrmd')
   gw_server_state_lib = static_library(
     'gw-server-state',
