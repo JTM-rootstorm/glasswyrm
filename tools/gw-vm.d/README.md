@@ -82,6 +82,7 @@ actions:
 ./tools/gw-vm full-packaging-test --yes
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
+./tools/gw-vm milestone3-runtime-test --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -145,10 +146,27 @@ M2 probes against `glasswyrmd-m2.service`. The scenario remains headless and
 does not install Xorg, Xwayland, a desktop environment, display manager,
 window manager, or compositor.
 
+Milestone 3 validates the independently buildable and installable `libgwipc`
+foundation without integrating it into a production process:
+
+```sh
+./tools/gw-vm milestone3-runtime-test --yes
+```
+
+It requires the tested commit to descend from
+`d6816484f0293b8b47edf0f13e5da691014e3e7c`, runs full strict and sanitizer
+tests plus an IPC-only build, installs into a staging root, and compiles C and
+C++ consumers exclusively against the staged headers and pkg-config metadata.
+A transient `gwipc-m3.service` then exercises handshake, ping/pong, compositor
+contract round trips, memfd transfer, snapshots, structured rejections, and
+malformed-client isolation over a private `SOCK_SEQPACKET` endpoint. The guest
+must remain terminal-only with Xorg and Xwayland absent.
+
 ## Safety
 
 Snapshot reset, emerge, unmerge, and the complete packaging test change guest
-state. The Milestone 1 and Milestone 2 runtime tests can also install missing
+state. The Milestone 1, Milestone 2, and Milestone 3 runtime tests can also
+install missing
 fixed dependencies. These operations require `--yes` unless the relevant
 safety setting explicitly allows them. Shutdown requests a graceful guest
 shutdown; the harness does not destroy a running domain by default.
@@ -179,3 +197,13 @@ Milestone 2 acceptance writes `milestone2-runtime-test.log`,
 when its collected evidence proves the required base, toolchain, X server
 absence, M1 regression, M2 tests, sanitizer status, every fixed raw and XCB
 probe, systemd shutdown, and current-invocation journal gates.
+
+Milestone 3 acceptance writes `milestone3-runtime-test.log`,
+`milestone3-meson-test.log`, `milestone3-install-test.log`,
+`milestone3-handshake.log`, `milestone3-fd-transfer.log`,
+`milestone3-snapshot.log`, `milestone3-malformed.log`,
+`milestone3-journal.log`, `milestone3-facts.env`, and
+`milestone3-summary.json`. Its summary validates the exact tested commit,
+toolchain and version domains, build and staged-install gates, every fixed
+process probe, service shutdown, socket cleanup, and the current invocation
+journal.
