@@ -214,7 +214,7 @@ void Server::accept_clients() {
         continue;
       }
       clients_.push_back(std::make_unique<ClientConnection>(
-          descriptor, next_client_identifier_++, *resource_base));
+          descriptor, next_client_identifier_++, *resource_base, state_));
       std::fprintf(stderr, "glasswyrmd: accepted client %llu\n",
                    static_cast<unsigned long long>(next_client_identifier_ - 1));
       continue;
@@ -307,7 +307,11 @@ int Server::run() {
       descriptors.push_back(
           pollfd{client->descriptor(), client->poll_events(), 0});
     }
-    const int result = ::poll(descriptors.data(), descriptors.size(), -1);
+    const bool pending_work = std::any_of(
+        clients_.begin(), clients_.end(),
+        [](const auto& client) { return client->needs_service(); });
+    const int result =
+        ::poll(descriptors.data(), descriptors.size(), pending_work ? 0 : -1);
     if (result < 0) {
       if (errno == EINTR) {
         continue;
