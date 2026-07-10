@@ -8,6 +8,89 @@ test('scaffold', scaffold_test)
 
 test_source_root_include = include_directories('..')
 
+if get_option('libgwipc')
+  gwipc_wire_codec_test = executable(
+    'gwipc_wire_codec_test',
+    files('unit/ipc/wire_codec_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-wire-codec', gwipc_wire_codec_test, timeout: 10)
+  test('gwipc-envelope', gwipc_wire_codec_test, timeout: 10)
+  test('gwipc-control-codec', gwipc_wire_codec_test, timeout: 10)
+  test('gwipc-snapshot-codec', gwipc_wire_codec_test, timeout: 10)
+
+  gwipc_contract_codec_test = executable(
+    'gwipc_contract_codec_test',
+    files('unit/ipc/contract_codec_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_decoder_fuzz_test = executable(
+    'gwipc_decoder_fuzz_test',
+    files('unit/ipc/decoder_fuzz_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-malformed', gwipc_decoder_fuzz_test, timeout: 15)
+
+  gwipc_wire_probe = executable(
+    'gwipc_wire_probe',
+    files('integration/gwipc_wire_probe.c'),
+    dependencies: gwipc_dep,
+  )
+
+  gwipc_transport_test = executable(
+    'gwipc_transport_test',
+    files('integration/gwipc_transport_test.cpp'),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-transport', gwipc_transport_test, timeout: 10)
+
+  gwipc_endpoint_test = executable(
+    'gwipc_endpoint_test',
+    files('integration/gwipc_endpoint_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test('gwipc-endpoint', gwipc_endpoint_test, timeout: 10)
+
+  gwipc_fault_test = executable(
+    'gwipc_fault_test',
+    files(
+      'integration/gwipc_fault_test.cpp',
+      '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-fault-atomicity', gwipc_fault_test, timeout: 10)
+
+  gwipc_probe_server = executable(
+    'gwipc_probe_server',
+    files('integration/gwipc_probe_server.cpp'),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  gwipc_probe_client = executable(
+    'gwipc_probe_client',
+    files('integration/gwipc_probe_client.cpp'),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+
+  gwipc_symbols_test = find_program('tools/gwipc_symbols_test.sh')
+  test(
+    'gwipc-public-symbols',
+    gwipc_symbols_test,
+    args: [gwipc_library.full_path()],
+    depends: gwipc_library,
+    timeout: 10,
+  )
+endif
+
 x11_setup_parser_test = executable(
   'x11_setup_parser_test',
   files('protocol/x11_setup_parser_test.cpp'),
