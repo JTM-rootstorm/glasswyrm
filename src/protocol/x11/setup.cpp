@@ -16,10 +16,6 @@ constexpr std::array<std::uint8_t, 21> kVendor{
     'G', 'l', 'a', 's', 's', 'w', 'y', 'r', 'm', ' ', 'M',
     'i', 'l', 'e', 's', 't', 'o', 'n', 'e', ' ', '1'};
 
-constexpr std::uint32_t kRootWindow = 1;
-constexpr std::uint32_t kDefaultColormap = 2;
-constexpr std::uint32_t kRootVisual = 3;
-
 [[nodiscard]] std::size_t padding_for(const std::size_t size) noexcept {
   return (4 - (size & 3U)) & 3U;
 }
@@ -149,7 +145,7 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u32(config.resource_id_mask);
   body.write_u32(0); // motion buffer size
   body.write_u16(static_cast<std::uint16_t>(kVendor.size()));
-  body.write_u16(std::numeric_limits<std::uint16_t>::max());
+  body.write_u16(kScreenModel.maximum_request_length);
   body.write_u8(1);                         // screens
   body.write_u8(1);                         // pixmap formats
   body.write_u8(0);                         // image byte order: LSBFirst
@@ -168,35 +164,35 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u8(32); // scanline pad
   body.write_padding(5);
 
-  body.write_u32(kRootWindow);
-  body.write_u32(kDefaultColormap);
+  body.write_u32(kScreenModel.root_window);
+  body.write_u32(kScreenModel.default_colormap);
   body.write_u32(0x00ffffff); // white pixel
   body.write_u32(0);          // black pixel
   body.write_u32(0);          // current input masks
-  body.write_u16(1024);
-  body.write_u16(768);
-  body.write_u16(270);
-  body.write_u16(203);
+  body.write_u16(kScreenModel.width_pixels);
+  body.write_u16(kScreenModel.height_pixels);
+  body.write_u16(kScreenModel.width_millimeters);
+  body.write_u16(kScreenModel.height_millimeters);
   body.write_u16(1); // installed colormaps min
   body.write_u16(1); // installed colormaps max
-  body.write_u32(kRootVisual);
+  body.write_u32(kScreenModel.root_visual);
   body.write_u8(0);  // backing store: Never
   body.write_u8(0);  // save unders
-  body.write_u8(24); // root depth
+  body.write_u8(kScreenModel.root_depth);
   body.write_u8(1);  // allowed depths
 
-  body.write_u8(24);
+  body.write_u8(kScreenModel.root_depth);
   body.write_padding(1);
   body.write_u16(1); // visuals
   body.write_padding(4);
 
-  body.write_u32(kRootVisual);
+  body.write_u32(kScreenModel.root_visual);
   body.write_u8(4); // TrueColor
   body.write_u8(8); // bits per RGB value
   body.write_u16(256);
-  body.write_u32(0x00ff0000);
-  body.write_u32(0x0000ff00);
-  body.write_u32(0x000000ff);
+  body.write_u32(kScreenModel.red_mask);
+  body.write_u32(kScreenModel.green_mask);
+  body.write_u32(kScreenModel.blue_mask);
   body.write_padding(4);
 
   const std::size_t body_size = body.size();

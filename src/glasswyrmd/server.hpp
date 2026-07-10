@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/client_connection.hpp"
 #include "glasswyrmd/options.hpp"
+#include "glasswyrmd/server_state.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -38,6 +39,7 @@ class Server {
   dev_t socket_device_ = 0;
   ino_t socket_inode_ = 0;
   std::uint64_t next_client_identifier_ = 1;
+  ServerState state_;
   std::vector<std::unique_ptr<ClientConnection>> clients_;
 };
 
