@@ -37,6 +37,10 @@ xcb_probe_result=not-run
 unit_result=not-run
 meson_result=not-run
 
+package_installed() {
+  [[ -n "$(portageq match / "$1" 2>/dev/null)" ]]
+}
+
 mkdir -p "$artifact_dir"
 rm -f "$artifact_dir"/milestone1-*.log "$facts"
 touch "$runtime_log" "$meson_log" "$xcb_log" "$journal_log"
@@ -55,7 +59,8 @@ record_facts() {
     printf 'meson_version=%s\n' "$(meson --version 2>/dev/null || printf unavailable)"
     printf 'ninja_version=%s\n' "$(ninja --version 2>/dev/null || printf unavailable)"
     printf 'systemd_version=%s\n' "$(systemctl --version 2>/dev/null | head -n 1 || printf unavailable)"
-    if has_version x11-base/xorg-server || has_version x11-base/xwayland; then
+    if package_installed x11-base/xorg-server ||
+      package_installed x11-base/xwayland; then
       printf 'x_servers_absent=false\n'
     else
       printf 'x_servers_absent=true\n'
@@ -75,7 +80,8 @@ trap record_facts EXIT
   exit 1
 }
 
-if has_version x11-base/xorg-server || has_version x11-base/xwayland; then
+if package_installed x11-base/xorg-server ||
+  package_installed x11-base/xwayland; then
   echo 'Milestone 1 requires a guest without Xorg or Xwayland installed' >&2
   exit 1
 fi
