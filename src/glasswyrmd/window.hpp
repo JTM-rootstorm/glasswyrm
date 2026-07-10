@@ -61,6 +61,7 @@ struct WindowCreateSpec {
   std::uint8_t depth{0};
   WindowClass window_class{WindowClass::CopyFromParent};
   std::uint32_t visual{0};
+  std::uint32_t attribute_mask{0};
   WindowAttributes attributes;
 };
 

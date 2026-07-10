@@ -97,5 +97,31 @@ int main() {
       !table.find_window(window_id)->properties.empty()) {
     return 9;
   }
+
+  ResourceTable bounded(kScreenModel, ResourceLimits{4, 6, 2});
+  if (bounded.create_window(1, base, mask, make_window(window_id)) !=
+          CreateWindowStatus::Success ||
+      bounded.change_property(window_id, 39, bytes(31, {1, 2, 3}),
+                              PropertyMode::Replace) !=
+          PropertyMutationStatus::Success ||
+      bounded.change_property(window_id, 39, bytes(31, {4, 5}),
+                              PropertyMode::Append) !=
+          PropertyMutationStatus::BadAlloc ||
+      std::get<std::vector<std::uint8_t>>(
+          bounded.find_window(window_id)->properties.at(39).data) !=
+          std::vector<std::uint8_t>({1, 2, 3}) ||
+      bounded.change_property(window_id, 40, bytes(31, {4, 5, 6}),
+                              PropertyMode::Replace) !=
+          PropertyMutationStatus::Success ||
+      bounded.change_property(window_id, 41, bytes(31, {}),
+                              PropertyMode::Replace) !=
+          PropertyMutationStatus::BadAlloc ||
+      bounded.change_property(window_id, 40, bytes(31, {4, 5, 6, 7}),
+                              PropertyMode::Replace) !=
+          PropertyMutationStatus::BadAlloc ||
+      bounded.total_property_bytes() != 6 ||
+      bounded.find_window(window_id)->properties.at(40).byte_size() != 3) {
+    return 10;
+  }
   return 0;
 }

@@ -298,18 +298,13 @@ void ClientConnection::handle_events(const short events) {
     close_with_log("socket error");
     return;
   }
-  if (needs_service()) {
-    read_input();
-  }
-  if ((events & POLLIN) != 0 &&
-      (state_ == State::AwaitingSetup || state_ == State::Established)) {
+  if (needs_service() ||
+      (((events & (POLLIN | POLLHUP)) != 0) &&
+       (state_ == State::AwaitingSetup || state_ == State::Established))) {
     read_input();
   }
   if ((events & POLLOUT) != 0 && state_ != State::Closing) {
     write_output();
-  }
-  if ((events & POLLHUP) != 0 && state_ != State::Closing) {
-    read_input();
   }
 }
 

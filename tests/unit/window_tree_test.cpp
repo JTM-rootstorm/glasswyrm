@@ -44,5 +44,25 @@ int main() {
       !table.invariants_hold()) {
     return 3;
   }
+
+  ResourceTable deep;
+  constexpr std::uint32_t depth = 25000;
+  std::uint32_t parent = 1;
+  for (std::uint32_t index = 1; index <= depth; ++index) {
+    const auto xid = base + index;
+    if (deep.create_window(1, base, mask, make_window(xid, parent)) !=
+        CreateWindowStatus::Success) {
+      return 4;
+    }
+    parent = xid;
+  }
+  CleanupResult deep_cleanup;
+  if (deep.destroy_window(base + 1, &deep_cleanup) !=
+          DestroyWindowStatus::Success ||
+      deep_cleanup.resources_destroyed != depth ||
+      deep.resource_count(ResourceType::Window) != 1 ||
+      !deep.invariants_hold()) {
+    return 5;
+  }
   return 0;
 }

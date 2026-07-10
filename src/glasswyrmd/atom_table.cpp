@@ -5,7 +5,8 @@
 #include <utility>
 
 namespace glasswyrm::server {
-AtomTable::AtomTable() {
+AtomTable::AtomTable(const std::uint32_t maximum_atom)
+    : maximum_atom_(maximum_atom) {
   ids_by_name_.reserve(kHighestPredefinedAtom);
   names_by_id_.reserve(kHighestPredefinedAtom);
   for (const auto& predefined : gw::protocol::x11::kPredefinedAtoms) {
@@ -23,18 +24,22 @@ InternAtomResult AtomTable::intern(const std::string_view atom_name,
   if (only_if_exists) {
     return {};
   }
-  if (next_dynamic_atom_ == 0) {
+  if (next_dynamic_atom_ == 0 || next_dynamic_atom_ > maximum_atom_) {
     return {.status = InternAtomStatus::Exhausted};
   }
 
   try {
     const std::uint32_t atom = next_dynamic_atom_;
     std::string owned_name(atom_name);
-    ids_by_name_.emplace(owned_name, atom);
+    const auto [name_iterator, inserted] =
+        ids_by_name_.emplace(owned_name, atom);
+    if (!inserted) {
+      return {.atom = name_iterator->second};
+    }
     try {
       names_by_id_.emplace(atom, std::move(owned_name));
     } catch (...) {
-      ids_by_name_.erase(std::string(atom_name));
+      ids_by_name_.erase(name_iterator);
       throw;
     }
     next_dynamic_atom_ =

@@ -69,6 +69,10 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   spec.y = static_cast<std::int16_t>(y);
   spec.depth = request.data;
   spec.window_class = static_cast<WindowClass>(window_class);
+  spec.attribute_mask = value_mask;
+  if (window_class > static_cast<std::uint16_t>(WindowClass::InputOnly)) {
+    return error(context, request, x11::CoreErrorCode::BadValue, window_class);
+  }
   if ((value_mask & ~kKnownMask) != 0) {
     return error(context, request, x11::CoreErrorCode::BadValue, value_mask);
   }
@@ -134,8 +138,18 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
         }
         spec.attributes.save_under = value != 0;
         break;
-      case 11: spec.attributes.event_mask = value; break;
-      case 12: spec.attributes.do_not_propagate_mask = value; break;
+      case 11:
+        if ((value & ~0x01ffffffU) != 0) {
+          return error(context, request, x11::CoreErrorCode::BadValue, value);
+        }
+        spec.attributes.event_mask = value;
+        break;
+      case 12:
+        if ((value & ~0x0000204fU) != 0) {
+          return error(context, request, x11::CoreErrorCode::BadValue, value);
+        }
+        spec.attributes.do_not_propagate_mask = value;
+        break;
       case 13:
         if (value != 0 && value != state.screen().default_colormap) {
           return error(context, request, x11::CoreErrorCode::BadColormap,
@@ -161,8 +175,7 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
     case CreateWindowStatus::BadWindow:
       return error(context, request, x11::CoreErrorCode::BadWindow, spec.parent);
     case CreateWindowStatus::BadValue:
-      return error(context, request, x11::CoreErrorCode::BadValue,
-                   spec.width == 0 ? spec.width : spec.height);
+      return error(context, request, x11::CoreErrorCode::BadValue, 0);
     case CreateWindowStatus::BadMatch:
       return error(context, request, x11::CoreErrorCode::BadMatch);
     case CreateWindowStatus::BadAlloc:

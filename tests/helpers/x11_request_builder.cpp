@@ -44,20 +44,22 @@ x11::ByteWriter header(std::uint8_t opcode, std::uint8_t data,
 std::vector<std::uint8_t> X11RequestBuilder::create_window(
     std::uint32_t window, std::uint32_t parent, std::int16_t x, std::int16_t y,
     std::uint16_t width, std::uint16_t height, std::uint32_t value_mask,
-    std::span<const std::uint32_t> values) const {
+    std::span<const std::uint32_t> values, std::uint8_t depth,
+    std::uint16_t window_class, std::uint32_t visual,
+    std::uint16_t border_width) const {
   if (static_cast<std::size_t>(std::popcount(value_mask)) != values.size()) {
     throw std::invalid_argument("CreateWindow mask/value count mismatch");
   }
-  auto writer = header(1, 24, order_);
+  auto writer = header(1, depth, order_);
   writer.write_u32(window);
   writer.write_u32(parent);
   writer.write_u16(static_cast<std::uint16_t>(x));
   writer.write_u16(static_cast<std::uint16_t>(y));
   writer.write_u16(width);
   writer.write_u16(height);
-  writer.write_u16(0);
-  writer.write_u16(1);
-  writer.write_u32(3);
+  writer.write_u16(border_width);
+  writer.write_u16(window_class);
+  writer.write_u32(visual);
   writer.write_u32(value_mask);
   for (const auto value : values) {
     writer.write_u32(value);

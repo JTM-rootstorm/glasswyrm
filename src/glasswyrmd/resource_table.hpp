@@ -57,9 +57,16 @@ inline constexpr std::size_t kMaximumBytesPerProperty = 4U * 1024U * 1024U;
 inline constexpr std::size_t kMaximumTotalPropertyBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t kMaximumPropertiesPerWindow = 4096;
 
+struct ResourceLimits {
+  std::size_t maximum_bytes_per_property{kMaximumBytesPerProperty};
+  std::size_t maximum_total_property_bytes{kMaximumTotalPropertyBytes};
+  std::size_t maximum_properties_per_window{kMaximumPropertiesPerWindow};
+};
+
 class ResourceTable {
  public:
-  explicit ResourceTable(ScreenModel screen = kScreenModel);
+  explicit ResourceTable(ScreenModel screen = kScreenModel,
+                         ResourceLimits limits = {});
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
   [[nodiscard]] const ResourceRecord* find(std::uint32_t xid) const noexcept;
@@ -98,9 +105,11 @@ class ResourceTable {
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
-  void destroy_window_recursive(std::uint32_t xid, CleanupResult& result);
+  void destroy_window_tree(std::uint32_t xid, CleanupResult& result);
+  void destroy_leaf(std::uint32_t xid, CleanupResult& result);
 
   ScreenModel screen_;
+  ResourceLimits limits_;
   std::unordered_map<std::uint32_t, ResourceRecord> resources_;
   std::unordered_map<ClientId, std::vector<std::uint32_t>> resources_by_owner_;
   std::size_t total_property_bytes_{0};
