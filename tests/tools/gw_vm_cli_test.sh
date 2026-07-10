@@ -245,7 +245,7 @@ printf 'git' >>"$GW_VM_TEST_COMMAND_LOG"
 printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
 printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
 case " $* " in
-  *' status --porcelain --untracked-files=no '*)
+  *' status --porcelain --untracked-files=all '*)
     if [[ ${GW_VM_TEST_GIT_DIRTY:-0} == 1 ]]; then
       printf ' M tracked-source.cpp\n'
     fi
@@ -455,7 +455,7 @@ assert_not_contains "$command_log" '.glasswyrm-vm-source'
 : >"$command_log"
 run_failure "$work_dir/milestone1-dirty-source.out" \
   env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone1-runtime-test --yes
-assert_contains "$work_dir/milestone1-dirty-source.out" 'requires a clean tracked source tree'
+assert_contains "$work_dir/milestone1-dirty-source.out" 'requires committed source outside Plans/'
 assert_not_contains "$command_log" '.glasswyrm-vm-source'
 
 : >"$command_log"
