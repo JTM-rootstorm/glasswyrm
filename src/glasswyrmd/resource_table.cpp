@@ -168,7 +168,15 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
   const std::size_t property_bytes = window_property_bytes(*window);
   const auto owner = find(xid)->owner;
   if (auto* parent = find_window(parent_id); parent != nullptr) {
-    std::erase(parent->children, xid);
+    if (!parent->children.empty() && parent->children.back() == xid) {
+      parent->children.pop_back();
+    } else {
+      const auto child =
+          std::find(parent->children.begin(), parent->children.end(), xid);
+      if (child != parent->children.end()) {
+        parent->children.erase(child);
+      }
+    }
   }
   if (owner) {
     auto owner_iterator = resources_by_owner_.find(*owner);
