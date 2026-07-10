@@ -72,6 +72,57 @@ push_overlay() {
   record_scenario "push-overlay" "passed" ""
 }
 
+prepare_source_destination() {
+  local script
+  script='set -euo pipefail
+destination=$1
+marker="$destination/.glasswyrm-vm-source"
+if [[ -e "$destination" && ! -d "$destination" ]]; then
+  echo "Refusing to replace non-directory source destination: $destination" >&2
+  exit 1
+fi
+if [[ -e "$marker" && ( ! -f "$marker" || -L "$marker" ) ]]; then
+  echo "Refusing invalid source ownership marker: $marker" >&2
+  exit 1
+fi
+if [[ -d "$destination" && ! -e "$marker" ]]; then
+  if find "$destination" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    echo "Refusing to replace unowned source destination: $destination" >&2
+    exit 1
+  fi
+fi
+mkdir -p "$destination"
+touch "$marker"'
+  guest_run_script "$script" "$GUEST_SOURCE_PATH" || return
+}
+
+push_source() {
+  if ! command_exists rsync; then
+    warn "Required host command not found: rsync"
+    return 1
+  fi
+  if [[ ! -d "$LOCAL_SOURCE_PATH_ABS" ]]; then
+    warn "Source path does not exist: $LOCAL_SOURCE_PATH"
+    return 1
+  fi
+  wait_for_guest || return
+  prepare_source_destination || return
+  ssh_arguments
+  rsync -a --delete \
+    --filter='P /.glasswyrm-vm-source' \
+    --filter='- /.git/' \
+    --filter='- /Plans/' \
+    --filter='- /artifacts/' \
+    --filter='- /build/' \
+    --filter='- /build-*/' \
+    --filter='- /builddir/' \
+    --filter='- /_build/' \
+    --filter='- /tools/gw-vm.d/config.toml' \
+    -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" \
+    "$LOCAL_SOURCE_PATH_ABS/" "$SSH_TARGET:$GUEST_SOURCE_PATH/" || return
+  record_scenario "push-source" "passed" ""
+}
+
 register_overlay() {
   local script
   script='set -euo pipefail

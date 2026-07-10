@@ -45,8 +45,10 @@ set_config_value() {
     guest.ssh_port) SSH_PORT="$value" ;;
     guest.shared_overlay_path) GUEST_OVERLAY_PATH="$value" ;;
     guest.shared_artifacts_path) GUEST_ARTIFACTS_PATH="$value" ;;
+    guest.shared_source_path) GUEST_SOURCE_PATH="$value" ;;
     paths.overlay) LOCAL_OVERLAY_PATH="$value" ;;
     paths.artifacts) ARTIFACTS_PATH="$value" ;;
+    paths.source) LOCAL_SOURCE_PATH="$value" ;;
     portage.overlay_name) OVERLAY_NAME="$value" ;;
     portage.repos_conf_path) REPOS_CONF_PATH="$value" ;;
     portage.default_package) DEFAULT_PACKAGE="$value" ;;
@@ -93,6 +95,7 @@ apply_environment_overrides() {
   SNAPSHOT_NAME="${GLASSWYRM_VM_SNAPSHOT:-$SNAPSHOT_NAME}"
   LOCAL_OVERLAY_PATH="${GLASSWYRM_VM_OVERLAY_PATH:-$LOCAL_OVERLAY_PATH}"
   ARTIFACTS_PATH="${GLASSWYRM_VM_ARTIFACTS_PATH:-$ARTIFACTS_PATH}"
+  LOCAL_SOURCE_PATH="${GLASSWYRM_VM_SOURCE_PATH:-$LOCAL_SOURCE_PATH}"
 }
 
 resolve_repo_path() {
@@ -120,6 +123,8 @@ validate_config() {
     die "Guest overlay path must be a safe absolute path."
   [[ "$GUEST_ARTIFACTS_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$GUEST_ARTIFACTS_PATH" != "/" && "$GUEST_ARTIFACTS_PATH" != *".."* ]] ||
     die "Guest artifact path must be a safe absolute path."
+  [[ "$GUEST_SOURCE_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$GUEST_SOURCE_PATH" != "/" && "$GUEST_SOURCE_PATH" != *".."* ]] ||
+    die "Guest source path must be a safe absolute path."
   [[ "$OVERLAY_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "Invalid overlay name."
   [[ "$REPOS_CONF_PATH" =~ ^/etc/portage/repos\.conf/[A-Za-z0-9._-]+\.conf$ ]] ||
     die "repos_conf_path must name a .conf file under /etc/portage/repos.conf/."
@@ -130,7 +135,10 @@ validate_config() {
   validate_package "$DEFAULT_PACKAGE"
 
   LOCAL_OVERLAY_PATH_ABS="$(resolve_repo_path "$LOCAL_OVERLAY_PATH")"
+  LOCAL_SOURCE_PATH_ABS="$(resolve_repo_path "$LOCAL_SOURCE_PATH")"
   ARTIFACTS_PATH_ABS="$(resolve_repo_path "$ARTIFACTS_PATH")"
+  [[ "$LOCAL_SOURCE_PATH_ABS" == "$REPO_ROOT" || "$LOCAL_SOURCE_PATH_ABS" == "$REPO_ROOT/"* ]] ||
+    die "Source path must remain inside the repository."
   local artifacts_root
   artifacts_root="$(realpath -m "$REPO_ROOT/artifacts/vm")"
   [[ "$ARTIFACTS_PATH_ABS" == "$artifacts_root" || "$ARTIFACTS_PATH_ABS" == "$artifacts_root/"* ]] ||
@@ -158,8 +166,10 @@ load_config() {
   SSH_PORT=22
   GUEST_OVERLAY_PATH="/mnt/shared/glasswyrm-overlay"
   GUEST_ARTIFACTS_PATH="/mnt/shared/glasswyrm-artifacts"
+  GUEST_SOURCE_PATH="/var/tmp/glasswyrm-source"
   LOCAL_OVERLAY_PATH="packaging/gentoo/overlay"
   ARTIFACTS_PATH="artifacts/vm/latest"
+  LOCAL_SOURCE_PATH="."
   OVERLAY_NAME="glasswyrm-local"
   REPOS_CONF_PATH="/etc/portage/repos.conf/glasswyrm-local.conf"
   DEFAULT_PACKAGE="x11-base/glasswyrm"

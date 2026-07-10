@@ -12,10 +12,12 @@ ssh_user = "root"
 ssh_port = 22
 shared_overlay_path = "/mnt/shared/glasswyrm-overlay"
 shared_artifacts_path = "/mnt/shared/glasswyrm-artifacts"
+shared_source_path = "/var/tmp/glasswyrm-source"
 
 [paths]
 overlay = "packaging/gentoo/overlay"
 artifacts = "artifacts/vm/latest"
+source = "."
 
 [portage]
 overlay_name = "glasswyrm-local"
