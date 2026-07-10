@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Assertions intentionally match literal guest scripts.
 
 set -euo pipefail
 
