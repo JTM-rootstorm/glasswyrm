@@ -25,6 +25,22 @@ gw_scaffold_dep = declare_dependency(
 )
 
 if get_option('glasswyrmd')
+  gw_server_state_lib = static_library(
+    'gw-server-state',
+    files(
+      'glasswyrmd/property.cpp',
+      'glasswyrmd/resource_table.cpp',
+      'glasswyrmd/atom_table.cpp',
+      'glasswyrmd/server_state.cpp',
+    ),
+    dependencies: gw_x11_setup_dep,
+    include_directories: include_directories('.'),
+  )
+  gw_server_state_dep = declare_dependency(
+    link_with: gw_server_state_lib,
+    dependencies: gw_x11_setup_dep,
+    include_directories: include_directories('.'),
+  )
   gw_server_core_lib = static_library(
     'gw-server-core',
     files(
@@ -32,12 +48,12 @@ if get_option('glasswyrmd')
       'glasswyrmd/client_connection.cpp',
       'glasswyrmd/server.cpp',
     ),
-    dependencies: gw_x11_setup_dep,
+    dependencies: gw_server_state_dep,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   gw_server_core_dep = declare_dependency(
     link_with: gw_server_core_lib,
-    dependencies: gw_x11_setup_dep,
+    dependencies: gw_server_state_dep,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   glasswyrmd_program = executable(

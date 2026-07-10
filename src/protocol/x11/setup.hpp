@@ -1,6 +1,7 @@
 #pragma once
 
 #include "protocol/x11/byte_order.hpp"
+#include "protocol/x11/screen_model.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -76,7 +77,7 @@ evaluate_setup_request(const SetupRequest &request) noexcept;
 
 struct SetupReplyConfig {
   std::uint32_t resource_id_base{0x00400000};
-  std::uint32_t resource_id_mask{0x001fffff};
+  std::uint32_t resource_id_mask{kScreenModel.resource_id_mask};
 };
 
 [[nodiscard]] std::vector<std::uint8_t>
