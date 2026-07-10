@@ -6,7 +6,11 @@ gw_scaffold_lib = static_library(
 
 gw_x11_setup_lib = static_library(
   'gw-x11-setup',
-  files('protocol/x11/setup.cpp'),
+  files(
+    'protocol/x11/setup.cpp',
+    'protocol/x11/request.cpp',
+    'protocol/x11/reply.cpp',
+  ),
   include_directories: include_directories('.'),
 )
 

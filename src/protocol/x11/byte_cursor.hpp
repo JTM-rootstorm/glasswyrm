@@ -23,6 +23,14 @@ public:
     return true;
   }
 
+  [[nodiscard]] bool read_u8(std::uint8_t &value) noexcept {
+    if (remaining() < 1) {
+      return false;
+    }
+    value = bytes_[offset_++];
+    return true;
+  }
+
   [[nodiscard]] bool read_u16(std::uint16_t &value) noexcept {
     if (remaining() < 2) {
       return false;
@@ -38,9 +46,40 @@ public:
     return true;
   }
 
+  [[nodiscard]] bool read_u32(std::uint32_t &value) noexcept {
+    if (remaining() < 4) {
+      return false;
+    }
+    if (order_ == ByteOrder::LittleEndian) {
+      value = static_cast<std::uint32_t>(bytes_[offset_]) |
+              (static_cast<std::uint32_t>(bytes_[offset_ + 1]) << 8U) |
+              (static_cast<std::uint32_t>(bytes_[offset_ + 2]) << 16U) |
+              (static_cast<std::uint32_t>(bytes_[offset_ + 3]) << 24U);
+    } else {
+      value = (static_cast<std::uint32_t>(bytes_[offset_]) << 24U) |
+              (static_cast<std::uint32_t>(bytes_[offset_ + 1]) << 16U) |
+              (static_cast<std::uint32_t>(bytes_[offset_ + 2]) << 8U) |
+              static_cast<std::uint32_t>(bytes_[offset_ + 3]);
+    }
+    offset_ += 4;
+    return true;
+  }
+
+  [[nodiscard]] bool read_bytes(const std::size_t count,
+                                std::span<const std::uint8_t> &value) noexcept {
+    if (count > remaining()) {
+      return false;
+    }
+    value = bytes_.subspan(offset_, count);
+    offset_ += count;
+    return true;
+  }
+
   [[nodiscard]] std::size_t remaining() const noexcept {
     return bytes_.size() - offset_;
   }
+
+  [[nodiscard]] std::size_t offset() const noexcept { return offset_; }
 
 private:
   std::span<const std::uint8_t> bytes_;
