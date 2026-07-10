@@ -24,6 +24,22 @@ x11_setup_reply_test = executable(
 )
 test('x11-setup-reply', x11_setup_reply_test, timeout: 10)
 
+x11_request_framer_test = executable(
+  'x11_request_framer_test',
+  files('protocol/x11_request_framer_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: test_source_root_include,
+)
+test('x11-request-framer', x11_request_framer_test, timeout: 10)
+
+x11_reply_atom_test = executable(
+  'x11_reply_atom_test',
+  files('protocol/x11_reply_atom_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: test_source_root_include,
+)
+test('x11-reply-atom', x11_reply_atom_test, timeout: 10)
+
 if get_option('glasswyrmd')
   x11_fake_client_lib = static_library(
     'x11-fake-client',
