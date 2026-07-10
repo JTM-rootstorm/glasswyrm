@@ -77,6 +77,10 @@ prepare_source_destination() {
   script='set -euo pipefail
 destination=$1
 marker="$destination/.glasswyrm-vm-source"
+if [[ -L "$destination" ]]; then
+  echo "Refusing symlink source destination: $destination" >&2
+  exit 1
+fi
 if [[ -e "$destination" && ! -d "$destination" ]]; then
   echo "Refusing to replace non-directory source destination: $destination" >&2
   exit 1

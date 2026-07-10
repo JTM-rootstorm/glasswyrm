@@ -6,6 +6,8 @@ fi
 GW_VM_MILESTONE1_LOADED=1
 
 M1_GUEST_ARTIFACT_DIR="/var/tmp/glasswyrm-m1-artifacts"
+M1_REQUIRED_BASE_COMMIT="429b1847367d08ffe628a8ac05423813db30ee9d"
+M1_TESTED_COMMIT=""
 M1_ARTIFACT_NAMES=(
   milestone1-runtime-test.log
   milestone1-meson-test.log
@@ -72,6 +74,11 @@ trap record_facts EXIT
   echo "Owned source marker is missing: $source_dir/.glasswyrm-vm-source" >&2
   exit 1
 }
+
+if has_version x11-base/xorg-server || has_version x11-base/xwayland; then
+  echo 'Milestone 1 requires a guest without Xorg or Xwayland installed' >&2
+  exit 1
+fi
 
 export NOCOLOR=1
 emerge --verbose --noreplace --color=n \
@@ -194,8 +201,8 @@ write_milestone1_summary() {
   local passed=$1
   local failure_stage=${2:-}
   local tested_commit base_commit facts summary
-  tested_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf unknown)"
-  base_commit="$(git -C "$REPO_ROOT" merge-base HEAD 429b1847367d08ffe628a8ac05423813db30ee9d 2>/dev/null || printf unknown)"
+  tested_commit="${M1_TESTED_COMMIT:-unknown}"
+  base_commit="$M1_REQUIRED_BASE_COMMIT"
   facts="$ARTIFACTS_PATH_ABS/milestone1-facts.env"
   summary="$ARTIFACTS_PATH_ABS/milestone1-summary.json"
   require_command python3
@@ -234,11 +241,40 @@ payload = {
     },
     "passed": passed == "true",
 }
+
 effective_failure = failure or facts.get("failure_stage", "")
 if effective_failure:
     payload["failure_stage"] = effective_failure
 pathlib.Path(output_path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 PY
+}
+
+prepare_milestone1_evidence() {
+  local tracked_status
+  tracked_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" || return
+  if [[ -n "$tracked_status" ]]; then
+    printf '%s\n' 'Milestone 1 VM acceptance requires a clean tracked source tree.' >&2
+    printf '%s\n' "$tracked_status" >&2
+    return 1
+  fi
+  M1_TESTED_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return
+  git -C "$REPO_ROOT" merge-base --is-ancestor \
+    "$M1_REQUIRED_BASE_COMMIT" "$M1_TESTED_COMMIT" || {
+      printf 'HEAD is not based on required Milestone 1 commit %s\n' \
+        "$M1_REQUIRED_BASE_COMMIT" >&2
+      return 1
+    }
+  rm -f "$ARTIFACTS_PATH_ABS"/milestone1-*.log \
+    "$ARTIFACTS_PATH_ABS/milestone1-facts.env" \
+    "$ARTIFACTS_PATH_ABS/milestone1-summary.json"
+}
+
+clear_milestone1_guest_artifacts() {
+  guest_run_script 'set -euo pipefail
+artifact_dir=$1
+[[ "$artifact_dir" == /var/tmp/glasswyrm-m1-artifacts ]]
+rm -rf -- "$artifact_dir"
+mkdir -p -- "$artifact_dir"' "$M1_GUEST_ARTIFACT_DIR"
 }
 
 milestone1_runtime_test() {
@@ -247,9 +283,21 @@ milestone1_runtime_test() {
   require_vm_domain
   init_artifacts
   SCENARIO_RECORDS=()
-  local failure= status=0 collection_status=0 script
+  local failure= status=0 collection_status=0 script current_commit
+  local artifacts_prepared=false
 
-  if vm_boot; then :; else status=$?; failure=boot; fi
+  if prepare_milestone1_evidence; then :; else status=$?; failure=source-evidence; fi
+  if [[ -z "$failure" ]]; then
+    if vm_boot; then :; else status=$?; failure=boot; fi
+  fi
+  if [[ -z "$failure" ]]; then
+    if clear_milestone1_guest_artifacts; then
+      artifacts_prepared=true
+    else
+      status=$?
+      failure=artifact-preparation
+    fi
+  fi
   if [[ -z "$failure" ]]; then
     if push_source; then :; else status=$?; failure=push-source; fi
   fi
@@ -265,7 +313,9 @@ milestone1_runtime_test() {
     fi
   fi
 
-  collect_milestone1_artifacts || collection_status=$?
+  if [[ "$artifacts_prepared" == true ]]; then
+    collect_milestone1_artifacts || collection_status=$?
+  fi
   if ((collection_status != 0)) && [[ -z "$failure" ]]; then
     status=$collection_status
     failure=artifact-collection
@@ -275,6 +325,12 @@ milestone1_runtime_test() {
     printf 'Milestone 1 VM runtime test failed during: %s\n' "$failure" >&2
     print_artifacts >&2
     return "${status:-1}"
+  fi
+  current_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf changed)"
+  if [[ "$current_commit" != "$M1_TESTED_COMMIT" ]]; then
+    write_milestone1_summary false source-identity-changed || return 1
+    printf '%s\n' 'Milestone 1 source identity changed during VM acceptance.' >&2
+    return 1
   fi
   write_milestone1_summary true "" || return 1
   printf 'Milestone 1 VM runtime test passed.\n'

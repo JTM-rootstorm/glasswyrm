@@ -238,7 +238,25 @@ printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
 printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
 EOF
 
-chmod +x "$fake_bin/virsh" "$fake_bin/ssh" "$fake_bin/rsync" "$fake_bin/scp"
+cat >"$fake_bin/git" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'git' >>"$GW_VM_TEST_COMMAND_LOG"
+printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
+printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
+case " $* " in
+  *' status --porcelain --untracked-files=no '*)
+    if [[ ${GW_VM_TEST_GIT_DIRTY:-0} == 1 ]]; then
+      printf ' M tracked-source.cpp\n'
+    fi
+    ;;
+  *' rev-parse HEAD '*) printf '86dab3c000000000000000000000000000000000\n' ;;
+  *' merge-base --is-ancestor '*) exit 0 ;;
+  *) printf 'unexpected fake git command: %s\n' "$*" >&2; exit 45 ;;
+esac
+EOF
+
+chmod +x "$fake_bin/virsh" "$fake_bin/ssh" "$fake_bin/rsync" "$fake_bin/scp" "$fake_bin/git"
 
 export PATH="$fake_bin:$PATH"
 export GW_VM_TEST_COMMAND_LOG=$command_log
@@ -419,8 +437,25 @@ assert_not_contains "$command_log" 'rsync'
 rm -rf "$guest_source_dir"
 
 : >"$command_log"
+symlink_target=${work_dir}/symlink-target
+mkdir -p "$symlink_target"
+touch "$symlink_target/must-survive"
+ln -s "$symlink_target" "$guest_source_dir"
+run_failure "$work_dir/push-source-symlink-failure.out" "$gw_vm" push-source
+assert_contains "$work_dir/push-source-symlink-failure.out" 'Refusing symlink source destination'
+assert_not_contains "$command_log" 'rsync'
+[[ -f $symlink_target/must-survive ]] || fail 'symlink destination target was modified'
+rm -f "$guest_source_dir"
+
+: >"$command_log"
 run_failure "$work_dir/milestone1-gate.out" "$gw_vm" milestone1-runtime-test
 assert_contains "$work_dir/milestone1-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone1-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone1-runtime-test --yes
+assert_contains "$work_dir/milestone1-dirty-source.out" 'requires a clean tracked source tree'
 assert_not_contains "$command_log" '.glasswyrm-vm-source'
 
 : >"$command_log"
