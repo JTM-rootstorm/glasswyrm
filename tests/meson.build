@@ -6,6 +6,76 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+test_source_root_include = include_directories('..')
+
+x11_setup_parser_test = executable(
+  'x11_setup_parser_test',
+  files('protocol/x11_setup_parser_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: test_source_root_include,
+)
+test('x11-setup-parser', x11_setup_parser_test, timeout: 10)
+
+x11_setup_reply_test = executable(
+  'x11_setup_reply_test',
+  files('protocol/x11_setup_reply_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: test_source_root_include,
+)
+test('x11-setup-reply', x11_setup_reply_test, timeout: 10)
+
+if get_option('glasswyrmd')
+  x11_fake_client_lib = static_library(
+    'x11-fake-client',
+    files(
+      'helpers/x11_fake_client.cpp',
+      'integration/server_fixture.cpp',
+    ),
+    dependencies: gw_x11_setup_dep,
+    include_directories: test_source_root_include,
+  )
+  x11_fake_client_dep = declare_dependency(
+    link_with: x11_fake_client_lib,
+    dependencies: gw_x11_setup_dep,
+    include_directories: test_source_root_include,
+  )
+
+  foreach integration_case : [
+    ['glasswyrmd-handshake', 'glasswyrmd_handshake_test.cpp'],
+    ['glasswyrmd-malformed-client', 'glasswyrmd_malformed_client_test.cpp'],
+    ['glasswyrmd-lifecycle', 'glasswyrmd_lifecycle_test.cpp'],
+  ]
+    integration_program = executable(
+      integration_case[0],
+      files('integration/' + integration_case[1]),
+      dependencies: x11_fake_client_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      integration_case[0],
+      integration_program,
+      args: [glasswyrmd_program.full_path()],
+      timeout: 15,
+    )
+  endforeach
+
+  x11_setup_probe = executable(
+    'x11_setup_probe',
+    files('integration/x11_setup_probe.cpp'),
+    dependencies: x11_fake_client_dep,
+    include_directories: test_source_root_include,
+  )
+
+  xcb_test_dependency = dependency('xcb', required: false)
+  if xcb_test_dependency.found()
+    xcb_setup_probe = executable(
+      'xcb_setup_probe',
+      files('xcb/xcb_setup_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
+  endif
+endif
+
 gw_vm_cli_test = find_program('tools/gw_vm_cli_test.sh')
 test(
   'gw-vm-cli',
