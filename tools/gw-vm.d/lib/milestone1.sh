@@ -267,11 +267,18 @@ PY
 }
 
 prepare_milestone1_evidence() {
-  local tracked_status
-  tracked_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" || return
-  if [[ -n "$tracked_status" ]]; then
-    printf '%s\n' 'Milestone 1 VM acceptance requires a clean tracked source tree.' >&2
-    printf '%s\n' "$tracked_status" >&2
+  local source_status unexpected_status= line
+  source_status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" || return
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ "$line" == "?? Plans/"* ]]; then
+      continue
+    fi
+    unexpected_status+="${unexpected_status:+$'\n'}$line"
+  done <<<"$source_status"
+  if [[ -n "$unexpected_status" ]]; then
+    printf '%s\n' 'Milestone 1 VM acceptance requires committed source outside Plans/.' >&2
+    printf '%s\n' "$unexpected_status" >&2
     return 1
   fi
   M1_TESTED_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return
