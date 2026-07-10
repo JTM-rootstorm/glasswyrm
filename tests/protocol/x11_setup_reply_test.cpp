@@ -74,10 +74,8 @@ void test_success_golden(const ByteOrder order, const std::string_view golden) {
           "success length field matches encoded body");
   require(reply[28] == 1 && reply[29] == 1,
           "one screen and one pixmap format are encoded");
-  const std::uint8_t expected_bit_order =
-      order == ByteOrder::LittleEndian ? 0 : 1;
-  require(reply[30] == expected_bit_order && reply[31] == expected_bit_order,
-          "wire byte-order enums use LSBFirst or MSBFirst values");
+  require(reply[30] == 0 && reply[31] == 0,
+          "synthetic image and bitmap formats remain LSBFirst");
   require(reply[64] == 24 && reply[65] == 32,
           "depth-24 pixmaps use 32 bits per pixel");
   require(reply[110] == 24 && reply[111] == 1,
@@ -147,7 +145,7 @@ int main() {
       "0");
   test_success_golden(
       ByteOrder::BigEndian,
-      "0100000b000000220000000100400000001fffff000000000015ffff01010101202008ff"
+      "0100000b000000220000000100400000001fffff000000000015ffff01010000202008ff"
       "00000000476c6173737779726d204d696c6573746f6e6520310000001820200000000000"
       "000000010000000200ffffff000000000000000004000300010e00cb0001000100000003"
       "000018011800000100000000000000030408010000ff00000000ff00000000ff0000000"

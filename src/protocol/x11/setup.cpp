@@ -20,11 +20,6 @@ constexpr std::uint32_t kRootWindow = 1;
 constexpr std::uint32_t kDefaultColormap = 2;
 constexpr std::uint32_t kRootVisual = 3;
 
-[[nodiscard]] constexpr std::uint8_t
-protocol_bit_order(const ByteOrder order) noexcept {
-  return order == ByteOrder::LittleEndian ? 0 : 1;
-}
-
 [[nodiscard]] std::size_t padding_for(const std::size_t size) noexcept {
   return (4 - (size & 3U)) & 3U;
 }
@@ -157,8 +152,8 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u16(std::numeric_limits<std::uint16_t>::max());
   body.write_u8(1);                         // screens
   body.write_u8(1);                         // pixmap formats
-  body.write_u8(protocol_bit_order(order)); // image byte order
-  body.write_u8(protocol_bit_order(order)); // bitmap bit order
+  body.write_u8(0);                         // image byte order: LSBFirst
+  body.write_u8(0);                         // bitmap bit order: LSBFirst
   body.write_u8(32);                        // bitmap scanline unit
   body.write_u8(32);                        // bitmap scanline pad
   body.write_u8(8);                         // minimum keycode

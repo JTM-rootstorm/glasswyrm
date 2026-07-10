@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <sys/types.h>
 #include <vector>
@@ -26,6 +27,7 @@ class Server {
   bool prepare_socket_path();
   bool remove_stale_socket();
   void accept_clients();
+  [[nodiscard]] std::optional<std::uint32_t> allocate_resource_base() const;
   void remove_closed_clients();
   void close_listener();
   void unlink_owned_socket();
@@ -36,7 +38,6 @@ class Server {
   dev_t socket_device_ = 0;
   ino_t socket_inode_ = 0;
   std::uint64_t next_client_identifier_ = 1;
-  std::uint32_t next_resource_base_ = 0x00200000U;
   std::vector<std::unique_ptr<ClientConnection>> clients_;
 };
 

@@ -8,12 +8,26 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
+#include <iterator>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+
+namespace {
+
+std::size_t descriptor_count(pid_t pid) {
+  const std::filesystem::path directory =
+      std::filesystem::path("/proc") / std::to_string(pid) / "fd";
+  return static_cast<std::size_t>(
+      std::distance(std::filesystem::directory_iterator(directory),
+                    std::filesystem::directory_iterator{}));
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   using gw::protocol::x11::ByteOrder;
@@ -34,7 +48,8 @@ int main(int argc, char** argv) {
                         WEXITSTATUS(duplicate_status) != 0,
                     "duplicate daemon rejects active socket");
 
-  for (int iteration = 0; iteration < 128; ++iteration) {
+  const std::size_t baseline_descriptors = descriptor_count(server.pid());
+  for (int iteration = 0; iteration < 320; ++iteration) {
     gw::test::X11FakeClient client(server.socket_path());
     if ((iteration & 1) == 0) {
       client.send_all(gw::test::make_setup_request(ByteOrder::LittleEndian));
@@ -43,6 +58,16 @@ int main(int argc, char** argv) {
                         "repeated setup succeeds");
     }
   }
+  bool descriptors_released = false;
+  for (int attempt = 0; attempt < 200; ++attempt) {
+    if (descriptor_count(server.pid()) == baseline_descriptors) {
+      descriptors_released = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  gw::test::require(descriptors_released,
+                    "short connections release every client descriptor");
   gw::test::X11FakeClient final_client(server.socket_path());
   final_client.send_all(gw::test::make_setup_request(ByteOrder::LittleEndian));
   gw::test::require(final_client.receive_setup_reply(ByteOrder::LittleEndian)[0] ==
@@ -128,5 +153,13 @@ int main(int argc, char** argv) {
   ::close(replacement_socket);
   gw::test::require(::unlink(ownership_path.c_str()) == 0,
                     "remove identity replacement fixture");
+
+  for (int iteration = 0; iteration < 32; ++iteration) {
+    gw::test::ServerProcess signal_server(argv[1]);
+    const int signal_status = signal_server.stop(SIGTERM);
+    gw::test::require(WIFEXITED(signal_status) &&
+                          WEXITSTATUS(signal_status) == 0,
+                      "repeated SIGTERM wakeup exits cleanly");
+  }
   return 0;
 }
