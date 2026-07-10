@@ -90,6 +90,7 @@ if get_option('glasswyrmd')
       integration_case[0],
       integration_program,
       args: [glasswyrmd_program.full_path()],
+      depends: glasswyrmd_program,
       timeout: 15,
     )
   endforeach
