@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <limits>
 #include <poll.h>
 #include <sys/socket.h>
@@ -17,8 +18,18 @@ namespace glasswyrm::server {
 namespace {
 
 volatile std::sig_atomic_t stop_requested = 0;
+volatile std::sig_atomic_t signal_write_descriptor = -1;
 
-void request_stop(int) { stop_requested = 1; }
+void request_stop(int) {
+  const int saved_errno = errno;
+  stop_requested = 1;
+  if (signal_write_descriptor >= 0) {
+    const std::uint8_t byte = 1;
+    (void)::write(static_cast<int>(signal_write_descriptor), &byte,
+                  sizeof(byte));
+  }
+  errno = saved_errno;
+}
 
 bool make_address(const std::string& path, sockaddr_un& address,
                   socklen_t& length) {
@@ -64,13 +75,21 @@ bool Server::remove_stale_socket() {
                  socket_path_.c_str());
     return false;
   }
+  if (before.st_uid != ::geteuid()) {
+    std::fprintf(stderr,
+                 "glasswyrmd: refusing to remove socket owned by another "
+                 "user: %s\n",
+                 socket_path_.c_str());
+    return false;
+  }
 
   sockaddr_un address {};
   socklen_t address_length = 0;
   if (!make_address(socket_path_, address, address_length)) {
     return false;
   }
-  const int probe = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  const int probe =
+      ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
   if (probe < 0) {
     std::fprintf(stderr, "glasswyrmd: cannot create socket probe: %s\n",
                  std::strerror(errno));
@@ -165,21 +184,39 @@ bool Server::open_listener() {
   return true;
 }
 
+std::optional<std::uint32_t> Server::allocate_resource_base() const {
+  constexpr std::uint64_t first_base = 0x00200000U;
+  constexpr std::uint64_t last_base = 0xffe00000U;
+  constexpr std::uint64_t stride = 0x00200000U;
+  for (std::uint64_t candidate = first_base; candidate <= last_base;
+       candidate += stride) {
+    const auto base = static_cast<std::uint32_t>(candidate);
+    const bool in_use = std::any_of(
+        clients_.begin(), clients_.end(), [base](const auto& client) {
+          return client->resource_id_base() == base;
+        });
+    if (!in_use) {
+      return base;
+    }
+  }
+  return std::nullopt;
+}
+
 void Server::accept_clients() {
   for (;;) {
     const int descriptor =
         ::accept4(listener_, nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK);
     if (descriptor >= 0) {
-      if (next_resource_base_ > 0x1fe00000U) {
+      const auto resource_base = allocate_resource_base();
+      if (!resource_base) {
         std::fprintf(stderr, "glasswyrmd: client resource-ID space exhausted\n");
         ::close(descriptor);
         continue;
       }
       clients_.push_back(std::make_unique<ClientConnection>(
-          descriptor, next_client_identifier_++, next_resource_base_));
+          descriptor, next_client_identifier_++, *resource_base));
       std::fprintf(stderr, "glasswyrmd: accepted client %llu\n",
                    static_cast<unsigned long long>(next_client_identifier_ - 1));
-      next_resource_base_ += 0x00200000U;
       continue;
     }
     if (errno == EINTR) {
@@ -226,6 +263,20 @@ void Server::unlink_owned_socket() {
 
 int Server::run() {
   stop_requested = 0;
+  int signal_pipe[2] = {-1, -1};
+  if (::pipe2(signal_pipe, O_CLOEXEC | O_NONBLOCK) != 0) {
+    std::fprintf(stderr, "glasswyrmd: cannot create signal wakeup pipe: %s\n",
+                 std::strerror(errno));
+    return 1;
+  }
+  signal_write_descriptor = signal_pipe[1];
+  const auto close_signal_pipe = [&signal_pipe] {
+    signal_write_descriptor = -1;
+    ::close(signal_pipe[0]);
+    ::close(signal_pipe[1]);
+    signal_pipe[0] = -1;
+    signal_pipe[1] = -1;
+  };
   struct sigaction action {};
   action.sa_handler = request_stop;
   ::sigemptyset(&action.sa_mask);
@@ -233,6 +284,7 @@ int Server::run() {
       ::sigaction(SIGTERM, &action, nullptr) != 0) {
     std::fprintf(stderr, "glasswyrmd: cannot install signal handlers: %s\n",
                  std::strerror(errno));
+    close_signal_pipe();
     return 1;
   }
   struct sigaction ignore_pipe {};
@@ -241,14 +293,16 @@ int Server::run() {
   (void)::sigaction(SIGPIPE, &ignore_pipe, nullptr);
 
   if (!open_listener()) {
+    close_signal_pipe();
     return 1;
   }
   std::fprintf(stderr, "glasswyrmd: listening on %s\n", socket_path_.c_str());
 
   while (!stop_requested) {
     std::vector<pollfd> descriptors;
-    descriptors.reserve(clients_.size() + 1);
+    descriptors.reserve(clients_.size() + 2);
     descriptors.push_back(pollfd{listener_, POLLIN, 0});
+    descriptors.push_back(pollfd{signal_pipe[0], POLLIN, 0});
     for (const auto& client : clients_) {
       descriptors.push_back(
           pollfd{client->descriptor(), client->poll_events(), 0});
@@ -260,11 +314,12 @@ int Server::run() {
       }
       std::fprintf(stderr, "glasswyrmd: poll failed: %s\n",
                    std::strerror(errno));
+      close_signal_pipe();
       return 1;
     }
     const std::size_t polled_client_count = clients_.size();
     for (std::size_t index = 0; index < polled_client_count; ++index) {
-      clients_[index]->handle_events(descriptors[index + 1].revents);
+      clients_[index]->handle_events(descriptors[index + 2].revents);
     }
     remove_closed_clients();
     if ((descriptors.front().revents & POLLIN) != 0) {
@@ -273,6 +328,7 @@ int Server::run() {
   }
 
   clients_.clear();
+  close_signal_pipe();
   close_listener();
   unlink_owned_socket();
   std::fprintf(stderr, "glasswyrmd: stopped\n");

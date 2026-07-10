@@ -45,6 +45,12 @@ unowned. Signal handlers only record shutdown intent; cleanup occurs in normal
 control flow. The daemon stays foreground and init-system neutral so tests and
 either supported Gentoo init system can supervise it directly.
 
+Stale-socket recovery requires the socket inode to be owned by the daemon's
+effective user and rechecks its identity immediately before removal. Milestone
+1 does not attempt to defend against a hostile same-UID process racing pathname
+replacement; same-UID clients already share the unauthenticated local trust
+domain in this milestone.
+
 ## Consequences
 
 - Raw little- and big-endian clients can complete X11 11.0 setup.

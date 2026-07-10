@@ -27,6 +27,9 @@ class ClientConnection {
 
   [[nodiscard]] int descriptor() const { return descriptor_; }
   [[nodiscard]] std::uint64_t identifier() const { return identifier_; }
+  [[nodiscard]] std::uint32_t resource_id_base() const {
+    return resource_id_base_;
+  }
   [[nodiscard]] State state() const { return state_; }
   [[nodiscard]] short poll_events() const;
 

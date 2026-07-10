@@ -1,4 +1,4 @@
-option('glasswyrmd', type: 'boolean', value: true, description: 'Build the protocol server placeholder.')
+option('glasswyrmd', type: 'boolean', value: true, description: 'Build the X11 protocol server.')
 option('gwm', type: 'boolean', value: true, description: 'Build the window manager placeholder.')
 option('gwcomp', type: 'boolean', value: true, description: 'Build the compositor placeholder.')
 option('tools', type: 'boolean', value: true, description: 'Build the developer tool placeholders.')
