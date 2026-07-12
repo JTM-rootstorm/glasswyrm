@@ -283,9 +283,6 @@ int run(const glasswyrm::compositor::Options& options) {
           if ((gwipc_message_flags(message.get()) & GWIPC_FLAG_ACK_REQUIRED) == 0)
             frame.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
           (void)enqueue_ack(producer.get(), message.get(), commit, frame);
-          for (const auto& [buffer_id, reason] : compositor.releases())
-            (void)enqueue_release(producer.get(), buffer_id, reason);
-          compositor.clear_releases();
           if (frame.result == GWIPC_FRAME_ACCEPTED) {
             accepted_any_frame = true;
             std::fprintf(stderr, "gwcomp: frame accepted commit=%llu frame=%llu hash=%016llx\n",
@@ -304,6 +301,9 @@ int run(const glasswyrm::compositor::Options& options) {
       }
       if (!applied && type != GWIPC_MESSAGE_FRAME_COMMIT)
         std::fprintf(stderr, "gwcomp: rejected contract type=0x%04x\n", type);
+      for (const auto& [buffer_id, reason] : compositor.releases())
+        (void)enqueue_release(producer.get(), buffer_id, reason);
+      compositor.clear_releases();
     }
     if (producer && gwipc_connection_get_state(producer.get()) ==
                         GWIPC_CONNECTION_CLOSED) {
