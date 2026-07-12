@@ -79,7 +79,10 @@ bool CompositorPeer::connect(std::string &error) {
 }
 
 bool CompositorPeer::send_bootstrap(std::string &error) {
-  return submit(CompositorSnapshotSubmission{1, 1, {}, {}}, error);
+  return submit(replay_input_.commit_id != 0
+                    ? replay_input_
+                    : CompositorSnapshotSubmission{1, 1, {}, {}},
+                error);
 }
 
 bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
@@ -193,55 +196,66 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
   return true;
 }
 
-bool CompositorPeer::drain(std::string &error) {
+PeerProcessOutcome CompositorPeer::drain(std::string &error) {
   for (;;) {
     glasswyrm::ipc::Message message;
     const auto status = transport_.handle().receive(message);
     if (status == GWIPC_STATUS_WOULD_BLOCK)
-      return true;
+      return PeerProcessOutcome::Progress;
     if (status != GWIPC_STATUS_OK) {
       error = "compositor peer receive failed";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     if (gwipc_message_type(message.get()) != GWIPC_MESSAGE_FRAME_ACKNOWLEDGED) {
       error = gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE
                   ? "metadata-only compositor sent a buffer release"
                   : "unexpected compositor bootstrap message";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     gwipc_decoded_contract *raw = nullptr;
     if (gwipc_contract_decode_message(message.get(), &raw) != GWIPC_STATUS_OK)
-      return false;
+      return PeerProcessOutcome::Fatal;
     std::unique_ptr<gwipc_decoded_contract, DecodedDelete> decoded(raw);
     const auto *ack = gwipc_decoded_frame_acknowledged(decoded.get());
+    if (ack && ack->commit_id == pending_.commit_id && ack->output_id == 1 &&
+        ack->presented_generation == pending_.generation &&
+        ack->result >= GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA &&
+        ack->result <= GWIPC_FRAME_DROPPED &&
+        (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) != 0 &&
+        gwipc_message_reply_to(message.get()) == commit_sequence_) {
+      state_ = PeerBootstrapState::Synchronized;
+      return PeerProcessOutcome::SemanticRejected;
+    }
     if (!ack || ack->commit_id != pending_.commit_id || ack->output_id != 1 ||
         ack->presented_generation != pending_.generation ||
         ack->result != GWIPC_FRAME_ACCEPTED ||
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||
         gwipc_message_reply_to(message.get()) != commit_sequence_) {
       error = "invalid compositor bootstrap acknowledgement";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     replay_input_ = pending_;
     state_ = PeerBootstrapState::Synchronized;
   }
 }
 
-bool CompositorPeer::process(const short revents, std::string &error) {
+PeerProcessOutcome CompositorPeer::process(const short revents, std::string &error) {
   if (!transport_.process(revents, error)) {
     state_ = PeerBootstrapState::Failed;
-    return false;
+    return PeerProcessOutcome::Disconnected;
   }
   if (state_ == PeerBootstrapState::Connecting && transport_.established() &&
       !send_bootstrap(error)) {
     state_ = PeerBootstrapState::Failed;
-    return false;
+    return PeerProcessOutcome::Fatal;
   }
-  if (state_ == PeerBootstrapState::AwaitingReply && !drain(error)) {
-    state_ = PeerBootstrapState::Failed;
-    return false;
+  if (state_ == PeerBootstrapState::AwaitingReply) {
+    const auto outcome = drain(error);
+    if (outcome == PeerProcessOutcome::Fatal)
+      state_ = PeerBootstrapState::Failed;
+    return outcome;
   }
-  return true;
+  return PeerProcessOutcome::Progress;
 }
 
 void CompositorPeer::disconnect() noexcept {

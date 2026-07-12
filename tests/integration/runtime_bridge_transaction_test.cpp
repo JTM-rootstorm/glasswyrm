@@ -95,15 +95,11 @@ int main(int argc, char** argv) {
           "completed transaction can explicitly begin policy rollback");
 
   stop(policy_process);
-  policy_process = -1;
-  bool failed = false;
-  const auto deadline =
-      RuntimeBridge::Clock::now() + std::chrono::seconds(5);
-  while (!failed && RuntimeBridge::Clock::now() < deadline) {
-    failed = !service_once(bridge, error);
-  }
-  require(failed && !error.empty(),
-          "peer loss during a transaction is an explicit failure");
+  policy_process = launch(argv[1], policy_socket);
+  drive_until(bridge, [&] { return bridge.policy_result_ready(); },
+              "peer restart replays bootstrap and pending policy transaction");
+  require(bridge.policy_result().generation == 4,
+          "restarted policy peer completes the retained transaction");
 
   bridge.start();
   require(!bridge.policy_result_ready() &&
@@ -112,5 +108,6 @@ int main(int argc, char** argv) {
               !bridge.submit_policy({5, 5, {}}, error),
           "start resets transaction stage before peers synchronize");
   stop(compositor_process);
+  stop(policy_process);
   return 0;
 }
