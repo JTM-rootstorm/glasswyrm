@@ -10,6 +10,7 @@ gw_x11_setup_lib = static_library(
     'protocol/x11/setup.cpp',
     'protocol/x11/request.cpp',
     'protocol/x11/reply.cpp',
+    'protocol/x11/event.cpp',
   ),
   include_directories: include_directories('.'),
 )

@@ -84,6 +84,13 @@ class ResourceTable {
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner);
+  [[nodiscard]] bool set_event_selection(std::uint32_t window, ClientId client,
+                                         std::uint32_t mask);
+  [[nodiscard]] std::uint32_t event_selection(std::uint32_t window,
+                                              ClientId client) const noexcept;
+  [[nodiscard]] std::uint32_t all_event_selections(
+      std::uint32_t window) const noexcept;
+  void remove_event_selections(ClientId client) noexcept;
 
   [[nodiscard]] PropertyMutationStatus change_property(
       std::uint32_t window, std::uint32_t property_atom, Property value,

@@ -28,6 +28,7 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   root.depth = screen.root_depth;
   root.window_class = WindowClass::InputOutput;
   root.visual = screen.root_visual;
+  root.map_state = MapState::Viewable;
   root.attributes.colormap = screen.default_colormap;
   resources_.emplace(
       screen.root_window,
@@ -86,6 +87,9 @@ CreateWindowStatus ResourceTable::create_window(
   window.height = spec.height;
   window.border_width = spec.border_width;
   window.attributes = spec.attributes;
+  if (spec.initial_event_mask != 0) {
+    window.event_selections.emplace(owner, spec.initial_event_mask);
+  }
 
   if (spec.window_class == WindowClass::CopyFromParent) {
     window.window_class = parent->window_class;
@@ -216,6 +220,7 @@ void ResourceTable::destroy_window_tree(const std::uint32_t xid,
 }
 
 CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
+  remove_event_selections(owner);
   CleanupResult result;
   while (true) {
     const auto iterator = resources_by_owner_.find(owner);
@@ -225,6 +230,54 @@ CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
     destroy_window_tree(iterator->second.back(), result);
   }
   return result;
+}
+
+bool ResourceTable::set_event_selection(const std::uint32_t window_id,
+                                        const ClientId client,
+                                        const std::uint32_t mask) {
+  auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return false;
+  }
+  if (mask == 0) {
+    window->event_selections.erase(client);
+  } else {
+    window->event_selections.insert_or_assign(client, mask);
+  }
+  return true;
+}
+
+std::uint32_t ResourceTable::event_selection(
+    const std::uint32_t window_id, const ClientId client) const noexcept {
+  const auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return 0;
+  }
+  const auto iterator = window->event_selections.find(client);
+  return iterator == window->event_selections.end() ? 0 : iterator->second;
+}
+
+std::uint32_t ResourceTable::all_event_selections(
+    const std::uint32_t window_id) const noexcept {
+  const auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return 0;
+  }
+  std::uint32_t result = 0;
+  for (const auto& [client, mask] : window->event_selections) {
+    static_cast<void>(client);
+    result |= mask;
+  }
+  return result;
+}
+
+void ResourceTable::remove_event_selections(const ClientId client) noexcept {
+  for (auto& [xid, record] : resources_) {
+    static_cast<void>(xid);
+    if (auto* window = std::get_if<WindowResource>(&record.payload)) {
+      window->event_selections.erase(client);
+    }
+  }
 }
 
 PropertyMutationStatus ResourceTable::change_property(

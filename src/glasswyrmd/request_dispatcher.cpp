@@ -142,7 +142,7 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
         if ((value & ~0x01ffffffU) != 0) {
           return error(context, request, x11::CoreErrorCode::BadValue, value);
         }
-        spec.attributes.event_mask = value;
+        spec.initial_event_mask = value;
         break;
       case 12:
         if ((value & ~0x0000204fU) != 0) {
@@ -200,6 +200,43 @@ DispatchResult destroy_window(ServerState& state,
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
   return {};
+}
+
+DispatchResult get_window_attributes(ServerState& state,
+                                     const DispatchContext& context,
+                                     const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t window_id = 0;
+  (void)reader.read_u32(window_id);
+  const auto* window = state.resources().find_window(window_id);
+  if (window == nullptr) {
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  }
+  x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                          window->attributes.backing_store);
+  reply.write_u32(window->visual);
+  reply.write_u16(static_cast<std::uint16_t>(window->window_class));
+  reply.write_u8(window->attributes.bit_gravity);
+  reply.write_u8(window->attributes.window_gravity);
+  reply.write_u32(window->attributes.backing_planes);
+  reply.write_u32(window->attributes.backing_pixel);
+  reply.write_u8(window->attributes.save_under ? 1 : 0);
+  reply.write_u8(window->attributes.colormap == state.screen().default_colormap
+                     ? 1
+                     : 0);
+  reply.write_u8(static_cast<std::uint8_t>(window->map_state));
+  reply.write_u8(window->attributes.override_redirect ? 1 : 0);
+  reply.write_u32(window->attributes.colormap);
+  reply.write_payload_u32(state.resources().all_event_selections(window_id));
+  reply.write_payload_u32(
+      state.resources().event_selection(window_id, context.client_id));
+  reply.write_payload_u16(static_cast<std::uint16_t>(
+      window->attributes.do_not_propagate_mask));
+  reply.write_payload_u16(0);
+  return {std::move(reply).finish()};
 }
 
 DispatchResult get_geometry(ServerState& state,
@@ -527,6 +564,13 @@ DispatchResult dispatch_request(ServerState& state,
     switch (static_cast<x11::CoreOpcode>(request.opcode)) {
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);
+      case x11::CoreOpcode::ChangeWindowAttributes:
+      case x11::CoreOpcode::MapWindow:
+      case x11::CoreOpcode::UnmapWindow:
+      case x11::CoreOpcode::ConfigureWindow:
+        return error(context, request, x11::CoreErrorCode::BadRequest);
+      case x11::CoreOpcode::GetWindowAttributes:
+        return get_window_attributes(state, context, request);
       case x11::CoreOpcode::DestroyWindow:
         return destroy_window(state, context, request);
       case x11::CoreOpcode::GetGeometry:
