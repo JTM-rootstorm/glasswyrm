@@ -108,6 +108,18 @@ if get_option('glasswyrmd')
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
     )
+    glasswyrmd_integrated_startup_test = executable(
+      'glasswyrmd_integrated_startup_test',
+      files('integration/glasswyrmd_integrated_startup_test.cpp'),
+    )
+    test(
+      'glasswyrmd-integrated-startup',
+      glasswyrmd_integrated_startup_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 20,
+    )
   endif
 endif
 
