@@ -78,5 +78,46 @@ int main() {
       !wide.invariants_hold()) {
     return 7;
   }
+
+  ResourceTable mixed;
+  if (mixed.create_window(1, base, mask, make_window(base + 1, 1)) !=
+          CreateWindowStatus::Success ||
+      mixed.create_window(2, base, mask,
+                          make_window(base + 2, base + 1)) !=
+          CreateWindowStatus::Success ||
+      mixed.create_window(1, base, mask,
+                          make_window(base + 3, base + 1)) !=
+          CreateWindowStatus::Success ||
+      mixed.create_window(2, base, mask,
+                          make_window(base + 4, base + 2)) !=
+          CreateWindowStatus::Success)
+    return 8;
+  constexpr std::uint32_t structure = 1U << 17U;
+  constexpr std::uint32_t substructure = 1U << 19U;
+  (void)mixed.set_event_selection(base + 2, 10, structure);
+  (void)mixed.set_event_selection(base + 1, 20, substructure);
+  const auto plan = mixed.capture_destroy_plan(base + 1);
+  if (!plan || plan->postorder.size() != 4 ||
+      std::vector<std::uint32_t>{plan->postorder[0].xid,
+                                 plan->postorder[1].xid,
+                                 plan->postorder[2].xid,
+                                 plan->postorder[3].xid} !=
+          std::vector<std::uint32_t>{base + 3, base + 4, base + 2,
+                                     base + 1} ||
+      plan->postorder[2].structure_recipients !=
+          std::vector<ClientId>{10} ||
+      plan->postorder[2].substructure_recipients !=
+          std::vector<ClientId>{20} || plan->postorder[0].owner != 1 ||
+      plan->postorder[1].owner != 2 || plan->postorder[2].owner != 2 ||
+      plan->postorder[3].owner != 1 ||
+      !mixed.find_window(base + 4))
+    return 9;
+  CleanupResult mixed_cleanup;
+  if (mixed.commit_destroy_plan(*plan, &mixed_cleanup) !=
+          DestroyWindowStatus::Success ||
+      mixed_cleanup.resources_destroyed != 4 ||
+      mixed.resource_count_by_owner(1) != 0 ||
+      mixed.resource_count_by_owner(2) != 0 || !mixed.invariants_hold())
+    return 10;
   return 0;
 }

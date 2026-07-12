@@ -57,6 +57,12 @@ struct ClientCleanupWindow {
   std::uint32_t parent{0};
   std::vector<ClientId> structure_recipients;
   std::vector<ClientId> substructure_recipients;
+  std::optional<ClientId> owner;
+};
+
+struct WindowDestroyPlan {
+  std::uint32_t root{0};
+  std::vector<ClientCleanupWindow> postorder;
 };
 
 struct ClientCleanupPlan {
@@ -112,6 +118,10 @@ class ResourceTable {
       const WindowCreateSpec& spec);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
+  [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
+      std::uint32_t xid) const;
+  [[nodiscard]] DestroyWindowStatus commit_destroy_plan(
+      const WindowDestroyPlan& plan, CleanupResult* result = nullptr);
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner);
   [[nodiscard]] ClientCleanupPlan prepare_client_cleanup(ClientId owner);
   [[nodiscard]] CleanupResult commit_client_cleanup(
@@ -145,7 +155,6 @@ class ResourceTable {
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
-  void destroy_window_tree(std::uint32_t xid, CleanupResult& result);
   void destroy_leaf(std::uint32_t xid, CleanupResult& result);
   void recompute_map_states_from(std::uint32_t xid, bool parent_viewable);
 
