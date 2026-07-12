@@ -635,6 +635,9 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
   if (!state.resources().find_window(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
   if (decoded.window == state.screen().root_window) return {};
+  if (state.resources().is_policy_candidate(decoded.window) &&
+      context.integrated_lifecycle)
+    return DispatchResult::deferred(decoded.window);
   if (state.resources().is_policy_candidate(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadImplementation);
   switch (state.resources().set_local_map_intent(decoded.window, mapped)) {
@@ -665,6 +668,9 @@ DispatchResult configure_window(ServerState& state,
       *decoded.stack_mode != x11::CoreStackMode::Below)
     return error(context, request, x11::CoreErrorCode::BadImplementation,
                  static_cast<std::uint32_t>(*decoded.stack_mode));
+  if (state.resources().is_policy_candidate(decoded.window) &&
+      context.integrated_lifecycle)
+    return DispatchResult::deferred(decoded.window, decoded);
   if (state.resources().is_policy_candidate(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadImplementation);
   LocalConfigure local{decoded.x, decoded.y, decoded.width, decoded.height,

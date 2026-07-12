@@ -406,6 +406,7 @@ if get_option('glasswyrmd')
     ['window-tree', 'window_tree_test.cpp'],
     ['server-lifecycle-state', 'server_lifecycle_state_test.cpp'],
     ['local-lifecycle-dispatch', 'local_lifecycle_dispatch_test.cpp'],
+    ['lifecycle-coordinator', 'lifecycle_coordinator_test.cpp'],
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
