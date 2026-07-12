@@ -37,6 +37,12 @@ if get_option('gwm')
     depends: gwm_program,
     timeout: 15,
   )
+  test('gwm-help', gwm_program, args: ['--help'], depends: gwm_program,
+       timeout: 10)
+  test('gwm-version', gwm_program, args: ['--version'], depends: gwm_program,
+       timeout: 10)
+  test('gwm-m5-producer-help', gwm_m5_producer_program, args: ['--help'],
+       depends: gwm_m5_producer_program, timeout: 10)
 
 endif
 

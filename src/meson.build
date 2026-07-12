@@ -220,6 +220,12 @@ if get_option('gwm')
     dependencies: [gwm_options_dep, gw_wm_policy_dep, gwipc_dep],
     install: true,
   )
+  gwm_m5_producer_program = executable(
+    'gwm_m5_producer',
+    files('../tests/integration/gwm_m5_producer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
 endif
 
 if get_option('gwcomp')
