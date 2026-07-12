@@ -135,9 +135,6 @@ int main(int argc, char** argv) try {
   (void)input.barrier(id++);
   (void)input.motion(id++, 2, ga.x + 8, ga.y + 8);
   {
-    XPtr<xcb_generic_event_t> event(wait_for(a, XCB_ENTER_NOTIFY));
-  }
-  {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_MOTION_NOTIFY));
   }
   const auto focus_a = input.button(id++, 3, 1, true);
