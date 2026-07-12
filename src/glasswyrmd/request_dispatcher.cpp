@@ -7,6 +7,7 @@
 #include "glasswyrmd/raster_ops.hpp"
 #include "core/geometry/region.hpp"
 #include "protocol/x11/exposure_event.hpp"
+#include "protocol/x11/event_mask.hpp"
 
 #include <bit>
 #include <algorithm>
@@ -40,8 +41,6 @@ bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
 
 std::optional<StructuralEventState> capture_structural_state(
     const ResourceTable& resources, const std::uint32_t target) {
-  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
-  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
   const auto* window = resources.find_window(target);
   if (!window) return std::nullopt;
   const auto* parent = resources.find_window(window->parent);
@@ -63,11 +62,11 @@ std::optional<StructuralEventState> capture_structural_state(
       state.above_sibling = *std::next(position);
   }
   for (const auto& [client, mask] : window->event_selections)
-    if ((mask & kStructureNotifyMask) != 0)
+    if ((mask & x11::event_mask::StructureNotify) != 0)
       state.structure_recipients.push_back(client);
   if (parent)
     for (const auto& [client, mask] : parent->event_selections)
-      if ((mask & kSubstructureNotifyMask) != 0)
+      if ((mask & x11::event_mask::SubstructureNotify) != 0)
         state.substructure_recipients.push_back(client);
   std::sort(state.structure_recipients.begin(),
             state.structure_recipients.end());
@@ -77,11 +76,11 @@ std::optional<StructuralEventState> capture_structural_state(
 }
 
 constexpr std::uint32_t kWindowAttributeMask = 0x00007fffU;
-constexpr std::uint32_t kCoreEventMask = 0x01ffffffU;
-constexpr std::uint32_t kDoNotPropagateMask = 0x0000204fU;
-constexpr std::uint32_t kButtonPressMask = 1U << 2U;
-constexpr std::uint32_t kResizeRedirectMask = 1U << 18U;
-constexpr std::uint32_t kSubstructureRedirectMask = 1U << 20U;
+constexpr auto kCoreEventMask = x11::event_mask::All;
+constexpr auto kDoNotPropagateMask = x11::event_mask::DoNotPropagate;
+constexpr auto kButtonPressMask = x11::event_mask::ButtonPress;
+constexpr auto kResizeRedirectMask = x11::event_mask::ResizeRedirect;
+constexpr auto kSubstructureRedirectMask = x11::event_mask::SubstructureRedirect;
 
 bool supported_window_drawable(const ResourceTable& resources,
                                const std::uint32_t xid) {

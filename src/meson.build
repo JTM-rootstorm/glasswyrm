@@ -13,6 +13,9 @@ gw_x11_setup_lib = static_library(
     'protocol/x11/event.cpp',
     'protocol/x11/exposure_event.cpp',
     'protocol/x11/lifecycle_request.cpp',
+    'protocol/x11/input_event.cpp',
+    'protocol/x11/crossing_event.cpp',
+    'protocol/x11/focus_event.cpp',
   ),
   include_directories: include_directories('.'),
 )
@@ -174,6 +177,8 @@ if get_option('glasswyrmd')
       'core/geometry/region.cpp',
       'glasswyrmd/pixel_storage.cpp',
       'glasswyrmd/raster_ops.cpp',
+      'input/input_state.cpp',
+      'input/input_router.cpp',
     ),
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),
