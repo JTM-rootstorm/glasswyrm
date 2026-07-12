@@ -58,6 +58,7 @@ struct WindowResource {
   bool map_requested{false};
   bool policy_visible{false};
   bool focused{false};
+  bool cleanup_pending{false};
   std::uint64_t creation_serial{0};
   std::uint64_t map_serial{0};
   std::uint64_t focus_serial{0};

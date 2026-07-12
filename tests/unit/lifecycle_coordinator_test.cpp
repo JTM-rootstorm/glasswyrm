@@ -81,6 +81,24 @@ void test_capacity_and_successful_fifo() {
           "successful commit promotes state and starts the next operation");
 }
 
+void test_priority_cleanup_runs_after_active_before_fifo() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 3, recorder.callbacks());
+  auto cleanup = operation(30, 3, 30);
+  cleanup.kind = LifecycleOperationKind::ClientCleanup;
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              coordinator.enqueue(operation(20, 2, 20)) ==
+                  EnqueueStatus::Queued &&
+              coordinator.enqueue_priority(std::move(cleanup)) ==
+                  EnqueueStatus::Queued,
+          "priority cleanup queues without interrupting active transaction");
+  require(coordinator.policy_accepted(snapshot(10)) &&
+              coordinator.compositor_accepted() && coordinator.active() &&
+              coordinator.active()->token == 30 &&
+              recorder.policy == std::vector<std::uint32_t>({10, 30}),
+          "priority cleanup starts before ordinary pending FIFO work");
+}
+
 void test_compositor_rejection_rolls_back_both_peers() {
   Recorder recorder;
   LifecycleCoordinator coordinator(snapshot(1), 4, recorder.callbacks());
@@ -231,10 +249,38 @@ void test_operation_rebase_preserves_unrelated_intent() {
           "Map rebase preserves a preceding Configure intent");
 }
 
+void test_create_destroy_rebase_latest_snapshot() {
+  LifecycleSnapshot committed;
+  committed.root_window = 1;
+  committed.root_order = {10};
+  committed.windows[10].xid = 10;
+  LifecycleOperation create;
+  create.kind = LifecycleOperationKind::Create;
+  create.window = 20;
+  create.proposed = committed;
+  create.proposed.windows[20].xid = 20;
+  const auto created = rebase_lifecycle_operation(committed, create);
+  require(created && created->windows.contains(10) &&
+              created->windows.contains(20) &&
+              created->root_order == std::vector<std::uint32_t>({10, 20}),
+          "Create rebase adds the staged candidate to latest committed state");
+  LifecycleOperation destroy;
+  destroy.kind = LifecycleOperationKind::Destroy;
+  destroy.window = 10;
+  destroy.proposed = *created;
+  destroy.proposed.windows.erase(10);
+  const auto destroyed = rebase_lifecycle_operation(*created, destroy);
+  require(destroyed && !destroyed->windows.contains(10) &&
+              destroyed->windows.contains(20) &&
+              destroyed->root_order == std::vector<std::uint32_t>({20}),
+          "Destroy rebase removes only its candidate from latest state");
+}
+
 }  // namespace
 
 int main() {
   test_capacity_and_successful_fifo();
+  test_priority_cleanup_runs_after_active_before_fifo();
   test_compositor_rejection_rolls_back_both_peers();
   test_cancellation_before_policy_result();
   test_disconnect_replays_each_phase();
@@ -242,5 +288,6 @@ int main() {
   test_rollback_preparation_failure_is_fatal();
   test_queued_operation_rebases_on_latest_commit();
   test_operation_rebase_preserves_unrelated_intent();
+  test_create_destroy_rebase_latest_snapshot();
   return 0;
 }

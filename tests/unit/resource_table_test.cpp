@@ -49,7 +49,22 @@ int main() {
     return 6;
   }
 
-  const auto cleanup = table.cleanup_client(1);
+  const auto plan = table.prepare_client_cleanup(1);
+  if (!plan.affects_policy ||
+      plan.roots != std::vector<std::uint32_t>{base_a + 1} ||
+      plan.postorder.size() != 2 ||
+      plan.postorder[0].xid != base_b + 1 ||
+      plan.postorder[1].xid != base_a + 1 ||
+      plan.postorder[1].substructure_recipients !=
+          std::vector<glasswyrm::server::ClientId>{2} ||
+      !table.cleanup_pending(base_a + 1) ||
+      !table.cleanup_pending(base_b + 1) ||
+      table.find(base_a + 1) == nullptr || table.find(base_b + 1) == nullptr ||
+      table.event_selection(1, 1) != 0 ||
+      table.event_selection(1, 2) != 0x00080000) {
+    return 8;
+  }
+  const auto cleanup = table.commit_client_cleanup(plan);
   if (cleanup.resources_destroyed != 2 || table.find(base_a + 1) != nullptr ||
       table.find(base_b + 1) != nullptr || table.find_window(1) == nullptr ||
       !table.invariants_hold()) {
