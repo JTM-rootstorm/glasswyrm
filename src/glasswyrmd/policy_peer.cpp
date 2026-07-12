@@ -163,7 +163,10 @@ bool PolicyPeer::connect(std::string &error) {
 }
 
 bool PolicyPeer::send_bootstrap(std::string &error) {
-  return submit(PolicySnapshotSubmission{1, 1, {}}, error);
+  return submit(replay_input_.commit_id != 0
+                    ? replay_input_
+                    : PolicySnapshotSubmission{1, 1, {}},
+                error);
 }
 
 bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
@@ -230,22 +233,22 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
   return true;
 }
 
-bool PolicyPeer::drain(std::string &error) {
+PeerProcessOutcome PolicyPeer::drain(std::string &error) {
   for (;;) {
     glasswyrm::ipc::Message message;
     const auto status = transport_.handle().receive(message);
     if (status == GWIPC_STATUS_WOULD_BLOCK)
-      return true;
+      return PeerProcessOutcome::Progress;
     if (status != GWIPC_STATUS_OK) {
       error = "policy peer receive failed";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     const auto type = gwipc_message_type(message.get());
     if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN ||
         type == GWIPC_MESSAGE_SNAPSHOT_END) {
       gwipc_decoded_control *raw = nullptr;
       if (gwipc_control_decode_message(message.get(), &raw) != GWIPC_STATUS_OK)
-        return false;
+        return PeerProcessOutcome::Fatal;
       std::unique_ptr<gwipc_decoded_control, DecodedControlDelete> decoded(raw);
       if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN) {
         const auto *value = gwipc_decoded_snapshot_begin(decoded.get());
@@ -255,7 +258,7 @@ bool PolicyPeer::drain(std::string &error) {
             value->generation != pending_.generation ||
             value->expected_item_count != pending_.windows.size()) {
           error = "invalid policy bootstrap snapshot";
-          return false;
+          return PeerProcessOutcome::Fatal;
         }
         reply_snapshot_active_ = true;
       } else {
@@ -266,7 +269,7 @@ bool PolicyPeer::drain(std::string &error) {
             value->actual_item_count != pending_.windows.size() ||
             result_.windows.size() != pending_.windows.size()) {
           error = "invalid policy bootstrap snapshot end";
-          return false;
+          return PeerProcessOutcome::Fatal;
         }
         reply_snapshot_active_ = false;
         reply_snapshot_complete_ = true;
@@ -276,24 +279,33 @@ bool PolicyPeer::drain(std::string &error) {
     if (type == GWIPC_MESSAGE_POLICY_WINDOW_STATE) {
       gwipc_decoded_contract *raw = nullptr;
       if (gwipc_contract_decode_message(message.get(), &raw) != GWIPC_STATUS_OK)
-        return false;
+        return PeerProcessOutcome::Fatal;
       std::unique_ptr<gwipc_decoded_contract, DecodedContractDelete> decoded(
           raw);
       const auto *value = gwipc_decoded_policy_window_state(decoded.get());
       if (!value || !reply_snapshot_active_)
-        return false;
+        return PeerProcessOutcome::Fatal;
       result_.windows.push_back(*value);
       continue;
     }
     if (type != GWIPC_MESSAGE_POLICY_ACKNOWLEDGED) {
       error = "unexpected policy bootstrap message";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     gwipc_decoded_contract *raw = nullptr;
     if (gwipc_contract_decode_message(message.get(), &raw) != GWIPC_STATUS_OK)
-      return false;
+      return PeerProcessOutcome::Fatal;
     std::unique_ptr<gwipc_decoded_contract, DecodedContractDelete> decoded(raw);
     const auto *ack = gwipc_decoded_policy_acknowledged(decoded.get());
+    if (ack && ack->commit_id == pending_.commit_id &&
+        ack->producer_generation == pending_.generation &&
+        ack->result >= GWIPC_POLICY_REJECTED_INCOMPLETE_SNAPSHOT &&
+        ack->result <= GWIPC_POLICY_REJECTED_UNSUPPORTED_METADATA &&
+        (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) != 0 &&
+        gwipc_message_reply_to(message.get()) == commit_sequence_) {
+      state_ = PeerBootstrapState::Synchronized;
+      return PeerProcessOutcome::SemanticRejected;
+    }
     if (!ack || !reply_snapshot_complete_ ||
         ack->commit_id != pending_.commit_id ||
         ack->producer_generation != pending_.generation ||
@@ -303,14 +315,14 @@ bool PolicyPeer::drain(std::string &error) {
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||
         gwipc_message_reply_to(message.get()) != commit_sequence_) {
       error = "invalid policy bootstrap acknowledgement";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     result_.generation = ack->applied_generation;
     result_.hash = ack->policy_hash;
     if (!valid_policy_result(pending_, result_) ||
         canonical_policy_hash(result_, screen_) != ack->policy_hash) {
       error = "policy acknowledgement hash does not match returned snapshot";
-      return false;
+      return PeerProcessOutcome::Fatal;
     }
     policy_hash_ = ack->policy_hash;
     replay_input_ = pending_;
@@ -318,27 +330,28 @@ bool PolicyPeer::drain(std::string &error) {
   }
 }
 
-bool PolicyPeer::process(const short revents, std::string &error) {
+PeerProcessOutcome PolicyPeer::process(const short revents, std::string &error) {
   if (!transport_.process(revents, error)) {
     state_ = PeerBootstrapState::Failed;
-    return false;
+    return PeerProcessOutcome::Disconnected;
   }
   if (state_ == PeerBootstrapState::Connecting && transport_.established() &&
       !send_bootstrap(error)) {
     state_ = PeerBootstrapState::Failed;
-    return false;
+    return PeerProcessOutcome::Fatal;
   }
-  if (state_ == PeerBootstrapState::AwaitingReply && !drain(error)) {
-    state_ = PeerBootstrapState::Failed;
-    return false;
+  if (state_ == PeerBootstrapState::AwaitingReply) {
+    const auto outcome = drain(error);
+    if (outcome == PeerProcessOutcome::Fatal)
+      state_ = PeerBootstrapState::Failed;
+    return outcome;
   }
-  return true;
+  return PeerProcessOutcome::Progress;
 }
 
 void PolicyPeer::disconnect() noexcept {
   transport_.disconnect();
   state_ = PeerBootstrapState::Disconnected;
-  policy_hash_ = 0;
   commit_sequence_ = 0;
   reply_snapshot_active_ = false;
   reply_snapshot_complete_ = false;

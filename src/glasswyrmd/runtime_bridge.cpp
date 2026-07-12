@@ -28,6 +28,8 @@ void RuntimeBridge::start(const Clock::time_point now) noexcept {
   retry_at_ = now;
   retry_index_ = 0;
   transaction_stage_ = TransactionStage::None;
+  resume_transaction_stage_ = TransactionStage::None;
+  recovering_ = false;
 }
 
 void RuntimeBridge::schedule_retry(const Clock::time_point now) noexcept {
@@ -45,21 +47,31 @@ bool RuntimeBridge::service(const short policy_revents,
     return false;
   if (stage_ == Stage::Ready) {
     std::string peer_error;
-    if (!policy_.process(policy_revents, peer_error) ||
-        !compositor_.process(compositor_revents, peer_error)) {
-      if (transaction_stage_ != TransactionStage::None) {
-        stage_ = Stage::Failed;
-        error = peer_error.empty() ? "peer disconnected during lifecycle transaction"
-                                   : peer_error;
-        return false;
-      }
+    const auto policy_outcome = policy_.process(policy_revents, peer_error);
+    const auto compositor_outcome =
+        compositor_.process(compositor_revents, peer_error);
+    if (policy_outcome == PeerProcessOutcome::Fatal ||
+        compositor_outcome == PeerProcessOutcome::Fatal) {
+      stage_ = Stage::Failed;
+      error = peer_error.empty() ? "peer protocol divergence" : peer_error;
+      return false;
+    }
+    if (policy_outcome == PeerProcessOutcome::Disconnected ||
+        compositor_outcome == PeerProcessOutcome::Disconnected) {
+      resume_transaction_stage_ = transaction_stage_;
+      recovering_ = true;
       policy_.disconnect();
       compositor_.disconnect();
       stage_ = Stage::Policy;
       deadline_ = now + deadline_duration_;
       retry_index_ = 0;
       schedule_retry(now);
+      return true;
     }
+    if (policy_outcome == PeerProcessOutcome::SemanticRejected)
+      transaction_stage_ = TransactionStage::PolicyRejected;
+    if (compositor_outcome == PeerProcessOutcome::SemanticRejected)
+      transaction_stage_ = TransactionStage::CompositorRejected;
     if (transaction_stage_ == TransactionStage::Policy &&
         policy_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::PolicyReady;
@@ -82,7 +94,10 @@ bool RuntimeBridge::service(const short policy_revents,
     }
     if (policy_.state() == PeerBootstrapState::Connecting ||
         policy_.state() == PeerBootstrapState::AwaitingReply) {
-      if (!policy_.process(policy_revents, error)) {
+      const auto outcome = policy_.process(policy_revents, error);
+      if (outcome == PeerProcessOutcome::Fatal ||
+          outcome == PeerProcessOutcome::SemanticRejected) return false;
+      if (outcome == PeerProcessOutcome::Disconnected) {
         policy_.disconnect();
         schedule_retry(now);
       }
@@ -102,13 +117,39 @@ bool RuntimeBridge::service(const short policy_revents,
     }
     if (compositor_.state() == PeerBootstrapState::Connecting ||
         compositor_.state() == PeerBootstrapState::AwaitingReply) {
-      if (!compositor_.process(compositor_revents, error)) {
+      const auto outcome = compositor_.process(compositor_revents, error);
+      if (outcome == PeerProcessOutcome::Fatal ||
+          outcome == PeerProcessOutcome::SemanticRejected) return false;
+      if (outcome == PeerProcessOutcome::Disconnected) {
         compositor_.disconnect();
         schedule_retry(now);
       }
     }
-    if (compositor_.state() == PeerBootstrapState::Synchronized)
+    if (compositor_.state() == PeerBootstrapState::Synchronized) {
       stage_ = Stage::Ready;
+      if (recovering_) {
+        transaction_stage_ = TransactionStage::None;
+        recovering_ = false;
+        std::string resume_error;
+        if (resume_transaction_stage_ == TransactionStage::Policy &&
+            !submit_policy(pending_policy_, resume_error)) {
+          error = resume_error;
+          return false;
+        }
+        if (resume_transaction_stage_ == TransactionStage::Compositor) {
+          transaction_stage_ = TransactionStage::PolicyReady;
+          if (!submit_compositor(pending_compositor_, resume_error)) {
+            error = resume_error;
+            return false;
+          }
+        }
+        if (resume_transaction_stage_ == TransactionStage::PolicyReady ||
+            resume_transaction_stage_ == TransactionStage::PolicyRejected ||
+            resume_transaction_stage_ == TransactionStage::Complete ||
+            resume_transaction_stage_ == TransactionStage::CompositorRejected)
+          transaction_stage_ = resume_transaction_stage_;
+      }
+    }
   }
   return true;
 }
@@ -120,6 +161,7 @@ bool RuntimeBridge::submit_policy(const PolicySnapshotSubmission& submission,
     return false;
   }
   if (!policy_.submit(submission, error)) return false;
+  pending_policy_ = submission;
   transaction_stage_ = TransactionStage::Policy;
   return true;
 }
@@ -127,13 +169,20 @@ bool RuntimeBridge::submit_policy(const PolicySnapshotSubmission& submission,
 bool RuntimeBridge::policy_result_ready() const noexcept {
   return transaction_stage_ == TransactionStage::PolicyReady;
 }
+bool RuntimeBridge::policy_rejected_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::PolicyRejected;
+}
 
 bool RuntimeBridge::submit_compositor(
     const CompositorSnapshotSubmission& submission, std::string& error) {
   if (!ready() || transaction_stage_ != TransactionStage::PolicyReady) return false;
   if (!compositor_.submit(submission, error)) return false;
+  pending_compositor_ = submission;
   transaction_stage_ = TransactionStage::Compositor;
   return true;
+}
+bool RuntimeBridge::compositor_rejected_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::CompositorRejected;
 }
 
 bool RuntimeBridge::compositor_result_ready() const noexcept {
@@ -143,7 +192,9 @@ bool RuntimeBridge::compositor_result_ready() const noexcept {
 bool RuntimeBridge::prepare_rollback() noexcept {
   if (!ready() ||
       (transaction_stage_ != TransactionStage::PolicyReady &&
-       transaction_stage_ != TransactionStage::Complete))
+       transaction_stage_ != TransactionStage::PolicyRejected &&
+       transaction_stage_ != TransactionStage::Complete &&
+       transaction_stage_ != TransactionStage::CompositorRejected))
     return false;
   transaction_stage_ = TransactionStage::None;
   return true;

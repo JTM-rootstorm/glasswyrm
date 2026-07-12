@@ -18,7 +18,7 @@ class CompositorPeer {
 public:
   CompositorPeer(std::string path, gw::protocol::x11::ScreenModel screen);
   [[nodiscard]] bool connect(std::string &error);
-  [[nodiscard]] bool process(short revents, std::string &error);
+  [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
   [[nodiscard]] short wanted_events() const noexcept {
     return transport_.wanted_events();
@@ -34,7 +34,7 @@ public:
 
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
-  [[nodiscard]] bool drain(std::string &error);
+  [[nodiscard]] PeerProcessOutcome drain(std::string &error);
 
   PeerTransport transport_;
   gw::protocol::x11::ScreenModel screen_;

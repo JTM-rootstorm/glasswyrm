@@ -43,7 +43,9 @@ template <class Peer> void drive(Peer &peer) {
     require(std::chrono::steady_clock::now() < deadline, "bootstrap timed out");
     pollfd descriptor{peer.fd(), peer.wanted_events(), 0};
     require(::poll(&descriptor, 1, 50) >= 0, "poll peer");
-    require(peer.process(descriptor.revents, error), error.c_str());
+    require(peer.process(descriptor.revents, error) ==
+                glasswyrm::server::PeerProcessOutcome::Progress,
+            error.c_str());
   }
 }
 template <class Peer> void synchronize(Peer &peer) {

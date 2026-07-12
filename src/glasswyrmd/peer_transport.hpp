@@ -14,6 +14,7 @@ enum class PeerBootstrapState {
   Synchronized,
   Failed,
 };
+enum class PeerProcessOutcome { Progress, SemanticRejected, Disconnected, Fatal };
 
 class PeerTransport {
 public:
