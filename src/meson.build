@@ -181,6 +181,7 @@ if get_option('glasswyrmd')
   gw_server_core_sources = files(
     'glasswyrmd/options.cpp',
     'glasswyrmd/client_connection.cpp',
+    'glasswyrmd/event_router.cpp',
     'glasswyrmd/server.cpp',
   )
   gw_server_core_dependencies = [gw_server_state_dep]
