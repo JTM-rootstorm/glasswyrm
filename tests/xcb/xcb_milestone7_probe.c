@@ -66,8 +66,7 @@ int main(void) {
                "CreatePixmap failed"))
     return fail(connection, "drawable creation failed");
 
-  const uint32_t gc_values[] = {0x00ffffffU, 0x00d94848U,
-                                XCB_GRAPHICS_EXPOSURE};
+  const uint32_t gc_values[] = {0x00ffffffU, 0x00d94848U, 1U};
   if (!checked(connection,
                xcb_create_gc_checked(
                    connection, gc, pixmap,
