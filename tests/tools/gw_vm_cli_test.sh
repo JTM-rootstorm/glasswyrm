@@ -386,6 +386,12 @@ scenario_exit=0
 api_version=0.4.0
 soversion=0
 wire_version=1.0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+xcb_proto=x11-base/xcb-proto-1.17.0
 x_servers_absent=true
 full_tests=passed
 sanitizer=passed
@@ -415,11 +421,16 @@ buffer_release=passed
 compositor_restart=passed
 gwm_restart=passed
 connection_survival=passed
+replay_hash=passed
+post_restart_hash=passed
 post_restart_drawing=passed
 rendering_archive=passed
 FACTS
       if [[ ${GW_VM_TEST_BAD_M7_FACTS:-0} == 1 ]]; then
         printf 'final_frame_golden=failed\nscenario_exit=1\n'
+      fi
+      if [[ ${GW_VM_TEST_BAD_M7_REPLAY:-0} == 1 ]]; then
+        printf 'replay_hash=failed\nscenario_exit=1\n'
       fi
       ;;
     milestone7-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
@@ -1049,6 +1060,9 @@ assert_contains "$artifact_dir/milestone7-summary.json" \
   '"required_base_commit": "d05dcf2bb979fd82dd5a1dd0a07e34a915ec9746"'
 assert_contains "$artifact_dir/milestone7-summary.json" '"final_frame_golden": "passed"'
 assert_contains "$artifact_dir/milestone7-summary.json" '"connection_survival": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"replay_hash": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"post_restart_hash": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"compiler_c": "gcc test"'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-runtime'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server-ipc'
@@ -1070,6 +1084,9 @@ assert_contains "$command_log" 'xcb_milestone7_probe'
 assert_contains "$command_log" 'm7_restart_hold_probe'
 assert_contains "$command_log" 'systemctl restart gwcomp-m7.service'
 assert_contains "$command_log" 'systemctl restart gwm-m7.service'
+assert_contains "$command_log" 'frame-hashes.json'
+assert_contains "$command_log" 'cmp "$restart_result"'
+assert_contains "$command_log" 'journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service'
 assert_contains "$command_log" 'milestone7-rendering.tar'
 assert_file_glob "$artifact_dir/milestone7-rendering.tar"
 
@@ -1078,6 +1095,12 @@ run_failure "$work_dir/milestone7-bad-golden.out" \
   env GW_VM_TEST_BAD_M7_FACTS=1 "$gw_vm" milestone7-runtime-test --yes
 assert_contains "$artifact_dir/milestone7-summary.json" \
   'final_frame_golden must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-bad-replay.out" \
+  env GW_VM_TEST_BAD_M7_REPLAY=1 "$gw_vm" milestone7-runtime-test --yes
+assert_contains "$artifact_dir/milestone7-summary.json" \
+  'replay_hash must be passed'
 
 : >"$command_log"
 run_failure "$work_dir/milestone7-error.out" \
