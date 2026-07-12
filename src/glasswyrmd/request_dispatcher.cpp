@@ -101,8 +101,13 @@ DecodedWindowAttributes decode_window_attributes(
       case 0:
         if (value > 1) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
         result.attributes.background_pixmap = value;
+        result.attributes.background_source = value == 0
+            ? BackgroundSource::None : BackgroundSource::ParentRelative;
         break;
-      case 1: result.attributes.background_pixel = value; break;
+      case 1:
+        result.attributes.background_pixel = value & 0x00ffffffU;
+        result.attributes.background_source = BackgroundSource::Pixel;
+        break;
       case 2:
         if (value != 0) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
         result.attributes.border_pixmap = value;
@@ -858,6 +863,16 @@ DispatchResult dispatch_request(ServerState& state,
         return list_properties(state, context, request);
       case x11::CoreOpcode::GetInputFocus:
         return get_input_focus(state, context, request);
+      case x11::CoreOpcode::CreatePixmap:
+      case x11::CoreOpcode::FreePixmap:
+      case x11::CoreOpcode::CreateGC:
+      case x11::CoreOpcode::ChangeGC:
+      case x11::CoreOpcode::FreeGC:
+      case x11::CoreOpcode::ClearArea:
+      case x11::CoreOpcode::CopyArea:
+      case x11::CoreOpcode::PolyFillRectangle:
+      case x11::CoreOpcode::PutImage:
+        return error(context, request, x11::CoreErrorCode::BadRequest);
       case x11::CoreOpcode::NoOperation:
         return {};
     }

@@ -102,6 +102,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('drawable-core', drawable_core_test, timeout: 10)
+  drawable_resource_test = executable(
+    'drawable_resource_test',
+    files('unit/drawable_resource_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drawable-resources', drawable_resource_test, timeout: 10)
   glasswyrmd_options_test = executable(
     'glasswyrmd_options_test',
     files('unit/glasswyrmd_options_test.cpp'),

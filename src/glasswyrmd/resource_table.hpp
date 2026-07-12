@@ -2,6 +2,8 @@
 
 #include "glasswyrmd/resource_id.hpp"
 #include "glasswyrmd/window.hpp"
+#include "glasswyrmd/pixmap.hpp"
+#include "glasswyrmd/graphics_context.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -14,12 +16,12 @@ namespace glasswyrm::server {
 
 using ClientId = std::uint64_t;
 
-enum class ResourceType { Window };
+enum class ResourceType { Window, Pixmap, GraphicsContext };
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
-  std::variant<WindowResource> payload;
+  std::variant<WindowResource, PixmapResource, GraphicsContextResource> payload;
 };
 
 enum class CreateWindowStatus {
@@ -46,6 +48,10 @@ enum class PropertyMutationStatus {
   BadAlloc,
 };
 enum class PropertyReadStatus { Success, BadWindow, BadValue };
+enum class CreatePixmapStatus { Success, BadIdChoice, BadDrawable, BadValue, BadAlloc };
+enum class FreePixmapStatus { Success, BadPixmap };
+enum class CreateGcStatus { Success, BadIdChoice, BadDrawable, BadMatch, BadAlloc };
+enum class FreeGcStatus { Success, BadGContext };
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -101,6 +107,10 @@ class ResourceTable {
   [[nodiscard]] const WindowResource* find_window(
       std::uint32_t xid) const noexcept;
   [[nodiscard]] WindowResource* find_window(std::uint32_t xid) noexcept;
+  [[nodiscard]] const PixmapResource* find_pixmap(std::uint32_t xid) const noexcept;
+  [[nodiscard]] PixmapResource* find_pixmap(std::uint32_t xid) noexcept;
+  [[nodiscard]] const GraphicsContextResource* find_gc(std::uint32_t xid) const noexcept;
+  [[nodiscard]] GraphicsContextResource* find_gc(std::uint32_t xid) noexcept;
   [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
   [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
                                                           bool mapped);
@@ -116,6 +126,15 @@ class ResourceTable {
   [[nodiscard]] CreateWindowStatus create_window(
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       const WindowCreateSpec& spec);
+  [[nodiscard]] CreatePixmapStatus create_pixmap(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t drawable, std::uint8_t depth,
+      std::uint16_t width, std::uint16_t height);
+  [[nodiscard]] FreePixmapStatus free_pixmap(std::uint32_t xid);
+  [[nodiscard]] CreateGcStatus create_gc(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t drawable, GraphicsContextResource gc);
+  [[nodiscard]] FreeGcStatus free_gc(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
