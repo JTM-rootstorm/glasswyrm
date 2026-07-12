@@ -163,7 +163,7 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
   CommitResult result;
   result.presented_generation = presented_generation_;
   if (snapshot_active_ || !initial_snapshot_received_ || frame.commit_id == 0 ||
-      frame.output_id == 0 || frame.producer_generation == 0 || frame.flags != 0)
+      frame.producer_generation == 0 || frame.flags != 0)
     return result;
   if (!pending_.output) {
     if (!pending_.surfaces.empty()) return result;
@@ -174,7 +174,7 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
     result.presented_generation = presented_generation_;
     return result;
   }
-  if (pending_.output->output_id != frame.output_id) return result;
+  if (frame.output_id != 0 && pending_.output->output_id != frame.output_id) return result;
   for (const auto& [id, surface] : pending_.surfaces) {
     (void)id;
     if (surface.output_id != pending_.output->output_id) {

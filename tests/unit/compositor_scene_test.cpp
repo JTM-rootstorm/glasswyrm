@@ -78,6 +78,10 @@ void test_snapshot_abort_restores_pending() {
   require(model.begin_complete_snapshot() && model.apply(output()) &&
               model.end_complete_snapshot(), "initial snapshot completes");
   require(model.commit(frame(1, 1)).accepted(), "initial frame commits");
+  auto all_outputs = frame(2, 2);
+  all_outputs.output_id = 0;
+  require(model.commit(all_outputs).accepted(),
+          "zero output target commits the single M4 output");
   require(model.begin_complete_snapshot(), "replacement snapshot begins from empty");
   require(model.pending().surfaces.empty() && !model.pending().output,
           "replacement snapshot stages an empty scene");
