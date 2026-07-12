@@ -12,6 +12,7 @@ currently implemented:
   update procedure.
 
 These documents do not declare Milestone 4 complete. The reusable scene,
-read-only buffer mapping, renderer, output, and dump primitives and the
-production listener exist; reactor-side buffer attachment, the end-to-end
-synthetic producer, and accepted-frame presentation remain deferred.
+read-only buffer mapping, renderer, output, dump primitives, production
+listener, and basic end-to-end synthetic presentation path exist. The remaining
+producer scenarios, buffer-release proofs, reconnect coverage, and complete VM
+acceptance remain deferred.
