@@ -53,7 +53,7 @@ EvaluationError validate(const RawState& raw) {
          (window.stack_sibling != 0 || window.stack_mode != StackMode::None)) ||
         (window.stack_serial != 0 && window.stack_mode == StackMode::None) ||
         window.stack_sibling == id ||
-        (window.wants_map != (window.map_serial != 0)) ||
+        (window.wants_map && window.map_serial == 0) ||
         !extent_fits(window.requested_x, window.requested_width) ||
         !extent_fits(window.requested_y, window.requested_height) ||
         !creation_serials.insert(window.creation_serial).second)
