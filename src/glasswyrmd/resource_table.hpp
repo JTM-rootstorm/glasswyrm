@@ -52,6 +52,20 @@ struct CleanupResult {
   std::size_t property_bytes_released{0};
 };
 
+struct ClientCleanupWindow {
+  std::uint32_t xid{0};
+  std::uint32_t parent{0};
+  std::vector<ClientId> structure_recipients;
+  std::vector<ClientId> substructure_recipients;
+};
+
+struct ClientCleanupPlan {
+  ClientId owner{0};
+  std::vector<std::uint32_t> roots;
+  std::vector<ClientCleanupWindow> postorder;
+  bool affects_policy{false};
+};
+
 struct PropertyReadResult {
   PropertyReadStatus status{PropertyReadStatus::Success};
   bool present{false};
@@ -99,6 +113,10 @@ class ResourceTable {
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner);
+  [[nodiscard]] ClientCleanupPlan prepare_client_cleanup(ClientId owner);
+  [[nodiscard]] CleanupResult commit_client_cleanup(
+      const ClientCleanupPlan& plan);
+  [[nodiscard]] bool cleanup_pending(std::uint32_t xid) const noexcept;
   [[nodiscard]] bool set_event_selection(std::uint32_t window, ClientId client,
                                          std::uint32_t mask);
   [[nodiscard]] std::uint32_t event_selection(std::uint32_t window,

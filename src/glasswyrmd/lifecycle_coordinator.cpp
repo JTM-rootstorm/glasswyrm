@@ -7,6 +7,35 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
   auto rebased = committed;
   const auto source = operation.proposed.windows.find(operation.window);
   const auto target = rebased.windows.find(operation.window);
+  if (operation.kind == LifecycleOperationKind::Create) {
+    if (source == operation.proposed.windows.end() ||
+        target != rebased.windows.end()) return std::nullopt;
+    rebased.windows.emplace(operation.window, source->second);
+    rebased.root_order.push_back(operation.window);
+    return rebased;
+  }
+  if (operation.kind == LifecycleOperationKind::Destroy) {
+    if (target == rebased.windows.end()) return std::nullopt;
+    rebased.windows.erase(target);
+    std::erase(rebased.root_order, operation.window);
+    if (rebased.focused_window == operation.window)
+      rebased.focused_window = rebased.root_window;
+    return rebased;
+  }
+  if (operation.kind == LifecycleOperationKind::ClientCleanup) {
+    for (auto iterator = rebased.windows.begin();
+         iterator != rebased.windows.end();) {
+      if (!operation.proposed.windows.contains(iterator->first)) {
+        std::erase(rebased.root_order, iterator->first);
+        if (rebased.focused_window == iterator->first)
+          rebased.focused_window = rebased.root_window;
+        iterator = rebased.windows.erase(iterator);
+      } else {
+        ++iterator;
+      }
+    }
+    return rebased;
+  }
   if (source == operation.proposed.windows.end() ||
       target == rebased.windows.end()) return std::nullopt;
   switch (operation.kind) {
@@ -54,6 +83,17 @@ EnqueueStatus LifecycleCoordinator::enqueue(LifecycleOperation operation) {
     return EnqueueStatus::Full;
   queue_.push_back(std::move(operation));
   if (phase_ == CoordinatorPhase::Idle && !start_next()) return EnqueueStatus::Fatal;
+  return EnqueueStatus::Queued;
+}
+
+EnqueueStatus LifecycleCoordinator::enqueue_priority(
+    LifecycleOperation operation) {
+  if (phase_ == CoordinatorPhase::Fatal) return EnqueueStatus::Fatal;
+  if (queue_.size() + (active_ ? 1U : 0U) >= maximum_pending_)
+    return EnqueueStatus::Full;
+  queue_.push_front(std::move(operation));
+  if (phase_ == CoordinatorPhase::Idle && !start_next())
+    return EnqueueStatus::Fatal;
   return EnqueueStatus::Queued;
 }
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <unordered_set>
 
 namespace glasswyrm::server {
 namespace {
@@ -331,16 +332,86 @@ void ResourceTable::destroy_window_tree(const std::uint32_t xid,
 }
 
 CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
+  const auto plan = prepare_client_cleanup(owner);
+  return commit_client_cleanup(plan);
+}
+
+ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
   remove_event_selections(owner);
-  CleanupResult result;
-  while (true) {
-    const auto iterator = resources_by_owner_.find(owner);
-    if (iterator == resources_by_owner_.end() || iterator->second.empty()) {
-      break;
+  ClientCleanupPlan plan;
+  plan.owner = owner;
+  const auto owned = resources_by_owner_.find(owner);
+  if (owned == resources_by_owner_.end()) return plan;
+
+  for (auto iterator = owned->second.rbegin(); iterator != owned->second.rend();
+       ++iterator) {
+    const auto xid = *iterator;
+    const auto* window = find_window(xid);
+    if (!window) continue;
+    bool covered = false;
+    auto parent = window->parent;
+    while (parent != 0 && parent != screen_.root_window) {
+      const auto* record = find(parent);
+      if (!record) break;
+      if (record->owner == owner) {
+        covered = true;
+        break;
+      }
+      const auto* parent_window = find_window(parent);
+      if (!parent_window) break;
+      parent = parent_window->parent;
     }
-    destroy_window_tree(iterator->second.back(), result);
+    if (!covered) plan.roots.push_back(xid);
   }
+
+  std::unordered_set<std::uint32_t> captured;
+  for (const auto root : plan.roots) {
+    std::vector<std::pair<std::uint32_t, bool>> stack{{root, false}};
+    while (!stack.empty()) {
+      const auto [xid, expanded] = stack.back();
+      stack.pop_back();
+      auto* window = find_window(xid);
+      if (!window) continue;
+      if (expanded) {
+        if (!captured.insert(xid).second) continue;
+        window->cleanup_pending = true;
+        plan.affects_policy = plan.affects_policy || is_policy_candidate(xid);
+        ClientCleanupWindow captured_window{xid, window->parent, {}, {}};
+        for (const auto& [client, mask] : window->event_selections)
+          if ((mask & kStructureNotifyMask) != 0)
+            captured_window.structure_recipients.push_back(client);
+        if (const auto* parent = find_window(window->parent))
+          for (const auto& [client, mask] : parent->event_selections)
+            if ((mask & kSubstructureNotifyMask) != 0)
+              captured_window.substructure_recipients.push_back(client);
+        std::sort(captured_window.structure_recipients.begin(),
+                  captured_window.structure_recipients.end());
+        std::sort(captured_window.substructure_recipients.begin(),
+                  captured_window.substructure_recipients.end());
+        plan.postorder.push_back(std::move(captured_window));
+        continue;
+      }
+      stack.emplace_back(xid, true);
+      for (const auto child : window->children)
+        stack.emplace_back(child, false);
+    }
+  }
+  return plan;
+}
+
+CleanupResult ResourceTable::commit_client_cleanup(
+    const ClientCleanupPlan& plan) {
+  CleanupResult result;
+  for (const auto root : plan.roots)
+    if (find_window(root)) (void)destroy_window(root, &result);
   return result;
+}
+
+bool ResourceTable::cleanup_pending(const std::uint32_t xid) const noexcept {
+  const auto* window = find_window(xid);
+  return window && window->cleanup_pending;
 }
 
 bool ResourceTable::set_event_selection(const std::uint32_t window_id,
