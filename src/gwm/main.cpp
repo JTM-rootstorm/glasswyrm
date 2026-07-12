@@ -20,6 +20,8 @@ namespace {
 
 constexpr std::uint64_t kRequiredCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_WINDOW_POLICY;
+constexpr std::uint64_t kOfferedCapabilities =
+    kRequiredCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 constexpr std::uint32_t kMaximumQueuedBytes = GWIPC_HARD_MAXIMUM_QUEUED_BYTES;
@@ -91,6 +93,16 @@ glasswyrm::wm::RawWindow window_from(const gwipc_policy_window_upsert& value) {
           value.map_serial,
           value.focus_serial,
           value.flags};
+}
+
+glasswyrm::wm::RawWindow window_from(
+    const gwipc_policy_lifecycle_window_upsert& value) {
+  auto window = window_from(value.window);
+  window.geometry_serial = value.geometry_serial;
+  window.stack_serial = value.stack_serial;
+  window.stack_sibling = value.stack_sibling;
+  window.stack_mode = static_cast<glasswyrm::wm::StackMode>(value.stack_mode);
+  return window;
 }
 
 gwipc_policy_result result_from(glasswyrm::wm::EvaluationError error) {
@@ -334,6 +346,17 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
                    static_cast<unsigned>(value->override_redirect));
       return true;
     }
+    case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT: {
+      const auto* value =
+          gwipc_decoded_policy_lifecycle_window_upsert(contract.get());
+      if (!value || !peer.transaction.upsert(window_from(*value))) return false;
+      std::fprintf(stderr,
+                   "gwm: lifecycle window upsert id=%u geometry=%llu stack=%llu\n",
+                   value->window.window_id,
+                   static_cast<unsigned long long>(value->geometry_serial),
+                   static_cast<unsigned long long>(value->stack_serial));
+      return true;
+    }
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE: {
       const auto* value = gwipc_decoded_policy_window_remove(contract.get());
       return value && peer.transaction.remove(value->window_id);
@@ -393,7 +416,7 @@ int run(const glasswyrm::wm::Options& options) {
   listener_options.path = options.ipc_socket.c_str();
   listener_options.local_role = GWIPC_ROLE_WINDOW_MANAGER;
   listener_options.accepted_peer_roles = GWIPC_ROLE_BIT(GWIPC_ROLE_PROTOCOL_SERVER);
-  listener_options.offered_capabilities = kRequiredCapabilities;
+  listener_options.offered_capabilities = kOfferedCapabilities;
   listener_options.required_peer_capabilities = kRequiredCapabilities;
   listener_options.maximum_payload = GWIPC_DEFAULT_MAXIMUM_PAYLOAD;
   listener_options.maximum_fd_count = GWIPC_DEFAULT_MAXIMUM_FDS;
