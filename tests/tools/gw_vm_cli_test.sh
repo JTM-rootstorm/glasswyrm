@@ -354,7 +354,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -393,6 +393,9 @@ assert_contains "$work_dir/scenario-m2-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m3-injection.out" "$gw_vm" scenario 'milestone3-runtime-test;touch'
 assert_contains "$work_dir/scenario-m3-injection.out" 'Scenario names are fixed'
+
+run_failure "$work_dir/scenario-m4-injection.out" "$gw_vm" scenario 'milestone4-runtime-test;touch'
+assert_contains "$work_dir/scenario-m4-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -736,5 +739,27 @@ run_failure "$work_dir/milestone3-error.out" \
 assert_contains "$work_dir/milestone3-error.out" 'failed during: guest-runtime'
 assert_contains "$artifact_dir/milestone3-summary.json" '"passed": false'
 assert_contains "$command_log" 'milestone3-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone4-gate.out" "$gw_vm" milestone4-runtime-test
+assert_contains "$work_dir/milestone4-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone4-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone4-runtime-test --yes
+assert_contains "$work_dir/milestone4-bad-base.out" \
+  'HEAD is not based on required Milestone 4 commit 6080e094c35929d0fb2deb4b31ff4040e392a75e'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone4-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" scenario milestone4-runtime-test --yes
+assert_contains "$work_dir/milestone4-dirty-source.out" 'requires committed source outside Plans/'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+run_failure "$work_dir/milestone4-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone4-runtime-test.sh"
+assert_contains "$work_dir/milestone4-wrapper-gate.out" '--yes'
 
 printf 'gw-vm CLI tests passed\n'
