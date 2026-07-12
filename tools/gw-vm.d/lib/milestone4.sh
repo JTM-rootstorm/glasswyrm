@@ -168,7 +168,9 @@ collect_milestone4_artifacts() {
     guest_run_script 'set -euo pipefail; cat "$1"' "$M4_GUEST_ARTIFACT_DIR/$name" >"$path" 2>&1 || { echo "Unable to collect guest artifact: $name" >>"$path"; failed=1; }
   done
   ssh_arguments
-  scp "${SSH_ARGS[@]}" "$SSH_TARGET:$M4_GUEST_ARTIFACT_DIR/milestone4-frames.tar" "$ARTIFACTS_PATH_ABS/milestone4-frames.tar" || failed=1
+  scp -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 \
+    "$SSH_TARGET:$M4_GUEST_ARTIFACT_DIR/milestone4-frames.tar" \
+    "$ARTIFACTS_PATH_ABS/milestone4-frames.tar" || failed=1
   if [[ -f "$ARTIFACTS_PATH_ABS/milestone4-frames.tar" ]]; then tar -tf "$ARTIFACTS_PATH_ABS/milestone4-frames.tar" >/dev/null || failed=1; fi
   return "$failed"
 }
@@ -184,7 +186,7 @@ if p.is_file():
     for line in p.read_text(errors="replace").splitlines():
         key, sep, value = line.partition("=")
         if sep and key.replace("_", "").isalnum(): facts[key] = value
-required = {key: "passed" for key in ("full_tests compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot frame_archive systemd_runtime socket_cleanup".split())}
+required = {key: "passed" for key in ("full_tests compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release detach_remove unknown_reference invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot frame_archive systemd_runtime socket_cleanup".split())}
 required.update(scenario_exit="0", x_servers_absent="true", api_version="0.2.0", wire_version="1.0")
 errors = [f"{k} must be {v}" for k,v in required.items() if facts.get(k) != v]
 if facts.get("sanitizer") not in {"passed", "unavailable"}: errors.append("sanitizer must be passed or unavailable")
