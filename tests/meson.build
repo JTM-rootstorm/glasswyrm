@@ -377,6 +377,7 @@ if get_option('glasswyrmd')
     ['resource-id', 'resource_id_test.cpp'],
     ['resource-table', 'resource_table_test.cpp'],
     ['window-tree', 'window_tree_test.cpp'],
+    ['server-lifecycle-state', 'server_lifecycle_state_test.cpp'],
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
