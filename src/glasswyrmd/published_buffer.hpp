@@ -12,7 +12,11 @@
 
 namespace glasswyrm::server {
 
-enum class PublishedBufferRetirement { Replaced, SurfaceRemoved };
+enum class PublishedBufferRetirement {
+  Replaced,
+  SurfaceRemoved,
+  ConsumerDone,
+};
 
 class PublishedWindowBuffer {
  public:
