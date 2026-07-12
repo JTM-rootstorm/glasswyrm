@@ -109,6 +109,15 @@ int main(int argc, char **argv) {
   if (error != NULL || focus == NULL) fail("initial focus query failed");
   const xcb_window_t original_focus = focus->focus;
   free(focus);
+  xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(
+      connection, xcb_get_geometry(connection, window), &error);
+  if (error != NULL || geometry == NULL)
+    fail("initial geometry query failed");
+  const int16_t original_x = geometry->x;
+  const int16_t original_y = geometry->y;
+  const uint16_t original_width = geometry->width;
+  const uint16_t original_height = geometry->height;
+  free(geometry);
   marker(control, "ready", "ready\n");
 
   const time_t deadline = time(NULL) + 30;
@@ -128,10 +137,11 @@ int main(int argc, char **argv) {
       attributes->map_state != XCB_MAP_STATE_VIEWABLE)
     fail("window mapping was not preserved");
   free(attributes);
-  xcb_get_geometry_reply_t *geometry = xcb_get_geometry_reply(
+  geometry = xcb_get_geometry_reply(
       connection, xcb_get_geometry(connection, window), &error);
-  if (error != NULL || geometry == NULL || geometry->x != 64 ||
-      geometry->y != 48 || geometry->width != 320 || geometry->height != 200)
+  if (error != NULL || geometry == NULL || geometry->x != original_x ||
+      geometry->y != original_y || geometry->width != original_width ||
+      geometry->height != original_height)
     fail("window geometry was not preserved");
   free(geometry);
   xcb_query_tree_reply_t *tree = xcb_query_tree_reply(
