@@ -931,7 +931,7 @@ M0  Repository skeleton                         complete
 M1  X11 setup service                           complete
 M2  Core protocol and resources                 complete
 M3  Versioned IPC foundation                    complete
-M4  Headless compositor and synthetic surfaces
+M4  Headless compositor and synthetic surfaces   complete
 M5  Window-manager policy scaffold
 M6  Three-process mapped-window lifecycle
 M7  Drawable and software-rendering bridge

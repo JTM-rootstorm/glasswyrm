@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-Milestone 4 is the compositor-facing proof of Glasswyrm's three-process
+Milestone 4 is the completed compositor-facing proof of Glasswyrm's three-process
 architecture. It does not implement mapped X11 windows, WM policy, input,
 DRM/KMS, scaling, HDR, VRR, or accelerated rendering.
 

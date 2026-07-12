@@ -1,6 +1,6 @@
 # 0006: Use a Transactional Headless Compositor
 
-Status: Accepted; integration incomplete
+Status: Accepted
 
 ## Context
 
