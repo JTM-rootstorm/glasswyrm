@@ -8,7 +8,9 @@ M6_GUEST_ARTIFACT_DIR=/var/tmp/glasswyrm-m6-artifacts
 M6_REQUIRED_BASE_COMMIT=9b9170de569fa112c400780beec3140bd4ef6af1
 M6_TESTED_COMMIT=
 M6_ARTIFACT_NAMES=(milestone6-runtime-test.log milestone6-meson-test.log
-  milestone6-raw-x11.log milestone6-scene.log milestone6-facts.env)
+  milestone6-raw-x11.log milestone6-scene.log milestone6-restart.json
+  milestone6-glasswyrmd-journal.log milestone6-gwm-journal.log
+  milestone6-gwcomp-journal.log milestone6-facts.env)
 
 milestone6_guest_script() {
   cat <<'GUEST_SCRIPT'
@@ -29,6 +31,7 @@ meson_log="$artifact_dir/milestone6-meson-test.log"
 raw_log="$artifact_dir/milestone6-raw-x11.log"
 scene_log="$artifact_dir/milestone6-scene.log"
 facts="$artifact_dir/milestone6-facts.env"
+restart_result="$artifact_dir/milestone6-restart.json"
 failure_stage=dependency-preparation
 full_tests=not-run sanitizer=not-run runtime_build=not-run server_standalone=not-run server_ipc=not-run
 gwm_only=not-run gwcomp_only=not-run ipc_only=not-run api04_consumers=not-run
@@ -40,6 +43,12 @@ touch "$runtime_log" "$meson_log" "$raw_log" "$scene_log"
 exec > >(tee -a "$runtime_log") 2>&1
 record_facts() {
   status=$?; set +e
+  systemctl stop glasswyrmd-m6.service gwm-m6.service gwcomp-m6.service >/dev/null 2>&1
+  journalctl -u glasswyrmd-m6.service --no-pager >"$artifact_dir/milestone6-glasswyrmd-journal.log" 2>&1
+  journalctl -u gwm-m6.service --no-pager >"$artifact_dir/milestone6-gwm-journal.log" 2>&1
+  journalctl -u gwcomp-m6.service --no-pager >"$artifact_dir/milestone6-gwcomp-journal.log" 2>&1
+  systemctl reset-failed glasswyrmd-m6.service gwm-m6.service gwcomp-m6.service >/dev/null 2>&1
+  rm -rf /run/glasswyrm-m6 /tmp/.X11-unix/X99
   api_version=unknown; wire_version=unknown
   if [[ -x "$ipc_build_dir/tests/gwipc_wire_probe" ]]; then
     api_version="$("$ipc_build_dir/tests/gwipc_wire_probe" --print-api-version 2>/dev/null || printf unknown)"
@@ -76,7 +85,29 @@ for source in gwipc_cpp_consumer.cpp gwipc_policy_cpp_consumer.cpp gwipc_lifecyc
 api04_consumers=passed
 failure_stage=integrated-three-process-probe
 meson test -C "$runtime_build_dir" --print-errorlogs glasswyrmd-integrated-lifecycle 2>&1 | tee -a "$raw_log"
-integrated_little_big=passed
+runtime_dir=/run/glasswyrm-m6 control_dir="$runtime_dir/control"
+rm -rf "$runtime_dir" /tmp/.X11-unix/X99; mkdir -p "$runtime_dir" "$control_dir" /tmp/.X11-unix
+systemd-run --unit=gwm-m6 --property=Type=simple --property=Restart=no --no-block -- "$runtime_build_dir/src/gwm" --ipc-socket "$runtime_dir/gwm.sock"
+systemd-run --unit=gwcomp-m6 --property=Type=simple --property=Restart=no --no-block -- "$runtime_build_dir/src/gwcomp" --ipc-socket "$runtime_dir/gwcomp.sock" --dump-dir "$scene_dir"
+for socket in "$runtime_dir/gwm.sock" "$runtime_dir/gwcomp.sock"; do for _ in {1..200}; do [[ -S "$socket" ]] && break; sleep .05; done; [[ -S "$socket" ]]; done
+systemd-run --unit=glasswyrmd-m6 --property=Type=simple --property=Restart=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$runtime_dir/gwm.sock" --compositor-socket "$runtime_dir/gwcomp.sock"
+for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .05; done; [[ -S /tmp/.X11-unix/X99 ]]
+"$runtime_build_dir/tests/x11_milestone6_probe" --display :99 --byte-order little >>"$raw_log" 2>&1
+"$runtime_build_dir/tests/x11_milestone6_probe" --display :99 --byte-order big >>"$raw_log" 2>&1
+DISPLAY=:99 "$runtime_build_dir/tests/xcb_milestone6_probe" >>"$raw_log" 2>&1
+xcb_m6_probe=passed integrated_little_big=passed
+"$runtime_build_dir/tests/m6_restart_hold_probe" --display :99 --control-dir "$control_dir" >>"$raw_log" 2>&1 & hold_pid=$!
+for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
+[[ -f "$control_dir/ready" ]] || { wait "$hold_pid"; exit 1; }
+systemctl restart gwm-m6.service
+for _ in {1..200}; do systemctl is-active --quiet gwm-m6.service && [[ -S "$runtime_dir/gwm.sock" ]] && break; sleep .05; done
+systemctl is-active --quiet gwm-m6.service; [[ -S "$runtime_dir/gwm.sock" ]]; sleep .25
+systemctl restart gwcomp-m6.service
+for _ in {1..200}; do systemctl is-active --quiet gwcomp-m6.service && [[ -S "$runtime_dir/gwcomp.sock" ]] && break; sleep .05; done
+systemctl is-active --quiet gwcomp-m6.service; [[ -S "$runtime_dir/gwcomp.sock" ]]; sleep .25
+touch "$control_dir/continue"; wait "$hold_pid"
+install -m 0644 "$control_dir/result.json" "$restart_result"
+grep -F '"completed":true' "$restart_result"; restart_probe=passed
 manifest="$(find /tmp -maxdepth 2 -path '/tmp/glasswyrmd-integrated-lifecycle-*/scene.jsonl' -type f -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
 [[ -n "$manifest" && -s "$manifest" ]]; cp "$manifest" "$scene_dir/scene.jsonl"
 if find /tmp -maxdepth 2 -path '/tmp/glasswyrmd-integrated-lifecycle-*/*.ppm' -print -quit | grep -q .; then exit 1; fi
@@ -124,7 +155,7 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     k,s,v=line.partition('=')
     if s: facts[k]=v
-required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers integrated_little_big no_ppm scene_archive'.split()
+required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers integrated_little_big no_ppm scene_archive restart_probe xcb_m6_probe'.split()
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
 if facts.get('scenario_exit')!='0': errors.append('scenario_exit must be 0')
 if facts.get('api_version')!='0.4.0': errors.append('api_version must be 0.4.0')

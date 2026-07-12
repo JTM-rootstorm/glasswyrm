@@ -368,9 +368,15 @@ api04_consumers=passed
 integrated_little_big=passed
 no_ppm=passed
 scene_archive=passed
-restart_probe=unavailable
-xcb_m6_probe=unavailable
+restart_probe=passed
+xcb_m6_probe=passed
 FACTS
+      if [[ ${GW_VM_TEST_BAD_M6_FACTS:-0} == 1 ]]; then
+        printf 'restart_probe=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone6-restart.json)
+      printf '{"completed":true,"connection_preserved":true}\n'
       ;;
     milestone6-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
@@ -948,12 +954,22 @@ run_success "$work_dir/milestone6.out" "$gw_vm" scenario milestone6-runtime-test
 assert_contains "$artifact_dir/milestone6-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone6-summary.json" \
   '"required_base_commit": "9b9170de569fa112c400780beec3140bd4ef6af1"'
-assert_contains "$artifact_dir/milestone6-summary.json" '"restart_probe": "unavailable"'
+assert_contains "$artifact_dir/milestone6-summary.json" '"restart_probe": "passed"'
+assert_contains "$artifact_dir/milestone6-summary.json" '"xcb_m6_probe": "passed"'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-runtime'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-server'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-server-ipc'
 assert_contains "$command_log" 'gwipc_lifecycle_c_consumer.c'
 assert_contains "$command_log" 'glasswyrmd-integrated-lifecycle'
+assert_contains "$command_log" 'm6_restart_hold_probe'
+assert_contains "$command_log" 'systemctl restart gwm-m6.service'
+assert_contains "$command_log" 'systemctl restart gwcomp-m6.service'
 assert_file_glob "$artifact_dir/milestone6-lifecycle.tar"
+
+: >"$command_log"
+run_failure "$work_dir/milestone6-bad-restart.out" \
+  env GW_VM_TEST_BAD_M6_FACTS=1 "$gw_vm" milestone6-runtime-test --yes
+assert_contains "$artifact_dir/milestone6-summary.json" \
+  'restart_probe must be passed'
 
 printf 'gw-vm CLI tests passed\n'
