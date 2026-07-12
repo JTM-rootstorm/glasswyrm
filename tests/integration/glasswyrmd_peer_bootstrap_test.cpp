@@ -77,7 +77,8 @@ lifecycle(std::uint64_t serial, bool mapped, std::int32_t x, std::int32_t y) {
 glasswyrm::server::CompositorSnapshotSubmission
 project(std::uint64_t id,
         const glasswyrm::server::PolicySnapshotResult &result) {
-  glasswyrm::server::CompositorSnapshotSubmission submission{id, id, {}, {}};
+  glasswyrm::server::CompositorSnapshotSubmission submission{
+      id, id, {}, {}, {}, {}};
   for (const auto &state : result.windows) {
     gwipc_surface_upsert surface{};
     surface.struct_size = sizeof(surface);
