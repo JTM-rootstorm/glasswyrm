@@ -4,6 +4,8 @@ Milestone 7 adds a buffered `ProtocolServer` application profile to the existing
 GWIPC wire 1.0 compositor contract. It does not add a message or change the
 public API version. `gwcomp` still owns final composition and frame output;
 `glasswyrmd` publishes XRGB8888 window content but never composes the desktop.
+The producer-side mirror, damage, arbitration, and replay rules are documented
+in [M7 content publication](../rendering/M7_CONTENT_PUBLICATION.md).
 
 ## Peer profiles
 
@@ -50,4 +52,3 @@ omitted surfaces use `SurfaceRemoved`; otherwise retired unattached buffers use
 `ConsumerDone`. The process sends `FrameAcknowledged` before queued
 `BufferRelease` records. Rejected commits do not promote scene or attachment
 state. Disconnect drops all mappings and attachment knowledge.
-

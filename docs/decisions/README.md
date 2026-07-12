@@ -15,3 +15,4 @@ Current decisions:
 - [0006: Use a Transactional Headless Compositor](0006-headless-compositor-synthetic-surfaces.md)
 - [0007: Run Window-Management Policy as a Separate Service](0007-window-manager-policy-scaffold.md)
 - [0008: Route Top-Level Lifecycle Through Three Processes](0008-three-process-window-lifecycle.md)
+- [0009: Bridge Server-Rendered Drawables to the Compositor](0009-server-rendered-drawable-bridge.md)
