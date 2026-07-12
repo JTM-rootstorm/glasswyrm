@@ -1,4 +1,5 @@
 #include "glasswyrmd/resource_table.hpp"
+#include "protocol/x11/event_mask.hpp"
 
 #include "glasswyrmd/resource_id.hpp"
 
@@ -386,8 +387,8 @@ DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
 
 std::optional<WindowDestroyPlan> ResourceTable::capture_destroy_plan(
     const std::uint32_t xid) const {
-  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
-  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  constexpr auto kStructureNotifyMask = gw::protocol::x11::event_mask::StructureNotify;
+  constexpr auto kSubstructureNotifyMask = gw::protocol::x11::event_mask::SubstructureNotify;
   if (xid == screen_.root_window || !find_window(xid)) return std::nullopt;
   WindowDestroyPlan plan;
   plan.root = xid;
@@ -480,8 +481,8 @@ CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
 }
 
 ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
-  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
-  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  constexpr auto kStructureNotifyMask = gw::protocol::x11::event_mask::StructureNotify;
+  constexpr auto kSubstructureNotifyMask = gw::protocol::x11::event_mask::SubstructureNotify;
   remove_event_selections(owner);
   ClientCleanupPlan plan;
   plan.owner = owner;

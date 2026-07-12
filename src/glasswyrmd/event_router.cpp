@@ -2,14 +2,15 @@
 
 #include "protocol/x11/event.hpp"
 #include "protocol/x11/exposure_event.hpp"
+#include "protocol/x11/event_mask.hpp"
 
 #include <algorithm>
 
 namespace glasswyrm::server {
 namespace {
-constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
-constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
-constexpr std::uint32_t kExposureMask = 1U << 15U;
+constexpr auto kStructureNotifyMask = gw::protocol::x11::event_mask::StructureNotify;
+constexpr auto kSubstructureNotifyMask = gw::protocol::x11::event_mask::SubstructureNotify;
+constexpr auto kExposureMask = gw::protocol::x11::event_mask::Exposure;
 
 ClientConnection *find_client(std::span<ClientConnection *const> clients,
                               const ClientId id) {
