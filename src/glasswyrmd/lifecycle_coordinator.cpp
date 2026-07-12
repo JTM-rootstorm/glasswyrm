@@ -2,6 +2,36 @@
 
 namespace glasswyrm::server {
 
+std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
+    const LifecycleSnapshot& committed, const LifecycleOperation& operation) {
+  auto rebased = committed;
+  const auto source = operation.proposed.windows.find(operation.window);
+  const auto target = rebased.windows.find(operation.window);
+  if (source == operation.proposed.windows.end() ||
+      target == rebased.windows.end()) return std::nullopt;
+  switch (operation.kind) {
+    case LifecycleOperationKind::Map:
+    case LifecycleOperationKind::Unmap:
+      target->second.map_requested = source->second.map_requested;
+      target->second.map_serial = source->second.map_serial;
+      break;
+    case LifecycleOperationKind::Configure:
+      target->second.requested_x = source->second.requested_x;
+      target->second.requested_y = source->second.requested_y;
+      target->second.requested_width = source->second.requested_width;
+      target->second.requested_height = source->second.requested_height;
+      target->second.requested_border_width =
+          source->second.requested_border_width;
+      target->second.geometry_serial = source->second.geometry_serial;
+      target->second.stack_serial = source->second.stack_serial;
+      target->second.stack_sibling = source->second.stack_sibling;
+      target->second.stack_mode = source->second.stack_mode;
+      break;
+    default: return std::nullopt;
+  }
+  return rebased;
+}
+
 LifecycleCoordinator::LifecycleCoordinator(LifecycleSnapshot committed,
     const std::size_t maximum_pending, LifecycleCallbacks callbacks)
     : committed_(std::move(committed)), maximum_pending_(maximum_pending),
@@ -53,6 +83,10 @@ bool LifecycleCoordinator::policy_accepted(LifecycleSnapshot evaluated) {
   if (phase_ != CoordinatorPhase::AwaitingPolicy) return false;
   evaluated_ = std::move(evaluated);
   if (active_->canceled) {
+    if (callbacks_.prepare_rollback && !callbacks_.prepare_rollback()) {
+      fatal();
+      return false;
+    }
     phase_ = CoordinatorPhase::RollingBackPolicy;
     if (!send_policy(committed_)) fatal();
     return phase_ != CoordinatorPhase::Fatal;
@@ -71,6 +105,10 @@ bool LifecycleCoordinator::compositor_accepted() {
   if (!active_) return false;
   if (phase_ == CoordinatorPhase::AwaitingCompositor) {
     if (active_->canceled) {
+      if (callbacks_.prepare_rollback && !callbacks_.prepare_rollback()) {
+        fatal();
+        return false;
+      }
       phase_ = CoordinatorPhase::RollingBackPolicy;
       if (!send_policy(committed_)) fatal();
       return phase_ != CoordinatorPhase::Fatal;
@@ -86,6 +124,10 @@ bool LifecycleCoordinator::compositor_accepted() {
 
 bool LifecycleCoordinator::compositor_rejected() {
   if (phase_ != CoordinatorPhase::AwaitingCompositor || !active_) return false;
+  if (callbacks_.prepare_rollback && !callbacks_.prepare_rollback()) {
+    fatal();
+    return false;
+  }
   phase_ = CoordinatorPhase::RollingBackPolicy;
   if (!send_policy(committed_)) fatal();
   return phase_ != CoordinatorPhase::Fatal;
