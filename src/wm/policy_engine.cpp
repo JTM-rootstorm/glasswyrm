@@ -30,6 +30,14 @@ EvaluationError validate(const RawState& raw) {
 
   std::set<std::uint64_t> creation_serials;
   for (const auto& [id, window] : raw.windows) {
+    const auto known_window_type = window.window_type == WindowType::Unknown ||
+                                   window.window_type == WindowType::Normal ||
+                                   window.window_type == WindowType::Dialog ||
+                                   window.window_type == WindowType::Utility;
+    const auto known_decoration =
+        window.decoration_preference == DecorationPreference::Unknown ||
+        window.decoration_preference == DecorationPreference::False ||
+        window.decoration_preference == DecorationPreference::True;
     if (id == 0 || id != window.window_id || id == context.root_window_id ||
         window.parent_window_id != context.root_window_id ||
         window.creation_serial == 0 || window.requested_width == 0 ||
@@ -37,6 +45,7 @@ EvaluationError validate(const RawState& raw) {
         window.requested_width > maximum_window_extent ||
         window.requested_height > maximum_window_extent ||
         window.border_width > maximum_border_width || window.flags != 0 ||
+        !known_window_type || !known_decoration ||
         (window.wants_map != (window.map_serial != 0)) ||
         !extent_fits(window.requested_x, window.requested_width) ||
         !extent_fits(window.requested_y, window.requested_height) ||
@@ -105,6 +114,17 @@ void hash_little(std::uint64_t& hash, Value value) {
   }
 }
 
+template <class Value>
+void write_little(std::array<std::uint8_t, 64>& bytes, std::size_t& offset,
+                  Value value) {
+  using Unsigned = std::make_unsigned_t<Value>;
+  auto bits = static_cast<Unsigned>(value);
+  for (std::size_t index = 0; index < sizeof(Value); ++index) {
+    bytes[offset++] = static_cast<std::uint8_t>(bits);
+    bits >>= 8U;
+  }
+}
+
 std::uint64_t policy_hash(const PolicyState& policy) {
   std::uint64_t hash = UINT64_C(14695981039346656037);
   constexpr std::string_view tag = "glasswyrm-policy-v1";
@@ -116,26 +136,42 @@ std::uint64_t policy_hash(const PolicyState& policy) {
   hash_little(hash, context.work_y); hash_little(hash, context.work_width);
   hash_little(hash, context.work_height); hash_little(hash, context.flags);
   for (const auto id : policy.output_order) {
-    const auto& window = policy.windows.at(id);
-    hash_little(hash, window.window_id); hash_little(hash, window.transient_for);
-    hash_little(hash, window.workspace_id); hash_little(hash, UINT32_C(0));
-    hash_little(hash, window.output_id);
-    hash_little(hash, window.final_x); hash_little(hash, window.final_y);
-    hash_little(hash, window.final_width); hash_little(hash, window.final_height);
-    hash_little(hash, window.stacking);
-    hash_little(hash, static_cast<std::uint16_t>(window.window_type));
-    hash_little(hash, static_cast<std::uint16_t>(window.applied_state));
-    hash_byte(hash, window.visible); hash_byte(hash, window.focused);
-    hash_byte(hash, window.managed); hash_byte(hash, window.decoration_eligible);
-    hash_byte(hash, window.override_redirect); hash_byte(hash, window.attention_requested);
-    hash_byte(hash, static_cast<std::uint8_t>(window.fullscreen_eligible));
-    hash_byte(hash, static_cast<std::uint8_t>(window.direct_scanout_eligible));
-    hash_little(hash, UINT32_C(0)); hash_little(hash, UINT32_C(0));
+    for (const auto byte : encode_policy_window_state(policy.windows.at(id)))
+      hash_byte(hash, byte);
   }
   return hash;
 }
 
 }  // namespace
+
+std::array<std::uint8_t, 64> encode_policy_window_state(
+    const WindowState& state) noexcept {
+  std::array<std::uint8_t, 64> bytes{};
+  std::size_t offset = 0;
+  write_little(bytes, offset, state.window_id);
+  write_little(bytes, offset, state.transient_for);
+  write_little(bytes, offset, state.workspace_id);
+  write_little(bytes, offset, UINT32_C(0));
+  write_little(bytes, offset, state.output_id);
+  write_little(bytes, offset, state.final_x);
+  write_little(bytes, offset, state.final_y);
+  write_little(bytes, offset, state.final_width);
+  write_little(bytes, offset, state.final_height);
+  write_little(bytes, offset, state.stacking);
+  write_little(bytes, offset, static_cast<std::uint16_t>(state.window_type));
+  write_little(bytes, offset, static_cast<std::uint16_t>(state.applied_state));
+  bytes[offset++] = state.visible;
+  bytes[offset++] = state.focused;
+  bytes[offset++] = state.managed;
+  bytes[offset++] = state.decoration_eligible;
+  bytes[offset++] = state.override_redirect;
+  bytes[offset++] = state.attention_requested;
+  bytes[offset++] = static_cast<std::uint8_t>(state.fullscreen_eligible);
+  bytes[offset++] = static_cast<std::uint8_t>(state.direct_scanout_eligible);
+  write_little(bytes, offset, UINT32_C(0));
+  write_little(bytes, offset, UINT32_C(0));
+  return bytes;
+}
 
 Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   Evaluation result;
@@ -153,7 +189,7 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   for (const auto& [id, window] : raw.windows) {
     (void)id;
     if (!window.override_redirect && window.transient_for == 0 && window.wants_map &&
-        !window.minimized_requested && !window.fullscreen_requested &&
+        !window.fullscreen_requested &&
         !window.maximized_requested &&
         (window.window_type == WindowType::Normal ||
          window.window_type == WindowType::Utility ||
@@ -197,10 +233,6 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
           y_span == 0 ? 0 : (slot * 32U) % (static_cast<std::size_t>(y_span) + 1U));
     }
     state.decoration_eligible = decoration(window, state.applied_state);
-    state.fullscreen_eligible = window.override_redirect
-                                    ? TriState::Unknown
-                                    : (state.applied_state == AppliedState::Fullscreen
-                                           ? TriState::True : TriState::False);
     state.visible = window.wants_map &&
                     (window.override_redirect || state.applied_state != AppliedState::Minimized);
     policy.windows.emplace(id, state);
@@ -209,7 +241,8 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   // A transient's geometry and visibility depend on its parent, so resolve roots first.
   std::vector<std::uint32_t> unresolved;
   for (const auto& [id, window] : raw.windows)
-    if (window.transient_for != 0) unresolved.push_back(id);
+    if (!window.override_redirect && window.transient_for != 0)
+      unresolved.push_back(id);
   const auto transient_depth = [&](const std::uint32_t id) {
     std::size_t depth = 0;
     auto current = raw.windows.at(id).transient_for;
@@ -237,6 +270,15 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
         static_cast<std::int64_t>(raw.context.work_y) + raw.context.work_height - state.final_height);
     state.visible = state.visible && parent.visible;
   }
+  for (auto& [id, state] : policy.windows) {
+    (void)id;
+    state.fullscreen_eligible = state.override_redirect
+                                    ? TriState::Unknown
+                                    : (state.visible &&
+                                               state.applied_state == AppliedState::Fullscreen
+                                           ? TriState::True
+                                           : TriState::False);
+  }
 
   std::vector<std::uint32_t> managed_roots;
   std::vector<std::uint32_t> overrides;
@@ -256,7 +298,8 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
     stacking.push_back(id);
     std::vector<std::uint32_t> children;
     for (const auto& [child_id, child] : raw.windows)
-      if (child.transient_for == id && policy.windows.at(child_id).visible)
+      if (!child.override_redirect && child.transient_for == id &&
+          policy.windows.at(child_id).visible)
         children.push_back(child_id);
     sort_ids(children);
     for (const auto child : children) self(self, child);
