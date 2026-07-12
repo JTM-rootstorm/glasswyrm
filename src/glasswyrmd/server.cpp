@@ -1111,6 +1111,10 @@ int Server::run() {
               input_state.time(), new_target, input_state.mask(),
               glasswyrm::input::motion_delivery_mask(input_state), x, y,
               new_target, recipients);
+          std::fprintf(stderr,
+                       "glasswyrmd: input motion id=%llu root=%d,%d target=0x%08x delivered=%zu\n",
+                       static_cast<unsigned long long>(record.input_id), x, y,
+                       new_target, delivered);
           acknowledge(record,
                       x != record.root_x || y != record.root_y
                           ? GWIPC_SYNTHETIC_INPUT_CLAMPED
