@@ -24,3 +24,9 @@ GWIPC_0.4 {
     gwipc_decoded_surface_policy_upsert;
     gwipc_connection_enqueue_with_sequence;
 } GWIPC_0.3;
+
+GWIPC_0.5 {
+  global:
+    gwipc_contract_encode_synthetic_*;
+    gwipc_decoded_synthetic_*;
+} GWIPC_0.4;
