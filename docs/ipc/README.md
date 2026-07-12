@@ -10,6 +10,8 @@ window-policy contract used by `gwm`.
   additive message registry.
 - [M6 Lifecycle Contract](M6_LIFECYCLE_CONTRACT.md) documents API 0.4 lifecycle
   and metadata-only records.
+- [M8 Synthetic-Input Contract](M8_SYNTHETIC_INPUT_CONTRACT.md) documents the
+  additive API 0.5 DiagnosticTool input vocabulary.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records
