@@ -77,6 +77,23 @@ assert_file_glob() {
   compgen -G "$pattern" >/dev/null || fail "no file matched: $pattern"
 }
 
+semver_helper=${repo_root}/tools/gw-vm.d/lib/common.sh
+for compatible in '0.1.0 0.1.0' '0.2.0 0.1.0' '0.10.0 0.3.0' \
+  '1.0.0 0.3.0' '0.3.1 0.3.0'; do
+  read -r actual minimum <<<"$compatible"
+  bash -c 'source "$1"; semantic_version_at_least "$2" "$3"' _ \
+    "$semver_helper" "$actual" "$minimum" ||
+    fail "semantic version helper rejected $actual >= $minimum"
+done
+for incompatible in '0.0.9 0.1.0' '0.2.9 0.3.0' '0.3 0.3.0' \
+  'unknown 0.1.0' '0.3.0 0.3'; do
+  read -r actual minimum <<<"$incompatible"
+  if bash -c 'source "$1"; semantic_version_at_least "$2" "$3"' _ \
+    "$semver_helper" "$actual" "$minimum"; then
+    fail "semantic version helper accepted $actual >= $minimum"
+  fi
+done
+
 cat >"$config_file" <<EOF
 [libvirt]
 uri = "test:///glasswyrm"
@@ -249,7 +266,9 @@ compiler_cxx=g++ test
 meson_version=1.7.0
 ninja_version=1.12.0
 systemd_version=systemd 257
-api_version=0.1.0
+FACTS
+      printf 'api_version=%s\n' "${GW_VM_TEST_M3_API_VERSION:-0.1.0}"
+      cat <<'FACTS'
 soversion=0
 wire_version=1.0
 x_servers_absent=true
@@ -720,6 +739,11 @@ assert_contains "$artifact_dir/milestone3-summary.json" '"api_version": "0.1.0"'
 assert_contains "$artifact_dir/milestone3-summary.json" '"wire_version": "1.0"'
 assert_contains "$artifact_dir/milestone3-summary.json" '"contract_roundtrip": "passed"'
 assert_contains "$artifact_dir/milestone3-summary.json" '"xorg_xwayland_absent": true'
+
+run_success "$work_dir/milestone3-newer-api.out" \
+  env GW_VM_TEST_M3_API_VERSION=0.3.0 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$artifact_dir/milestone3-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone3-summary.json" '"api_version": "0.3.0"'
 
 run_failure "$work_dir/milestone3-bad-facts.out" \
   env GW_VM_TEST_BAD_M3_FACTS=1 "$gw_vm" milestone3-runtime-test --yes
