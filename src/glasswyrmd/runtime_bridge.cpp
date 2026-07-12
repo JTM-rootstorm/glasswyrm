@@ -15,9 +15,10 @@ constexpr std::array kRetryDelays = {
 RuntimeBridge::RuntimeBridge(std::string policy_path,
                              std::string compositor_path,
                              const gw::protocol::x11::ScreenModel screen,
-                             const std::chrono::milliseconds deadline)
+                             const std::chrono::milliseconds deadline,
+                             const bool software_content)
     : policy_(std::move(policy_path), screen),
-      compositor_(std::move(compositor_path), screen),
+      compositor_(std::move(compositor_path), screen, software_content),
       deadline_duration_(deadline) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
@@ -75,7 +76,8 @@ bool RuntimeBridge::service(const short policy_revents,
     if (transaction_stage_ == TransactionStage::Policy &&
         policy_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::PolicyReady;
-    if (transaction_stage_ == TransactionStage::Compositor &&
+    if ((transaction_stage_ == TransactionStage::Compositor ||
+         transaction_stage_ == TransactionStage::Content) &&
         compositor_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::Complete;
     return true;
@@ -143,6 +145,11 @@ bool RuntimeBridge::service(const short policy_revents,
             return false;
           }
         }
+        if (resume_transaction_stage_ == TransactionStage::Content &&
+            !submit_content(pending_content_, resume_error)) {
+          error = resume_error;
+          return false;
+        }
         if (resume_transaction_stage_ == TransactionStage::PolicyReady ||
             resume_transaction_stage_ == TransactionStage::PolicyRejected ||
             resume_transaction_stage_ == TransactionStage::Complete ||
@@ -179,6 +186,18 @@ bool RuntimeBridge::submit_compositor(
   if (!compositor_.submit(submission, error)) return false;
   pending_compositor_ = submission;
   transaction_stage_ = TransactionStage::Compositor;
+  return true;
+}
+
+bool RuntimeBridge::submit_content(
+    const CompositorContentSubmission& submission, std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::None) {
+    error = "content submission attempted while transaction stage is busy";
+    return false;
+  }
+  if (!compositor_.submit_content(submission, error)) return false;
+  pending_content_ = submission;
+  transaction_stage_ = TransactionStage::Content;
   return true;
 }
 bool RuntimeBridge::compositor_rejected_ready() const noexcept {
