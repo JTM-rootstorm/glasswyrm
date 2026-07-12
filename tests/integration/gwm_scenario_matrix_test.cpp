@@ -2,6 +2,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <signal.h>
+
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -60,6 +62,21 @@ void wait_ready(pid_t compositor, const std::filesystem::path& socket) {
   fail("gwm listener readiness timeout");
 }
 
+int wait_bounded(pid_t child, std::string_view label) {
+  int status = 0;
+  for (int attempt = 0; attempt < 3000; ++attempt) {
+    const auto result = ::waitpid(child, &status, WNOHANG);
+    if (result == child) return status;
+    if (result < 0) fail(std::string(label) + " waitpid failed");
+    (void)::usleep(10'000);
+  }
+  std::fprintf(stderr, "gwm scenario matrix: timeout waiting for %.*s pid=%d\n",
+               static_cast<int>(label.size()), label.data(), child);
+  (void)::kill(child, SIGKILL);
+  (void)::waitpid(child, &status, 0);
+  fail(std::string(label) + " exceeded 30-second lifecycle deadline");
+}
+
 void run_scenario(const char* gwm, const char* producer,
                   const std::filesystem::path& root,
                   const std::filesystem::path& fixtures,
@@ -82,12 +99,11 @@ void run_scenario(const char* gwm, const char* producer,
             scenario.name, "--output", output.c_str(), nullptr);
     _exit(127);
   }
-  int status = 0;
-  require(::waitpid(client, &status, 0) == client && WIFEXITED(status) &&
-              WEXITSTATUS(status) == 0,
+  int status = wait_bounded(client, std::string(scenario.name) + " producer");
+  require(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           std::string(scenario.name) + " producer succeeds");
-  require(::waitpid(manager, &status, 0) == manager && WIFEXITED(status) &&
-              WEXITSTATUS(status) == 0,
+  status = wait_bounded(manager, std::string(scenario.name) + " gwm");
+  require(WIFEXITED(status) && WEXITSTATUS(status) == 0,
           std::string(scenario.name) + " gwm succeeds");
   require(read_file(output) == read_file(fixtures / (std::string(scenario.name) + ".json")),
           std::string(scenario.name) + " JSON matches reviewed fixture exactly");

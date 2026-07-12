@@ -261,7 +261,6 @@ struct PeerState {
   std::uint64_t snapshot_generation{};
   std::uint64_t last_commit_id{};
   std::uint64_t last_generation{};
-  std::uint64_t accepted_commits{};
 
   void disconnect() noexcept { *this = {}; }
 };
@@ -366,7 +365,6 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
       }
       if (!enqueue_policy(connection, message, *value, evaluation.policy))
         return false;
-      ++peer.accepted_commits;
       accepted = true;
       std::fprintf(stderr,
                    "gwm: policy accepted commit=%llu generation=%llu windows=%zu hash=%016llx\n",
@@ -419,6 +417,7 @@ int run(const glasswyrm::wm::Options& options) {
   std::unique_ptr<gwipc_connection, ConnectionDeleter> producer;
   PeerState peer;
   bool accepted_any = false;
+  std::uint64_t accepted_commits = 0;
   bool stop_after_flush = false;
   bool flush_complete = false;
   bool stopping = false;
@@ -491,8 +490,9 @@ int run(const glasswyrm::wm::Options& options) {
       }
       if (accepted) {
         accepted_any = true;
+        ++accepted_commits;
         if (options.max_commits &&
-            peer.accepted_commits == *options.max_commits)
+            accepted_commits == *options.max_commits)
           stop_after_flush = true;
       }
     }
