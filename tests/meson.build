@@ -199,6 +199,13 @@ if get_option('glasswyrmd')
 endif
 
 if get_option('glasswyrmd') and get_option('libgwipc')
+  published_buffer_test = executable(
+    'published_buffer_test',
+    files('unit/published_buffer_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('published-buffer', published_buffer_test, timeout: 10)
   lifecycle_projection_test = executable(
     'lifecycle_projection_test',
     files('unit/lifecycle_projection_test.cpp'),
