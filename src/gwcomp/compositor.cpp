@@ -88,7 +88,10 @@ bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& e
     return false;
   }
   auto unique = BufferMapping::import(value, fd, error);
-  if (!unique) return false;
+  if (!unique) {
+    if (value.buffer_id != 0) releases_[value.buffer_id] = GWIPC_BUFFER_RELEASE_INVALID;
+    return false;
+  }
   mappings_.emplace(value.buffer_id, Mapping(std::move(unique)));
   pending_attachments_[value.surface_id] = value.buffer_id;
   return true;
@@ -213,6 +216,10 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
     } else if (now->second != old_buffer) {
       releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
     }
+  }
+  for (const auto& [buffer_id, reason] : releases_) {
+    (void)reason;
+    mappings_.erase(buffer_id);
   }
   scene_ = std::move(candidate);
   committed_attachments_ = pending_attachments_;
