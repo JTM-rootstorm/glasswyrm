@@ -247,6 +247,18 @@ void test_operation_rebase_preserves_unrelated_intent() {
               unmapped->windows.at(10).requested_x == 80 &&
               unmapped->windows.at(10).geometry_serial == 9,
           "Map rebase preserves a preceding Configure intent");
+
+  LifecycleOperation override_change;
+  override_change.kind = LifecycleOperationKind::OverrideChange;
+  override_change.window = 10;
+  override_change.proposed = *unmapped;
+  override_change.proposed.windows[10].override_redirect = true;
+  override_change.proposed.windows[10].requested_x = 1234;
+  const auto overridden =
+      rebase_lifecycle_operation(*unmapped, override_change);
+  require(overridden && overridden->windows.at(10).override_redirect &&
+              overridden->windows.at(10).requested_x == 80,
+          "OverrideChange rebase changes only override-redirect");
 }
 
 void test_create_destroy_rebase_latest_snapshot() {
