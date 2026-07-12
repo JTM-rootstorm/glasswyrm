@@ -159,7 +159,12 @@ bool await(gwipc_connection* c, std::uint64_t commit_id, gwipc_frame_result resu
         ack |= v && v->commit_id == commit_id && v->result == result;
       } else if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE) {
         const auto* v = gwipc_decoded_buffer_release(decoded.get());
-        release |= v && v->buffer_id == released && v->reason == reason;
+        const bool matched = v && v->buffer_id == released && v->reason == reason;
+        if (matched && !release)
+          std::fprintf(stderr, "buffer-released id=%llu reason=%u\n",
+                       static_cast<unsigned long long>(v->buffer_id),
+                       static_cast<unsigned>(v->reason));
+        release |= matched;
       }
     }
   }
