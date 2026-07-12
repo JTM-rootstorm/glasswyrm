@@ -24,6 +24,49 @@ gw_scaffold_dep = declare_dependency(
   include_directories: [gw_include_dir, gw_generated_include_dir],
 )
 
+gw_compositor_geometry_lib = static_library(
+  'gwcomp-geometry',
+  files(
+    'compositor/rectangle.cpp',
+    'compositor/damage_region.cpp',
+  ),
+  include_directories: include_directories('.'),
+)
+gw_compositor_geometry_dep = declare_dependency(
+  link_with: gw_compositor_geometry_lib,
+  include_directories: include_directories('.'),
+)
+
+gw_render_software_lib = static_library(
+  'gwcomp-render-software',
+  files(
+    'render/software/blend.cpp',
+    'render/software/renderer.cpp',
+  ),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: include_directories('.'),
+)
+gw_render_software_dep = declare_dependency(
+  link_with: gw_render_software_lib,
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: include_directories('.'),
+)
+
+if get_option('headless_backend')
+  gw_headless_lib = static_library(
+    'gw-headless',
+    files(
+      'backends/headless/output.cpp',
+      'backends/headless/frame_dump.cpp',
+    ),
+    include_directories: include_directories('.'),
+  )
+  gw_headless_dep = declare_dependency(
+    link_with: gw_headless_lib,
+    include_directories: include_directories('.'),
+  )
+endif
+
 if get_option('libgwipc')
   gwipc_cpp_args = ['-DGWIPC_BUILDING_LIBRARY', '-fvisibility-inlines-hidden']
   if get_option('ipc_trace')
@@ -53,6 +96,7 @@ if get_option('libgwipc')
     'gwipc',
     files(
       'ipc/public_api.cpp',
+      'ipc/contract_api.cpp',
       'ipc/message.cpp',
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
@@ -68,7 +112,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.1.0',
+    version: '0.2.0',
     soversion: '0',
     install: true,
   )
@@ -98,7 +142,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.1.0',
+    version: '0.2.0',
   )
 endif
 
@@ -153,6 +197,15 @@ if get_option('gwm')
 endif
 
 if get_option('gwcomp')
+  gwcomp_options_lib = static_library(
+    'gwcomp-options',
+    files('gwcomp/options.cpp'),
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gwcomp_options_dep = declare_dependency(
+    link_with: gwcomp_options_lib,
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
   executable(
     'gwcomp',
     files('gwcomp/main.cpp'),

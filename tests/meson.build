@@ -8,6 +8,42 @@ test('scaffold', scaffold_test)
 
 test_source_root_include = include_directories('..')
 
+if get_option('gwcomp')
+  gwcomp_options_test = executable(
+    'gwcomp_options_test',
+    files('unit/gwcomp_options_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-options', gwcomp_options_test, timeout: 10)
+endif
+
+compositor_geometry_test = executable(
+  'compositor_geometry_test',
+  files('unit/compositor_geometry_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-geometry', compositor_geometry_test, timeout: 10)
+
+software_renderer_test = executable(
+  'software_renderer_test',
+  files('pixel/software_renderer_test.cpp'),
+  dependencies: gw_render_software_dep,
+  include_directories: test_source_root_include,
+)
+test('software-renderer', software_renderer_test, timeout: 10)
+
+if get_option('headless_backend')
+  headless_output_test = executable(
+    'headless_output_test',
+    files('unit/headless_output_test.cpp'),
+    dependencies: gw_headless_dep,
+    include_directories: test_source_root_include,
+  )
+  test('headless-output', headless_output_test, timeout: 10)
+endif
+
 if get_option('libgwipc')
   gwipc_wire_codec_test = executable(
     'gwipc_wire_codec_test',
@@ -27,6 +63,13 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_public_contract_api_test = executable(
+    'gwipc_public_contract_api_test',
+    files('unit/ipc/public_contract_api_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test('gwipc-public-contract-api', gwipc_public_contract_api_test, timeout: 10)
 
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',
