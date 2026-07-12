@@ -151,10 +151,34 @@ void test_full_handler_returns_error_without_blocking() {
           "full handler emits BadAlloc and continues without a barrier");
 }
 
+void test_clear_area_forwards_expose_intent() {
+  constexpr std::uint32_t base = 0x00600000U;
+  constexpr std::uint32_t window = base + 1;
+  auto state = state_with_window(3, base, window);
+  SocketPair sockets;
+  std::vector<glasswyrm::server::ExposeIntent> intents;
+  glasswyrm::server::ClientConnection connection(
+      sockets.server, 3, base, state, false, {}, {}, {},
+      [&](const auto& values) { intents = values; });
+  sockets.server = -1;
+  establish(connection, sockets.client);
+  const std::array<std::uint8_t,16> clear{
+      61,1,4,0,
+      static_cast<std::uint8_t>(window),static_cast<std::uint8_t>(window>>8U),
+      static_cast<std::uint8_t>(window>>16U),static_cast<std::uint8_t>(window>>24U),
+      0,0,0,0,0,0,0,0};
+  require(::send(sockets.client,clear.data(),clear.size(),0)==16,"send clear area");
+  connection.handle_events(POLLIN);
+  require(intents.size()==1&&intents[0].window==window&&
+              intents[0].rectangle.width==64&&intents[0].rectangle.height==64,
+          "clear area forwards exposure intent");
+}
+
 }  // namespace
 
 int main() {
   test_pipelined_bytes_resume_once();
   test_full_handler_returns_error_without_blocking();
+  test_clear_area_forwards_expose_intent();
   return 0;
 }

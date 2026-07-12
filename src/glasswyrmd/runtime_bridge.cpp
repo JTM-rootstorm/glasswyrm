@@ -15,9 +15,10 @@ constexpr std::array kRetryDelays = {
 RuntimeBridge::RuntimeBridge(std::string policy_path,
                              std::string compositor_path,
                              const gw::protocol::x11::ScreenModel screen,
-                             const std::chrono::milliseconds deadline)
+                             const std::chrono::milliseconds deadline,
+                             const bool software_content)
     : policy_(std::move(policy_path), screen),
-      compositor_(std::move(compositor_path), screen),
+      compositor_(std::move(compositor_path), screen, software_content),
       deadline_duration_(deadline) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
@@ -30,6 +31,7 @@ void RuntimeBridge::start(const Clock::time_point now) noexcept {
   transaction_stage_ = TransactionStage::None;
   resume_transaction_stage_ = TransactionStage::None;
   recovering_ = false;
+  compositor_reset_ = false;
 }
 
 void RuntimeBridge::schedule_retry(const Clock::time_point now) noexcept {
@@ -58,6 +60,8 @@ bool RuntimeBridge::service(const short policy_revents,
     }
     if (policy_outcome == PeerProcessOutcome::Disconnected ||
         compositor_outcome == PeerProcessOutcome::Disconnected) {
+      if (compositor_outcome == PeerProcessOutcome::Disconnected)
+        compositor_reset_ = true;
       resume_transaction_stage_ = transaction_stage_;
       recovering_ = true;
       policy_.disconnect();
@@ -71,13 +75,23 @@ bool RuntimeBridge::service(const short policy_revents,
     if (policy_outcome == PeerProcessOutcome::SemanticRejected)
       transaction_stage_ = TransactionStage::PolicyRejected;
     if (compositor_outcome == PeerProcessOutcome::SemanticRejected)
-      transaction_stage_ = TransactionStage::CompositorRejected;
+      transaction_stage_ = transaction_stage_ == TransactionStage::Content
+                               ? TransactionStage::ContentRejected
+                           : transaction_stage_ == TransactionStage::Replay
+                               ? TransactionStage::ReplayRejected
+                               : TransactionStage::CompositorRejected;
     if (transaction_stage_ == TransactionStage::Policy &&
         policy_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::PolicyReady;
     if (transaction_stage_ == TransactionStage::Compositor &&
         compositor_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::Complete;
+    if (transaction_stage_ == TransactionStage::Content &&
+        compositor_.state() == PeerBootstrapState::Synchronized)
+      transaction_stage_ = TransactionStage::ContentComplete;
+    if (transaction_stage_ == TransactionStage::Replay &&
+        compositor_.state() == PeerBootstrapState::Synchronized)
+      transaction_stage_ = TransactionStage::ReplayComplete;
     return true;
   }
   if (stage_ != Stage::Ready && now >= deadline_) {
@@ -143,10 +157,24 @@ bool RuntimeBridge::service(const short policy_revents,
             return false;
           }
         }
+        if (resume_transaction_stage_ == TransactionStage::Content &&
+            !submit_content(pending_content_, resume_error)) {
+          error = resume_error;
+          return false;
+        }
+        if (resume_transaction_stage_ == TransactionStage::Replay &&
+            !submit_replay(pending_compositor_, resume_error)) {
+          error = resume_error;
+          return false;
+        }
         if (resume_transaction_stage_ == TransactionStage::PolicyReady ||
             resume_transaction_stage_ == TransactionStage::PolicyRejected ||
             resume_transaction_stage_ == TransactionStage::Complete ||
-            resume_transaction_stage_ == TransactionStage::CompositorRejected)
+            resume_transaction_stage_ == TransactionStage::ContentComplete ||
+            resume_transaction_stage_ == TransactionStage::CompositorRejected ||
+            resume_transaction_stage_ == TransactionStage::ContentRejected ||
+            resume_transaction_stage_ == TransactionStage::ReplayComplete ||
+            resume_transaction_stage_ == TransactionStage::ReplayRejected)
           transaction_stage_ = resume_transaction_stage_;
       }
     }
@@ -181,12 +209,50 @@ bool RuntimeBridge::submit_compositor(
   transaction_stage_ = TransactionStage::Compositor;
   return true;
 }
+
+bool RuntimeBridge::submit_content(
+    const CompositorContentSubmission& submission, std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::None) {
+    error = "content submission attempted while transaction stage is busy";
+    return false;
+  }
+  if (!compositor_.submit_content(submission, error)) return false;
+  pending_content_ = submission;
+  transaction_stage_ = TransactionStage::Content;
+  return true;
+}
+bool RuntimeBridge::submit_replay(
+    const CompositorSnapshotSubmission& submission, std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::None) {
+    error = "compositor replay attempted while transaction stage is busy";
+    return false;
+  }
+  if (!compositor_.submit(submission, error)) return false;
+  pending_compositor_ = submission;
+  transaction_stage_ = TransactionStage::Replay;
+  return true;
+}
 bool RuntimeBridge::compositor_rejected_ready() const noexcept {
   return transaction_stage_ == TransactionStage::CompositorRejected;
 }
 
 bool RuntimeBridge::compositor_result_ready() const noexcept {
   return transaction_stage_ == TransactionStage::Complete;
+}
+bool RuntimeBridge::content_result_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::ContentComplete;
+}
+bool RuntimeBridge::content_rejected_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::ContentRejected;
+}
+bool RuntimeBridge::replay_result_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::ReplayComplete;
+}
+bool RuntimeBridge::replay_rejected_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::ReplayRejected;
+}
+bool RuntimeBridge::transaction_idle() const noexcept {
+  return transaction_stage_ == TransactionStage::None;
 }
 
 bool RuntimeBridge::prepare_rollback() noexcept {

@@ -13,6 +13,22 @@ x11_event_test = executable(
 )
 test('x11-structural-events', x11_event_test, timeout: 10)
 
+x11_exposure_event_test = executable(
+  'x11_exposure_event_test',
+  files('protocol/x11_exposure_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: include_directories('..'),
+)
+test('x11-exposure-events', x11_exposure_event_test, timeout: 10)
+
+m7_fixture_validate = find_program('tools/m7_fixture_validate.sh')
+test(
+  'm7-fixture-checksums',
+  m7_fixture_validate,
+  args: [meson.project_source_root() / 'tests/fixtures/m7'],
+  timeout: 10,
+)
+
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
   files('protocol/x11_lifecycle_request_test.cpp'),
@@ -87,6 +103,27 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  drawable_core_test = executable(
+    'drawable_core_test',
+    files('unit/drawable_core_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drawable-core', drawable_core_test, timeout: 10)
+  drawable_resource_test = executable(
+    'drawable_resource_test',
+    files('unit/drawable_resource_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drawable-resources', drawable_resource_test, timeout: 10)
+  drawable_dispatch_test = executable(
+    'drawable_dispatch_test',
+    files('unit/drawable_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drawable-dispatch', drawable_dispatch_test, timeout: 10)
   glasswyrmd_options_test = executable(
     'glasswyrmd_options_test',
     files('unit/glasswyrmd_options_test.cpp'),
@@ -170,6 +207,20 @@ if get_option('glasswyrmd')
 endif
 
 if get_option('glasswyrmd') and get_option('libgwipc')
+  published_buffer_test = executable(
+    'published_buffer_test',
+    files('unit/published_buffer_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('published-buffer', published_buffer_test, timeout: 10)
+  content_presenter_test = executable(
+    'content_presenter_test',
+    files('unit/content_presenter_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('content-presenter', content_presenter_test, timeout: 10)
   lifecycle_projection_test = executable(
     'lifecycle_projection_test',
     files('unit/lifecycle_projection_test.cpp'),
@@ -553,6 +604,12 @@ if get_option('glasswyrmd')
     dependencies: x11_fake_client_dep,
     include_directories: test_source_root_include,
   )
+  x11_milestone7_probe = executable(
+    'x11_milestone7_probe',
+    files('integration/x11_milestone7_probe.cpp'),
+    dependencies: x11_fake_client_dep,
+    include_directories: test_source_root_include,
+  )
 
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
@@ -575,6 +632,16 @@ if get_option('glasswyrmd')
     xcb_milestone6_probe = executable(
       'xcb_milestone6_probe',
       files('xcb/xcb_milestone6_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
+    xcb_milestone7_probe = executable(
+      'xcb_milestone7_probe',
+      files('xcb/xcb_milestone7_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
+    m7_restart_hold_probe = executable(
+      'm7_restart_hold_probe',
+      files('xcb/m7_restart_hold_probe.c'),
       dependencies: xcb_test_dependency,
     )
   endif

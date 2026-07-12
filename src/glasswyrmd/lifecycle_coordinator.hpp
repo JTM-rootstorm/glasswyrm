@@ -47,7 +47,11 @@ class LifecycleCoordinator {
                                 std::size_t maximum_pending = 1024,
                                 LifecycleCallbacks callbacks = {});
   [[nodiscard]] EnqueueStatus enqueue(LifecycleOperation operation);
+  [[nodiscard]] EnqueueStatus enqueue_paused(LifecycleOperation operation);
+  [[nodiscard]] bool resume();
   [[nodiscard]] EnqueueStatus enqueue_priority(LifecycleOperation operation);
+  [[nodiscard]] EnqueueStatus enqueue_priority_paused(
+      LifecycleOperation operation);
   [[nodiscard]] bool policy_accepted(LifecycleSnapshot evaluated);
   [[nodiscard]] bool policy_rejected();
   [[nodiscard]] bool compositor_accepted();

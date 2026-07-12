@@ -4,6 +4,7 @@
 #include "protocol/x11/byte_order.hpp"
 #include "protocol/x11/request.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
+#include "core/geometry/rectangle.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -39,6 +40,15 @@ struct StructuralTransition {
   std::optional<StructuralEventState> committed;
 };
 
+struct DrawableDamage {
+  std::uint32_t window{};
+  glasswyrm::geometry::Rectangle rectangle{};
+};
+struct ExposeIntent {
+  std::uint32_t window{};
+  glasswyrm::geometry::Rectangle rectangle{};
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -50,6 +60,8 @@ struct DispatchResult {
   bool deferred_map{false};
   std::optional<bool> deferred_override_redirect;
   std::vector<StructuralTransition> structural_transitions;
+  std::vector<DrawableDamage> drawable_damage;
+  std::vector<ExposeIntent> expose_intents;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

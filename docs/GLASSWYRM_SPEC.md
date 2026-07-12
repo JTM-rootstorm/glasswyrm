@@ -934,7 +934,7 @@ M3  Versioned IPC foundation                    complete
 M4  Headless compositor and synthetic surfaces   complete
 M5  Window-manager policy scaffold              complete
 M6  Three-process mapped-window lifecycle       complete
-M7  Drawable and software-rendering bridge
+M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing
 M9  Simple real X11 clients
 M10 DRM/KMS software scanout
@@ -967,6 +967,17 @@ is accepted by repository-owned raw/XCB/restart probes, golden M6 fixtures, the
 Gentoo VM scenario, sanitizer testing, and the full component build matrix.
 This status does not imply drawing, input, or normal X11 application
 compatibility.
+
+Milestone 7 adds an explicit `--software-content` integrated profile. It keeps
+canonical depth-24 XRGB8888 pixels in `glasswyrmd`, implements the documented
+Pixmap, GraphicsContext, GXcopy, plane-mask, image-upload, fill, copy, clear,
+and exposure subset, and publishes synchronized read-only memfd mirrors through
+the existing GWIPC 0.4/wire 1.0 buffer and damage contracts. `gwcomp` remains
+the final composition authority. Repository-owned raw/XCB/restart probes,
+reviewed pixel evidence, strict compiler builds, sanitizers, component builds,
+and the fixed Gentoo VM scenario define the accepted boundary; input, fonts,
+child composition, acceleration, and normal application compatibility remain
+deferred.
 
 ## 26. Definition of done
 

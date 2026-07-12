@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
           "policy-ready transaction can explicitly begin rollback");
   drive_until(bridge, [&] { return bridge.policy_result_ready(); },
               "rollback policy result timed out");
-  require(bridge.submit_compositor({3, 3, {}, {}}, error),
+  require(bridge.submit_compositor({3, 3, {}, {}, {}, {}}, error),
           "accepted rollback policy advances to compositor replay");
   drive_until(bridge, [&] { return bridge.compositor_result_ready(); },
               "compositor result timed out");

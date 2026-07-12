@@ -2,6 +2,7 @@
 #include "glasswyrmd/event_router.hpp"
 
 #ifdef GW_SERVER_HAS_IPC
+#include "glasswyrmd/content_presenter.hpp"
 #include "glasswyrmd/lifecycle_coordinator.hpp"
 #include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
@@ -9,6 +10,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -67,8 +69,39 @@ Server::Server(Options options) : options_(std::move(options)) {
     for (const auto& client : clients_) recipients.push_back(client.get());
     EventRouter router(state_.resources());
     for (const auto& transition : transitions)
+    {
       (void)router.route_transition(transition.kind, transition.before,
                                     transition.committed, recipients);
+      if (transition.kind == StructuralTransitionKind::Map && transition.before &&
+          transition.committed && !transition.before->viewable &&
+          transition.committed->viewable) {
+        const std::array rectangles{glasswyrm::geometry::Rectangle{
+            0, 0, transition.committed->width, transition.committed->height}};
+        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+      } else if (transition.kind == StructuralTransitionKind::Configure &&
+                 transition.before && transition.committed) {
+        std::vector<glasswyrm::geometry::Rectangle> rectangles;
+        if (transition.committed->width > transition.before->width)
+          rectangles.push_back({static_cast<std::int32_t>(transition.before->width), 0,
+              static_cast<std::uint32_t>(transition.committed->width - transition.before->width),
+              transition.committed->height});
+        if (transition.committed->height > transition.before->height)
+          rectangles.push_back({0, static_cast<std::int32_t>(transition.before->height),
+              std::min<std::uint16_t>(transition.before->width, transition.committed->width),
+              static_cast<std::uint32_t>(transition.committed->height - transition.before->height)});
+        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+      }
+    }
+  };
+  expose_intent_handler_ = [this](const std::vector<ExposeIntent>& intents) {
+    std::vector<ClientConnection*> recipients;
+    recipients.reserve(clients_.size());
+    for (const auto& client : clients_) recipients.push_back(client.get());
+    EventRouter router(state_.resources());
+    for (const auto& intent : intents) {
+      const std::array rectangles{intent.rectangle};
+      (void)router.route_expose(intent.window, rectangles, recipients);
+    }
   };
 }
 
@@ -241,7 +274,8 @@ void Server::accept_clients() {
       clients_.push_back(std::make_unique<ClientConnection>(
           descriptor, next_client_identifier_++, *resource_base, state_,
           options_.integrated(), deferred_lifecycle_handler_,
-          structural_transition_handler_));
+          structural_transition_handler_, drawable_damage_handler_,
+          expose_intent_handler_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -340,13 +374,17 @@ int Server::run() {
 #ifdef GW_SERVER_HAS_IPC
   std::unique_ptr<RuntimeBridge> bridge;
   std::unique_ptr<LifecycleCoordinator> lifecycle;
+  std::unique_ptr<ContentPresenter> content_presenter;
   std::uint64_t next_lifecycle_token = 1;
   // Runtime bootstrap owns commit/generation 1.
-  std::uint64_t next_commit = 2;
-  std::uint64_t next_generation = 2;
-  std::uint64_t submission_commit = 0;
-  std::uint64_t submission_generation = 0;
+  std::uint64_t next_policy_commit = 2;
+  std::uint64_t next_policy_generation = 2;
+  std::uint64_t next_compositor_commit = 2;
+  std::uint64_t next_compositor_generation = 2;
+  std::uint64_t policy_commit = 0;
+  std::uint64_t policy_generation = 0;
   std::optional<StructuralEventState> transition_before;
+  bool content_replay_attempted = false;
   struct PendingMutation {
     std::optional<WindowCreateSpec> create;
     ClientId owner{};
@@ -358,7 +396,15 @@ int Server::run() {
   std::map<std::uint64_t, PendingMutation> pending_mutations;
   if (options_.integrated()) {
     bridge = std::make_unique<RuntimeBridge>(
-        *options_.wm_socket, *options_.compositor_socket, state_.screen());
+        *options_.wm_socket, *options_.compositor_socket, state_.screen(),
+        std::chrono::seconds(10), options_.software_content);
+    if (options_.software_content) {
+      content_presenter = std::make_unique<ContentPresenter>();
+      drawable_damage_handler_ = [&](const std::vector<DrawableDamage>& damage) {
+        for (const auto& item : damage)
+          content_presenter->damage(item.window, item.rectangle);
+      };
+    }
     bridge->start();
     while (!stop_requested && !bridge->ready()) {
       pollfd bootstrap[3] = {
@@ -397,10 +443,10 @@ int Server::run() {
     LifecycleCallbacks callbacks;
     callbacks.send_policy = [&](const LifecycleSnapshot& snapshot) {
       std::string error;
-      submission_commit = next_commit++;
-      submission_generation = next_generation++;
+      policy_commit = next_policy_commit++;
+      policy_generation = next_policy_generation++;
       const bool sent = bridge->submit_policy(
-          project_policy(snapshot, submission_commit, submission_generation),
+          project_policy(snapshot, policy_commit, policy_generation),
           error);
       if (!sent)
         std::fprintf(stderr, "glasswyrmd: policy submission failed: %s\n",
@@ -409,10 +455,15 @@ int Server::run() {
     };
     callbacks.send_compositor = [&](const LifecycleSnapshot& snapshot) {
       std::string error;
-      return bridge->submit_compositor(
-          project_compositor(snapshot, submission_commit,
-                             submission_generation),
-          error);
+      auto submission = project_compositor(
+          snapshot, next_compositor_commit++, next_compositor_generation++,
+          options_.software_content);
+      if (content_presenter && !content_presenter->prepare_lifecycle(
+                                   snapshot, state_.resources(), submission))
+        return false;
+      if (bridge->submit_compositor(submission, error)) return true;
+      if (content_presenter) content_presenter->reject_lifecycle();
+      return false;
     };
     callbacks.commit = [&](const LifecycleSnapshot& snapshot) {
       transition_before.reset();
@@ -448,7 +499,12 @@ int Server::run() {
       } else {
         committed = state_.commit_lifecycle(snapshot);
       }
-      if (!committed) return false;
+      if (!committed) {
+        if (content_presenter) content_presenter->reject_lifecycle();
+        return false;
+      }
+      if (content_presenter)
+        content_presenter->accept_lifecycle(snapshot, state_.resources());
       return true;
     };
     callbacks.complete = [&](const std::uint64_t token, const bool success) {
@@ -504,6 +560,30 @@ int Server::run() {
                               : StructuralTransitionKind::Configure;
         (void)router.route_transition(kind, transition_before, committed,
                                       recipients);
+        if (committed && operation->kind == LifecycleOperationKind::Map &&
+            (!transition_before || !transition_before->viewable) &&
+            committed->viewable) {
+          const std::array rectangles{geometry::Rectangle{
+              0, 0, committed->width, committed->height}};
+          (void)router.route_expose(operation->window, rectangles, recipients);
+        } else if (committed && transition_before &&
+                   operation->kind == LifecycleOperationKind::Configure) {
+          std::vector<geometry::Rectangle> rectangles;
+          if (committed->width > transition_before->width)
+            rectangles.push_back(
+                {static_cast<std::int32_t>(transition_before->width), 0,
+                 static_cast<std::uint32_t>(committed->width -
+                                            transition_before->width),
+                 committed->height});
+          if (committed->height > transition_before->height)
+            rectangles.push_back(
+                {0, static_cast<std::int32_t>(transition_before->height),
+                 std::min<std::uint16_t>(transition_before->width,
+                                         committed->width),
+                 static_cast<std::uint32_t>(committed->height -
+                                            transition_before->height)});
+          (void)router.route_expose(operation->window, rectangles, recipients);
+        }
         }
         }
       }
@@ -583,7 +663,10 @@ int Server::run() {
       operation.proposed = std::move(proposed);
       const auto token = operation.token;
       pending_mutations.emplace(token, std::move(mutation));
-      const auto status = lifecycle->enqueue(std::move(operation));
+      const auto status = content_presenter &&
+                                  content_presenter->frame_in_flight()
+                              ? lifecycle->enqueue_paused(std::move(operation))
+                              : lifecycle->enqueue(std::move(operation));
       if (status == EnqueueStatus::Queued) {
         client.set_dispatch_blocked(token);
         return true;
@@ -637,8 +720,11 @@ int Server::run() {
       mutation.resource_base = resource_base;
       mutation.cleanup = std::move(plan);
       pending_mutations.emplace(token, std::move(mutation));
-      if (lifecycle->enqueue_priority(std::move(operation)) !=
-          EnqueueStatus::Queued) {
+      const auto cleanup_status =
+          content_presenter && content_presenter->frame_in_flight()
+              ? lifecycle->enqueue_priority_paused(std::move(operation))
+              : lifecycle->enqueue_priority(std::move(operation));
+      if (cleanup_status != EnqueueStatus::Queued) {
         std::fprintf(stderr,
                      "glasswyrmd: could not queue coordinated client cleanup\n");
         stop_requested = 1;
@@ -717,6 +803,66 @@ int Server::run() {
         close_signal_pipe();
         return 1;
       }
+      std::vector<CompositorBufferRelease> compositor_releases;
+      if (content_presenter) {
+        if (bridge->take_compositor_reset())
+          content_presenter->peer_disconnected();
+        compositor_releases = bridge->take_buffer_releases();
+        if (bridge->content_rejected_ready()) {
+          content_presenter->reject_content();
+          bridge->clear_transaction_result();
+          if (content_replay_attempted) {
+            std::fprintf(stderr,
+                         "glasswyrmd: repeated compositor content rejection\n");
+            close_signal_pipe();
+            return 1;
+          }
+          content_replay_attempted = true;
+          auto replay = project_compositor(
+              lifecycle->committed(), next_compositor_commit++,
+              next_compositor_generation++, true);
+          if (!content_presenter->prepare_replay(
+                  lifecycle->committed(), state_.resources(), replay) ||
+              !bridge->submit_replay(replay, error)) {
+            content_presenter->reject_lifecycle();
+            std::fprintf(stderr,
+                         "glasswyrmd: compositor content replay failed: %s\n",
+                         error.c_str());
+            close_signal_pipe();
+            return 1;
+          }
+        } else if (bridge->content_result_ready()) {
+          content_presenter->accept_content();
+          content_replay_attempted = false;
+          bridge->clear_transaction_result();
+          if (lifecycle && lifecycle->pending_count() != 0 &&
+              !lifecycle->resume()) {
+            std::fprintf(stderr,
+                         "glasswyrmd: could not resume deferred lifecycle\n");
+            close_signal_pipe();
+            return 1;
+          }
+        }
+        if (bridge->replay_rejected_ready()) {
+          content_presenter->reject_lifecycle();
+          std::fprintf(stderr,
+                       "glasswyrmd: compositor rejected full content replay\n");
+          close_signal_pipe();
+          return 1;
+        }
+        if (bridge->replay_result_ready()) {
+          content_presenter->accept_lifecycle(lifecycle->committed(),
+                                              state_.resources());
+          bridge->clear_transaction_result();
+          content_replay_attempted = false;
+          if (lifecycle->pending_count() != 0 && !lifecycle->resume()) {
+            std::fprintf(stderr,
+                         "glasswyrmd: could not resume lifecycle after replay\n");
+            close_signal_pipe();
+            return 1;
+          }
+        }
+      }
       if (lifecycle && bridge->policy_result_ready()) {
         const auto* active = lifecycle->active();
         auto evaluated = active
@@ -745,19 +891,61 @@ int Server::run() {
         close_signal_pipe();
         return 1;
       }
-      if (lifecycle && bridge->compositor_rejected_ready() &&
-          !lifecycle->compositor_rejected()) {
-        std::fprintf(stderr,
-                     "glasswyrmd: compositor rollback transition failed\n");
-        close_signal_pipe();
-        return 1;
+      if (lifecycle && bridge->compositor_rejected_ready()) {
+        if (content_presenter) content_presenter->reject_lifecycle();
+        if (!lifecycle->compositor_rejected()) {
+          std::fprintf(stderr,
+                       "glasswyrmd: compositor rollback transition failed\n");
+          close_signal_pipe();
+          return 1;
+        }
       }
-      if (lifecycle && bridge->compositor_result_ready() &&
-          !lifecycle->compositor_accepted()) {
-        std::fprintf(stderr,
-                     "glasswyrmd: compositor lifecycle transition failed\n");
-        close_signal_pipe();
-        return 1;
+      if (lifecycle && bridge->compositor_result_ready()) {
+        const bool rollback = lifecycle->phase() ==
+                              CoordinatorPhase::RollingBackCompositor;
+        if (!lifecycle->compositor_accepted()) {
+          std::fprintf(stderr,
+                       "glasswyrmd: compositor lifecycle transition failed\n");
+          close_signal_pipe();
+          return 1;
+        }
+        if (rollback && content_presenter)
+          content_presenter->accept_lifecycle(lifecycle->committed(),
+                                              state_.resources());
+      }
+      if (content_presenter) {
+        for (const auto& release : compositor_releases) {
+          if (!content_presenter->release(release.buffer_id, release.reason)) {
+            std::fprintf(stderr,
+                         "glasswyrmd: invalid compositor buffer release id=%llu reason=%u\n",
+                         static_cast<unsigned long long>(release.buffer_id),
+                         static_cast<unsigned>(release.reason));
+            close_signal_pipe();
+            return 1;
+          }
+          std::fprintf(stderr,
+                       "glasswyrmd: published buffer released buffer=%llu reason=%u\n",
+                       static_cast<unsigned long long>(release.buffer_id),
+                       static_cast<unsigned>(release.reason));
+        }
+      }
+      if (content_presenter && lifecycle &&
+          lifecycle->phase() == CoordinatorPhase::Idle &&
+          bridge->transaction_idle() &&
+          !content_presenter->frame_in_flight() &&
+          content_presenter->has_pending_damage()) {
+        CompositorContentSubmission content;
+        if (content_presenter->prepare_content(
+                lifecycle->committed(), state_.resources(),
+                next_compositor_commit++, next_compositor_generation++,
+                content)) {
+          if (!bridge->submit_content(content, error)) {
+            content_presenter->reject_content();
+            std::fprintf(stderr,
+                         "glasswyrmd: content submission failed: %s\n",
+                         error.c_str());
+          }
+        }
       }
     }
 #endif

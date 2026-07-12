@@ -1,9 +1,11 @@
 #pragma once
 
 #include "glasswyrmd/property.hpp"
+#include "glasswyrmd/pixel_storage.hpp"
 
 #include <cstdint>
 #include <unordered_map>
+#include <memory>
 #include <vector>
 
 namespace glasswyrm::server {
@@ -20,8 +22,10 @@ enum class MapState : std::uint8_t {
   Viewable = 2,
 };
 enum class LifecycleStackMode : std::uint8_t { None, Above, Below };
+enum class BackgroundSource : std::uint8_t { None, ParentRelative, Pixel };
 
 struct WindowAttributes {
+  BackgroundSource background_source{BackgroundSource::None};
   std::uint32_t background_pixmap{0};
   std::uint32_t background_pixel{0};
   std::uint32_t border_pixmap{0};
@@ -67,6 +71,7 @@ struct WindowResource {
   std::uint32_t stack_sibling{0};
   LifecycleStackMode stack_mode{LifecycleStackMode::None};
   WindowAttributes attributes;
+  std::shared_ptr<PixelStorage> storage;
   std::unordered_map<std::uint64_t, std::uint32_t> event_selections;
   std::unordered_map<std::uint32_t, Property> properties;
 };

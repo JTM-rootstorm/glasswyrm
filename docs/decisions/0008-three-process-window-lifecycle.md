@@ -29,9 +29,8 @@ frame or PPM for this path.
 Startup synchronizes an empty policy snapshot and an output-only compositor
 snapshot before the X11 listener is opened. Connections use bounded retry and
 deadlines. The coordinator and peer APIs retain full snapshots for rollback
-and replay. Unit tests cover rollback and reconnect phases; full live-client
-peer-restart acceptance remains required before restart recovery is claimed as
-complete.
+and replay. Unit tests cover rollback and reconnect phases, and the fixed M6
+acceptance harness proves live-client survival across peer restarts.
 
 When IPC support is disabled, `glasswyrmd` retains its standalone behavior.
 There is no hidden built-in window-management policy.
@@ -44,4 +43,3 @@ There is no hidden built-in window-management policy.
   unsupported.
 - The local same-UID trust model and unauthenticated X11 listener remain
   documented early-development limitations.
-

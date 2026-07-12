@@ -11,7 +11,8 @@ namespace {
 
 void print_usage(std::ostream& output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
-            "[--version] [--wm-socket PATH --compositor-socket PATH]\n";
+            "[--version] [--wm-socket PATH --compositor-socket PATH] "
+            "[--software-content]\n";
 }
 
 bool parse_display(std::string_view text, std::uint16_t& display) {
@@ -58,6 +59,14 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
       options.socket_dir = argv[index];
       continue;
     }
+    if (argument == "--software-content") {
+      if (options.software_content) {
+        error << "glasswyrmd: duplicate option: --software-content\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.software_content = true;
+      continue;
+    }
     if (argument == "--wm-socket" || argument == "--compositor-socket") {
       if (++index >= argc || argv[index][0] == '\0') {
         error << "glasswyrmd: " << argument
@@ -80,6 +89,11 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
   if (options.wm_socket.has_value() != options.compositor_socket.has_value()) {
     error << "glasswyrmd: --wm-socket and --compositor-socket must be supplied "
              "together\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.software_content && !options.integrated()) {
+    error << "glasswyrmd: --software-content requires --wm-socket and "
+             "--compositor-socket\n";
     return ParseOptionsResult::ExitFailure;
   }
   return ParseOptionsResult::Run;
