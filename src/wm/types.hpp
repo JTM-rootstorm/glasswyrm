@@ -17,6 +17,7 @@ enum class WindowType : std::uint8_t { Unknown, Normal, Dialog, Utility };
 enum class DecorationPreference : std::uint8_t { Unknown, False, True };
 enum class AppliedState : std::uint8_t { Normal = 1, Maximized, Fullscreen, Minimized };
 enum class TriState : std::uint8_t { Unknown, False, True };
+enum class StackMode : std::uint8_t { None, Above, Below };
 enum class EvaluationError : std::uint8_t {
   None,
   IncompleteSnapshot,
@@ -61,6 +62,10 @@ struct RawWindow {
   std::uint64_t map_serial{};
   std::uint64_t focus_serial{};
   std::uint32_t flags{};
+  std::uint64_t geometry_serial{};
+  std::uint64_t stack_serial{};
+  std::uint32_t stack_sibling{};
+  StackMode stack_mode{StackMode::None};
 };
 
 struct RawState {

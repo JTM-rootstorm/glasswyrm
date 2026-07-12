@@ -1,6 +1,8 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/lifecycle_contract.hpp"
+#include "ipc/wire/policy_contract.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <cstddef>
@@ -97,6 +99,10 @@ int main() {
     BufferAttach buffer;
     SurfaceDamage damage;
     FrameAcknowledged acknowledged;
+    PolicyWindowUpsert policy_window;
+    PolicyWindowState policy_state;
+    PolicyLifecycleWindowUpsert lifecycle_window;
+    SurfacePolicyUpsert surface_policy;
     (void)decode_envelope(input, next(state) % 18U, next(state) % 1048577U,
                           envelope);
     (void)decode(input, hello);
@@ -111,6 +117,10 @@ int main() {
     (void)decode(input, buffer);
     (void)decode(input, damage);
     (void)decode(input, acknowledged);
+    (void)decode(input, policy_window);
+    (void)decode(input, policy_state);
+    (void)decode(input, lifecycle_window);
+    (void)decode(input, surface_policy);
     require(damage.rectangles.size() <= kMaximumDamageRectangles,
             "random damage decoding stays within its allocation bound");
     require(hello.name.size() <= kMaximumInstanceLabel &&

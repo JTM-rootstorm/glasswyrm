@@ -2,7 +2,7 @@
 
 #include "compositor/damage_region.hpp"
 
-#include <glasswyrm/ipc/contracts.h>
+#include <glasswyrm/ipc.h>
 
 #include <cstdint>
 #include <map>
@@ -14,6 +14,7 @@ namespace gw::compositor {
 struct Scene {
   std::optional<gwipc_output_upsert> output;
   std::map<std::uint64_t, gwipc_surface_upsert> surfaces;
+  std::map<std::uint64_t, gwipc_surface_policy_upsert> surface_policies;
 };
 
 struct CommitResult {
@@ -35,6 +36,7 @@ public:
   [[nodiscard]] bool apply(const gwipc_output_upsert& output);
   [[nodiscard]] bool apply(const gwipc_output_remove& output);
   [[nodiscard]] bool apply(const gwipc_surface_upsert& surface);
+  [[nodiscard]] bool apply(const gwipc_surface_policy_upsert& policy);
   [[nodiscard]] bool apply(const gwipc_surface_remove& surface);
   [[nodiscard]] bool apply(const gwipc_surface_damage& damage);
 

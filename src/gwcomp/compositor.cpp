@@ -39,13 +39,20 @@ std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
 
 } // namespace
 
-Compositor::Compositor(std::filesystem::path dump_directory)
-    : dumper_(std::move(dump_directory)) {}
+Compositor::Compositor(
+    std::filesystem::path dump_directory,
+    std::optional<std::filesystem::path> scene_manifest)
+    : dumper_(std::move(dump_directory)) {
+  if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
+}
 
 bool Compositor::begin_snapshot() {
   if (snapshot_active_ || !scene_.begin_complete_snapshot()) return false;
   pre_snapshot_attachments_ = pending_attachments_;
   pending_attachments_.clear();
+  snapshot_surface_ids_.clear();
+  snapshot_policy_ids_.clear();
+  snapshot_invalid_ = false;
   snapshot_active_ = true;
   return true;
 }
@@ -54,6 +61,8 @@ bool Compositor::end_snapshot() {
   if (!snapshot_active_ || !scene_.end_complete_snapshot()) return false;
   pre_snapshot_attachments_.clear();
   snapshot_active_ = false;
+  snapshot_surface_ids_.clear();
+  snapshot_policy_ids_.clear();
   return true;
 }
 
@@ -62,11 +71,28 @@ void Compositor::abort_snapshot() {
   pending_attachments_ = pre_snapshot_attachments_;
   pre_snapshot_attachments_.clear();
   snapshot_active_ = false;
+  snapshot_surface_ids_.clear();
+  snapshot_policy_ids_.clear();
+  snapshot_invalid_ = false;
 }
 
 bool Compositor::apply(const gwipc_output_upsert& value) { return scene_.apply(value); }
 bool Compositor::apply(const gwipc_output_remove& value) { return scene_.apply(value); }
-bool Compositor::apply(const gwipc_surface_upsert& value) { return scene_.apply(value); }
+bool Compositor::apply(const gwipc_surface_upsert& value) {
+  if (snapshot_active_ && !snapshot_surface_ids_.insert(value.surface_id).second) {
+    snapshot_invalid_ = true;
+    return false;
+  }
+  return scene_.apply(value);
+}
+
+bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
+  if (snapshot_active_ && !snapshot_policy_ids_.insert(value.surface_id).second) {
+    snapshot_invalid_ = true;
+    return false;
+  }
+  return scene_.apply(value);
+}
 
 bool Compositor::apply(const gwipc_surface_remove& value) {
   if (!scene_.apply(value)) return false;
@@ -80,6 +106,14 @@ bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& e
   if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) {
     if (fd >= 0) (void)::close(fd);
     error = "buffer mutation is gated until a complete snapshot begins";
+    return false;
+  }
+  const auto surface = scene_.pending().surfaces.find(value.surface_id);
+  if (surface != scene_.pending().surfaces.end() &&
+      surface->second.presentation_flags ==
+          GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) {
+    if (fd >= 0) (void)::close(fd);
+    error = "metadata-only surfaces cannot have buffers";
     return false;
   }
   if (mappings_.contains(value.buffer_id)) {
@@ -105,8 +139,15 @@ bool Compositor::detach(const gwipc_buffer_detach& value) {
   return true;
 }
 
-PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& error) {
+PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
+                                  std::string& error,
+                                  const bool metadata_only_peer) {
   PresentedFrame presented;
+  if (snapshot_invalid_) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = "complete snapshot contains duplicate surface records";
+    return presented;
+  }
   if (value.commit_id <= last_commit_id_ || value.producer_generation < last_generation_) {
     error = "commit IDs must increase and generations must not decrease";
     return presented;
@@ -128,10 +169,24 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
   }
 
   for (const auto& [surface_id, surface] : staged.surfaces) {
+    const bool metadata_only = surface.presentation_flags ==
+                               GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+    if (metadata_only_peer != metadata_only) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      error = metadata_only_peer ? "ProtocolServer supplied a buffered surface"
+                                 : "TestProducer supplied a metadata-only surface";
+      return presented;
+    }
     const auto attachment = pending_attachments_.find(surface_id);
-    if (surface.visible && attachment == pending_attachments_.end()) {
+    if (!metadata_only && surface.visible &&
+        attachment == pending_attachments_.end()) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       error = "visible surface has no attached buffer";
+      return presented;
+    }
+    if (metadata_only && attachment != pending_attachments_.end()) {
+      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
+      error = "metadata-only surface has an attached buffer";
       return presented;
     }
     if (attachment == pending_attachments_.end()) continue;
@@ -142,6 +197,33 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
       error = "surface and buffer dimensions do not match";
       return presented;
     }
+  }
+
+  if (metadata_only_peer) {
+    SceneManifestResult manifest_result;
+    if (scene_manifest_) {
+      if (!scene_manifest_->append(value.commit_id, value.producer_generation,
+                                   staged, manifest_result, error)) {
+        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+        return presented;
+      }
+    } else {
+      std::string ignored_json;
+      if (!SceneManifest::describe(value.commit_id, value.producer_generation,
+                                   staged, manifest_result, ignored_json,
+                                   error)) {
+        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+        return presented;
+      }
+    }
+    scene_ = std::move(candidate);
+    committed_attachments_.clear();
+    output_.disable();
+    ++frame_ordinal_;
+    last_generation_ = value.producer_generation;
+    presented.ordinal = frame_ordinal_;
+    presented.hash = manifest_result.hash;
+    return presented;
   }
   for (const auto& [surface_id, buffer_id] : pending_attachments_) {
     (void)buffer_id;
@@ -188,7 +270,10 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
     }
     for (const auto surface_id : candidate.stacking_order()) {
       const auto& surface = staged.surfaces.at(surface_id);
-      if (!surface.visible || surface.opacity == 0) continue;
+      if (!surface.visible || surface.opacity == 0 ||
+          surface.presentation_flags ==
+              GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
+        continue;
       auto bounds = surface_bounds(surface, *staged.output);
       if (!bounds || !intersection(*bounds, rectangle)) continue;
       const auto mapping = mappings_.at(pending_attachments_.at(surface_id));
@@ -266,6 +351,9 @@ void Compositor::disconnect() {
   last_commit_id_ = 0;
   last_generation_ = 0;
   snapshot_active_ = false;
+  snapshot_invalid_ = false;
+  snapshot_surface_ids_.clear();
+  snapshot_policy_ids_.clear();
 }
 
 } // namespace gw::compositor

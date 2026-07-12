@@ -38,6 +38,19 @@ int main() {
     return 1;
 
   options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--scene-manifest", "/tmp/scenes.jsonl"},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.scene_manifest != "/tmp/scenes.jsonl")
+    return 1;
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--scene-manifest", ""},
+            options, output, error) != ParseOptionsResult::ExitFailure)
+    return 1;
+
+  options = {};
   if (parse({"gwcomp", "--help"}, options, output, error) !=
           ParseOptionsResult::ExitSuccess ||
       output.find("Usage: gwcomp") == std::string::npos)

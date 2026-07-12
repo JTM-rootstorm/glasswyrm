@@ -5,6 +5,7 @@
 #include <glasswyrm/ipc/control.h>
 #include <glasswyrm/ipc/contracts.h>
 #include <glasswyrm/ipc/listener.h>
+#include <glasswyrm/ipc/lifecycle.h>
 #include <glasswyrm/ipc/message.h>
 #include <glasswyrm/ipc/policy.h>
 #include <glasswyrm/ipc/version.h>

@@ -6,7 +6,12 @@ namespace gw::protocol::x11 {
 
 enum class CoreOpcode : std::uint8_t {
   CreateWindow = 1,
+  ChangeWindowAttributes = 2,
+  GetWindowAttributes = 3,
   DestroyWindow = 4,
+  MapWindow = 8,
+  UnmapWindow = 10,
+  ConfigureWindow = 12,
   GetGeometry = 14,
   QueryTree = 15,
   InternAtom = 16,
@@ -17,6 +22,27 @@ enum class CoreOpcode : std::uint8_t {
   ListProperties = 21,
   GetInputFocus = 43,
   NoOperation = 127,
+};
+
+enum class CoreEventType : std::uint8_t {
+  DestroyNotify = 17,
+  UnmapNotify = 18,
+  MapNotify = 19,
+  ConfigureNotify = 22,
+};
+
+enum class CoreMapState : std::uint8_t {
+  Unmapped = 0,
+  Unviewable = 1,
+  Viewable = 2,
+};
+
+enum class CoreStackMode : std::uint8_t {
+  Above = 0,
+  Below = 1,
+  TopIf = 2,
+  BottomIf = 3,
+  Opposite = 4,
 };
 
 enum class CoreErrorCode : std::uint8_t {

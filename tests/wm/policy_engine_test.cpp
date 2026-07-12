@@ -148,7 +148,7 @@ void transients_override_and_states() {
               evaluated.policy.windows.at(50).final_y == 90,
           "nested transients resolve geometry and depth-first stacking");
 
-  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 0;
+  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 99;
   raw.windows.at(20).fullscreen_requested = true;
   raw.windows.at(20).maximized_requested = true;
   raw.windows.at(20).minimized_requested = true;
@@ -195,6 +195,160 @@ void decoration_and_focus() {
               !evaluated.policy.windows.at(20).focused &&
               evaluated.policy.output_order == std::vector<std::uint32_t>({10, 20}),
           "no visible candidate leaves focus empty and hidden output ID-sorted");
+}
+
+void lifecycle_geometry() {
+  auto raw = state();
+  raw.windows.at(10).geometry_serial = 1;
+  raw.windows.at(10).requested_x = 500;
+  raw.windows.at(10).requested_y = 400;
+  auto evaluated = evaluate(raw, 1);
+  require(evaluated && evaluated.policy.windows.at(10).final_x == 500 &&
+              evaluated.policy.windows.at(10).final_y == 400,
+          "nonzero geometry serial preserves requested managed position");
+
+  raw.windows.at(10).requested_x = -500;
+  raw.windows.at(10).requested_y = 1000;
+  raw.windows.at(10).requested_width = 900;
+  raw.windows.at(10).requested_height = 900;
+  evaluated = evaluate(raw, 2);
+  require(evaluated && evaluated.policy.windows.at(10).final_x == 100 &&
+              evaluated.policy.windows.at(10).final_y == 50 &&
+              evaluated.policy.windows.at(10).final_width == 640 &&
+              evaluated.policy.windows.at(10).final_height == 480,
+          "persisted geometry clamps dimensions and rectangle into work area");
+
+  raw.windows.at(10).fullscreen_requested = true;
+  raw.windows.at(10).requested_x = 300;
+  raw.windows.at(10).requested_width = 200;
+  evaluated = evaluate(raw, 3);
+  require(evaluated && evaluated.policy.windows.at(10).final_x == 100 &&
+              evaluated.policy.windows.at(10).final_width == 640,
+          "fullscreen overrides persisted geometry");
+
+  raw = state();
+  auto transient = window(30, 3);
+  transient.transient_for = 10; transient.geometry_serial = 9;
+  transient.requested_x = 500; transient.requested_y = 400;
+  transient.requested_width = 100; transient.requested_height = 60;
+  raw.windows.emplace(30, transient);
+  evaluated = evaluate(raw, 4);
+  require(evaluated && evaluated.policy.windows.at(30).final_x == 150 &&
+              evaluated.policy.windows.at(30).final_y == 70,
+          "transient centering overrides lifecycle geometry intent");
+
+  raw = state();
+  raw.windows.at(20).geometry_serial = 7;
+  raw.windows.at(20).requested_x = 333;
+  raw.windows.erase(10);
+  evaluated = evaluate(raw, 5);
+  require(evaluated && evaluated.policy.windows.at(20).final_x == 333,
+          "persisted placement does not recascade after another window is removed");
+}
+
+RawState stack_state() {
+  auto raw = state();
+  raw.windows.emplace(30, window(30, 3));
+  return raw;
+}
+
+void lifecycle_restacking() {
+  auto raw = stack_state();
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  auto evaluated = evaluate(raw, 1);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({20, 30, 10}),
+          "Above without sibling moves to band top");
+
+  raw = stack_state();
+  raw.windows.at(30).stack_serial = 1;
+  raw.windows.at(30).stack_mode = StackMode::Below;
+  evaluated = evaluate(raw, 1);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({30, 10, 20}),
+          "Below without sibling moves to band bottom");
+
+  raw = stack_state();
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_sibling = 20;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  evaluated = evaluate(raw, 1);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({20, 10, 30}),
+          "Above sibling inserts immediately above in band");
+
+  raw.windows.at(10).stack_mode = StackMode::Below;
+  evaluated = evaluate(raw, 2);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({10, 20, 30}),
+          "Below sibling inserts immediately below in band");
+
+  raw = stack_state();
+  raw.windows.at(10).stack_serial = 2;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  raw.windows.at(30).stack_serial = 1;
+  raw.windows.at(30).stack_mode = StackMode::Below;
+  evaluated = evaluate(raw, 3);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({30, 20, 10}),
+          "restack operations apply in ascending stack serial order");
+
+  raw = stack_state();
+  raw.windows.at(10).override_redirect = true;
+  raw.windows.at(20).override_redirect = true;
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  evaluated = evaluate(raw, 3);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({30, 20, 10}),
+          "override-redirect restacking remains within the top band");
+
+  raw = stack_state();
+  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 0;
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  evaluated = evaluate(raw, 4);
+  require(evaluated && evaluated.policy.output_order.back() == 10 &&
+              evaluated.policy.windows.at(10).stacking == -1,
+          "hidden restack intent preserves hidden output rules");
+  raw.windows.at(10).wants_map = true; raw.windows.at(10).map_serial = 1;
+  evaluated = evaluate(raw, 5);
+  require(evaluated && evaluated.policy.output_order ==
+                           std::vector<std::uint32_t>({20, 30, 10}),
+          "hidden restack intent takes effect when window maps");
+}
+
+void lifecycle_restack_validation() {
+  auto raw = stack_state();
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  require(evaluate(raw, 1).error == EvaluationError::InvalidWindow,
+          "stack mode without serial is rejected");
+  raw = stack_state(); raw.windows.at(10).stack_serial = 1;
+  require(evaluate(raw, 1).error == EvaluationError::InvalidWindow,
+          "stack serial without mode is rejected");
+  raw = stack_state(); raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  raw.windows.at(10).stack_sibling = 999;
+  require(evaluate(raw, 1).error == EvaluationError::UnknownReference,
+          "missing stack sibling is rejected as unknown reference");
+  raw = stack_state(); raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  raw.windows.at(10).stack_sibling = 20;
+  raw.windows.at(20).override_redirect = true;
+  require(evaluate(raw, 1).error == EvaluationError::UnsupportedMetadata,
+          "cross-band sibling is rejected");
+  raw = stack_state(); raw.windows.at(10).transient_for = 20;
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  require(evaluate(raw, 1).error == EvaluationError::UnsupportedMetadata,
+          "transient restack is rejected");
+  raw = stack_state(); raw.windows.at(30).transient_for = 20;
+  raw.windows.at(10).stack_serial = 1;
+  raw.windows.at(10).stack_mode = StackMode::Above;
+  raw.windows.at(10).stack_sibling = 30;
+  require(evaluate(raw, 1).error == EvaluationError::UnsupportedMetadata,
+          "transient stack sibling is rejected");
 }
 
 void transactions() {
@@ -258,6 +412,9 @@ int main() {
   cascade_and_determinism();
   transients_override_and_states();
   decoration_and_focus();
+  lifecycle_geometry();
+  lifecycle_restacking();
+  lifecycle_restack_validation();
   transactions();
   return 0;
 }

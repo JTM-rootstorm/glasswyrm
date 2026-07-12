@@ -16,14 +16,19 @@ namespace x11 = gw::protocol::x11;
 ClientConnection::ClientConnection(const int descriptor,
                                    const std::uint64_t identifier,
                                    const std::uint32_t resource_id_base,
-                                   ServerState& server_state)
+                                   ServerState& server_state,
+                                   const bool integrated_lifecycle,
+                                   DeferredHandler deferred_handler,
+                                   StructuralTransitionHandler transition_handler)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
-      server_state_(server_state) {}
+      server_state_(server_state),
+      integrated_lifecycle_(integrated_lifecycle),
+      deferred_handler_(std::move(deferred_handler)),
+      transition_handler_(std::move(transition_handler)) {}
 
 ClientConnection::~ClientConnection() {
-  cleanup_resources();
   if (descriptor_ >= 0) {
     ::close(descriptor_);
   }
@@ -34,28 +39,14 @@ short ClientConnection::poll_events() const {
     return 0;
   }
   short events = 0;
-  if (state_ == State::AwaitingSetup || state_ == State::Established) {
+  if (state_ == State::AwaitingSetup ||
+      (state_ == State::Established && !dispatch_blocked())) {
     events |= POLLIN;
   }
   if (!output_queue_.empty()) {
     events |= POLLOUT;
   }
   return events;
-}
-
-void ClientConnection::cleanup_resources() {
-  if (resources_cleaned_) {
-    return;
-  }
-  resources_cleaned_ = true;
-  const auto cleanup = server_state_.cleanup_client(identifier_);
-  if (cleanup.resources_destroyed != 0 || cleanup.property_bytes_released != 0) {
-    std::fprintf(stderr,
-                 "glasswyrmd: client %llu: cleanup resources=%zu "
-                 "property_bytes=%zu\n",
-                 static_cast<unsigned long long>(identifier_),
-                 cleanup.resources_destroyed, cleanup.property_bytes_released);
-  }
 }
 
 void ClientConnection::close_with_log(const char* reason) {
@@ -65,7 +56,6 @@ void ClientConnection::close_with_log(const char* reason) {
   output_queue_.clear();
   queued_output_bytes_ = 0;
   pending_input_.clear();
-  cleanup_resources();
 }
 
 void ClientConnection::close_after_output(const char* reason) {
@@ -74,7 +64,6 @@ void ClientConnection::close_after_output(const char* reason) {
   pending_input_.clear();
   if (output_queue_.empty()) {
     state_ = State::Closing;
-    cleanup_resources();
     return;
   }
   output_queue_.back().close_after = true;
@@ -90,6 +79,31 @@ bool ClientConnection::enqueue(std::vector<std::uint8_t> bytes,
   queued_output_bytes_ += bytes.size();
   output_queue_.push_back({std::move(bytes), 0, close_after});
   return true;
+}
+
+bool ClientConnection::enqueue_server_packet(std::vector<std::uint8_t> bytes) {
+  if (state_ == State::Closing) return false;
+  return enqueue(std::move(bytes));
+}
+
+void ClientConnection::set_dispatch_blocked(
+    const DispatchBlockToken token) noexcept {
+  dispatch_block_token_ = token;
+}
+
+bool ClientConnection::clear_dispatch_blocked(
+    const DispatchBlockToken token) noexcept {
+  if (!dispatch_block_token_ || *dispatch_block_token_ != token) return false;
+  dispatch_block_token_.reset();
+  return true;
+}
+
+void ClientConnection::mark_transport_closed() noexcept {
+  state_ = State::Closing;
+  output_queue_.clear();
+  queued_output_bytes_ = 0;
+  pending_input_.clear();
+  dispatch_block_token_.reset();
 }
 
 void ClientConnection::prepare_setup_reply() {
@@ -151,7 +165,7 @@ void ClientConnection::process_input(
     RequestWorkBudget& budget) {
   std::size_t consumed = 0;
   while (consumed < input.size() && state_ != State::Closing &&
-         state_ != State::Rejecting) {
+         state_ != State::Rejecting && !dispatch_blocked()) {
     if (state_ == State::AwaitingSetup) {
       const auto result = setup_parser_.consume(input.subspan(consumed));
       consumed += result.consumed;
@@ -188,11 +202,24 @@ void ClientConnection::process_input(
         budget.record(request_framer_->request().bytes.size());
         const DispatchContext context{identifier_, resource_id_base_,
                                       server_state_.screen().resource_id_mask,
-                                      request_sequence_, byte_order_};
+                                      request_sequence_, byte_order_,
+                                      integrated_lifecycle_};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
         if (!result_packet.output.empty() &&
             !enqueue(std::move(result_packet.output))) {
+          return;
+        }
+        if (!result_packet.structural_transitions.empty() &&
+            transition_handler_)
+          transition_handler_(result_packet.structural_transitions);
+        if (result_packet.kind == DispatchKind::DeferredLifecycle &&
+            (!deferred_handler_ || !deferred_handler_(*this, result_packet))) {
+          close_with_log("deferred lifecycle handoff failed");
+          return;
+        }
+        if (result_packet.kind == DispatchKind::CloseClient) {
+          close_with_log("dispatcher requested client close");
           return;
         }
         request_framer_->reset();
@@ -210,6 +237,10 @@ void ClientConnection::process_input(
         close_with_log("connection closed during core request");
         return;
     }
+  }
+  if (dispatch_blocked() && consumed < input.size()) {
+    pending_input_.insert(pending_input_.end(), input.begin() + consumed,
+                          input.end());
   }
 }
 
@@ -293,9 +324,14 @@ void ClientConnection::handle_events(const short events) {
     close_with_log("socket error");
     return;
   }
+  if (dispatch_blocked() && (events & POLLHUP) != 0) {
+    mark_transport_closed();
+    return;
+  }
   if (needs_service() ||
       (((events & (POLLIN | POLLHUP)) != 0) &&
-       (state_ == State::AwaitingSetup || state_ == State::Established))) {
+       (state_ == State::AwaitingSetup ||
+        (state_ == State::Established && !dispatch_blocked())))) {
     read_input();
   }
   if ((events & POLLOUT) != 0 && state_ != State::Closing) {

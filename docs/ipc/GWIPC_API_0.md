@@ -2,7 +2,7 @@
 
 ## Version And ABI
 
-The installed C API is version 0.3.0 and the shared library has SOVERSION 0.
+The installed C API is version 0.4.0 and the shared library has SOVERSION 0.
 `gwipc_get_api_version()` reports the library API version;
 `gwipc_get_max_wire_version()` independently reports the highest supported wire
 version. ABI compatibility must not be inferred from wire compatibility.
@@ -14,9 +14,10 @@ reserved fields to zero. Status-returning functions do not throw exceptions.
 System failures expose the saved `errno` through the owning listener or
 connection.
 
-API 0 remains additive. API 0.1 transport consumers and API 0.2 compositor
-contract consumers retain their symbols and wire encodings. API 0.3 adds public
-snapshot-control and window-policy structures without changing wire 1.0.
+API 0 remains additive. API 0.1 transport consumers, API 0.2 compositor
+contract consumers, and API 0.3 policy consumers retain their symbols and wire
+encodings. API 0.4 adds lifecycle records and sequence-returning enqueue
+without changing wire 1.0.
 
 ## Typed Control And Contracts
 
@@ -50,6 +51,10 @@ caller. Destroying it closes every attached descriptor that has not been taken.
 Enqueueing a message duplicates every supplied descriptor with close-on-exec.
 The caller retains the originals. The connection owns its duplicates until
 send completion, cancellation, failure, or destruction.
+
+`gwipc_connection_enqueue_with_sequence()` has the same ownership and atomic
+failure behavior as the original enqueue function and reports the assigned
+outgoing sequence for exact reply correlation.
 
 ## Nonblocking Operation
 
