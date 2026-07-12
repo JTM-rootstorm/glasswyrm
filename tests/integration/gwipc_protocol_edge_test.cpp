@@ -4,6 +4,7 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "tests/helpers/test_support.hpp"
 
@@ -25,7 +26,8 @@ using gw::test::require;
 
 constexpr auto kCapabilities =
     GWIPC_CAP_FD_PASSING | GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE |
-    GWIPC_CAP_MEMFD_BUFFERS | GWIPC_CAP_WINDOW_POLICY;
+    GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_MEMFD_BUFFERS |
+    GWIPC_CAP_WINDOW_POLICY;
 
 struct RawPair {
   gwipc_connection* connection{new gwipc_connection};
@@ -154,6 +156,66 @@ void test_policy_commit_correlation() {
   require(gwipc_connection_process_poll_events(mismatch.connection, POLLIN) ==
               GWIPC_STATUS_PROTOCOL_ERROR,
           "mismatched policy acknowledgement is rejected");
+}
+
+void test_lifecycle_capabilities_flags_and_descriptors() {
+  RawPair pair;
+  const gw::ipc::wire::PolicyWindowUpsert base{
+      10, 1, 0, 1, 0, 0, 100, 80, 0,
+      gw::ipc::wire::PolicyWindowType::Normal,
+      gw::ipc::wire::PolicyMapIntent::WantsMap, false, 0, false, false,
+      false, false, 1, 1, 0, 0};
+  const auto lifecycle = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyLifecycleWindowUpsert{base});
+  require(enqueue(pair.connection,
+                  GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT, 0,
+                  lifecycle) == GWIPC_STATUS_CAPABILITY_MISMATCH,
+          "lifecycle policy requires negotiated lifecycle capability");
+  pair.connection->peer.capabilities |= GWIPC_CAP_WINDOW_LIFECYCLE;
+  require(enqueue(pair.connection,
+                  GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT, 0,
+                  lifecycle) == GWIPC_STATUS_OK,
+          "incremental lifecycle policy accepts zero flags");
+  require(enqueue(pair.connection,
+                  GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT,
+                  GWIPC_FLAG_ACK_REQUIRED, lifecycle) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "lifecycle policy rejects unrelated flags");
+
+  const auto policy = gw::ipc::wire::encode(
+      gw::ipc::wire::SurfacePolicyUpsert{
+          20, 10, 1, gw::ipc::wire::PolicyWindowType::Normal,
+          gw::ipc::wire::PolicyAppliedState::Normal});
+  pair.connection->outgoing_snapshot = {true, 1, 1, UINT32_MAX, 0};
+  require(enqueue(pair.connection, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,
+                  GWIPC_FLAG_SNAPSHOT_ITEM, policy) == GWIPC_STATUS_OK,
+          "surface policy accepts only active snapshot item");
+  require(enqueue(pair.connection, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT, 0,
+                  policy) == GWIPC_STATUS_PROTOCOL_ERROR,
+          "surface policy rejects missing snapshot flag");
+  const int descriptor = ::memfd_create("gwipc-lifecycle", MFD_CLOEXEC);
+  require(descriptor >= 0, "create lifecycle descriptor probe");
+  require(enqueue(pair.connection, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,
+                  GWIPC_FLAG_SNAPSHOT_ITEM, policy, 0, &descriptor, 1) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "surface policy rejects descriptors");
+  (void)::close(descriptor);
+
+  RawPair metadata;
+  gw::ipc::wire::SurfaceUpsert surface;
+  surface.surface_id = 1;
+  surface.output_id = 1;
+  surface.logical_width = 1;
+  surface.logical_height = 1;
+  surface.presentation_flags = GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  const auto surface_bytes = gw::ipc::wire::encode(surface);
+  require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
+                  surface_bytes) == GWIPC_STATUS_CAPABILITY_MISMATCH,
+          "metadata-only surface requires lifecycle capability");
+  metadata.connection->peer.capabilities |= GWIPC_CAP_WINDOW_LIFECYCLE;
+  require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
+                  surface_bytes) == GWIPC_STATUS_OK,
+          "metadata-only surface accepts negotiated lifecycle capability");
 }
 
 void test_outgoing_snapshot_violations_are_atomic() {
@@ -345,6 +407,7 @@ void test_message_descriptor_ownership() {
 }  // namespace
 
 int main() {
+  test_lifecycle_capabilities_flags_and_descriptors();
   test_policy_commit_correlation();
   test_outgoing_snapshot_violations_are_atomic();
   test_incoming_snapshot_violation_closes_after_error();

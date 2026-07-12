@@ -251,7 +251,7 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes,
       in_range(decoded.fullscreen_eligible, TriState::Unknown, TriState::True) &&
       in_range(decoded.direct_scanout_eligible, TriState::Unknown,
                TriState::True) &&
-      decoded.presentation_flags == 0 &&
+      (decoded.presentation_flags & ~UINT32_C(1)) == 0 &&
       (!decoded.clipping ||
        valid_rectangle({decoded.clip_x, decoded.clip_y, decoded.clip_width,
                         decoded.clip_height}));

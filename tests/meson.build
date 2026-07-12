@@ -206,6 +206,14 @@ if get_option('libgwipc')
   )
   test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10)
 
+  gwipc_lifecycle_contract_test = executable(
+    'gwipc_lifecycle_contract_test',
+    files('unit/ipc/lifecycle_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10)
+
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',
     files('unit/ipc/public_contract_api_test.cpp'),
