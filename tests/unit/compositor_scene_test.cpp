@@ -6,19 +6,25 @@
 namespace {
 using gw::compositor::Rectangle;
 using gw::compositor::SceneModel;
-using namespace gw::ipc::wire;
 
-OutputUpsert output(std::uint32_t width = 100, std::uint32_t height = 80) {
-  OutputUpsert value;
+gwipc_output_upsert output(std::uint32_t width = 100,
+                           std::uint32_t height = 80) {
+  gwipc_output_upsert value{};
+  value.struct_size = sizeof(value);
   value.output_id = 1;
   value.enabled = true;
   value.logical_width = value.physical_pixel_width = width;
   value.logical_height = value.physical_pixel_height = height;
+  value.scale_numerator = value.scale_denominator = 1;
+  value.transform = GWIPC_TRANSFORM_NORMAL;
+  value.color = {GWIPC_SDR_COLOR_SPACE_SRGB, GWIPC_TRANSFER_FUNCTION_SRGB,
+                 GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
   return value;
 }
 
-SurfaceUpsert surface(std::uint64_t id, std::int32_t stacking = 0) {
-  SurfaceUpsert value;
+gwipc_surface_upsert surface(std::uint64_t id, std::int32_t stacking = 0) {
+  gwipc_surface_upsert value{};
+  value.struct_size = sizeof(value);
   value.surface_id = id;
   value.output_id = 1;
   value.logical_x = 10;
@@ -27,11 +33,21 @@ SurfaceUpsert surface(std::uint64_t id, std::int32_t stacking = 0) {
   value.logical_height = 10;
   value.stacking = stacking;
   value.visible = true;
+  value.transform = GWIPC_TRANSFORM_NORMAL;
+  value.opacity = GWIPC_OPACITY_ONE;
+  value.scale_numerator = value.scale_denominator = 1;
+  value.color = {GWIPC_SDR_COLOR_SPACE_SRGB, GWIPC_TRANSFER_FUNCTION_SRGB,
+                 GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
   return value;
 }
 
-FrameCommit frame(std::uint64_t id, std::uint64_t generation) {
-  return {id, 1, generation, 0};
+gwipc_frame_commit frame(std::uint64_t id, std::uint64_t generation) {
+  gwipc_frame_commit value{};
+  value.struct_size = sizeof(value);
+  value.commit_id = id;
+  value.output_id = 1;
+  value.producer_generation = generation;
+  return value;
 }
 
 void require(bool condition, const char* message) { gw::test::require(condition, message); }
@@ -47,7 +63,7 @@ void test_snapshot_gate_and_atomic_rejection() {
   require(model.apply(invalid_reference), "unresolved reference stages for commit validation");
   require(model.end_complete_snapshot(), "complete snapshot ends");
   const auto rejected = model.commit(frame(1, 1));
-  require(rejected.result == FrameResult::RejectedUnknownSurface,
+  require(rejected.result == GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE,
           "bad surface reference rejects frame");
   require(!model.committed().output, "rejection preserves empty committed state");
   require(model.pending().surfaces.contains(3), "rejection preserves pending correction state");
@@ -74,7 +90,7 @@ void test_validation_and_stacking() {
   SceneModel model;
   require(model.begin_complete_snapshot() && model.apply(output()), "snapshot starts");
   auto bad = surface(9);
-  bad.opacity = kOpacityOne + 1;
+  bad.opacity = GWIPC_OPACITY_ONE + 1;
   require(!model.apply(bad), "opacity above fixed-point one is rejected");
   bad = surface(9);
   bad.clipping = false;
@@ -101,7 +117,13 @@ void test_old_new_bounds_and_explicit_damage() {
   require(move.damage == std::vector<Rectangle>({{10, 12, 20, 10}, {50, 12, 20, 10}}),
           "move damages deterministic old and new bounds");
 
-  require(model.apply(SurfaceDamage{1, {{-4, 2, 10, 3}}}), "surface damage stages");
+  const gwipc_damage_rectangle rectangle{-4, 2, 10, 3};
+  gwipc_surface_damage damage{};
+  damage.struct_size = sizeof(damage);
+  damage.surface_id = 1;
+  damage.rectangles = &rectangle;
+  damage.rectangle_count = 1;
+  require(model.apply(damage), "surface damage stages");
   const auto content = model.commit(frame(3, 3));
   require(content.damage == std::vector<Rectangle>({{50, 14, 6, 3}}),
           "local damage clips and translates into output coordinates");

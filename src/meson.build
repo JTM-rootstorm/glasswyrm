@@ -32,11 +32,11 @@ gw_compositor_geometry_lib = static_library(
     'compositor/damage_region.cpp',
     'compositor/scene.cpp',
   ),
-  include_directories: include_directories('.'),
+  include_directories: [include_directories('.'), gw_include_dir],
 )
 gw_compositor_geometry_dep = declare_dependency(
   link_with: gw_compositor_geometry_lib,
-  include_directories: include_directories('.'),
+  include_directories: [include_directories('.'), gw_include_dir],
 )
 
 gw_render_software_lib = static_library(

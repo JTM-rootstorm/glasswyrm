@@ -7,24 +7,24 @@
 namespace gw::compositor {
 namespace {
 
-using ipc::wire::OutputUpsert;
-using ipc::wire::SdrColorMetadata;
-using ipc::wire::SurfaceUpsert;
+using OutputUpsert = gwipc_output_upsert;
+using SdrColorMetadata = gwipc_sdr_color_metadata;
+using SurfaceUpsert = gwipc_surface_upsert;
 
 constexpr std::uint32_t kMaximumOutputExtent = 4096;
 constexpr std::uint64_t kMaximumOutputPixels = 16'777'216;
 constexpr std::size_t kMaximumSurfaces = 4096;
 
 bool srgb(const SdrColorMetadata& color) {
-  return color.color_space == ipc::wire::SdrColorSpace::Srgb &&
-         color.transfer_function == ipc::wire::TransferFunction::Srgb &&
-         color.primaries == ipc::wire::ColorPrimaries::Srgb;
+  return color.color_space == GWIPC_SDR_COLOR_SPACE_SRGB &&
+         color.transfer_function == GWIPC_TRANSFER_FUNCTION_SRGB &&
+         color.primaries == GWIPC_COLOR_PRIMARIES_SRGB;
 }
 
 bool valid_output(const OutputUpsert& output) {
   if (output.output_id == 0 || output.logical_x != 0 || output.logical_y != 0 ||
       output.scale_numerator != 1 || output.scale_denominator != 1 ||
-      output.transform != ipc::wire::Transform::Normal || !srgb(output.color))
+      output.transform != GWIPC_TRANSFORM_NORMAL || !srgb(output.color))
     return false;
   if (!output.enabled)
     return output.logical_width == 0 && output.logical_height == 0 &&
@@ -48,10 +48,10 @@ bool checked_extent(std::int32_t origin, std::uint32_t extent) {
 bool valid_surface(const SurfaceUpsert& surface) {
   if (surface.surface_id == 0 || surface.x11_window_id != 0 ||
       surface.parent_surface_id != 0 || surface.output_id == 0 ||
-      surface.transform != ipc::wire::Transform::Normal ||
+      surface.transform != GWIPC_TRANSFORM_NORMAL ||
       surface.scale_numerator != 1 || surface.scale_denominator != 1 ||
       !srgb(surface.color) || surface.presentation_flags != 0 ||
-      surface.opacity > ipc::wire::kOpacityOne ||
+      surface.opacity > GWIPC_OPACITY_ONE ||
       !checked_extent(surface.logical_x, surface.logical_width) ||
       !checked_extent(surface.logical_y, surface.logical_height)) return false;
   if (!surface.clipping)
@@ -124,7 +124,7 @@ bool SceneModel::apply(const OutputUpsert& output) {
   return true;
 }
 
-bool SceneModel::apply(const ipc::wire::OutputRemove& output) {
+bool SceneModel::apply(const gwipc_output_remove& output) {
   if (!mutations_allowed() || output.output_id == 0 || !pending_.output ||
       pending_.output->output_id != output.output_id) return false;
   pending_.output.reset();
@@ -139,22 +139,27 @@ bool SceneModel::apply(const SurfaceUpsert& surface) {
   return true;
 }
 
-bool SceneModel::apply(const ipc::wire::SurfaceRemove& surface) {
+bool SceneModel::apply(const gwipc_surface_remove& surface) {
   return mutations_allowed() && surface.surface_id != 0 &&
          pending_.surfaces.erase(surface.surface_id) == 1;
 }
 
-bool SceneModel::apply(const ipc::wire::SurfaceDamage& damage) {
+bool SceneModel::apply(const gwipc_surface_damage& damage) {
   if (!mutations_allowed() || !pending_.surfaces.contains(damage.surface_id) ||
-      damage.rectangles.size() > ipc::wire::kMaximumDamageRectangles) return false;
-  for (const auto& rectangle : damage.rectangles)
+      damage.rectangle_count > GWIPC_MAXIMUM_DAMAGE_RECTANGLES ||
+      (damage.rectangle_count != 0 && !damage.rectangles)) return false;
+  for (std::size_t index = 0; index < damage.rectangle_count; ++index) {
+    const auto& rectangle = damage.rectangles[index];
     if (!checked_extent(rectangle.x, rectangle.width) ||
         !checked_extent(rectangle.y, rectangle.height)) return false;
-  explicit_damage_.push_back(damage);
+  }
+  explicit_damage_.push_back(
+      {damage.surface_id,
+       {damage.rectangles, damage.rectangles + damage.rectangle_count}});
   return true;
 }
 
-CommitResult SceneModel::commit(const ipc::wire::FrameCommit& frame) {
+CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
   CommitResult result;
   result.presented_generation = presented_generation_;
   if (snapshot_active_ || !initial_snapshot_received_ || frame.commit_id == 0 ||
@@ -165,7 +170,7 @@ CommitResult SceneModel::commit(const ipc::wire::FrameCommit& frame) {
     committed_ = pending_;
     explicit_damage_.clear();
     presented_generation_ = frame.producer_generation;
-    result.result = ipc::wire::FrameResult::Dropped;
+    result.result = GWIPC_FRAME_DROPPED;
     result.presented_generation = presented_generation_;
     return result;
   }
@@ -173,7 +178,7 @@ CommitResult SceneModel::commit(const ipc::wire::FrameCommit& frame) {
   for (const auto& [id, surface] : pending_.surfaces) {
     (void)id;
     if (surface.output_id != pending_.output->output_id) {
-      result.result = ipc::wire::FrameResult::RejectedUnknownSurface;
+      result.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
       return result;
     }
   }
@@ -182,7 +187,7 @@ CommitResult SceneModel::commit(const ipc::wire::FrameCommit& frame) {
     pending_ = committed_;
     explicit_damage_.clear();
     presented_generation_ = frame.producer_generation;
-    result.result = ipc::wire::FrameResult::Dropped;
+    result.result = GWIPC_FRAME_DROPPED;
     result.presented_generation = presented_generation_;
     return result;
   }
@@ -239,7 +244,7 @@ CommitResult SceneModel::commit(const ipc::wire::FrameCommit& frame) {
   pending_ = committed_;
   explicit_damage_.clear();
   presented_generation_ = frame.producer_generation;
-  result.result = ipc::wire::FrameResult::Accepted;
+  result.result = GWIPC_FRAME_ACCEPTED;
   result.presented_generation = presented_generation_;
   result.damage = damage.rectangles();
   return result;
