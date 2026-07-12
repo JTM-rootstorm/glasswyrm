@@ -89,6 +89,20 @@ EnqueueStatus LifecycleCoordinator::enqueue(LifecycleOperation operation) {
   return EnqueueStatus::Queued;
 }
 
+EnqueueStatus LifecycleCoordinator::enqueue_paused(
+    LifecycleOperation operation) {
+  if (phase_ == CoordinatorPhase::Fatal) return EnqueueStatus::Fatal;
+  if (queue_.size() + (active_ ? 1U : 0U) >= maximum_pending_)
+    return EnqueueStatus::Full;
+  queue_.push_back(std::move(operation));
+  return EnqueueStatus::Queued;
+}
+
+bool LifecycleCoordinator::resume() {
+  if (phase_ != CoordinatorPhase::Idle || active_) return false;
+  return start_next();
+}
+
 EnqueueStatus LifecycleCoordinator::enqueue_priority(
     LifecycleOperation operation) {
   if (phase_ == CoordinatorPhase::Fatal) return EnqueueStatus::Fatal;

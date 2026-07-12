@@ -160,15 +160,18 @@ bool PublishedBufferStore::release(const std::uint64_t buffer_id,
 }
 
 void PublishedBufferStore::peer_disconnected() noexcept {
-  for (auto& [window, buffer] : current_) {
-    (void)window;
-    buffer->set_announced(false);
-  }
   for (const auto& [id, retired] : retired_) {
     (void)id;
     accounted_bytes_ -= retired.buffer->size();
   }
   retired_.clear();
+}
+
+void PublishedBufferStore::forget_peer_attachments() noexcept {
+  for (auto& [window, buffer] : current_) {
+    (void)window;
+    buffer->set_announced(false);
+  }
 }
 
 }  // namespace glasswyrm::server

@@ -392,6 +392,8 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
       state_ = PeerBootstrapState::Failed;
     return outcome;
   }
+  if (state_ == PeerBootstrapState::Synchronized && software_content_)
+    return drain(error);
   return PeerProcessOutcome::Progress;
 }
 
