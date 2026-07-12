@@ -20,7 +20,8 @@ ClientConnection::ClientConnection(const int descriptor,
                                    const bool integrated_lifecycle,
                                    DeferredHandler deferred_handler,
                                    StructuralTransitionHandler transition_handler,
-                                   DrawableDamageHandler damage_handler)
+                                   DrawableDamageHandler damage_handler,
+                                   ExposeIntentHandler expose_handler)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -28,7 +29,8 @@ ClientConnection::ClientConnection(const int descriptor,
       integrated_lifecycle_(integrated_lifecycle),
       deferred_handler_(std::move(deferred_handler)),
       transition_handler_(std::move(transition_handler)),
-      damage_handler_(std::move(damage_handler)) {}
+      damage_handler_(std::move(damage_handler)),
+      expose_handler_(std::move(expose_handler)) {}
 
 ClientConnection::~ClientConnection() {
   if (descriptor_ >= 0) {
@@ -217,6 +219,8 @@ void ClientConnection::process_input(
           transition_handler_(result_packet.structural_transitions);
         if (!result_packet.drawable_damage.empty() && damage_handler_)
           damage_handler_(result_packet.drawable_damage);
+        if (!result_packet.expose_intents.empty() && expose_handler_)
+          expose_handler_(result_packet.expose_intents);
         if (result_packet.kind == DispatchKind::DeferredLifecycle &&
             (!deferred_handler_ || !deferred_handler_(*this, result_packet))) {
           close_with_log("deferred lifecycle handoff failed");
