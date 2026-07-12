@@ -392,6 +392,7 @@ meson_version=1.7.0
 ninja_version=1.12.0
 systemd_version=systemd 257
 xcb_proto=x11-base/xcb-proto-1.17.0
+scene_manifest=absent
 x_servers_absent=true
 full_tests=passed
 sanitizer=passed
@@ -489,10 +490,9 @@ if [[ "$*" == *milestone7-rendering.tar* ]]; then
   destination=${!#}; scratch=$(mktemp -d)
   printf 'P6\n1 1\n255\n000' >"$scratch/final.ppm"
   printf '{}\n' >"$scratch/frames.jsonl"
-  printf '{}\n' >"$scratch/scene.jsonl"
   printf '{}\n' >"$scratch/xcb-result.json"
   printf '{}\n' >"$scratch/result.json"
-  (cd "$scratch" && sha256sum final.ppm frames.jsonl scene.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm frames.jsonl scene.jsonl xcb-result.json result.json SHA256SUMS)
+  (cd "$scratch" && sha256sum final.ppm frames.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm frames.jsonl xcb-result.json result.json SHA256SUMS)
   rm -rf "$scratch"
 fi
 EOF
@@ -1063,6 +1063,7 @@ assert_contains "$artifact_dir/milestone7-summary.json" '"connection_survival": 
 assert_contains "$artifact_dir/milestone7-summary.json" '"replay_hash": "passed"'
 assert_contains "$artifact_dir/milestone7-summary.json" '"post_restart_hash": "passed"'
 assert_contains "$artifact_dir/milestone7-summary.json" '"compiler_c": "gcc test"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"scene_manifest": "absent"'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-runtime'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server'
 assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server-ipc'
@@ -1090,8 +1091,13 @@ assert_contains "$command_log" 'frame_field_at "$post_restart_frame" file'
 assert_contains "$command_log" 'cmp "$final_ppm" "$source_dir/tests/fixtures/m7/final.ppm"'
 assert_contains "$command_log" 'cmp "$restart_result"'
 assert_contains "$command_log" 'journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service'
+assert_contains "$command_log" 'archive_files+=(scene.jsonl)'
+assert_contains "$command_log" 'scene_manifest=absent'
 assert_contains "$command_log" 'milestone7-rendering.tar'
 assert_file_glob "$artifact_dir/milestone7-rendering.tar"
+if tar -tf "$artifact_dir/milestone7-rendering.tar" | grep -Fx scene.jsonl >/dev/null; then
+  fail 'M7 fake rendering archive unexpectedly contains optional scene.jsonl'
+fi
 
 : >"$command_log"
 run_failure "$work_dir/milestone7-bad-golden.out" \
