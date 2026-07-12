@@ -348,6 +348,31 @@ FACTS
       if [[ ${GW_VM_TEST_EMPTY_M5_JOURNAL:-0} != 1 ]]; then printf 'collected current M5 invocation journal\n'; fi
       ;;
     milestone5-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone6-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.4.0
+soversion=0
+wire_version=1.0
+x_servers_absent=true
+full_tests=passed
+sanitizer=passed
+runtime_build=passed
+server_standalone=passed
+server_ipc=passed
+gwm_only=passed
+gwcomp_only=passed
+ipc_only=passed
+api04_consumers=passed
+integrated_little_big=passed
+no_ppm=passed
+scene_archive=passed
+restart_probe=unavailable
+xcb_m6_probe=unavailable
+FACTS
+      ;;
+    milestone6-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -393,6 +418,12 @@ if [[ "$*" == *milestone5-policies.tar* ]]; then
   (cd "$scratch" && sha256sum basic.json >SHA256SUMS && tar -cf "$destination" basic.json SHA256SUMS)
   rm -rf "$scratch"
 fi
+if [[ "$*" == *milestone6-lifecycle.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  printf '{}\n' >"$scratch/scene.jsonl"
+  (cd "$scratch" && sha256sum scene.jsonl >SHA256SUMS && tar -cf "$destination" scene.jsonl SHA256SUMS)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -427,7 +458,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -472,6 +503,9 @@ assert_contains "$work_dir/scenario-m4-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m5-injection.out" "$gw_vm" scenario 'milestone5-runtime-test;touch'
 assert_contains "$work_dir/scenario-m5-injection.out" 'Scenario names are fixed'
+
+run_failure "$work_dir/scenario-m6-injection.out" "$gw_vm" scenario 'milestone6-runtime-test;touch'
+assert_contains "$work_dir/scenario-m6-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -893,5 +927,33 @@ run_failure "$work_dir/milestone5-error.out" \
   env GW_VM_TEST_FAIL_MATCH='unit=gwm-m5.service' "$gw_vm" milestone5-runtime-test --yes
 assert_contains "$work_dir/milestone5-error.out" 'failed during: guest-runtime'
 assert_contains "$command_log" 'milestone5-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone6-gate.out" "$gw_vm" milestone6-runtime-test
+assert_contains "$work_dir/milestone6-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone6-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone6-runtime-test --yes
+assert_contains "$work_dir/milestone6-bad-base.out" \
+  'HEAD is not based on required Milestone 6 commit 9b9170de569fa112c400780beec3140bd4ef6af1'
+
+run_failure "$work_dir/milestone6-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone6-runtime-test.sh"
+assert_contains "$work_dir/milestone6-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_success "$work_dir/milestone6.out" "$gw_vm" scenario milestone6-runtime-test --yes
+assert_contains "$artifact_dir/milestone6-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone6-summary.json" \
+  '"required_base_commit": "9b9170de569fa112c400780beec3140bd4ef6af1"'
+assert_contains "$artifact_dir/milestone6-summary.json" '"restart_probe": "unavailable"'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-runtime'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-server'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m6-server-ipc'
+assert_contains "$command_log" 'gwipc_lifecycle_c_consumer.c'
+assert_contains "$command_log" 'glasswyrmd-integrated-lifecycle'
+assert_file_glob "$artifact_dir/milestone6-lifecycle.tar"
 
 printf 'gw-vm CLI tests passed\n'
