@@ -171,6 +171,9 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   spec.initial_event_mask = decoded.event_mask.value_or(0);
 
   const auto* parent = state.resources().find_window(spec.parent);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(spec.parent))
+    return error(context, request, x11::CoreErrorCode::BadWindow, spec.parent);
   const bool policy_candidate =
       parent != nullptr && spec.parent == state.screen().root_window &&
       (spec.window_class == WindowClass::InputOutput ||
@@ -226,6 +229,8 @@ DispatchResult destroy_window(ServerState& state,
   if (!reader.read_u32(window)) {
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
+  if (context.integrated_lifecycle && state.resources().cleanup_pending(window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   if (context.integrated_lifecycle &&
       state.resources().is_policy_candidate(window)) {
     return DispatchResult::deferred_destroy_window(window);
@@ -666,6 +671,9 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
     return lifecycle_decode_error(context, request, status);
   if (!state.resources().find_window(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
   if (decoded.window == state.screen().root_window) return {};
   if (state.resources().is_policy_candidate(decoded.window) &&
       context.integrated_lifecycle)
@@ -693,6 +701,9 @@ DispatchResult configure_window(ServerState& state,
   if (status != x11::LifecycleDecodeStatus::Complete)
     return lifecycle_decode_error(context, request, status);
   if (!state.resources().find_window(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
   if (decoded.window == state.screen().root_window)
     return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);

@@ -1,7 +1,11 @@
 #include "glasswyrmd/server.hpp"
 
 #ifdef GW_SERVER_HAS_IPC
+#include "glasswyrmd/event_router.hpp"
+#include "glasswyrmd/lifecycle_coordinator.hpp"
+#include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
+#include "protocol/x11/reply.hpp"
 #endif
 
 #include <algorithm>
@@ -12,6 +16,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -199,7 +204,8 @@ std::optional<std::uint32_t> Server::allocate_resource_base() const {
   for (std::uint64_t candidate = first_base; candidate <= last_base;
        candidate += stride) {
     const auto base = static_cast<std::uint32_t>(candidate);
-    const bool in_use = std::any_of(clients_.begin(), clients_.end(),
+    const bool in_use = pending_resource_bases_.contains(base) ||
+                        std::any_of(clients_.begin(), clients_.end(),
                                     [base](const auto &client) {
                                       return client->resource_id_base() == base;
                                     });
@@ -223,7 +229,8 @@ void Server::accept_clients() {
         continue;
       }
       clients_.push_back(std::make_unique<ClientConnection>(
-          descriptor, next_client_identifier_++, *resource_base, state_));
+          descriptor, next_client_identifier_++, *resource_base, state_,
+          options_.integrated(), deferred_lifecycle_handler_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -244,6 +251,12 @@ void Server::accept_clients() {
 void Server::remove_closed_clients() {
   std::erase_if(clients_, [this](const auto &client) {
     if (client->state() != ClientConnection::State::Closing) return false;
+    if (cancel_lifecycle_handler_) {
+      pending_resource_bases_.insert(client->resource_id_base());
+      cancel_lifecycle_handler_(client->identifier(),
+                                client->resource_id_base());
+      return true;
+    }
     const auto cleanup = state_.cleanup_client(client->identifier());
     if (cleanup.resources_destroyed != 0 ||
         cleanup.property_bytes_released != 0) {
@@ -315,6 +328,21 @@ int Server::run() {
 
 #ifdef GW_SERVER_HAS_IPC
   std::unique_ptr<RuntimeBridge> bridge;
+  std::unique_ptr<LifecycleCoordinator> lifecycle;
+  std::uint64_t next_lifecycle_token = 1;
+  // Runtime bootstrap owns commit/generation 1.
+  std::uint64_t next_commit = 2;
+  std::uint64_t next_generation = 2;
+  std::optional<StructuralEventState> transition_before;
+  struct PendingMutation {
+    std::optional<WindowCreateSpec> create;
+    ClientId owner{};
+    std::uint32_t resource_base{}, resource_mask{};
+    std::uint64_t creation_serial{};
+    bool destroy{};
+    std::optional<ClientCleanupPlan> cleanup;
+  };
+  std::map<std::uint64_t, PendingMutation> pending_mutations;
   if (options_.integrated()) {
     bridge = std::make_unique<RuntimeBridge>(
         *options_.wm_socket, *options_.compositor_socket, state_.screen());
@@ -352,6 +380,231 @@ int Server::run() {
       close_signal_pipe();
       return 0;
     }
+
+    LifecycleCallbacks callbacks;
+    callbacks.send_policy = [&](const LifecycleSnapshot& snapshot) {
+      std::string error;
+      const bool sent = bridge->submit_policy(
+          project_policy(snapshot, next_commit, next_generation), error);
+      if (!sent)
+        std::fprintf(stderr, "glasswyrmd: policy submission failed: %s\n",
+                     error.c_str());
+      return sent;
+    };
+    callbacks.send_compositor = [&](const LifecycleSnapshot& snapshot) {
+      std::string error;
+      return bridge->submit_compositor(
+          project_compositor(snapshot, next_commit, next_generation), error);
+    };
+    callbacks.commit = [&](const LifecycleSnapshot& snapshot) {
+      transition_before.reset();
+      const auto* active = lifecycle ? lifecycle->active() : nullptr;
+      if (active) {
+        EventRouter router(state_.resources());
+        transition_before = router.capture(active->window);
+      }
+      const auto mutation = active ? pending_mutations.find(active->token)
+                                   : pending_mutations.end();
+      bool committed = false;
+      if (active && mutation != pending_mutations.end() &&
+          mutation->second.create) {
+        const auto& pending = mutation->second;
+        committed = state_.commit_create_lifecycle(
+            pending.owner, pending.resource_base, pending.resource_mask,
+            *pending.create, pending.creation_serial, snapshot);
+      } else if (active && mutation != pending_mutations.end() &&
+                 mutation->second.destroy) {
+        committed = state_.commit_destroy_lifecycle(active->window, snapshot);
+      } else if (active && mutation != pending_mutations.end() &&
+                 mutation->second.cleanup) {
+        auto staged = state_;
+        (void)staged.resources().commit_client_cleanup(
+            *mutation->second.cleanup);
+        committed = staged.commit_lifecycle(snapshot);
+        if (committed) state_ = std::move(staged);
+      } else {
+        committed = state_.commit_lifecycle(snapshot);
+      }
+      if (!committed) return false;
+      ++next_commit;
+      ++next_generation;
+      return true;
+    };
+    callbacks.complete = [&](const std::uint64_t token, const bool success) {
+      // Tokens are globally unique, so inspect every blocked connection rather
+      // than coupling token values to client identifiers.
+      ClientConnection* requester = nullptr;
+      for (const auto& client : clients_)
+        if (client->clear_dispatch_blocked(token)) requester = client.get();
+      const auto* operation = lifecycle ? lifecycle->active() : nullptr;
+      const auto mutation = pending_mutations.find(token);
+      const auto cleanup_base =
+          mutation != pending_mutations.end() && mutation->second.cleanup
+              ? std::optional<std::uint32_t>(mutation->second.resource_base)
+              : std::nullopt;
+      if (success && operation) {
+        std::vector<ClientConnection*> recipients;
+        recipients.reserve(clients_.size());
+        for (const auto& client : clients_) recipients.push_back(client.get());
+        EventRouter router(state_.resources());
+        if (operation->kind == LifecycleOperationKind::ClientCleanup &&
+            mutation != pending_mutations.end() && mutation->second.cleanup) {
+          for (const auto& item : mutation->second.cleanup->postorder) {
+            StructuralEventState before{};
+            before.target = item.xid;
+            before.parent = item.parent;
+            before.structure_recipients = item.structure_recipients;
+            before.substructure_recipients = item.substructure_recipients;
+            (void)router.route_transition(StructuralTransitionKind::Destroy,
+                                          before, std::nullopt, recipients);
+          }
+        } else {
+        const auto committed = router.capture(operation->window);
+        if (operation->kind == LifecycleOperationKind::Create) {
+          // M6 does not expose CreateNotify.
+        } else {
+        const auto kind = operation->kind == LifecycleOperationKind::Map
+                              ? StructuralTransitionKind::Map
+                          : operation->kind == LifecycleOperationKind::Unmap
+                              ? StructuralTransitionKind::Unmap
+                          : operation->kind == LifecycleOperationKind::Destroy
+                              ? StructuralTransitionKind::Destroy
+                              : StructuralTransitionKind::Configure;
+        (void)router.route_transition(kind, transition_before, committed,
+                                      recipients);
+        }
+        }
+      }
+      (void)requester;
+      transition_before.reset();
+      pending_mutations.erase(token);
+      if (cleanup_base) pending_resource_bases_.erase(*cleanup_base);
+      bridge->clear_transaction_result();
+    };
+    callbacks.fatal = [&] { stop_requested = 1; };
+    callbacks.rebase = rebase_lifecycle_operation;
+    callbacks.prepare_rollback = [&] { return bridge->prepare_rollback(); };
+    lifecycle = std::make_unique<LifecycleCoordinator>(
+        state_.lifecycle_snapshot(), 1024, std::move(callbacks));
+    deferred_lifecycle_handler_ = [&](ClientConnection& client,
+                                      const DispatchResult& result) {
+      auto proposed = lifecycle->committed();
+      const auto serial = state_.next_lifecycle_serial();
+      if (!serial) return false;
+      LifecycleOperation operation;
+      operation.token = next_lifecycle_token++;
+      operation.client_id = client.identifier();
+      operation.request_sequence = client.last_request_sequence();
+      operation.window = result.deferred_window;
+      PendingMutation mutation;
+      if (result.deferred_create) {
+        operation.kind = LifecycleOperationKind::Create;
+        auto create = state_.propose_create_lifecycle(
+            client.identifier(), client.resource_id_base(),
+            state_.screen().resource_id_mask, *result.deferred_create, *serial);
+        if (!create) return false;
+        proposed = std::move(*create);
+        mutation.create = result.deferred_create;
+        mutation.owner = client.identifier();
+        mutation.resource_base = client.resource_id_base();
+        mutation.resource_mask = state_.screen().resource_id_mask;
+        mutation.creation_serial = *serial;
+      } else if (result.deferred_destroy) {
+        operation.kind = LifecycleOperationKind::Destroy;
+        auto destroy = state_.propose_destroy_lifecycle(result.deferred_window);
+        if (!destroy) return false;
+        proposed = std::move(*destroy);
+        mutation.destroy = true;
+      } else {
+      auto found = proposed.windows.find(result.deferred_window);
+      if (found == proposed.windows.end()) return false;
+      if (result.deferred_configure) {
+        operation.kind = LifecycleOperationKind::Configure;
+        const auto& request = *result.deferred_configure;
+        if (request.x) found->second.requested_x = *request.x;
+        if (request.y) found->second.requested_y = *request.y;
+        if (request.width) found->second.requested_width = *request.width;
+        if (request.height) found->second.requested_height = *request.height;
+        if (request.border_width)
+          found->second.requested_border_width = *request.border_width;
+        found->second.geometry_serial = *serial;
+        found->second.stack_sibling = request.sibling.value_or(0);
+        found->second.stack_mode =
+            request.stack_mode == gw::protocol::x11::CoreStackMode::Above
+                ? LifecycleStackMode::Above
+                : request.stack_mode == gw::protocol::x11::CoreStackMode::Below
+                      ? LifecycleStackMode::Below
+                      : LifecycleStackMode::None;
+        if (request.stack_mode) found->second.stack_serial = *serial;
+      } else {
+        operation.kind = result.deferred_map ? LifecycleOperationKind::Map
+                                             : LifecycleOperationKind::Unmap;
+        found->second.map_requested = result.deferred_map;
+        found->second.map_serial = *serial;
+      }
+      }
+      operation.proposed = std::move(proposed);
+      const auto token = operation.token;
+      pending_mutations.emplace(token, std::move(mutation));
+      const auto status = lifecycle->enqueue(std::move(operation));
+      if (status == EnqueueStatus::Queued) {
+        client.set_dispatch_blocked(token);
+        return true;
+      }
+      pending_mutations.erase(token);
+      if (status == EnqueueStatus::Full) {
+        return client.enqueue_server_packet(gw::protocol::x11::encode_core_error(
+            client.byte_order(),
+            {gw::protocol::x11::CoreErrorCode::BadAlloc,
+             client.last_request_sequence(), 0,
+             static_cast<std::uint8_t>(result.deferred_configure
+                                           ? gw::protocol::x11::CoreOpcode::ConfigureWindow
+                                           : result.deferred_map
+                                                 ? gw::protocol::x11::CoreOpcode::MapWindow
+                                                 : gw::protocol::x11::CoreOpcode::UnmapWindow),
+             0}));
+      }
+      std::fprintf(stderr,
+                   "glasswyrmd: lifecycle enqueue failed token=%llu status=%u phase=%u\n",
+                   static_cast<unsigned long long>(token),
+                   static_cast<unsigned>(status),
+                   static_cast<unsigned>(lifecycle->phase()));
+      return false;
+    };
+    cancel_lifecycle_handler_ = [&](const std::uint64_t client,
+                                    const std::uint32_t resource_base) {
+      lifecycle->cancel_client(client);
+      auto plan = state_.resources().prepare_client_cleanup(client);
+      if (!plan.affects_policy) {
+        (void)state_.resources().commit_client_cleanup(plan);
+        pending_resource_bases_.erase(resource_base);
+        return;
+      }
+      auto proposed = lifecycle->committed();
+      for (const auto& item : plan.postorder) {
+        proposed.windows.erase(item.xid);
+        std::erase(proposed.root_order, item.xid);
+        if (proposed.focused_window == item.xid)
+          proposed.focused_window = proposed.root_window;
+      }
+      LifecycleOperation operation;
+      operation.token = next_lifecycle_token++;
+      operation.client_id = client;
+      operation.kind = LifecycleOperationKind::ClientCleanup;
+      operation.window = plan.roots.empty() ? 0 : plan.roots.front();
+      operation.proposed = std::move(proposed);
+      const auto token = operation.token;
+      PendingMutation mutation;
+      mutation.resource_base = resource_base;
+      mutation.cleanup = std::move(plan);
+      pending_mutations.emplace(token, std::move(mutation));
+      if (lifecycle->enqueue_priority(std::move(operation)) !=
+          EnqueueStatus::Queued) {
+        std::fprintf(stderr,
+                     "glasswyrmd: could not queue coordinated client cleanup\n");
+        stop_requested = 1;
+      }
+    };
   }
 #else
   if (options_.integrated()) {
@@ -425,6 +678,34 @@ int Server::run() {
         close_signal_pipe();
         return 1;
       }
+      if (lifecycle && bridge->policy_result_ready()) {
+        const auto* active = lifecycle->active();
+        auto evaluated = active
+                             ? apply_policy_result(active->proposed,
+                                                   bridge->policy_result())
+                             : std::nullopt;
+        if (!evaluated) {
+          bridge->clear_transaction_result();
+          if (!lifecycle->policy_rejected()) {
+            std::fprintf(stderr,
+                         "glasswyrmd: invalid policy lifecycle result\n");
+            close_signal_pipe();
+            return 1;
+          }
+        } else if (!lifecycle->policy_accepted(std::move(*evaluated))) {
+          std::fprintf(stderr,
+                       "glasswyrmd: policy lifecycle transition failed\n");
+          close_signal_pipe();
+          return 1;
+        }
+      }
+      if (lifecycle && bridge->compositor_result_ready() &&
+          !lifecycle->compositor_accepted()) {
+        std::fprintf(stderr,
+                     "glasswyrmd: compositor lifecycle transition failed\n");
+        close_signal_pipe();
+        return 1;
+      }
     }
 #endif
     remove_closed_clients();
@@ -438,6 +719,8 @@ int Server::run() {
   }
 
   clients_.clear();
+  deferred_lifecycle_handler_ = {};
+  cancel_lifecycle_handler_ = {};
   close_signal_pipe();
   close_listener();
   unlink_owned_socket();
