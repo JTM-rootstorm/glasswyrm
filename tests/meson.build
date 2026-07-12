@@ -13,6 +13,13 @@ x11_event_test = executable(
 )
 test('x11-structural-events', x11_event_test, timeout: 10)
 
+x11_lifecycle_request_test = executable(
+  'x11_lifecycle_request_test',
+  files('protocol/x11_lifecycle_request_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+)
+test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
+
 test_source_root_include = include_directories('..')
 
 if get_option('gwm')
