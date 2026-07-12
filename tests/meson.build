@@ -536,6 +536,12 @@ if get_option('glasswyrmd')
 
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
+    m6_restart_hold_probe = executable(
+      'm6_restart_hold_probe',
+      'xcb/m6_restart_hold_probe.c',
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
     xcb_setup_probe = executable(
       'xcb_setup_probe',
       files('xcb/xcb_setup_probe.c'),
