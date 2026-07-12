@@ -125,6 +125,7 @@ int main() {
                                             &parent_client.connection};
   const glasswyrm::server::EventRouter router(state.resources());
   const auto before_map = router.capture(spec.xid);
+  state.resources().find_window(spec.xid)->map_requested = true;
   state.resources().find_window(spec.xid)->map_state =
       glasswyrm::server::MapState::Viewable;
   const auto after_map = router.capture(spec.xid);

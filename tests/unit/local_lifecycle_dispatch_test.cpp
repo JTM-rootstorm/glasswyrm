@@ -18,12 +18,17 @@ int main(){
  for(auto order:{x11::ByteOrder::LittleEndian,x11::ByteOrder::BigEndian}){
   ServerState state;DispatchContext context{1,base,mask,1,order};
   require(state.resources().create_window(1,base,mask,spec(base+1,1))==CreateWindowStatus::Success&&state.resources().create_window(1,base,mask,spec(base+2,base+1,WindowClass::InputOnly))==CreateWindowStatus::Success&&state.resources().create_window(1,base,mask,spec(base+3,base+1,WindowClass::InputOnly))==CreateWindowStatus::Success,"create hierarchy");
+  require(state.resources().set_event_selection(base+2,1,1U<<17U)&&state.resources().set_event_selection(base+1,2,1U<<19U),"install local structural selectors");
   auto result=dispatch_request(state,context,request(order,x11::CoreOpcode::MapWindow,base+2));
-  require(result.output.empty()&&state.resources().find_window(base+2)->map_requested&&state.resources().find_window(base+2)->map_state==MapState::Unviewable,"local map decoded and applied");
+  require(result.output.empty()&&result.structural_transitions.size()==1&&result.structural_transitions[0].before->structure_recipients==std::vector<ClientId>{1}&&result.structural_transitions[0].before->substructure_recipients==std::vector<ClientId>{2}&&state.resources().find_window(base+2)->map_requested&&state.resources().find_window(base+2)->map_state==MapState::Unviewable,"local map decoded, applied, and captured for both selectors");
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::MapWindow,base+2));
+  require(result.structural_transitions.size()==1&&result.structural_transitions[0].before->mapped&&result.structural_transitions[0].committed->mapped,"local no-op map is captured for router suppression");
   result=dispatch_request(state,context,configure(order,base+2,static_cast<std::uint16_t>(x11::ConfigureX|x11::ConfigureWidth|x11::ConfigureSibling|x11::ConfigureStackMode),{static_cast<std::uint32_t>(-7),80,base+3,0}));
-  require(result.output.empty()&&state.resources().find_window(base+2)->x==-7&&state.resources().find_window(base+2)->width==80&&state.resources().find_window(base+1)->children.back()==base+2,"local configure and Above applied");
+  require(result.output.empty()&&result.structural_transitions.size()==1&&state.resources().find_window(base+2)->x==-7&&state.resources().find_window(base+2)->width==80&&state.resources().find_window(base+1)->children.back()==base+2,"local configure and Above applied with transition");
   result=dispatch_request(state,context,request(order,x11::CoreOpcode::UnmapWindow,base+2));
-  require(result.output.empty()&&state.resources().find_window(base+2)->map_state==MapState::Unmapped,"local unmap applied");
+  require(result.output.empty()&&result.structural_transitions.size()==1&&result.structural_transitions[0].before->mapped&&!result.structural_transitions[0].committed->mapped&&state.resources().find_window(base+2)->map_state==MapState::Unmapped,"local unmap applied with transition");
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::DestroyWindow,base+2));
+  require(result.structural_transitions.size()==1&&result.structural_transitions[0].kind==StructuralTransitionKind::Destroy&&result.structural_transitions[0].before->structure_recipients==std::vector<ClientId>{1}&&!result.structural_transitions[0].committed&&state.resources().find_window(base+2)==nullptr,"local destroy captures recipients before mutation");
   result=dispatch_request(state,context,request(order,x11::CoreOpcode::MapWindow,base+1));
   require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),"top-level policy window remains explicit deferred boundary");
   context.integrated_lifecycle=true;

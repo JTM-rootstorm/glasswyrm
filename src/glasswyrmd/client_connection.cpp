@@ -18,13 +18,15 @@ ClientConnection::ClientConnection(const int descriptor,
                                    const std::uint32_t resource_id_base,
                                    ServerState& server_state,
                                    const bool integrated_lifecycle,
-                                   DeferredHandler deferred_handler)
+                                   DeferredHandler deferred_handler,
+                                   StructuralTransitionHandler transition_handler)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
       server_state_(server_state),
       integrated_lifecycle_(integrated_lifecycle),
-      deferred_handler_(std::move(deferred_handler)) {}
+      deferred_handler_(std::move(deferred_handler)),
+      transition_handler_(std::move(transition_handler)) {}
 
 ClientConnection::~ClientConnection() {
   if (descriptor_ >= 0) {
@@ -208,6 +210,9 @@ void ClientConnection::process_input(
             !enqueue(std::move(result_packet.output))) {
           return;
         }
+        if (!result_packet.structural_transitions.empty() &&
+            transition_handler_)
+          transition_handler_(result_packet.structural_transitions);
         if (result_packet.kind == DispatchKind::DeferredLifecycle &&
             (!deferred_handler_ || !deferred_handler_(*this, result_packet))) {
           close_with_log("deferred lifecycle handoff failed");

@@ -6,6 +6,7 @@
 #include "protocol/x11/lifecycle_request.hpp"
 
 #include <bit>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -31,6 +32,63 @@ DispatchResult error(const DispatchContext& context,
 
 bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
   return request.bytes.size() == size;
+}
+
+std::optional<StructuralEventState> capture_structural_state(
+    const ResourceTable& resources, const std::uint32_t target) {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  const auto* window = resources.find_window(target);
+  if (!window) return std::nullopt;
+  const auto* parent = resources.find_window(window->parent);
+  StructuralEventState state{};
+  state.target = target;
+  state.parent = window->parent;
+  state.x = window->x;
+  state.y = window->y;
+  state.width = window->width;
+  state.height = window->height;
+  state.border_width = window->border_width;
+  state.override_redirect = window->attributes.override_redirect;
+  state.mapped = window->map_requested;
+  state.viewable = window->map_state == MapState::Viewable;
+  if (parent) {
+    const auto position = std::ranges::find(parent->children, target);
+    if (position != parent->children.end() &&
+        std::next(position) != parent->children.end())
+      state.above_sibling = *std::next(position);
+  }
+  for (const auto& [client, mask] : window->event_selections)
+    if ((mask & kStructureNotifyMask) != 0)
+      state.structure_recipients.push_back(client);
+  if (parent)
+    for (const auto& [client, mask] : parent->event_selections)
+      if ((mask & kSubstructureNotifyMask) != 0)
+        state.substructure_recipients.push_back(client);
+  std::sort(state.structure_recipients.begin(),
+            state.structure_recipients.end());
+  std::sort(state.substructure_recipients.begin(),
+            state.substructure_recipients.end());
+  return state;
+}
+
+std::vector<std::uint32_t> subtree_postorder(const ResourceTable& resources,
+                                             const std::uint32_t root) {
+  std::vector<std::uint32_t> result;
+  std::vector<std::pair<std::uint32_t, bool>> stack{{root, false}};
+  while (!stack.empty()) {
+    const auto [xid, expanded] = stack.back();
+    stack.pop_back();
+    const auto* window = resources.find_window(xid);
+    if (!window) continue;
+    if (expanded) {
+      result.push_back(xid);
+      continue;
+    }
+    stack.emplace_back(xid, true);
+    for (const auto child : window->children) stack.emplace_back(child, false);
+  }
+  return result;
 }
 
 constexpr std::uint32_t kWindowAttributeMask = 0x00007fffU;
@@ -231,15 +289,23 @@ DispatchResult destroy_window(ServerState& state,
   }
   if (context.integrated_lifecycle && state.resources().cleanup_pending(window))
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
+  if (window == state.screen().root_window) return {};
   if (context.integrated_lifecycle &&
       state.resources().is_policy_candidate(window)) {
     return DispatchResult::deferred_destroy_window(window);
   }
+  const auto destroyed = subtree_postorder(state.resources(), window);
+  DispatchResult result;
+  result.structural_transitions.reserve(destroyed.size());
+  for (const auto xid : destroyed)
+    result.structural_transitions.push_back(
+        {StructuralTransitionKind::Destroy,
+         capture_structural_state(state.resources(), xid), std::nullopt});
   const auto status = state.resources().destroy_window(window);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
-  return {};
+  return result;
 }
 
 DispatchResult change_window_attributes(
@@ -680,8 +746,16 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
     return DispatchResult::deferred(decoded.window, {}, mapped);
   if (state.resources().is_policy_candidate(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto before = capture_structural_state(state.resources(), decoded.window);
   switch (state.resources().set_local_map_intent(decoded.window, mapped)) {
-    case LocalLifecycleStatus::Success: return {};
+    case LocalLifecycleStatus::Success: {
+      DispatchResult result;
+      result.structural_transitions.push_back(
+          {mapped ? StructuralTransitionKind::Map
+                  : StructuralTransitionKind::Unmap,
+           before, capture_structural_state(state.resources(), decoded.window)});
+      return result;
+    }
     case LocalLifecycleStatus::BadWindow:
       return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
     case LocalLifecycleStatus::BadMatch:
@@ -723,8 +797,15 @@ DispatchResult configure_window(ServerState& state,
                            : decoded.stack_mode == x11::CoreStackMode::Below
                                  ? LifecycleStackMode::Below
                                  : LifecycleStackMode::None};
+  const auto before = capture_structural_state(state.resources(), decoded.window);
   switch (state.resources().configure_local(decoded.window, local)) {
-    case LocalLifecycleStatus::Success: return {};
+    case LocalLifecycleStatus::Success: {
+      DispatchResult result;
+      result.structural_transitions.push_back(
+          {StructuralTransitionKind::Configure, before,
+           capture_structural_state(state.resources(), decoded.window)});
+      return result;
+    }
     case LocalLifecycleStatus::BadWindow:
       return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
     case LocalLifecycleStatus::BadMatch:

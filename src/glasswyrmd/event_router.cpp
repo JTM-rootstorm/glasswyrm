@@ -62,6 +62,7 @@ EventRouter::capture(const std::uint32_t target) const {
   result.height = window->height;
   result.border_width = window->border_width;
   result.override_redirect = window->attributes.override_redirect;
+  result.mapped = window->map_requested;
   result.viewable = window->map_state == MapState::Viewable;
   if (parent) {
     const auto position = std::ranges::find(parent->children, target);
@@ -90,10 +91,10 @@ std::size_t EventRouter::route_transition(
   bool changed = false;
   switch (kind) {
   case StructuralTransitionKind::Map:
-    changed = before && committed && !before->viewable && committed->viewable;
+    changed = before && committed && !before->mapped && committed->mapped;
     break;
   case StructuralTransitionKind::Unmap:
-    changed = before && committed && before->viewable && !committed->viewable;
+    changed = before && committed && before->mapped && !committed->mapped;
     break;
   case StructuralTransitionKind::Configure:
     changed = before && committed &&
