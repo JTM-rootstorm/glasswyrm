@@ -21,6 +21,9 @@ class ContentPresenter {
   [[nodiscard]] bool prepare_lifecycle(
       const LifecycleSnapshot& snapshot, ResourceTable& resources,
       CompositorSnapshotSubmission& submission);
+  [[nodiscard]] bool prepare_replay(
+      const LifecycleSnapshot& snapshot, ResourceTable& resources,
+      CompositorSnapshotSubmission& submission);
   void accept_lifecycle(const LifecycleSnapshot& snapshot,
                         ResourceTable& resources);
   void reject_lifecycle() noexcept;
@@ -65,6 +68,7 @@ class ContentPresenter {
   std::map<std::uint32_t, WindowContent> windows_;
   std::set<std::uint64_t> discarded_buffers_;
   bool in_flight_{};
+  bool force_replacement_{};
 };
 
 }  // namespace glasswyrm::server

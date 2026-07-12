@@ -800,23 +800,11 @@ int Server::run() {
         close_signal_pipe();
         return 1;
       }
+      std::vector<CompositorBufferRelease> compositor_releases;
       if (content_presenter) {
         if (bridge->take_compositor_reset())
           content_presenter->peer_disconnected();
-        for (const auto& release : bridge->take_buffer_releases()) {
-          if (!content_presenter->release(release.buffer_id, release.reason)) {
-            std::fprintf(stderr,
-                         "glasswyrmd: invalid compositor buffer release id=%llu reason=%u\n",
-                         static_cast<unsigned long long>(release.buffer_id),
-                         static_cast<unsigned>(release.reason));
-            close_signal_pipe();
-            return 1;
-          }
-          std::fprintf(stderr,
-                       "glasswyrmd: published buffer released buffer=%llu reason=%u\n",
-                       static_cast<unsigned long long>(release.buffer_id),
-                       static_cast<unsigned>(release.reason));
-        }
+        compositor_releases = bridge->take_buffer_releases();
         if (bridge->content_rejected_ready()) {
           content_presenter->reject_content();
           bridge->clear_transaction_result();
@@ -827,11 +815,10 @@ int Server::run() {
             return 1;
           }
           content_replay_attempted = true;
-          content_presenter->forget_peer_attachments();
           auto replay = project_compositor(
               lifecycle->committed(), next_compositor_commit++,
               next_compositor_generation++, true);
-          if (!content_presenter->prepare_lifecycle(
+          if (!content_presenter->prepare_replay(
                   lifecycle->committed(), state_.resources(), replay) ||
               !bridge->submit_replay(replay, error)) {
             content_presenter->reject_lifecycle();
@@ -922,6 +909,22 @@ int Server::run() {
         if (rollback && content_presenter)
           content_presenter->accept_lifecycle(lifecycle->committed(),
                                               state_.resources());
+      }
+      if (content_presenter) {
+        for (const auto& release : compositor_releases) {
+          if (!content_presenter->release(release.buffer_id, release.reason)) {
+            std::fprintf(stderr,
+                         "glasswyrmd: invalid compositor buffer release id=%llu reason=%u\n",
+                         static_cast<unsigned long long>(release.buffer_id),
+                         static_cast<unsigned>(release.reason));
+            close_signal_pipe();
+            return 1;
+          }
+          std::fprintf(stderr,
+                       "glasswyrmd: published buffer released buffer=%llu reason=%u\n",
+                       static_cast<unsigned long long>(release.buffer_id),
+                       static_cast<unsigned>(release.reason));
+        }
       }
       if (content_presenter && lifecycle &&
           lifecycle->phase() == CoordinatorPhase::Idle &&
