@@ -30,6 +30,14 @@ EnqueueStatus LifecycleCoordinator::enqueue(LifecycleOperation operation) {
 bool LifecycleCoordinator::start_next() {
   if (active_ || queue_.empty()) return true;
   active_ = std::move(queue_.front()); queue_.pop_front();
+  if (callbacks_.rebase) {
+    auto rebased = callbacks_.rebase(committed_, *active_);
+    if (!rebased) {
+      finish(false);
+      return phase_ != CoordinatorPhase::Fatal;
+    }
+    active_->proposed = std::move(*rebased);
+  }
   phase_ = CoordinatorPhase::AwaitingPolicy;
   if (!send_policy(active_->proposed)) { fatal(); return false; }
   return true;
