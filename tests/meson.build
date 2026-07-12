@@ -24,6 +24,7 @@ if get_option('gwm')
     include_directories: test_source_root_include,
   )
   test('wm-policy', wm_policy_test, timeout: 10)
+
 endif
 
 if get_option('gwcomp')
@@ -151,6 +152,14 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_policy_contract_test = executable(
+    'gwipc_policy_contract_test',
+    files('unit/ipc/policy_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10)
 
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',

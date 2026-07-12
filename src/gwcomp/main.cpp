@@ -83,9 +83,13 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
 }
 
 bool is_complete_session_snapshot(const gwipc_message* message) {
-  std::size_t size = 0;
-  const auto* payload = gwipc_message_payload(message, &size);
-  return payload && size == 28 && payload[8] == 4 && payload[9] == 0;
+  gwipc_decoded_control* raw = nullptr;
+  if (gwipc_control_decode_message(message, &raw) != GWIPC_STATUS_OK)
+    return false;
+  std::unique_ptr<gwipc_decoded_control, decltype(&gwipc_decoded_control_destroy)>
+      control(raw, gwipc_decoded_control_destroy);
+  const auto* begin = gwipc_decoded_snapshot_begin(control.get());
+  return begin && begin->domain == GWIPC_SNAPSHOT_COMPLETE_SESSION;
 }
 
 bool enqueue_ack(gwipc_connection* connection, const gwipc_message* message,

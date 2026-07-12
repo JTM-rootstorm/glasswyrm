@@ -24,15 +24,13 @@ constexpr std::uint64_t kCapabilities =
 struct ConnectionDeleter { void operator()(gwipc_connection* p) const { gwipc_connection_destroy(p); } };
 struct MessageDeleter { void operator()(gwipc_message* p) const { gwipc_message_destroy(p); } };
 struct PayloadDeleter { void operator()(gwipc_contract_payload* p) const { gwipc_contract_payload_destroy(p); } };
+struct ControlPayloadDeleter { void operator()(gwipc_control_payload* p) const { gwipc_control_payload_destroy(p); } };
 struct DecodedDeleter { void operator()(gwipc_decoded_contract* p) const { gwipc_decoded_contract_destroy(p); } };
 using Connection = std::unique_ptr<gwipc_connection, ConnectionDeleter>;
 using Message = std::unique_ptr<gwipc_message, MessageDeleter>;
 using Payload = std::unique_ptr<gwipc_contract_payload, PayloadDeleter>;
+using ControlPayload = std::unique_ptr<gwipc_control_payload, ControlPayloadDeleter>;
 using Decoded = std::unique_ptr<gwipc_decoded_contract, DecodedDeleter>;
-
-void u16(std::vector<std::uint8_t>& b, std::uint16_t v) { b.push_back(v); b.push_back(v >> 8U); }
-void u32(std::vector<std::uint8_t>& b, std::uint32_t v) { for (unsigned s = 0; s < 32; s += 8) b.push_back(v >> s); }
-void u64(std::vector<std::uint8_t>& b, std::uint64_t v) { for (unsigned s = 0; s < 64; s += 8) b.push_back(v >> s); }
 
 bool enqueue(gwipc_connection* c, std::uint16_t type, std::uint32_t flags,
              const std::uint8_t* bytes, std::size_t size, const int* fds = nullptr,
@@ -120,12 +118,16 @@ gwipc_buffer_attach attachment(std::uint64_t buffer, std::uint64_t target = 1) {
 }
 
 bool begin(gwipc_connection* c, std::uint32_t items) {
-  std::vector<std::uint8_t> b; u64(b, 1); u16(b, 4); u16(b, 0); u64(b, 1); u32(b, items); u32(b, 0);
-  return enqueue(c, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0, b.data(), b.size());
+  gwipc_snapshot_begin value{sizeof(value),1,GWIPC_SNAPSHOT_COMPLETE_SESSION,0,1,items,{}};
+  gwipc_control_payload* raw=nullptr;if(gwipc_control_encode_snapshot_begin(&value,&raw)!=GWIPC_STATUS_OK)return false;
+  const ControlPayload payload(raw);std::size_t size=0;const auto* bytes=gwipc_control_payload_data(payload.get(),&size);
+  return enqueue(c,GWIPC_MESSAGE_SNAPSHOT_BEGIN,0,bytes,size);
 }
 bool end(gwipc_connection* c, std::uint32_t items) {
-  std::vector<std::uint8_t> b; u64(b, 1); u64(b, 1); u32(b, items); u32(b, 0);
-  return enqueue(c, GWIPC_MESSAGE_SNAPSHOT_END, 0, b.data(), b.size());
+  gwipc_snapshot_end value{sizeof(value),1,1,items,{}};gwipc_control_payload* raw=nullptr;
+  if(gwipc_control_encode_snapshot_end(&value,&raw)!=GWIPC_STATUS_OK)return false;
+  const ControlPayload payload(raw);std::size_t size=0;const auto* bytes=gwipc_control_payload_data(payload.get(),&size);
+  return enqueue(c,GWIPC_MESSAGE_SNAPSHOT_END,0,bytes,size);
 }
 bool commit(gwipc_connection* c, std::uint64_t id) {
   gwipc_frame_commit v{}; v.struct_size = sizeof(v); v.commit_id = id; v.output_id = 1; v.producer_generation = 1;
