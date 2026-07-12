@@ -136,6 +136,7 @@ cat "$control_dir/xcb-result.json" >>"$xcb_log"
 xcb_drawing=passed x11_resources=passed raster_requests=passed
 frame_count() { [[ -f "$dump_dir/frames.jsonl" ]] && wc -l <"$dump_dir/frames.jsonl" || printf '0\n'; }
 last_frame_field() { tail -n1 "$dump_dir/frames.jsonl" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+frame_field_at() { sed -n "${1}p" "$dump_dir/frames.jsonl" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
 wait_for_frame_after() { previous=$1; for _ in {1..200}; do current=$(frame_count); (( current > previous )) && return 0; sleep .05; done; return 1; }
 expected_pre="$(sed -n 's/.*"pre_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m7/frame-hashes.json")"
 expected_post="$(sed -n 's/.*"post_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m7/frame-hashes.json")"
@@ -174,10 +175,11 @@ touch "$control_dir/continue"; wait "$hold_pid"
 cmp "$restart_result" "$source_dir/tests/fixtures/m7/restart-result.json"
 connection_survival=passed plane_mask=passed post_restart_drawing=passed
 wait_for_frame_after "$pre_continue_count"
-post_restart_hash_value="$(last_frame_field fnv1a64)"; [[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
+post_restart_frame=$((pre_continue_count + 1))
+post_restart_hash_value="$(frame_field_at "$post_restart_frame" fnv1a64)"; [[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
 post_restart_hash=passed final_frame_golden=passed
 cp "$restart_result" "$artifact_dir/milestone7-restart-result.json"
-final_name="$(last_frame_field file)"; final_ppm="$dump_dir/$final_name"; [[ -n "$final_name" && -s "$final_ppm" ]]
+final_name="$(frame_field_at "$post_restart_frame" file)"; final_ppm="$dump_dir/$final_name"; [[ -n "$final_name" && -s "$final_ppm" ]]
 sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"
 journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service --no-pager >"$release_log"
 ! grep -Fq 'invalid compositor buffer release' "$release_log"
