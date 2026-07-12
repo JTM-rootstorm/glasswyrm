@@ -12,6 +12,7 @@ struct Options {
   std::string socket_dir = "/tmp/.X11-unix";
   std::optional<std::string> wm_socket;
   std::optional<std::string> compositor_socket;
+  bool software_content = false;
 
   [[nodiscard]] bool integrated() const noexcept {
     return wm_socket.has_value() && compositor_socket.has_value();

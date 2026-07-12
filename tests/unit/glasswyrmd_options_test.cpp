@@ -32,10 +32,11 @@ int main() {
   Options options;
   if (parse({"glasswyrmd", "--display", "99", "--socket-dir", "/tmp/x",
              "--wm-socket", "/tmp/gwm.sock", "--compositor-socket",
-             "/tmp/gwcomp.sock"},
+             "/tmp/gwcomp.sock", "--software-content"},
             options, output, error) != ParseOptionsResult::Run ||
       options.display != 99 || options.socket_dir != "/tmp/x" ||
-      !options.integrated() || *options.wm_socket != "/tmp/gwm.sock" ||
+      !options.integrated() || !options.software_content ||
+      *options.wm_socket != "/tmp/gwm.sock" ||
       *options.compositor_socket != "/tmp/gwcomp.sock") {
     return 1;
   }
@@ -46,6 +47,11 @@ int main() {
            std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/a",
                                     "--wm-socket", "/tmp/b",
                                     "--compositor-socket", "/tmp/c"},
+           std::vector<std::string>{"glasswyrmd", "--software-content"},
+           std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/a",
+                                    "--compositor-socket", "/tmp/b",
+                                    "--software-content",
+                                    "--software-content"},
        }) {
     options = {};
     if (parse(values, options, output, error) !=
@@ -63,7 +69,8 @@ int main() {
   if (parse({"glasswyrmd", "--help"}, options, output, error) !=
           ParseOptionsResult::ExitSuccess ||
       output.find("--wm-socket PATH --compositor-socket PATH") ==
-          std::string::npos) {
+          std::string::npos ||
+      output.find("--software-content") == std::string::npos) {
     return 4;
   }
   return 0;
