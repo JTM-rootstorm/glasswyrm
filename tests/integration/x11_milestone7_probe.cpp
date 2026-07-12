@@ -204,10 +204,11 @@ std::vector<std::uint8_t> resource_request(
 }
 
 void prepare(Session &session, std::uint32_t window, std::uint32_t pixmap,
-             std::uint32_t gc) {
+             std::uint32_t gc, const bool graphics_exposures = true) {
   session.send(session.wire.create_window(window, 1, 24, 32, 160, 120));
   session.send(create_pixmap(session.wire, pixmap, 1, session.order));
-  session.send(create_gc(session.wire, gc, pixmap, session.order));
+  session.send(create_gc(session.wire, gc, pixmap, session.order,
+                         graphics_exposures));
   session.send(put_image(session.wire, pixmap, gc, session.order));
   session.send(fill(session.wire, window, gc, session.order));
 }
@@ -215,7 +216,7 @@ void prepare(Session &session, std::uint32_t window, std::uint32_t pixmap,
 void run_draw(Session &session) {
   const auto window = session.base + 1, pixmap = session.base + 2,
              gc = session.base + 3;
-  prepare(session, window, pixmap, gc);
+  prepare(session, window, pixmap, gc, false);
   session.send(copy_area(session.wire, pixmap, window, gc, session.order));
   session.send(resource_request(session.wire, 8, window, session.order));
   session.sync();
