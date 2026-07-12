@@ -57,7 +57,12 @@ record_facts() {
   {
     printf 'failure_stage=%s\nscenario_exit=%s\n' "$failure_stage" "$status"
     printf 'api_version=%s\nsoversion=0\nwire_version=%s\n' "$api_version" "$wire_version"
-    if portageq match / x11-base/xorg-server >/dev/null 2>&1 || portageq match / x11-base/xwayland >/dev/null 2>&1; then echo x_servers_absent=false; else echo x_servers_absent=true; fi
+    if [[ -n "$(portageq match / x11-base/xorg-server 2>/dev/null)" ||
+          -n "$(portageq match / x11-base/xwayland 2>/dev/null)" ]]; then
+      echo x_servers_absent=false
+    else
+      echo x_servers_absent=true
+    fi
     for key in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers integrated_little_big no_ppm scene_archive restart_probe xcb_m6_probe; do printf '%s=%s\n' "$key" "${!key}"; done
   } >"$facts"
   exit "$status"
