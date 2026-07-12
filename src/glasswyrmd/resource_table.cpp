@@ -58,6 +58,112 @@ WindowResource* ResourceTable::find_window(const std::uint32_t xid) noexcept {
                              : std::get_if<WindowResource>(&resource->payload);
 }
 
+bool ResourceTable::is_policy_candidate(const std::uint32_t xid) const noexcept {
+  const auto* window = find_window(xid);
+  return window && window->parent == screen_.root_window &&
+         window->window_class == WindowClass::InputOutput;
+}
+
+void ResourceTable::recompute_map_states_from(const std::uint32_t xid,
+                                              const bool parent_viewable) {
+  auto* window = find_window(xid);
+  if (!window) return;
+  const bool candidate = is_policy_candidate(xid);
+  if (!window->map_requested) window->map_state = MapState::Unmapped;
+  else if (candidate && !window->policy_visible) window->map_state = MapState::Unmapped;
+  else window->map_state = parent_viewable ? MapState::Viewable : MapState::Unviewable;
+  const bool viewable = window->map_state == MapState::Viewable;
+  const auto children = window->children;
+  for (const auto child : children) recompute_map_states_from(child, viewable);
+}
+
+void ResourceTable::recompute_map_states(const std::uint32_t xid) {
+  if (xid == screen_.root_window) {
+    auto* root = find_window(xid); root->map_state = MapState::Viewable;
+    const auto children = root->children;
+    for (const auto child : children) recompute_map_states_from(child, true);
+    return;
+  }
+  auto* window = find_window(xid);
+  if (!window) return;
+  const auto* parent = find_window(window->parent);
+  recompute_map_states_from(xid, parent && parent->map_state == MapState::Viewable);
+}
+
+LocalLifecycleStatus ResourceTable::set_local_map_intent(const std::uint32_t xid,
+                                                         const bool mapped) {
+  auto* window = find_window(xid);
+  if (!window) return LocalLifecycleStatus::BadWindow;
+  if (xid == screen_.root_window || is_policy_candidate(xid))
+    return LocalLifecycleStatus::BadMatch;
+  window->map_requested = mapped;
+  recompute_map_states(xid);
+  return LocalLifecycleStatus::Success;
+}
+
+LocalLifecycleStatus ResourceTable::configure_local(
+    const std::uint32_t xid, const LocalConfigure& configure) {
+  auto* window = find_window(xid);
+  if (!window) return LocalLifecycleStatus::BadWindow;
+  if (xid == screen_.root_window || is_policy_candidate(xid))
+    return LocalLifecycleStatus::BadMatch;
+  if ((configure.width && (*configure.width == 0 || *configure.width > UINT16_MAX)) ||
+      (configure.height && (*configure.height == 0 || *configure.height > UINT16_MAX)) ||
+      (configure.border_width && *configure.border_width > UINT16_MAX) ||
+      (configure.x && (*configure.x < INT16_MIN || *configure.x > INT16_MAX)) ||
+      (configure.y && (*configure.y < INT16_MIN || *configure.y > INT16_MAX)))
+    return LocalLifecycleStatus::BadValue;
+  auto* parent = find_window(window->parent);
+  if (!parent) return LocalLifecycleStatus::BadWindow;
+  if (configure.sibling) {
+    if (*configure.sibling == xid) return LocalLifecycleStatus::BadMatch;
+    const auto* sibling = find_window(*configure.sibling);
+    if (!sibling || sibling->parent != window->parent ||
+        configure.stack_mode == LifecycleStackMode::None)
+      return LocalLifecycleStatus::BadMatch;
+  }
+  if (configure.x) window->x = static_cast<std::int16_t>(*configure.x);
+  if (configure.y) window->y = static_cast<std::int16_t>(*configure.y);
+  if (configure.width) window->width = static_cast<std::uint16_t>(*configure.width);
+  if (configure.height) window->height = static_cast<std::uint16_t>(*configure.height);
+  if (configure.border_width)
+    window->border_width = static_cast<std::uint16_t>(*configure.border_width);
+  window->requested_x = window->x; window->requested_y = window->y;
+  window->requested_width = window->width; window->requested_height = window->height;
+  window->requested_border_width = window->border_width;
+  if (configure.stack_mode != LifecycleStackMode::None) {
+    std::erase(parent->children, xid);
+    if (!configure.sibling) {
+      if (configure.stack_mode == LifecycleStackMode::Above) parent->children.push_back(xid);
+      else parent->children.insert(parent->children.begin(), xid);
+    } else {
+      auto position = std::find(parent->children.begin(), parent->children.end(),
+                                *configure.sibling);
+      if (configure.stack_mode == LifecycleStackMode::Above) ++position;
+      parent->children.insert(position, xid);
+    }
+  }
+  return LocalLifecycleStatus::Success;
+}
+
+bool ResourceTable::reorder_root_children(
+    const std::vector<std::uint32_t>& visible_bottom_to_top) {
+  auto* root = find_window(screen_.root_window);
+  if (!root) return false;
+  std::vector<std::uint32_t> result;
+  result.reserve(root->children.size());
+  for (const auto child : root->children)
+    if (std::find(visible_bottom_to_top.begin(), visible_bottom_to_top.end(), child) ==
+        visible_bottom_to_top.end()) result.push_back(child);
+  for (const auto child : visible_bottom_to_top) {
+    if (!is_policy_candidate(child) ||
+        std::find(result.begin(), result.end(), child) != result.end()) return false;
+    result.push_back(child);
+  }
+  root->children = std::move(result);
+  return true;
+}
+
 bool ResourceTable::valid_new_resource_id(
     const std::uint32_t xid, const std::uint32_t resource_base,
     const std::uint32_t resource_mask) const {
@@ -86,6 +192,11 @@ CreateWindowStatus ResourceTable::create_window(
   window.width = spec.width;
   window.height = spec.height;
   window.border_width = spec.border_width;
+  window.requested_x = spec.x;
+  window.requested_y = spec.y;
+  window.requested_width = spec.width;
+  window.requested_height = spec.height;
+  window.requested_border_width = spec.border_width;
   window.attributes = spec.attributes;
   if (spec.initial_event_mask != 0) {
     window.event_selections.emplace(owner, spec.initial_event_mask);
