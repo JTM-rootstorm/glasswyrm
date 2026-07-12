@@ -1,5 +1,7 @@
 #include <glasswyrm/ipc.h>
 
+#include "gwcomp_m4_edge_scenarios.hpp"
+
 #include <poll.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -134,7 +136,25 @@ gwipc_sdr_color_metadata srgb() {
           GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
 }
 
-bool send_basic(gwipc_connection* connection) {
+gwipc_surface_upsert surface(std::uint64_t id) {
+  gwipc_surface_upsert value{};
+  value.struct_size = sizeof(value); value.surface_id = id; value.output_id = 1;
+  value.logical_width = 320; value.logical_height = 200; value.visible = 1;
+  value.transform = GWIPC_TRANSFORM_NORMAL; value.opacity = GWIPC_OPACITY_ONE;
+  value.scale_numerator = 1; value.scale_denominator = 1; value.color = srgb();
+  return value;
+}
+
+bool send_commit(gwipc_connection* connection, std::uint64_t commit_id) {
+  gwipc_frame_commit commit{};
+  commit.struct_size = sizeof(commit); commit.commit_id = commit_id;
+  commit.output_id = 1; commit.producer_generation = commit_id - 99;
+  return enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
+                          GWIPC_FLAG_ACK_REQUIRED, commit,
+                          gwipc_contract_encode_frame_commit);
+}
+
+bool send_basic(gwipc_connection* connection, int* writable_background_fd) {
   std::vector<std::uint8_t> begin;
   put_u64(begin, 1); put_u16(begin, 4); put_u16(begin, 0);
   put_u64(begin, 1); put_u32(begin, 5); put_u32(begin, 0);
@@ -152,13 +172,7 @@ bool send_basic(gwipc_connection* connection) {
                         GWIPC_FLAG_SNAPSHOT_ITEM, output,
                         gwipc_contract_encode_output_upsert)) return false;
 
-  gwipc_surface_upsert background{};
-  background.struct_size = sizeof(background); background.surface_id = 1;
-  background.output_id = 1; background.logical_width = 320;
-  background.logical_height = 200; background.visible = 1;
-  background.transform = GWIPC_TRANSFORM_NORMAL;
-  background.opacity = GWIPC_OPACITY_ONE; background.scale_numerator = 1;
-  background.scale_denominator = 1; background.color = srgb();
+  gwipc_surface_upsert background = surface(1);
   gwipc_surface_upsert overlay = background;
   overlay.surface_id = 2; overlay.logical_x = 80; overlay.logical_y = 50;
   overlay.logical_width = 80; overlay.logical_height = 60; overlay.stacking = 1;
@@ -193,22 +207,19 @@ bool send_basic(gwipc_connection* connection) {
   const bool second = enqueue_contract(connection, GWIPC_MESSAGE_BUFFER_ATTACH,
       GWIPC_FLAG_SNAPSHOT_ITEM, attachment, gwipc_contract_encode_buffer_attach,
       &overlay_fd, 1);
-  (void)::close(background_fd); (void)::close(overlay_fd);
+  if (writable_background_fd) *writable_background_fd = background_fd;
+  else (void)::close(background_fd);
+  (void)::close(overlay_fd);
   if (!first || !second) return false;
 
   std::vector<std::uint8_t> end;
   put_u64(end, 1); put_u64(end, 1); put_u32(end, 5); put_u32(end, 0);
   if (!enqueue(connection, GWIPC_MESSAGE_SNAPSHOT_END, 0, end.data(), end.size()))
     return false;
-  gwipc_frame_commit commit{};
-  commit.struct_size = sizeof(commit); commit.commit_id = 100;
-  commit.output_id = 1; commit.producer_generation = 1;
-  return enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
-                          GWIPC_FLAG_ACK_REQUIRED, commit,
-                          gwipc_contract_encode_frame_commit);
+  return send_commit(connection, 100);
 }
 
-bool await_ack(gwipc_connection* connection) {
+bool await_ack(gwipc_connection* connection, std::uint64_t commit_id) {
   for (int attempt = 0; attempt < 200; ++attempt) {
     if (!pump(connection, 50)) return false;
     gwipc_message* raw = nullptr;
@@ -220,10 +231,80 @@ bool await_ack(gwipc_connection* connection) {
     if (gwipc_contract_decode_message(message.get(), &decoded) != GWIPC_STATUS_OK)
       return false;
     const auto* ack = gwipc_decoded_frame_acknowledged(decoded);
-    const bool accepted = ack && ack->commit_id == 100 &&
+    const bool accepted = ack && ack->commit_id == commit_id &&
                           ack->result == GWIPC_FRAME_ACCEPTED;
     gwipc_decoded_contract_destroy(decoded);
     return accepted;
+  }
+  return false;
+}
+
+bool update_surface(gwipc_connection* connection, const gwipc_surface_upsert& value,
+                    std::uint64_t commit_id) {
+  return enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0, value,
+                          gwipc_contract_encode_surface_upsert) &&
+         send_commit(connection, commit_id) && await_ack(connection, commit_id);
+}
+
+bool run_damage_update(gwipc_connection* connection, int background_fd) {
+  constexpr std::size_t size = 320U * 200U * 4U;
+  void* mapping = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         background_fd, 0);
+  if (mapping == MAP_FAILED) return false;
+  auto* pixels = static_cast<std::uint32_t*>(mapping);
+  for (std::size_t y = 20; y < 28; ++y)
+    for (std::size_t x = 24; x < 40; ++x) pixels[y * 320U + x] = UINT32_C(0xffe0c020);
+  const bool synced = ::msync(mapping, size, MS_SYNC) == 0;
+  (void)::munmap(mapping, size);
+  if (!synced) return false;
+  const gwipc_damage_rectangle rectangle{24, 20, 16, 8};
+  gwipc_surface_damage damage{};
+  damage.struct_size = sizeof(damage); damage.surface_id = 1;
+  damage.rectangles = &rectangle; damage.rectangle_count = 1;
+  return enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_DAMAGE, 0, damage,
+                          gwipc_contract_encode_surface_damage) &&
+         send_commit(connection, 101) && await_ack(connection, 101);
+}
+
+bool run_scenario(gwipc_connection* connection, std::string_view scenario,
+                  int background_fd) {
+  if (scenario == "basic") return true;
+  if (scenario == "damage-update") return run_damage_update(connection, background_fd);
+  auto background = surface(1);
+  auto overlay = surface(2);
+  overlay.logical_x = 80; overlay.logical_y = 50;
+  overlay.logical_width = 80; overlay.logical_height = 60; overlay.stacking = 1;
+  if (scenario == "stacking") {
+    background.stacking = 2;
+    overlay.stacking = -1;
+    return enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0, background,
+                            gwipc_contract_encode_surface_upsert) &&
+           update_surface(connection, overlay, 101);
+  }
+  if (scenario == "visibility") {
+    overlay.visible = 0;
+    if (!update_surface(connection, overlay, 101)) return false;
+    overlay.visible = 1;
+    return update_surface(connection, overlay, 102);
+  }
+  if (scenario == "clipping") {
+    overlay.logical_x = -20; overlay.logical_y = 175;
+    overlay.clipping = 1; overlay.clip_x = 10; overlay.clip_y = 5;
+    overlay.clip_width = 50; overlay.clip_height = 40;
+    if (!update_surface(connection, overlay, 101)) return false;
+    overlay.clip_x = 20; overlay.clip_y = 10;
+    overlay.clip_width = 30; overlay.clip_height = 20;
+    return update_surface(connection, overlay, 102);
+  }
+  if (scenario == "opacity") {
+    overlay.opacity = 0;
+    if (!update_surface(connection, overlay, 101)) return false;
+    overlay.opacity = GWIPC_OPACITY_ONE / 2;
+    if (!update_surface(connection, overlay, 102)) return false;
+    overlay.opacity = GWIPC_OPACITY_ONE;
+    if (!update_surface(connection, overlay, 103)) return false;
+    overlay.opacity = GWIPC_OPACITY_ONE / 2;
+    return update_surface(connection, overlay, 104);
   }
   return false;
 }
@@ -246,7 +327,11 @@ int main(int argc, char** argv) {
   for (const auto candidate : kScenarios) known |= candidate == scenario;
   if (!known) { std::fprintf(stderr, "gwcomp_m4_producer: unknown scenario: %.*s\n",
       static_cast<int>(scenario.size()), scenario.data()); return 2; }
-  if (scenario != "basic") {
+  const int edge_result = run_gwcomp_m4_edge_scenario(socket, scenario);
+  if (edge_result >= 0) return edge_result;
+  if (scenario != "basic" && scenario != "damage-update" &&
+      scenario != "stacking" && scenario != "visibility" &&
+      scenario != "clipping" && scenario != "opacity") {
     std::fprintf(stderr, "gwcomp_m4_producer: scenario not implemented yet: %.*s\n",
                  static_cast<int>(scenario.size()), scenario.data());
     return 2;
@@ -266,7 +351,14 @@ int main(int argc, char** argv) {
   for (int attempt = 0; attempt < 200 &&
        gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED;
        ++attempt) if (!pump(connection.get(), 50)) return 1;
+  int background_fd = -1;
   if (gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED ||
-      !send_basic(connection.get()) || !await_ack(connection.get())) return 1;
+      !send_basic(connection.get(), scenario == "damage-update" ? &background_fd : nullptr) ||
+      !await_ack(connection.get(), 100) ||
+      !run_scenario(connection.get(), scenario, background_fd)) {
+    if (background_fd >= 0) (void)::close(background_fd);
+    return 1;
+  }
+  if (background_fd >= 0) (void)::close(background_fd);
   return 0;
 }

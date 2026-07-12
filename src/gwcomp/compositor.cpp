@@ -233,6 +233,14 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
       releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
     }
   }
+  for (const auto& [buffer_id, mapping] : mappings_) {
+    (void)mapping;
+    const bool remains_attached = std::any_of(
+        pending_attachments_.begin(), pending_attachments_.end(),
+        [buffer_id](const auto& item) { return item.second == buffer_id; });
+    if (!remains_attached && !releases_.contains(buffer_id))
+      releases_[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
+  }
   for (const auto& [buffer_id, reason] : releases_) {
     (void)reason;
     mappings_.erase(buffer_id);

@@ -223,7 +223,9 @@ if get_option('gwcomp')
   )
   gwcomp_m4_producer_program = executable(
     'gwcomp_m4_producer',
-    files('../tests/integration/gwcomp_m4_producer.cpp'),
+    files('../tests/integration/gwcomp_m4_producer.cpp',
+          '../tests/integration/gwcomp_m4_edge_scenarios.cpp'),
+    include_directories: include_directories('../tests/integration'),
     dependencies: gwipc_dep,
     install: false,
   )
