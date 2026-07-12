@@ -933,7 +933,7 @@ M2  Core protocol and resources                 complete
 M3  Versioned IPC foundation                    complete
 M4  Headless compositor and synthetic surfaces   complete
 M5  Window-manager policy scaffold              complete
-M6  Three-process mapped-window lifecycle       in progress
+M6  Three-process mapped-window lifecycle       complete
 M7  Drawable and software-rendering bridge
 M8  Synthetic input and event routing
 M9  Simple real X11 clients
@@ -963,9 +963,10 @@ X11 mapping and three-process lifecycle begin in M6.
 Milestone 6 implementation now connects `glasswyrmd` explicitly to `gwm` and
 `gwcomp`, adds API 0.4 lifecycle records, metadata-only compositor surfaces,
 deferred per-client lifecycle barriers, and structural event routing. It
-remains marked in progress until the repository-owned raw/XCB/restart probes,
-golden M6 fixtures, Gentoo VM scenario, and full validation matrix pass. This
-status does not imply drawing, input, or normal X11 application compatibility.
+is accepted by repository-owned raw/XCB/restart probes, golden M6 fixtures, the
+Gentoo VM scenario, sanitizer testing, and the full component build matrix.
+This status does not imply drawing, input, or normal X11 application
+compatibility.
 
 ## 26. Definition of done
 

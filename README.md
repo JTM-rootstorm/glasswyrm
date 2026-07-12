@@ -4,7 +4,7 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is implementing Milestone 6. `glasswyrmd` retains its standalone
+The project has completed Milestone 6. `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless, metadata-only top-level lifecycle.
 Milestone 4 has added tested scene/damage, read-only buffer import,
@@ -15,7 +15,8 @@ and exact-pixel golden coverage. `gwm` is now a separate synthetic policy
 service with deterministic placement, stacking, focus, visibility, state, and
 policy-snapshot behavior. Integrated startup, full policy snapshots,
 metadata-only compositor scenes, deferred X11 lifecycle barriers, and
-structural event routing are implemented and under acceptance testing. There
+structural event routing are implemented and Milestone 6 acceptance is complete.
+There
 is still no client drawing, input, broad X11 application support, or DRM/KMS
 output. Runtime tools remain placeholders.
 
@@ -111,8 +112,8 @@ For the explicit integrated path, start the listeners before the server:
 
 `glasswyrmd` does not create `/tmp/.X11-unix/X99` until both peer bootstraps
 are accepted. Mapped windows on this path have policy and scene metadata but no
-client content. The repository's M6 raw integration executable is test-owned;
-the final standalone M6 raw, XCB, restart, and VM probes are not yet complete.
+client content. Repository-owned raw, XCB, and restart-hold probes exercise the
+integrated path without claiming normal application compatibility.
 
 ## Setup probes
 
@@ -159,7 +160,7 @@ core error. It never maps or displays the window.
 ## Current binaries
 
 - `glasswyrmd`: owns X11 protocol and resource truth; implements standalone M2
-  behavior and the explicit integrated M6 lifecycle under acceptance.
+  behavior and the accepted explicit integrated M6 lifecycle.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
 - `gwcomp`: owns headless composition and final display authority; it retains
@@ -183,7 +184,7 @@ three runtime processes communicate only in explicit integrated mode; there is
 no direct `gwm` to `gwcomp` socket. See the
 [M6 topology](docs/architecture/M6_RUNTIME_TOPOLOGY.md) and
 [X11 profile](docs/protocols/x11-milestone-6.md) for the implemented boundary
-and remaining acceptance work.
+and tested compatibility boundary.
 
 ## Project Layout
 
@@ -263,14 +264,20 @@ hash validation, malformed-peer isolation, and a hardened transient
 evidence. The terminal-only Gentoo acceptance run passes without Xorg,
 Xwayland, DRM, or input devices.
 
-The Milestone 6 VM command and its raw, XCB, restart, fixture, and artifact
-gates are not implemented yet. Host integration tests are not a substitute for
-that acceptance run.
+The fixed Gentoo acceptance command is:
+
+```sh
+./tools/gw-vm milestone6-runtime-test --yes
+```
+
+It runs the component build matrix, sanitizer suite, raw and XCB probes, live
+peer-restart hold probe, fixture checks, and artifact validation with Xorg and
+Xwayland absent.
 
 ## Compatibility
 
 Glasswyrm claims the standalone behavior documented in
 [`docs/protocols/x11-milestone-2.md`](docs/protocols/x11-milestone-2.md). The
 [Milestone 6 profile](docs/protocols/x11-milestone-6.md) records the narrower
-integrated behavior currently under acceptance. Neither is a compatibility
+integrated behavior accepted for M6. Neither is a compatibility
 claim for normal X11 applications.
