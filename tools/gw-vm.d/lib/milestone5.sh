@@ -111,15 +111,18 @@ gwm_only=passed
 failure_stage=ipc-only-regression
 { meson setup "$ipc_build_dir" "$source_dir" --prefix=/usr -Dwerror=true -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false; meson compile -C "$ipc_build_dir"; meson test -C "$ipc_build_dir" --print-errorlogs; } 2>&1 | tee -a "$meson_log"
 ipc_only=passed
+failure_stage=staged-install-and-consumers
 DESTDIR="$install_root" meson install -C "$ipc_build_dir" >>"$meson_log" 2>&1
 staged_lib_dir="$install_root/usr/lib64"; [[ -d "$staged_lib_dir" ]] || staged_lib_dir="$install_root/usr/lib"
 export PKG_CONFIG_PATH="$staged_lib_dir/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$install_root" LD_LIBRARY_PATH="$staged_lib_dir"
-cc "$source_dir/tests/install/gwipc_c_consumer.c" -o /var/tmp/gwipc-m4-c-consumer $(pkg-config --cflags --libs gwipc)
-c++ -std=c++20 "$source_dir/tests/install/gwipc_cpp_consumer.cpp" -o /var/tmp/gwipc-m4-cpp-consumer $(pkg-config --cflags --libs gwipc)
+read -r -a pkg_config_flags <<<"$(pkg-config --cflags --libs gwipc)"
+printf 'staged gwipc flags: %s\n' "${pkg_config_flags[*]}" | tee -a "$meson_log"
+cc "$source_dir/tests/install/gwipc_c_consumer.c" -o /var/tmp/gwipc-m4-c-consumer "${pkg_config_flags[@]}"
+c++ -std=c++20 "$source_dir/tests/install/gwipc_cpp_consumer.cpp" -o /var/tmp/gwipc-m4-cpp-consumer "${pkg_config_flags[@]}"
 /var/tmp/gwipc-m4-c-consumer; /var/tmp/gwipc-m4-cpp-consumer
 legacy_consumers=passed
-cc "$source_dir/tests/install/gwipc_policy_c_consumer.c" -o /var/tmp/gwipc-m5-policy-c $(pkg-config --cflags --libs gwipc)
-c++ -std=c++20 "$source_dir/tests/install/gwipc_policy_cpp_consumer.cpp" -o /var/tmp/gwipc-m5-policy-cpp $(pkg-config --cflags --libs gwipc)
+cc "$source_dir/tests/install/gwipc_policy_c_consumer.c" -o /var/tmp/gwipc-m5-policy-c "${pkg_config_flags[@]}"
+c++ -std=c++20 "$source_dir/tests/install/gwipc_policy_cpp_consumer.cpp" -o /var/tmp/gwipc-m5-policy-cpp "${pkg_config_flags[@]}"
 /var/tmp/gwipc-m5-policy-c; /var/tmp/gwipc-m5-policy-cpp
 policy_consumers=passed
 
