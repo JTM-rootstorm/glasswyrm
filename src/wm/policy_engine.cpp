@@ -38,6 +38,9 @@ EvaluationError validate(const RawState& raw) {
         window.decoration_preference == DecorationPreference::Unknown ||
         window.decoration_preference == DecorationPreference::False ||
         window.decoration_preference == DecorationPreference::True;
+    const auto known_stack_mode = window.stack_mode == StackMode::None ||
+                                  window.stack_mode == StackMode::Above ||
+                                  window.stack_mode == StackMode::Below;
     if (id == 0 || id != window.window_id || id == context.root_window_id ||
         window.parent_window_id != context.root_window_id ||
         window.creation_serial == 0 || window.requested_width == 0 ||
@@ -45,7 +48,11 @@ EvaluationError validate(const RawState& raw) {
         window.requested_width > maximum_window_extent ||
         window.requested_height > maximum_window_extent ||
         window.border_width > maximum_border_width || window.flags != 0 ||
-        !known_window_type || !known_decoration ||
+        !known_window_type || !known_decoration || !known_stack_mode ||
+        (window.stack_serial == 0 &&
+         (window.stack_sibling != 0 || window.stack_mode != StackMode::None)) ||
+        (window.stack_serial != 0 && window.stack_mode == StackMode::None) ||
+        window.stack_sibling == id ||
         (window.wants_map != (window.map_serial != 0)) ||
         !extent_fits(window.requested_x, window.requested_width) ||
         !extent_fits(window.requested_y, window.requested_height) ||
@@ -58,6 +65,16 @@ EvaluationError validate(const RawState& raw) {
       const auto target = raw.windows.find(window.transient_for);
       if (target == raw.windows.end() || target->second.override_redirect)
         return EvaluationError::UnknownReference;
+    }
+    if (window.stack_serial != 0) {
+      if (window.transient_for != 0) return EvaluationError::UnsupportedMetadata;
+      if (window.stack_sibling != 0) {
+        const auto sibling = raw.windows.find(window.stack_sibling);
+        if (sibling == raw.windows.end()) return EvaluationError::UnknownReference;
+        if (sibling->second.transient_for != 0 ||
+            sibling->second.override_redirect != window.override_redirect)
+          return EvaluationError::UnsupportedMetadata;
+      }
     }
   }
 
@@ -223,6 +240,15 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
                state.applied_state == AppliedState::Maximized) {
       state.final_x = raw.context.work_x; state.final_y = raw.context.work_y;
       state.final_width = raw.context.work_width; state.final_height = raw.context.work_height;
+    } else if (window.transient_for == 0 && window.geometry_serial != 0) {
+      const auto maximum_x = static_cast<std::int64_t>(raw.context.work_x) +
+                             raw.context.work_width - state.final_width;
+      const auto maximum_y = static_cast<std::int64_t>(raw.context.work_y) +
+                             raw.context.work_height - state.final_height;
+      state.final_x = clamp_coordinate(window.requested_x, raw.context.work_x,
+                                       maximum_x);
+      state.final_y = clamp_coordinate(window.requested_y, raw.context.work_y,
+                                       maximum_y);
     } else if (window.transient_for == 0) {
       const auto slot = cascade_slots.contains(id) ? cascade_slots.at(id) : 0;
       const auto x_span = raw.context.work_width - state.final_width;
@@ -283,7 +309,6 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   std::vector<std::uint32_t> managed_roots;
   std::vector<std::uint32_t> overrides;
   for (const auto& [id, window] : raw.windows) {
-    if (!policy.windows.at(id).visible) continue;
     if (window.override_redirect) overrides.push_back(id);
     else if (window.transient_for == 0) managed_roots.push_back(id);
   }
@@ -293,6 +318,40 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
     });
   };
   sort_ids(managed_roots); sort_ids(overrides);
+  const auto apply_restack = [&](std::vector<std::uint32_t>& band) {
+    auto operations = band;
+    std::erase_if(operations, [&](const auto id) {
+      return raw.windows.at(id).stack_serial == 0;
+    });
+    std::sort(operations.begin(), operations.end(), [&](const auto left,
+                                                        const auto right) {
+      const auto& l = raw.windows.at(left); const auto& r = raw.windows.at(right);
+      return std::tie(l.stack_serial, l.creation_serial, l.window_id) <
+             std::tie(r.stack_serial, r.creation_serial, r.window_id);
+    });
+    for (const auto id : operations) {
+      const auto& operation = raw.windows.at(id);
+      const auto current = std::find(band.begin(), band.end(), id);
+      if (current == band.end()) continue;
+      band.erase(current);
+      if (operation.stack_sibling == 0) {
+        if (operation.stack_mode == StackMode::Above) band.push_back(id);
+        else band.insert(band.begin(), id);
+        continue;
+      }
+      auto sibling = std::find(band.begin(), band.end(), operation.stack_sibling);
+      if (operation.stack_mode == StackMode::Above) ++sibling;
+      band.insert(sibling, id);
+    }
+  };
+  apply_restack(managed_roots);
+  apply_restack(overrides);
+  std::erase_if(managed_roots, [&](const auto id) {
+    return !policy.windows.at(id).visible;
+  });
+  std::erase_if(overrides, [&](const auto id) {
+    return !policy.windows.at(id).visible;
+  });
   std::vector<std::uint32_t> stacking;
   const auto emit = [&](const auto& self, const std::uint32_t id) -> void {
     stacking.push_back(id);
