@@ -396,12 +396,19 @@ gwm_only=passed
 gwcomp_only=passed
 ipc_only=passed
 api04_consumers=passed
+m4_pixel_regression=passed
+m5_policy_regression=passed
 m6_metadata_regression=passed
 raw_little=passed
 raw_big=passed
 image_byte_order=passed
 exposure_events=passed
 malformed_x11=passed
+malformed_gwipc=passed
+x11_resources=passed
+raster_requests=passed
+plane_mask=passed
+damage_coalescing=passed
 xcb_drawing=passed
 final_frame_golden=passed
 buffer_release=passed
@@ -1055,6 +1062,9 @@ assert_contains "$command_log" '/var/tmp/glasswyrm-m7-scenes'
 assert_contains "$command_log" '/var/tmp/glasswyrm-m7-control'
 assert_contains "$command_log" '--software-content'
 assert_contains "$command_log" 'x11_milestone6_probe'
+assert_contains "$command_log" 'gwcomp-golden'
+assert_contains "$command_log" 'wm-policy'
+assert_contains "$command_log" 'gwipc-malformed'
 assert_contains "$command_log" 'x11_milestone7_probe'
 assert_contains "$command_log" 'xcb_milestone7_probe'
 assert_contains "$command_log" 'm7_restart_hold_probe'

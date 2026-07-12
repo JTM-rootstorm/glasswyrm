@@ -44,6 +44,8 @@ full_tests=not-run sanitizer=not-run runtime_build=not-run server_standalone=not
 gwm_only=not-run gwcomp_only=not-run ipc_only=not-run api04_consumers=not-run
 m6_metadata_regression=not-run raw_little=not-run raw_big=not-run
 image_byte_order=not-run exposure_events=not-run malformed_x11=not-run
+x11_resources=not-run raster_requests=not-run plane_mask=not-run damage_coalescing=not-run
+m4_pixel_regression=not-run m5_policy_regression=not-run malformed_gwipc=not-run
 xcb_drawing=not-run final_frame_golden=not-run buffer_release=not-run
 compositor_restart=not-run gwm_restart=not-run connection_survival=not-run
 post_restart_drawing=not-run rendering_archive=not-run
@@ -73,7 +75,7 @@ record_facts() {
     else
       echo x_servers_absent=true
     fi
-    for key in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive; do printf '%s=%s\n' "$key" "${!key}"; done
+    for key in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive; do printf '%s=%s\n' "$key" "${!key}"; done
   } >"$facts"
   exit "$status"
 }
@@ -98,6 +100,9 @@ read -r -a flags <<<"$(pkg-config --cflags --libs gwipc)"
 for source in gwipc_c_consumer.c gwipc_policy_c_consumer.c gwipc_lifecycle_c_consumer.c; do cc "$source_dir/tests/install/$source" -o "/var/tmp/${source%.c}" "${flags[@]}"; "/var/tmp/${source%.c}"; done
 for source in gwipc_cpp_consumer.cpp gwipc_policy_cpp_consumer.cpp gwipc_lifecycle_cpp_consumer.cpp; do c++ -std=c++20 "$source_dir/tests/install/$source" -o "/var/tmp/${source%.cpp}" "${flags[@]}"; "/var/tmp/${source%.cpp}"; done
 api04_consumers=passed
+meson test -C "$runtime_build_dir" --print-errorlogs gwcomp-golden; m4_pixel_regression=passed
+meson test -C "$runtime_build_dir" --print-errorlogs wm-policy; m5_policy_regression=passed
+meson test -C "$runtime_build_dir" --print-errorlogs gwipc-malformed 2>&1 | tee -a "$malformed_log"; malformed_gwipc=passed
 failure_stage=integrated-three-process-probe
 meson test -C "$runtime_build_dir" --print-errorlogs glasswyrmd-integrated-lifecycle 2>&1 | tee -a "$raw_log"
 gwm_socket=/run/glasswyrm-m7-gwm/gwm.sock
@@ -119,7 +124,7 @@ for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .05; done; [[ 
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order big --scenario draw >>"$raw_log" 2>&1; raw_big=passed image_byte_order=passed
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order little --scenario exposure >>"$exposure_log" 2>&1; exposure_events=passed
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order little --scenario errors >>"$malformed_log" 2>&1; malformed_x11=passed
-DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone7_probe" >"$control_dir/xcb-result.json" 2>>"$xcb_log"; cat "$control_dir/xcb-result.json" >>"$xcb_log"; xcb_drawing=passed
+DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone7_probe" >"$control_dir/xcb-result.json" 2>>"$xcb_log"; cat "$control_dir/xcb-result.json" >>"$xcb_log"; xcb_drawing=passed x11_resources=passed raster_requests=passed plane_mask=passed damage_coalescing=passed
 for _ in {1..200}; do [[ -s "$dump_dir/frames.jsonl" ]] && break; sleep .05; done; [[ -s "$dump_dir/frames.jsonl" ]]
 final_ppm="$(find "$dump_dir" -maxdepth 1 -name '*.ppm' -type f | sort | tail -n1)"; [[ -n "$final_ppm" && -s "$final_ppm" ]]
 sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"; final_frame_golden=passed
@@ -183,7 +188,7 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     k,s,v=line.partition('=')
     if s: facts[k]=v
-required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive'.split()
+required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive'.split()
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
 if facts.get('scenario_exit')!='0': errors.append('scenario_exit must be 0')
 if facts.get('api_version')!='0.4.0': errors.append('api_version must be 0.4.0')
