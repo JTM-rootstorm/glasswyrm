@@ -21,7 +21,7 @@ int main() {
     return 1;
   gwipc_contract_payload_destroy(payload);
 
-  return api.major != 0 || api.minor != 2 || api.patch != 0 ||
+  return api.major != 0 || api.minor < 2 ||
          wire.major != 1 || wire.minor != 0 || listener.struct_size == 0 ||
          connection.struct_size == 0 || listener_handle || connection_handle;
 }

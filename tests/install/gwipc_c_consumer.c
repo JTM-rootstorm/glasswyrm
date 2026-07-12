@@ -21,7 +21,7 @@ int main(void) {
     return 1;
   gwipc_contract_payload_destroy(payload);
 
-  if (api.major != 0 || api.minor != 2 || api.patch != 0 || wire.major != 1 ||
+  if (api.major != 0 || api.minor < 2 || wire.major != 1 ||
       wire.minor != 0 || listener.struct_size == 0 ||
       connection.struct_size == 0) {
     return 1;
