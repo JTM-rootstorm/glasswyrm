@@ -6,6 +6,10 @@
 #include "glasswyrmd/lifecycle_coordinator.hpp"
 #include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
+#include "glasswyrmd/synthetic_input_peer.hpp"
+#include "input/input_router.hpp"
+#include "input/input_state.hpp"
+#include "protocol/x11/event_mask.hpp"
 #include "protocol/x11/reply.hpp"
 #endif
 
@@ -375,6 +379,15 @@ int Server::run() {
   std::unique_ptr<RuntimeBridge> bridge;
   std::unique_ptr<LifecycleCoordinator> lifecycle;
   std::unique_ptr<ContentPresenter> content_presenter;
+  std::unique_ptr<SyntheticInputPeer> input_peer;
+  glasswyrm::input::InputState input_state;
+  std::uint64_t expected_input_id = 1;
+  struct PendingFocusInput {
+    SyntheticInputRecord record;
+    std::uint32_t old_focus{};
+    std::size_t delivered{};
+  };
+  std::optional<PendingFocusInput> pending_focus_input;
   std::uint64_t next_lifecycle_token = 1;
   // Runtime bootstrap owns commit/generation 1.
   std::uint64_t next_policy_commit = 2;
@@ -587,6 +600,38 @@ int Server::run() {
         }
         }
       }
+      if (operation && operation->kind == LifecycleOperationKind::Focus &&
+          pending_focus_input) {
+        const auto new_focus = state_.focused_window();
+        if (success) {
+          std::vector<ClientConnection*> recipients;
+          recipients.reserve(clients_.size());
+          for (const auto& client : clients_) recipients.push_back(client.get());
+          EventRouter router(state_.resources());
+          pending_focus_input->delivered += router.route_focus(
+              pending_focus_input->old_focus, new_focus, recipients);
+        }
+        if (input_peer && input_peer->connected()) {
+          gwipc_synthetic_input_acknowledged acknowledgement{};
+          acknowledgement.struct_size = sizeof(acknowledgement);
+          acknowledgement.input_id = pending_focus_input->record.input_id;
+          acknowledgement.time_ms = input_state.time();
+          acknowledgement.result = success
+              ? GWIPC_SYNTHETIC_INPUT_ACCEPTED
+              : GWIPC_SYNTHETIC_INPUT_FOCUS_REJECTED;
+          acknowledgement.root_x = input_state.pointer_x();
+          acknowledgement.root_y = input_state.pointer_y();
+          acknowledgement.pointer_window = input_state.pointer_target();
+          acknowledgement.focus_window = new_focus;
+          acknowledgement.state = input_state.mask();
+          acknowledgement.delivered_event_count =
+              static_cast<std::uint32_t>(pending_focus_input->delivered);
+          if (!input_peer->acknowledge(pending_focus_input->record,
+                                       acknowledgement))
+            input_peer->disconnect();
+        }
+        pending_focus_input.reset();
+      }
       (void)requester;
       transition_before.reset();
       pending_mutations.erase(token);
@@ -730,6 +775,16 @@ int Server::run() {
         stop_requested = 1;
       }
     };
+    if (options_.synthetic_input_socket) {
+      input_peer = std::make_unique<SyntheticInputPeer>(
+          *options_.synthetic_input_socket);
+      std::string error;
+      if (!input_peer->start(error)) {
+        std::fprintf(stderr, "glasswyrmd: %s\n", error.c_str());
+        close_signal_pipe();
+        return 1;
+      }
+    }
   }
 #else
   if (options_.integrated()) {
@@ -748,7 +803,7 @@ int Server::run() {
 
   while (!stop_requested) {
     std::vector<pollfd> descriptors;
-    descriptors.reserve(clients_.size() + 4);
+    descriptors.reserve(clients_.size() + 6);
     short listener_events = POLLIN;
 #ifdef GW_SERVER_HAS_IPC
     if (bridge && !bridge->ready())
@@ -757,11 +812,21 @@ int Server::run() {
     descriptors.push_back(pollfd{listener_, listener_events, 0});
     descriptors.push_back(pollfd{signal_pipe[0], POLLIN, 0});
 #ifdef GW_SERVER_HAS_IPC
+    std::optional<std::size_t> input_listener_index;
+    std::optional<std::size_t> input_connection_index;
     if (bridge) {
       descriptors.push_back(
           pollfd{bridge->policy_fd(), bridge->policy_events(), 0});
       descriptors.push_back(
           pollfd{bridge->compositor_fd(), bridge->compositor_events(), 0});
+    }
+    if (input_peer) {
+      input_listener_index = descriptors.size();
+      descriptors.push_back(pollfd{input_peer->listener_fd(),
+                                   input_peer->listener_events(), 0});
+      input_connection_index = descriptors.size();
+      descriptors.push_back(pollfd{input_peer->connection_fd(),
+                                   input_peer->connection_events(), 0});
     }
 #endif
     const std::size_t client_offset = descriptors.size();
@@ -946,6 +1011,162 @@ int Server::run() {
                          error.c_str());
           }
         }
+      }
+    }
+    if (input_peer) {
+      if (input_listener_index &&
+          (descriptors[*input_listener_index].revents & POLLIN) != 0)
+        input_peer->accept_provider();
+      if (input_connection_index)
+        input_peer->service(descriptors[*input_connection_index].revents);
+      if (input_peer->consume_disconnect()) {
+        input_state.reset_provider_state();
+        expected_input_id = 1;
+        std::fprintf(stderr,
+                     "glasswyrmd: input provider state cleared\n");
+      }
+      const auto acknowledge = [&](const SyntheticInputRecord& record,
+                                   const gwipc_synthetic_input_result result,
+                                   const std::size_t delivered) {
+        gwipc_synthetic_input_acknowledged value{};
+        value.struct_size = sizeof(value);
+        value.input_id = record.input_id;
+        value.time_ms = input_state.time();
+        value.result = result;
+        value.root_x = input_state.pointer_x();
+        value.root_y = input_state.pointer_y();
+        value.pointer_window = input_state.pointer_target();
+        value.focus_window = state_.focused_window();
+        value.state = input_state.mask();
+        value.delivered_event_count = static_cast<std::uint32_t>(delivered);
+        if (!input_peer->acknowledge(record, value)) input_peer->disconnect();
+      };
+      std::size_t processed = 0;
+      while (!pending_focus_input && processed++ < 64) {
+        const auto next = input_peer->take_record();
+        if (!next) break;
+        const auto record = *next;
+        if (record.input_id != expected_input_id) {
+          input_peer->disconnect();
+          break;
+        }
+        ++expected_input_id;
+        std::vector<ClientConnection*> recipients;
+        recipients.reserve(clients_.size());
+        for (const auto& client : clients_) recipients.push_back(client.get());
+        EventRouter router(state_.resources());
+        std::size_t delivered = 0;
+        if (record.kind == SyntheticInputRecord::Kind::Barrier) {
+          acknowledge(record, GWIPC_SYNTHETIC_INPUT_ACCEPTED, 0);
+          continue;
+        }
+        if (record.time_ms == 0 || record.time_ms < input_state.time()) {
+          input_peer->disconnect();
+          break;
+        }
+        if (record.kind == SyntheticInputRecord::Kind::Motion) {
+          const auto [x, y] = glasswyrm::input::clamp_pointer(
+              record.root_x, record.root_y, state_.screen().width_pixels,
+              state_.screen().height_pixels);
+          const auto old_target = input_state.pointer_target();
+          const auto new_target = glasswyrm::input::hit_test_top_level(
+              state_.resources(), x, y);
+          (void)input_state.accept_time(record.time_ms);
+          input_state.set_pointer(x, y, new_target);
+          delivered += router.route_crossing(old_target, new_target,
+                                              state_.focused_window(),
+                                              input_state, recipients);
+          delivered += router.route_input(
+              gw::protocol::x11::CoreEventType::MotionNotify, 0,
+              input_state.time(), new_target, input_state.mask(),
+              glasswyrm::input::motion_delivery_mask(input_state), x, y,
+              new_target, recipients);
+          acknowledge(record,
+                      x != record.root_x || y != record.root_y
+                          ? GWIPC_SYNTHETIC_INPUT_CLAMPED
+                          : GWIPC_SYNTHETIC_INPUT_ACCEPTED,
+                      delivered);
+          continue;
+        }
+        auto staged = input_state;
+        const auto pre_state = input_state.mask();
+        if (record.kind == SyntheticInputRecord::Kind::Button) {
+          if (staged.transition_button(record.detail, record.pressed) !=
+              glasswyrm::input::TransitionStatus::Accepted) {
+            acknowledge(record, GWIPC_SYNTHETIC_INPUT_INVALID_TRANSITION, 0);
+            continue;
+          }
+          (void)staged.accept_time(record.time_ms);
+          delivered += router.route_input(
+              record.pressed ? gw::protocol::x11::CoreEventType::ButtonPress
+                             : gw::protocol::x11::CoreEventType::ButtonRelease,
+              record.detail, record.time_ms, input_state.pointer_target(),
+              pre_state,
+              record.pressed ? gw::protocol::x11::event_mask::ButtonPress
+                             : gw::protocol::x11::event_mask::ButtonRelease,
+              input_state.pointer_x(), input_state.pointer_y(),
+              input_state.pointer_target(), recipients);
+          input_state = staged;
+          const auto target = input_state.pointer_target();
+          const auto* window = state_.resources().find_window(target);
+          const bool requests_focus =
+              record.pressed && record.detail == 1 && window &&
+              state_.resources().is_policy_candidate(target) &&
+              window->map_state == MapState::Viewable &&
+              window->policy_visible && !window->cleanup_pending &&
+              !window->attributes.override_redirect &&
+              state_.focused_window() != target;
+          if (requests_focus) {
+            const auto serial = state_.next_lifecycle_serial();
+            auto proposed = lifecycle->committed();
+            auto found = proposed.windows.find(target);
+            if (!serial || found == proposed.windows.end()) {
+              acknowledge(record, GWIPC_SYNTHETIC_INPUT_FOCUS_UNCHANGED,
+                          delivered);
+              continue;
+            }
+            found->second.focus_serial = *serial;
+            LifecycleOperation operation;
+            operation.token = next_lifecycle_token++;
+            operation.kind = LifecycleOperationKind::Focus;
+            operation.window = target;
+            operation.proposed = std::move(proposed);
+            pending_focus_input = PendingFocusInput{
+                record, state_.focused_window(), delivered};
+            if (lifecycle->enqueue(std::move(operation)) !=
+                EnqueueStatus::Queued) {
+              pending_focus_input.reset();
+              acknowledge(record, GWIPC_SYNTHETIC_INPUT_FOCUS_REJECTED,
+                          delivered);
+            }
+            continue;
+          }
+          acknowledge(record,
+                      record.pressed && record.detail == 1
+                          ? GWIPC_SYNTHETIC_INPUT_FOCUS_UNCHANGED
+                          : GWIPC_SYNTHETIC_INPUT_ACCEPTED,
+                      delivered);
+          continue;
+        }
+        if (staged.transition_key(record.detail, record.pressed) !=
+            glasswyrm::input::TransitionStatus::Accepted) {
+          acknowledge(record, GWIPC_SYNTHETIC_INPUT_INVALID_TRANSITION, 0);
+          continue;
+        }
+        (void)staged.accept_time(record.time_ms);
+        const auto focus = state_.resources().find_window(state_.focused_window())
+                               ? state_.focused_window()
+                               : state_.screen().root_window;
+        delivered += router.route_input(
+            record.pressed ? gw::protocol::x11::CoreEventType::KeyPress
+                           : gw::protocol::x11::CoreEventType::KeyRelease,
+            record.detail, record.time_ms, focus, pre_state,
+            record.pressed ? gw::protocol::x11::event_mask::KeyPress
+                           : gw::protocol::x11::event_mask::KeyRelease,
+            input_state.pointer_x(), input_state.pointer_y(),
+            input_state.pointer_target(), recipients);
+        input_state = staged;
+        acknowledge(record, GWIPC_SYNTHETIC_INPUT_ACCEPTED, delivered);
       }
     }
 #endif

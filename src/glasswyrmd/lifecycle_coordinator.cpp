@@ -59,6 +59,9 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
     case LifecycleOperationKind::OverrideChange:
       target->second.override_redirect = source->second.override_redirect;
       break;
+    case LifecycleOperationKind::Focus:
+      target->second.focus_serial = source->second.focus_serial;
+      break;
     default: return std::nullopt;
   }
   return rebased;
