@@ -34,6 +34,7 @@ struct Recorder {
   std::vector<std::uint32_t> compositor;
   std::vector<std::uint32_t> commits;
   std::vector<std::pair<std::uint64_t, bool>> completed;
+  unsigned rollbacks_prepared{};
   bool fatal{};
 
   LifecycleCallbacks callbacks() {
@@ -54,7 +55,11 @@ struct Recorder {
           completed.emplace_back(token, success);
         },
         [&] { fatal = true; },
-        {}};
+        {},
+        [&] {
+          ++rollbacks_prepared;
+          return true;
+        }};
   }
 };
 
@@ -91,6 +96,7 @@ void test_compositor_rejection_rolls_back_both_peers() {
               coordinator.compositor_accepted() &&
               coordinator.committed().focused_window == 1 &&
               recorder.commits.empty() &&
+              recorder.rollbacks_prepared == 1 &&
               recorder.completed.back() ==
                   std::pair<std::uint64_t, bool>{10, false},
           "rollback replays compositor and never commits rejected state");
@@ -104,7 +110,8 @@ void test_cancellation_before_policy_result() {
   coordinator.cancel_client(7);
   require(coordinator.policy_accepted(snapshot(10)) &&
               coordinator.phase() == CoordinatorPhase::RollingBackPolicy &&
-              recorder.compositor.empty() && recorder.policy.back() == 1,
+              recorder.compositor.empty() && recorder.policy.back() == 1 &&
+              recorder.rollbacks_prepared == 1,
           "canceled accepted policy is never projected to compositor");
   require(coordinator.policy_accepted(snapshot(1)) &&
               coordinator.compositor_accepted() &&
@@ -152,6 +159,19 @@ void test_commit_failure_is_fatal() {
           "commit failure is fatal without promotion or completion");
 }
 
+void test_rollback_preparation_failure_is_fatal() {
+  Recorder recorder;
+  auto callbacks = recorder.callbacks();
+  callbacks.prepare_rollback = [] { return false; };
+  LifecycleCoordinator coordinator(snapshot(1), 1, std::move(callbacks));
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              coordinator.policy_accepted(snapshot(10)) &&
+              !coordinator.compositor_rejected() &&
+              coordinator.phase() == CoordinatorPhase::Fatal &&
+              recorder.fatal && recorder.policy.size() == 1,
+          "rollback transport preparation failure is fatal before replay");
+}
+
 void test_queued_operation_rebases_on_latest_commit() {
   Recorder recorder;
   auto callbacks = recorder.callbacks();
@@ -171,6 +191,46 @@ void test_queued_operation_rebases_on_latest_commit() {
           "queued intent rebases after the preceding commit");
 }
 
+void test_operation_rebase_preserves_unrelated_intent() {
+  LifecycleSnapshot committed;
+  committed.windows[10] = LifecycleWindow{};
+  committed.windows[10].xid = 10;
+  committed.windows[10].map_requested = true;
+  committed.windows[10].map_serial = 7;
+  committed.windows[10].requested_x = 40;
+  committed.windows[10].geometry_serial = 8;
+
+  LifecycleOperation configure;
+  configure.kind = LifecycleOperationKind::Configure;
+  configure.window = 10;
+  configure.proposed = committed;
+  configure.proposed.windows[10].map_requested = false;
+  configure.proposed.windows[10].map_serial = 99;
+  configure.proposed.windows[10].requested_x = 80;
+  configure.proposed.windows[10].geometry_serial = 9;
+  const auto configured = rebase_lifecycle_operation(committed, configure);
+  require(configured && configured->windows.at(10).map_requested &&
+              configured->windows.at(10).map_serial == 7 &&
+              configured->windows.at(10).requested_x == 80 &&
+              configured->windows.at(10).geometry_serial == 9,
+          "Configure rebase preserves a preceding Map intent");
+
+  LifecycleOperation unmap;
+  unmap.kind = LifecycleOperationKind::Unmap;
+  unmap.window = 10;
+  unmap.proposed = *configured;
+  unmap.proposed.windows[10].map_requested = false;
+  unmap.proposed.windows[10].map_serial = 10;
+  unmap.proposed.windows[10].requested_x = 999;
+  unmap.proposed.windows[10].geometry_serial = 100;
+  const auto unmapped = rebase_lifecycle_operation(*configured, unmap);
+  require(unmapped && !unmapped->windows.at(10).map_requested &&
+              unmapped->windows.at(10).map_serial == 10 &&
+              unmapped->windows.at(10).requested_x == 80 &&
+              unmapped->windows.at(10).geometry_serial == 9,
+          "Map rebase preserves a preceding Configure intent");
+}
+
 }  // namespace
 
 int main() {
@@ -179,6 +239,8 @@ int main() {
   test_cancellation_before_policy_result();
   test_disconnect_replays_each_phase();
   test_commit_failure_is_fatal();
+  test_rollback_preparation_failure_is_fatal();
   test_queued_operation_rebases_on_latest_commit();
+  test_operation_rebase_preserves_unrelated_intent();
   return 0;
 }

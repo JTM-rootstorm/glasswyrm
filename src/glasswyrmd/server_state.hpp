@@ -61,6 +61,33 @@ class ServerState {
       resources_.find_window(xid)->geometry_serial = serial;
     return true;
   }
+  [[nodiscard]] bool commit_lifecycle(const LifecycleSnapshot& snapshot) {
+    ServerState staged = *this;
+    std::vector<AppliedPolicyWindow> policy;
+    policy.reserve(snapshot.windows.size());
+    for (const auto& [xid, intent] : snapshot.windows) {
+      auto* window = staged.resources_.find_window(xid);
+      if (!window || !staged.resources_.is_policy_candidate(xid)) return false;
+      window->map_requested = intent.map_requested;
+      window->map_serial = intent.map_serial;
+      window->requested_x = intent.requested_x;
+      window->requested_y = intent.requested_y;
+      window->requested_width = intent.requested_width;
+      window->requested_height = intent.requested_height;
+      window->requested_border_width = intent.requested_border_width;
+      window->geometry_serial = intent.geometry_serial;
+      window->stack_serial = intent.stack_serial;
+      window->stack_sibling = intent.stack_sibling;
+      window->stack_mode = intent.stack_mode;
+      policy.push_back({xid, intent.applied_x, intent.applied_y,
+                        intent.applied_width, intent.applied_height,
+                        intent.stacking, intent.policy_visible,
+                        intent.focused});
+    }
+    if (!staged.apply_policy(policy)) return false;
+    *this = std::move(staged);
+    return true;
+  }
 
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner) {
     return resources_.cleanup_client(owner);

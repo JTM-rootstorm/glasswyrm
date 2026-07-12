@@ -35,7 +35,11 @@ struct LifecycleCallbacks {
   std::function<void()> fatal;
   std::function<std::optional<LifecycleSnapshot>(
       const LifecycleSnapshot&, const LifecycleOperation&)> rebase;
+  std::function<bool()> prepare_rollback;
 };
+
+[[nodiscard]] std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
+    const LifecycleSnapshot& committed, const LifecycleOperation& operation);
 
 class LifecycleCoordinator {
  public:
