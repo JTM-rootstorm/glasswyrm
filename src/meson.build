@@ -188,6 +188,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/peer_transport.cpp',
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_peer.cpp',
+      'glasswyrmd/runtime_bridge.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
   endif
@@ -196,6 +197,7 @@ if get_option('glasswyrmd')
     gw_server_core_sources,
     dependencies: gw_server_core_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
+    cpp_args: get_option('libgwipc') ? ['-DGW_SERVER_HAS_IPC=1'] : [],
   )
   gw_server_core_dep = declare_dependency(
     link_with: gw_server_core_lib,
