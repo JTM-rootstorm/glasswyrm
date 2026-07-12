@@ -148,6 +148,24 @@ if get_option('glasswyrmd')
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 20,
     )
+    glasswyrmd_integrated_lifecycle_test = executable(
+      'glasswyrmd_integrated_lifecycle_test',
+      files(
+        'integration/glasswyrmd_integrated_lifecycle_test.cpp',
+        'helpers/x11_fake_client.cpp',
+        'helpers/x11_request_builder.cpp',
+      ),
+      dependencies: [gw_x11_setup_dep],
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-integrated-lifecycle',
+      glasswyrmd_integrated_lifecycle_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 45,
+    )
   endif
 endif
 

@@ -5,8 +5,10 @@
 #include "glasswyrmd/server_state.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <sys/types.h>
 #include <vector>
@@ -41,6 +43,9 @@ class Server {
   std::uint64_t next_client_identifier_ = 1;
   ServerState state_;
   std::vector<std::unique_ptr<ClientConnection>> clients_;
+  ClientConnection::DeferredHandler deferred_lifecycle_handler_;
+  std::function<void(std::uint64_t, std::uint32_t)> cancel_lifecycle_handler_;
+  std::set<std::uint32_t> pending_resource_bases_;
 };
 
 }  // namespace glasswyrm::server

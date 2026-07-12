@@ -115,7 +115,10 @@ bool RuntimeBridge::service(const short policy_revents,
 
 bool RuntimeBridge::submit_policy(const PolicySnapshotSubmission& submission,
                                   std::string& error) {
-  if (!ready() || transaction_stage_ != TransactionStage::None) return false;
+  if (!ready() || transaction_stage_ != TransactionStage::None) {
+    error = "policy submission attempted while transaction stage is busy";
+    return false;
+  }
   if (!policy_.submit(submission, error)) return false;
   transaction_stage_ = TransactionStage::Policy;
   return true;
