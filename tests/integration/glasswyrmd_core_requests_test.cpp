@@ -111,6 +111,136 @@ void exercise_windows(const std::string& socket, x11::ByteOrder order) {
                     "destroyed window returns BadDrawable");
 }
 
+void require_error(const std::vector<std::uint8_t>& packet,
+                   std::uint8_t code, const char* message) {
+  gw::test::require(packet.size() == 32 && packet[0] == 0 && packet[1] == code,
+                    message);
+}
+
+void exercise_window_attributes(const std::string& socket,
+                                x11::ByteOrder order) {
+  constexpr std::uint32_t kAllAttributes = 0x7fffU;
+  constexpr std::uint32_t kButtonPress = 1U << 2U;
+  constexpr std::uint32_t kExposure = 1U << 15U;
+  Session owner(socket, order);
+  Session observer(socket, order);
+  const std::uint32_t window = owner.resource_base + 20;
+  const std::uint32_t create_window = owner.resource_base + 21;
+  const std::array<std::uint32_t, 15> all_values{
+      1, 0x10203040U, 0, 0x50607080U, 10, 10, 2, 0xa5a5a5a5U,
+      0x12345678U, 1, 1, kButtonPress, 0x204fU, 0, 0};
+
+  owner.client.send_all(owner.requests.create_window(
+      create_window, 1, 0, 0, 20, 20, kAllAttributes, all_values));
+  owner.sync();
+  owner.client.send_all(owner.requests.get_window_attributes(create_window));
+  const auto created = owner.client.receive_server_packet(order);
+  gw::test::require(
+      created[0] == 1 && created[1] == 2 && created[14] == 10 &&
+          created[15] == 10 && created[24] == 1 && created[27] == 1 &&
+          gw::test::read_wire_u32(created.data() + 16, order) == 0xa5a5a5a5U &&
+          gw::test::read_wire_u32(created.data() + 20, order) == 0x12345678U &&
+          gw::test::read_wire_u32(created.data() + 32, order) == kButtonPress &&
+          gw::test::read_wire_u32(created.data() + 36, order) == kButtonPress &&
+          gw::test::read_wire_u16(created.data() + 40, order) == 0x204fU,
+      "CreateWindow decodes every attribute bit");
+
+  owner.client.send_all(owner.requests.create_window(window, 1, 0, 0, 20, 20));
+  owner.sync();
+  auto changed_values = all_values;
+  changed_values[11] = kExposure;
+  owner.client.send_all(owner.requests.change_window_attributes(
+      window, kAllAttributes, changed_values));
+  owner.sync();
+  owner.client.send_all(owner.requests.get_window_attributes(window));
+  const auto changed = owner.client.receive_server_packet(order);
+  gw::test::require(
+      changed[0] == 1 && changed[1] == 2 && changed[14] == 10 &&
+          changed[15] == 10 && changed[24] == 1 && changed[27] == 1 &&
+          gw::test::read_wire_u32(changed.data() + 32, order) == kExposure &&
+          gw::test::read_wire_u32(changed.data() + 36, order) == kExposure &&
+          gw::test::read_wire_u16(changed.data() + 40, order) == 0x204fU,
+      "ChangeWindowAttributes decodes every attribute bit");
+
+  const std::array<std::uint32_t, 2> combined{0, kButtonPress};
+  owner.client.send_all(owner.requests.change_window_attributes(
+      window, (1U << 9U) | (1U << 11U), combined));
+  owner.sync();
+  owner.client.send_all(owner.requests.get_window_attributes(window));
+  const auto combined_reply = owner.client.receive_server_packet(order);
+  gw::test::require(
+      combined_reply[27] == 0 &&
+          gw::test::read_wire_u32(combined_reply.data() + 36, order) ==
+              kButtonPress,
+      "combined override and event selection update succeeds");
+
+  const std::array<std::uint32_t, 1> button{kButtonPress};
+  observer.client.send_all(observer.requests.change_window_attributes(
+      window, 1U << 11U, button));
+  require_error(observer.client.receive_server_packet(order), 10,
+                "ButtonPress selection is exclusive across clients");
+
+  for (const auto redirect : {1U << 18U, 1U << 20U}) {
+    const std::array<std::uint32_t, 1> selected{redirect};
+    owner.client.send_all(owner.requests.change_window_attributes(
+        window, 1U << 11U, selected));
+    require_error(owner.client.receive_server_packet(order), 10,
+                  "redirect selections return BadAccess");
+  }
+
+  const std::array<std::uint32_t, 2> invalid_atomic{0xdeadbeefU, 2};
+  owner.client.send_all(owner.requests.change_window_attributes(
+      window, (1U << 1U) | (1U << 9U), invalid_atomic));
+  require_error(owner.client.receive_server_packet(order), 2,
+                "invalid combined attribute returns BadValue");
+  owner.client.send_all(owner.requests.get_window_attributes(window));
+  const auto unchanged = owner.client.receive_server_packet(order);
+  gw::test::require(
+      unchanged[27] == 0 &&
+          gw::test::read_wire_u32(unchanged.data() + 36, order) == kButtonPress,
+      "failed attribute update does not mutate observable state");
+
+  const std::array<std::uint32_t, 1> zero{0};
+  owner.client.send_all(owner.requests.change_window_attributes(
+      window, 1U << 11U, zero));
+  owner.sync();
+  observer.client.send_all(observer.requests.change_window_attributes(
+      window, 1U << 11U, button));
+  observer.sync();
+  observer.client.send_all(observer.requests.get_window_attributes(window));
+  const auto transferred = observer.client.receive_server_packet(order);
+  gw::test::require(
+      gw::test::read_wire_u32(transferred.data() + 32, order) == kButtonPress &&
+          gw::test::read_wire_u32(transferred.data() + 36, order) == kButtonPress,
+      "zero mask removes selection and permits a new owner");
+
+  const std::array<std::uint32_t, 1> root_override{1};
+  owner.client.send_all(owner.requests.change_window_attributes(
+      1, 1U << 9U, root_override));
+  require_error(owner.client.receive_server_packet(order), 8,
+                "root override redirect returns BadMatch");
+
+  const std::array<std::uint32_t, 1> unknown_value{0};
+  owner.client.send_all(owner.requests.change_window_attributes(
+      window, 1U << 15U, unknown_value));
+  require_error(owner.client.receive_server_packet(order), 2,
+                "unknown attribute mask returns BadValue");
+
+  auto short_request = owner.requests.change_window_attributes(
+      window, 1U << 1U, unknown_value);
+  short_request.resize(12);
+  if (order == x11::ByteOrder::LittleEndian) {
+    short_request[2] = 3;
+    short_request[3] = 0;
+  } else {
+    short_request[2] = 0;
+    short_request[3] = 3;
+  }
+  owner.client.send_all(short_request);
+  require_error(owner.client.receive_server_packet(order), 16,
+                "mask/value length mismatch returns BadLength");
+}
+
 void exercise_atoms_and_properties(const std::string& socket) {
   Session little(socket, x11::ByteOrder::LittleEndian);
   Session big(socket, x11::ByteOrder::BigEndian);
@@ -227,6 +357,10 @@ int main(int argc, char** argv) {
     exercise_pipeline(server.socket_path());
     exercise_windows(server.socket_path(), x11::ByteOrder::LittleEndian);
     exercise_windows(server.socket_path(), x11::ByteOrder::BigEndian);
+    exercise_window_attributes(server.socket_path(),
+                               x11::ByteOrder::LittleEndian);
+    exercise_window_attributes(server.socket_path(),
+                               x11::ByteOrder::BigEndian);
     exercise_atoms_and_properties(server.socket_path());
     exercise_output_cap_isolation(server.socket_path());
     return 0;

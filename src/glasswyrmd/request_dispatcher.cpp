@@ -32,6 +32,87 @@ bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
   return request.bytes.size() == size;
 }
 
+constexpr std::uint32_t kWindowAttributeMask = 0x00007fffU;
+constexpr std::uint32_t kCoreEventMask = 0x01ffffffU;
+constexpr std::uint32_t kDoNotPropagateMask = 0x0000204fU;
+constexpr std::uint32_t kButtonPressMask = 1U << 2U;
+constexpr std::uint32_t kResizeRedirectMask = 1U << 18U;
+constexpr std::uint32_t kSubstructureRedirectMask = 1U << 20U;
+
+struct DecodedWindowAttributes {
+  WindowAttributes attributes;
+  std::optional<std::uint32_t> event_mask;
+  x11::CoreErrorCode error{x11::CoreErrorCode::BadImplementation};
+  std::uint32_t bad_value{0};
+  bool success{false};
+};
+
+DecodedWindowAttributes decode_window_attributes(
+    x11::ByteReader& reader, const std::uint32_t value_mask,
+    WindowAttributes attributes, const std::uint32_t default_colormap) {
+  DecodedWindowAttributes result;
+  result.attributes = attributes;
+  for (std::uint32_t bit = 0; bit < 15; ++bit) {
+    if ((value_mask & (std::uint32_t{1} << bit)) == 0) continue;
+    std::uint32_t value = 0;
+    if (!reader.read_u32(value)) return result;
+    result.bad_value = value;
+    switch (bit) {
+      case 0:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
+        result.attributes.background_pixmap = value;
+        break;
+      case 1: result.attributes.background_pixel = value; break;
+      case 2:
+        if (value != 0) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
+        result.attributes.border_pixmap = value;
+        break;
+      case 3: result.attributes.border_pixel = value; break;
+      case 4:
+        if (value > 10) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.bit_gravity = static_cast<std::uint8_t>(value);
+        break;
+      case 5:
+        if (value > 10) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.window_gravity = static_cast<std::uint8_t>(value);
+        break;
+      case 6:
+        if (value > 2) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.backing_store = static_cast<std::uint8_t>(value);
+        break;
+      case 7: result.attributes.backing_planes = value; break;
+      case 8: result.attributes.backing_pixel = value; break;
+      case 9:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.override_redirect = value != 0;
+        break;
+      case 10:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.save_under = value != 0;
+        break;
+      case 11:
+        if ((value & ~kCoreEventMask) != 0) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.event_mask = value;
+        break;
+      case 12:
+        if ((value & ~kDoNotPropagateMask) != 0) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.do_not_propagate_mask = value;
+        break;
+      case 13:
+        if (value != 0 && value != default_colormap) { result.error = x11::CoreErrorCode::BadColormap; return result; }
+        result.attributes.colormap = value;
+        break;
+      case 14:
+        if (value != 0) { result.error = x11::CoreErrorCode::BadCursor; return result; }
+        result.attributes.cursor = value;
+        break;
+      default: break;
+    }
+  }
+  result.success = true;
+  return result;
+}
+
 std::uint32_t property_bad_atom(const ServerState& state,
                                 const std::uint32_t property,
                                 const std::uint32_t type,
@@ -47,7 +128,6 @@ std::uint32_t property_bad_atom(const ServerState& state,
 
 DispatchResult create_window(ServerState& state, const DispatchContext& context,
                              const x11::FramedRequest& request) {
-  constexpr std::uint32_t kKnownMask = 0x00007fffU;
   if (request.bytes.size() < 32) {
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
@@ -73,7 +153,7 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   if (window_class > static_cast<std::uint16_t>(WindowClass::InputOnly)) {
     return error(context, request, x11::CoreErrorCode::BadValue, window_class);
   }
-  if ((value_mask & ~kKnownMask) != 0) {
+  if ((value_mask & ~kWindowAttributeMask) != 0) {
     return error(context, request, x11::CoreErrorCode::BadValue, value_mask);
   }
   const std::size_t value_count =
@@ -83,89 +163,11 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
 
-  for (std::uint32_t bit = 0; bit < 15; ++bit) {
-    if ((value_mask & (std::uint32_t{1} << bit)) == 0) {
-      continue;
-    }
-    std::uint32_t value = 0;
-    if (!reader.read_u32(value)) {
-      return error(context, request, x11::CoreErrorCode::BadLength);
-    }
-    switch (bit) {
-      case 0:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadPixmap, value);
-        }
-        spec.attributes.background_pixmap = value;
-        break;
-      case 1: spec.attributes.background_pixel = value; break;
-      case 2:
-        if (value != 0) {
-          return error(context, request, x11::CoreErrorCode::BadPixmap, value);
-        }
-        spec.attributes.border_pixmap = value;
-        break;
-      case 3: spec.attributes.border_pixel = value; break;
-      case 4:
-        if (value > 10) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.bit_gravity = static_cast<std::uint8_t>(value);
-        break;
-      case 5:
-        if (value > 10) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.window_gravity = static_cast<std::uint8_t>(value);
-        break;
-      case 6:
-        if (value > 2) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.backing_store = static_cast<std::uint8_t>(value);
-        break;
-      case 7: spec.attributes.backing_planes = value; break;
-      case 8: spec.attributes.backing_pixel = value; break;
-      case 9:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.override_redirect = value != 0;
-        break;
-      case 10:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.save_under = value != 0;
-        break;
-      case 11:
-        if ((value & ~0x01ffffffU) != 0) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.initial_event_mask = value;
-        break;
-      case 12:
-        if ((value & ~0x0000204fU) != 0) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.do_not_propagate_mask = value;
-        break;
-      case 13:
-        if (value != 0 && value != state.screen().default_colormap) {
-          return error(context, request, x11::CoreErrorCode::BadColormap,
-                       value);
-        }
-        spec.attributes.colormap = value;
-        break;
-      case 14:
-        if (value != 0) {
-          return error(context, request, x11::CoreErrorCode::BadCursor, value);
-        }
-        spec.attributes.cursor = value;
-        break;
-      default: break;
-    }
-  }
+  auto decoded = decode_window_attributes(reader, value_mask, spec.attributes,
+                                          state.screen().default_colormap);
+  if (!decoded.success) return error(context, request, decoded.error, decoded.bad_value);
+  spec.attributes = decoded.attributes;
+  spec.initial_event_mask = decoded.event_mask.value_or(0);
 
   switch (state.resources().create_window(
       context.client_id, context.resource_base, context.resource_mask, spec)) {
@@ -199,6 +201,62 @@ DispatchResult destroy_window(ServerState& state,
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
+  return {};
+}
+
+DispatchResult change_window_attributes(
+    ServerState& state, const DispatchContext& context,
+    const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t window_id = 0;
+  std::uint32_t value_mask = 0;
+  if (!reader.read_u32(window_id) || !reader.read_u32(value_mask)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  if ((value_mask & ~kWindowAttributeMask) != 0) {
+    return error(context, request, x11::CoreErrorCode::BadValue, value_mask);
+  }
+  const auto value_count = static_cast<std::size_t>(std::popcount(value_mask));
+  if (!exact_size(request, 12 + value_count * 4)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  auto* window = state.resources().find_window(window_id);
+  if (window == nullptr) {
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  }
+  auto decoded = decode_window_attributes(reader, value_mask,
+                                          window->attributes,
+                                          state.screen().default_colormap);
+  if (!decoded.success) {
+    return error(context, request, decoded.error, decoded.bad_value);
+  }
+  if ((value_mask & (1U << 9U)) != 0 &&
+      window_id == state.screen().root_window) {
+    return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
+  }
+  if (decoded.event_mask.has_value()) {
+    const auto selected = *decoded.event_mask;
+    if ((selected & (kResizeRedirectMask | kSubstructureRedirectMask)) != 0) {
+      return error(context, request, x11::CoreErrorCode::BadAccess, selected);
+    }
+    if ((selected & kButtonPressMask) != 0) {
+      for (const auto& [client, mask] : window->event_selections) {
+        if (client != context.client_id && (mask & kButtonPressMask) != 0) {
+          return error(context, request, x11::CoreErrorCode::BadAccess,
+                       selected);
+        }
+      }
+    }
+    // Updating the selection first preserves atomicity if insertion allocates.
+    if (!state.resources().set_event_selection(window_id, context.client_id,
+                                               selected)) {
+      return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+    }
+  }
+  window->attributes = decoded.attributes;
   return {};
 }
 
@@ -565,6 +623,7 @@ DispatchResult dispatch_request(ServerState& state,
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);
       case x11::CoreOpcode::ChangeWindowAttributes:
+        return change_window_attributes(state, context, request);
       case x11::CoreOpcode::MapWindow:
       case x11::CoreOpcode::UnmapWindow:
       case x11::CoreOpcode::ConfigureWindow:
