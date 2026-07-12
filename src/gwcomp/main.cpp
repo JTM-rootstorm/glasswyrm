@@ -82,6 +82,12 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
   return true;
 }
 
+bool is_complete_session_snapshot(const gwipc_message* message) {
+  std::size_t size = 0;
+  const auto* payload = gwipc_message_payload(message, &size);
+  return payload && size == 28 && payload[8] == 4 && payload[9] == 0;
+}
+
 bool enqueue_ack(gwipc_connection* connection, const gwipc_message* message,
                  const gwipc_frame_commit& commit,
                  const gw::compositor::PresentedFrame& frame) {
@@ -229,7 +235,7 @@ int run(const glasswyrm::compositor::Options& options) {
       ++messages;
       const auto type = gwipc_message_type(message.get());
       if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN) {
-        if (!compositor.begin_snapshot())
+        if (!is_complete_session_snapshot(message.get()) || !compositor.begin_snapshot())
           std::fprintf(stderr, "gwcomp: rejected invalid snapshot begin\n");
         continue;
       }

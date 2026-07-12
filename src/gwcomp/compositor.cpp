@@ -77,6 +77,11 @@ bool Compositor::apply(const gwipc_surface_remove& value) {
 bool Compositor::apply(const gwipc_surface_damage& value) { return scene_.apply(value); }
 
 bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& error) {
+  if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) {
+    if (fd >= 0) (void)::close(fd);
+    error = "buffer mutation is gated until a complete snapshot begins";
+    return false;
+  }
   if (mappings_.contains(value.buffer_id)) {
     if (fd >= 0) (void)::close(fd);
     error = "buffer ID is already active";
@@ -90,6 +95,7 @@ bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& e
 }
 
 bool Compositor::detach(const gwipc_buffer_detach& value) {
+  if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) return false;
   const auto found = pending_attachments_.find(value.surface_id);
   if (found == pending_attachments_.end() || found->second != value.buffer_id) return false;
   pending_attachments_.erase(found);
@@ -102,6 +108,7 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
     error = "commit IDs must increase and generations must not decrease";
     return presented;
   }
+  last_commit_id_ = value.commit_id;
 
   SceneModel candidate = scene_;
   auto result = candidate.commit(value);
@@ -113,7 +120,6 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
   if (!staged.output || !staged.output->enabled) {
     scene_ = std::move(candidate);
     committed_attachments_ = pending_attachments_;
-    last_commit_id_ = value.commit_id;
     last_generation_ = value.producer_generation;
     return presented;
   }
@@ -212,7 +218,6 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
   committed_attachments_ = pending_attachments_;
   output_ = std::move(scratch);
   ++frame_ordinal_;
-  last_commit_id_ = value.commit_id;
   last_generation_ = value.producer_generation;
   presented.ordinal = frame_ordinal_;
   presented.hash = dump.fnv1a64;
