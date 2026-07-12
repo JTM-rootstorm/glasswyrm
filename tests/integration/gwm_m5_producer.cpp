@@ -39,7 +39,9 @@ void usage(FILE* output) {
   std::fprintf(output,
       "Usage: gwm_m5_producer --socket PATH --scenario NAME --output PATH\n"
       "Scenarios: basic, snapshot-order, transient, override-redirect, focus, "
-      "stacking, fullscreen, maximize-minimize\n");
+      "stacking, fullscreen, maximize-minimize, incremental-update, "
+      "invalid-context, invalid-window, unknown-reference, transient-cycle, "
+      "snapshot-abort, snapshot-reconnect\n");
 }
 
 bool pump(gwipc_connection* connection, int timeout_ms) {
@@ -139,11 +141,24 @@ Scenario make_scenario(std::string_view name) {
   return result;
 }
 
-bool send_snapshot(gwipc_connection* connection, const Scenario& scenario) {
+bool send_commit(gwipc_connection* connection, std::uint64_t commit_id,
+                 std::uint64_t generation) {
+  gwipc_policy_commit commit{};
+  commit.struct_size = sizeof(commit); commit.commit_id = commit_id;
+  commit.producer_generation = generation;
+  return send_contract(connection, GWIPC_MESSAGE_POLICY_COMMIT,
+                       GWIPC_FLAG_ACK_REQUIRED, commit,
+                       gwipc_contract_encode_policy_commit);
+}
+
+bool send_snapshot(gwipc_connection* connection, const Scenario& scenario,
+                   std::uint64_t snapshot_id = 1,
+                   std::uint64_t commit_id = 100,
+                   std::uint64_t generation = 1) {
   const auto count = static_cast<std::uint32_t>(scenario.windows.size() + 1U);
   gwipc_snapshot_begin begin{};
-  begin.struct_size = sizeof(begin); begin.snapshot_id = 1;
-  begin.domain = GWIPC_SNAPSHOT_WINDOW_POLICY; begin.generation = 1;
+  begin.struct_size = sizeof(begin); begin.snapshot_id = snapshot_id;
+  begin.domain = GWIPC_SNAPSHOT_WINDOW_POLICY; begin.generation = generation;
   begin.expected_item_count = count;
   if (!send_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                     gwipc_control_encode_snapshot_begin) ||
@@ -159,15 +174,14 @@ bool send_snapshot(gwipc_connection* connection, const Scenario& scenario) {
   end.generation = begin.generation; end.actual_item_count = count;
   if (!send_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
                     gwipc_control_encode_snapshot_end)) return false;
-  gwipc_policy_commit commit{};
-  commit.struct_size = sizeof(commit); commit.commit_id = 100;
-  commit.producer_generation = 1;
-  return send_contract(connection, GWIPC_MESSAGE_POLICY_COMMIT,
-                       GWIPC_FLAG_ACK_REQUIRED, commit,
-                       gwipc_contract_encode_policy_commit);
+  return send_commit(connection, commit_id, generation);
 }
 
-bool receive_reply(gwipc_connection* connection, Reply& reply) {
+bool receive_reply(gwipc_connection* connection, Reply& reply,
+                   std::uint64_t commit_id = 100,
+                   std::uint64_t producer_generation = 1,
+                   gwipc_policy_result expected_result = GWIPC_POLICY_ACCEPTED,
+                   std::uint64_t previous_hash = 0) {
   bool active = false;
   std::uint64_t snapshot_id = 0, generation = 0;
   std::uint32_t expected = 0;
@@ -209,16 +223,154 @@ bool receive_reply(gwipc_connection* connection, Reply& reply) {
       reply.windows.push_back(*state);
     } else if (type == GWIPC_MESSAGE_POLICY_ACKNOWLEDGED) {
       const auto* ack = gwipc_decoded_policy_acknowledged(decoded.get());
+      const bool accepted = expected_result == GWIPC_POLICY_ACCEPTED;
       if (active || !ack || gwipc_message_flags(message.get()) != GWIPC_FLAG_REPLY ||
-          ack->commit_id != 100 || ack->producer_generation != 1 ||
-          ack->applied_generation != generation ||
-          ack->result != GWIPC_POLICY_ACCEPTED ||
-          ack->window_count != reply.windows.size()) return false;
+          ack->commit_id != commit_id ||
+          ack->producer_generation != producer_generation ||
+          ack->result != expected_result ||
+          (accepted && (ack->applied_generation != generation ||
+                        ack->window_count != reply.windows.size())) ||
+          (!accepted && (!reply.windows.empty() || ack->policy_hash != previous_hash ||
+                         ack->applied_generation != 1 || ack->window_count != 3)))
+        return false;
       reply.ack = *ack;
       return true;
     } else return false;
   }
   return false;
+}
+
+Connection connect_to(const char* socket) {
+  gwipc_connection_options options{};
+  options.struct_size = sizeof(options); options.path = socket;
+  options.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  options.acceptable_server_roles = GWIPC_ROLE_BIT(GWIPC_ROLE_WINDOW_MANAGER);
+  options.offered_capabilities = kCapabilities;
+  options.required_peer_capabilities = kCapabilities;
+  options.instance_label = "gwm-m5-producer";
+  gwipc_connection* raw = nullptr;
+  const auto status = gwipc_connection_connect(&options, &raw);
+  if (status != GWIPC_STATUS_OK && status != GWIPC_STATUS_IN_PROGRESS) return {};
+  Connection connection(raw);
+  for (int attempt = 0; attempt < 200 &&
+       gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED;
+       ++attempt) if (!pump(connection.get(), 50)) return {};
+  if (gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED)
+    return {};
+  return connection;
+}
+
+bool send_window(gwipc_connection* connection,
+                 const gwipc_policy_window_upsert& value) {
+  return send_contract(connection, GWIPC_MESSAGE_POLICY_WINDOW_UPSERT, 0, value,
+                       gwipc_contract_encode_policy_window_upsert);
+}
+bool send_context(gwipc_connection* connection,
+                  const gwipc_policy_context_upsert& value) {
+  return send_contract(connection, GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT, 0, value,
+                       gwipc_contract_encode_policy_context_upsert);
+}
+bool send_remove(gwipc_connection* connection, std::uint32_t id) {
+  gwipc_policy_window_remove value{};
+  value.struct_size = sizeof(value); value.window_id = id;
+  return send_contract(connection, GWIPC_MESSAGE_POLICY_WINDOW_REMOVE, 0, value,
+                       gwipc_contract_encode_policy_window_remove);
+}
+
+bool same_windows(const Reply& left, const Reply& right) {
+  if (left.windows.size() != right.windows.size()) return false;
+  for (std::size_t index = 0; index < left.windows.size(); ++index) {
+    const auto& a = left.windows[index]; const auto& b = right.windows[index];
+    if (a.window_id != b.window_id || a.final_x != b.final_x ||
+        a.final_y != b.final_y || a.final_width != b.final_width ||
+        a.final_height != b.final_height || a.stacking != b.stacking ||
+        a.visible != b.visible || a.focused != b.focused ||
+        a.managed != b.managed ||
+        a.decoration_eligible != b.decoration_eligible ||
+        a.applied_state != b.applied_state) return false;
+  }
+  return true;
+}
+
+bool bootstrap(gwipc_connection* connection, Reply& reply) {
+  return send_snapshot(connection, make_scenario("basic")) &&
+         receive_reply(connection, reply);
+}
+
+bool run_extended(gwipc_connection* connection, std::string_view name,
+                  Reply& final_reply) {
+  Reply initial;
+  if (!bootstrap(connection, initial)) return false;
+  if (name == "incremental-update") {
+    auto changed = window(1002, 2); changed.focus_serial = 20;
+    auto added = window(1004, 4);
+    return send_window(connection, changed) && send_remove(connection, 1001) &&
+           send_window(connection, added) && send_commit(connection, 101, 2) &&
+           receive_reply(connection, final_reply, 101, 2) &&
+           final_reply.windows.size() == 3 &&
+           std::none_of(final_reply.windows.begin(), final_reply.windows.end(),
+                        [](const auto& state) { return state.window_id == 1001; }) &&
+           std::any_of(final_reply.windows.begin(), final_reply.windows.end(),
+                       [](const auto& state) {
+                         return state.window_id == 1002 && state.focused;
+                       }) &&
+           std::any_of(final_reply.windows.begin(), final_reply.windows.end(),
+                       [](const auto& state) { return state.window_id == 1004; });
+  }
+
+  gwipc_policy_result rejection = GWIPC_POLICY_REJECTED_INVALID_WINDOW;
+  if (name == "invalid-context") {
+    auto bad = make_scenario("basic").context; bad.work_width = 20'000;
+    if (!send_context(connection, bad)) return false;
+    rejection = GWIPC_POLICY_REJECTED_INVALID_CONTEXT;
+  } else if (name == "invalid-window") {
+    auto bad = window(1002, 1);
+    if (!send_window(connection, bad)) return false;
+  } else if (name == "unknown-reference") {
+    auto bad = window(1002, 2); bad.transient_for = 9999;
+    if (!send_window(connection, bad)) return false;
+    rejection = GWIPC_POLICY_REJECTED_UNKNOWN_REFERENCE;
+  } else if (name == "transient-cycle") {
+    auto first = window(1001, 1); first.transient_for = 1002;
+    auto second = window(1002, 2); second.transient_for = 1001;
+    if (!send_window(connection, first) || !send_window(connection, second)) return false;
+  } else if (name == "snapshot-abort") {
+    gwipc_snapshot_begin begin{};
+    begin.struct_size = sizeof(begin); begin.snapshot_id = 2;
+    begin.domain = GWIPC_SNAPSHOT_WINDOW_POLICY; begin.generation = 2;
+    begin.expected_item_count = 2;
+    auto replacement = make_scenario("basic");
+    gwipc_snapshot_abort abort{};
+    abort.struct_size = sizeof(abort); abort.snapshot_id = 2; abort.reason = 1;
+    if (!send_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
+                      gwipc_control_encode_snapshot_begin) ||
+        !send_contract(connection, GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT,
+                       GWIPC_FLAG_SNAPSHOT_ITEM, replacement.context,
+                       gwipc_contract_encode_policy_context_upsert) ||
+        !send_control(connection, GWIPC_MESSAGE_SNAPSHOT_ABORT, abort,
+                      gwipc_control_encode_snapshot_abort) ||
+        !send_commit(connection, 101, 2) ||
+        !receive_reply(connection, final_reply, 101, 2)) return false;
+    return same_windows(initial, final_reply);
+  } else return false;
+
+  Reply rejected;
+  if (!send_commit(connection, 101, 2) ||
+      !receive_reply(connection, rejected, 101, 2, rejection,
+                     initial.ack.policy_hash)) return false;
+  if (name == "invalid-context") {
+    if (!send_context(connection, make_scenario("basic").context)) return false;
+  } else {
+    auto corrected = window(1002, 2);
+    if (!send_window(connection, corrected)) return false;
+    if (name == "transient-cycle") {
+      auto first = window(1001, 1);
+      if (!send_window(connection, first)) return false;
+    }
+  }
+  return send_commit(connection, 102, 2) &&
+         receive_reply(connection, final_reply, 102, 2) &&
+         same_windows(initial, final_reply);
 }
 
 const char* applied(gwipc_policy_applied_state value) {
@@ -288,28 +440,37 @@ int main(int argc, char** argv) {
     } else { usage(stderr); return 2; }
   }
   constexpr std::string_view names[] = {"basic", "snapshot-order", "transient",
-      "override-redirect", "focus", "stacking", "fullscreen", "maximize-minimize"};
+      "override-redirect", "focus", "stacking", "fullscreen", "maximize-minimize",
+      "incremental-update", "invalid-context", "invalid-window",
+      "unknown-reference", "transient-cycle", "snapshot-abort",
+      "snapshot-reconnect"};
   if (!socket || !output || scenario.empty() ||
       std::find(std::begin(names), std::end(names), scenario) == std::end(names)) {
     usage(stderr); return 2;
   }
-  gwipc_connection_options options{};
-  options.struct_size = sizeof(options); options.path = socket;
-  options.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
-  options.acceptable_server_roles = GWIPC_ROLE_BIT(GWIPC_ROLE_WINDOW_MANAGER);
-  options.offered_capabilities = kCapabilities;
-  options.required_peer_capabilities = kCapabilities;
-  options.instance_label = "gwm-m5-producer";
-  gwipc_connection* raw = nullptr;
-  const auto status = gwipc_connection_connect(&options, &raw);
-  if (status != GWIPC_STATUS_OK && status != GWIPC_STATUS_IN_PROGRESS) return 1;
-  const Connection connection(raw);
-  for (int attempt = 0; attempt < 200 &&
-       gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED;
-       ++attempt) if (!pump(connection.get(), 50)) return 1;
+  auto connection = connect_to(socket);
+  if (!connection) return 1;
   Reply reply;
-  if (gwipc_connection_get_state(connection.get()) != GWIPC_CONNECTION_ESTABLISHED ||
-      !send_snapshot(connection.get(), make_scenario(scenario)) ||
-      !receive_reply(connection.get(), reply) || !write_json(output, scenario, reply)) return 1;
+  const bool initial = scenario == "basic" || scenario == "snapshot-order" ||
+      scenario == "transient" || scenario == "override-redirect" ||
+      scenario == "focus" || scenario == "stacking" || scenario == "fullscreen" ||
+      scenario == "maximize-minimize";
+  bool ok = false;
+  if (initial) {
+    ok = send_snapshot(connection.get(), make_scenario(scenario)) &&
+         receive_reply(connection.get(), reply);
+  } else if (scenario == "snapshot-reconnect") {
+    Reply first;
+    ok = bootstrap(connection.get(), first);
+    connection.reset();
+    if (ok) {
+      connection = connect_to(socket);
+      ok = connection && bootstrap(connection.get(), reply) &&
+           first.ack.policy_hash == reply.ack.policy_hash && same_windows(first, reply);
+    }
+  } else {
+    ok = run_extended(connection.get(), scenario, reply);
+  }
+  if (!ok || !write_json(output, scenario, reply)) return 1;
   return 0;
 }
