@@ -3,6 +3,7 @@
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/core.hpp"
 #include "protocol/x11/reply.hpp"
+#include "protocol/x11/lifecycle_request.hpp"
 
 #include <bit>
 #include <cstddef>
@@ -609,8 +610,80 @@ DispatchResult get_input_focus(const ServerState& state,
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 0);
-  reply.write_u32(state.screen().root_window);
+  reply.write_u32(state.focused_window());
   return {std::move(reply).finish()};
+}
+
+DispatchResult lifecycle_decode_error(const DispatchContext& context,
+                                      const x11::FramedRequest& request,
+                                      x11::LifecycleDecodeStatus status) {
+  if (status == x11::LifecycleDecodeStatus::BadValue)
+    return error(context, request, x11::CoreErrorCode::BadValue);
+  if (status == x11::LifecycleDecodeStatus::BadMatch)
+    return error(context, request, x11::CoreErrorCode::BadMatch);
+  return error(context, request, x11::CoreErrorCode::BadLength);
+}
+
+DispatchResult map_window(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request, bool mapped) {
+  x11::WindowLifecycleRequest decoded;
+  const auto status = mapped
+      ? x11::decode_map_window(request.bytes, context.byte_order, decoded)
+      : x11::decode_unmap_window(request.bytes, context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  if (!state.resources().find_window(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (decoded.window == state.screen().root_window) return {};
+  if (state.resources().is_policy_candidate(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  switch (state.resources().set_local_map_intent(decoded.window, mapped)) {
+    case LocalLifecycleStatus::Success: return {};
+    case LocalLifecycleStatus::BadWindow:
+      return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+    case LocalLifecycleStatus::BadMatch:
+      return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+    case LocalLifecycleStatus::BadValue:
+      return error(context, request, x11::CoreErrorCode::BadValue);
+  }
+  return error(context, request, x11::CoreErrorCode::BadImplementation);
+}
+
+DispatchResult configure_window(ServerState& state,
+                                const DispatchContext& context,
+                                const x11::FramedRequest& request) {
+  x11::ConfigureWindowRequest decoded;
+  const auto status = x11::decode_configure_window(request.bytes,
+                                                    context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  if (!state.resources().find_window(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (decoded.window == state.screen().root_window)
+    return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+  if (decoded.stack_mode && *decoded.stack_mode != x11::CoreStackMode::Above &&
+      *decoded.stack_mode != x11::CoreStackMode::Below)
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 static_cast<std::uint32_t>(*decoded.stack_mode));
+  if (state.resources().is_policy_candidate(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  LocalConfigure local{decoded.x, decoded.y, decoded.width, decoded.height,
+                       decoded.border_width, decoded.sibling,
+                       decoded.stack_mode == x11::CoreStackMode::Above
+                           ? LifecycleStackMode::Above
+                           : decoded.stack_mode == x11::CoreStackMode::Below
+                                 ? LifecycleStackMode::Below
+                                 : LifecycleStackMode::None};
+  switch (state.resources().configure_local(decoded.window, local)) {
+    case LocalLifecycleStatus::Success: return {};
+    case LocalLifecycleStatus::BadWindow:
+      return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+    case LocalLifecycleStatus::BadMatch:
+      return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+    case LocalLifecycleStatus::BadValue:
+      return error(context, request, x11::CoreErrorCode::BadValue);
+  }
+  return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
 
 }  // namespace
@@ -625,9 +698,11 @@ DispatchResult dispatch_request(ServerState& state,
       case x11::CoreOpcode::ChangeWindowAttributes:
         return change_window_attributes(state, context, request);
       case x11::CoreOpcode::MapWindow:
+        return map_window(state, context, request, true);
       case x11::CoreOpcode::UnmapWindow:
+        return map_window(state, context, request, false);
       case x11::CoreOpcode::ConfigureWindow:
-        return error(context, request, x11::CoreErrorCode::BadRequest);
+        return configure_window(state, context, request);
       case x11::CoreOpcode::GetWindowAttributes:
         return get_window_attributes(state, context, request);
       case x11::CoreOpcode::DestroyWindow:
