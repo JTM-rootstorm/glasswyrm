@@ -39,7 +39,7 @@ int main(){
   require(result.kind==DispatchKind::Immediate&&state.resources().find_window(base+21),"integrated InputOnly child remains synchronous");
   state.resources().find_window(base+1)->map_requested=true;
   result=dispatch_request(state,context,attributes(order,base+1,(1U<<1U)|(1U<<9U),{0x12345678U,1}));
-  require(result.kind==DispatchKind::DeferredLifecycle&&result.deferred_override_redirect==true&&result.deferred_window==base+1&&!state.resources().find_window(base+1)->attributes.override_redirect&&state.resources().find_window(base+1)->attributes.background_pixel==0x12345678U,"mapped top-level override change defers while other validated attributes apply synchronously");
+  require(result.kind==DispatchKind::DeferredLifecycle&&result.deferred_override_redirect==true&&result.deferred_window==base+1&&!state.resources().find_window(base+1)->attributes.override_redirect&&state.resources().find_window(base+1)->attributes.background_pixel==0x00345678U&&state.resources().find_window(base+1)->attributes.background_source==BackgroundSource::Pixel,"mapped top-level override change defers while other validated attributes apply synchronously");
   result=dispatch_request(state,context,request(order,x11::CoreOpcode::DestroyWindow,base+1));
   require(result.kind==DispatchKind::DeferredLifecycle&&result.deferred_destroy&&state.resources().find_window(base+1),"integrated top-level DestroyWindow is staged without early mutation");
  }

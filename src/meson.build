@@ -198,6 +198,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
+      'glasswyrmd/content_presenter.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
   endif
