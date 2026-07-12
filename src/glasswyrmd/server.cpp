@@ -9,6 +9,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
@@ -67,8 +68,29 @@ Server::Server(Options options) : options_(std::move(options)) {
     for (const auto& client : clients_) recipients.push_back(client.get());
     EventRouter router(state_.resources());
     for (const auto& transition : transitions)
+    {
       (void)router.route_transition(transition.kind, transition.before,
                                     transition.committed, recipients);
+      if (transition.kind == StructuralTransitionKind::Map && transition.before &&
+          transition.committed && !transition.before->viewable &&
+          transition.committed->viewable) {
+        const std::array rectangles{glasswyrm::geometry::Rectangle{
+            0, 0, transition.committed->width, transition.committed->height}};
+        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+      } else if (transition.kind == StructuralTransitionKind::Configure &&
+                 transition.before && transition.committed) {
+        std::vector<glasswyrm::geometry::Rectangle> rectangles;
+        if (transition.committed->width > transition.before->width)
+          rectangles.push_back({static_cast<std::int32_t>(transition.before->width), 0,
+              static_cast<std::uint32_t>(transition.committed->width - transition.before->width),
+              transition.committed->height});
+        if (transition.committed->height > transition.before->height)
+          rectangles.push_back({0, static_cast<std::int32_t>(transition.before->height),
+              std::min<std::uint16_t>(transition.before->width, transition.committed->width),
+              static_cast<std::uint32_t>(transition.committed->height - transition.before->height)});
+        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+      }
+    }
   };
 }
 
