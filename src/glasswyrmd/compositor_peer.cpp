@@ -25,7 +25,8 @@ struct DecodedDelete {
 };
 template <class T, class Encoder>
 bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
-                      std::uint32_t flags, const T &value, Encoder encoder) {
+                      std::uint32_t flags, const T &value, Encoder encoder,
+                      std::uint64_t *out_sequence = nullptr) {
   gwipc_contract_payload *raw = nullptr;
   if (encoder(&value, &raw) != GWIPC_STATUS_OK)
     return false;
@@ -38,6 +39,10 @@ bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
   message.flags = flags;
   message.payload = data;
   message.payload_size = size;
+  if (out_sequence)
+    return gwipc_connection_enqueue_with_sequence(connection, &message,
+                                                  out_sequence) ==
+           GWIPC_STATUS_OK;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
 template <class T, class Encoder>
@@ -106,7 +111,8 @@ bool CompositorPeer::send_bootstrap(std::string &error) {
                        gwipc_control_encode_snapshot_end) ||
       !enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
                         GWIPC_FLAG_ACK_REQUIRED, commit,
-                        gwipc_contract_encode_frame_commit)) {
+                        gwipc_contract_encode_frame_commit,
+                        &commit_sequence_)) {
     error = "could not queue compositor bootstrap";
     return false;
   }
@@ -138,7 +144,7 @@ bool CompositorPeer::drain(std::string &error) {
     if (!ack || ack->commit_id != 1 || ack->output_id != 1 ||
         ack->presented_generation != 1 || ack->result != GWIPC_FRAME_ACCEPTED ||
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||
-        gwipc_message_reply_to(message.get()) == 0) {
+        gwipc_message_reply_to(message.get()) != commit_sequence_) {
       error = "invalid compositor bootstrap acknowledgement";
       return false;
     }
@@ -166,5 +172,6 @@ bool CompositorPeer::process(const short revents, std::string &error) {
 void CompositorPeer::disconnect() noexcept {
   transport_.disconnect();
   state_ = PeerBootstrapState::Disconnected;
+  commit_sequence_ = 0;
 }
 } // namespace glasswyrm::server
