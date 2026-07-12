@@ -93,6 +93,48 @@ void test_output_cap_is_atomic() {
   gwipc_connection_destroy(connection);
 }
 
+void test_enqueue_reports_assigned_sequence_atomically() {
+  const auto payload =
+      gw::ipc::wire::encode(gw::ipc::wire::OutputRemove{1});
+  auto* connection = established_connection();
+  require(enqueue(connection, GWIPC_MESSAGE_OUTPUT_REMOVE, 0, payload) ==
+              GWIPC_STATUS_OK,
+          "legacy enqueue remains successful");
+  gwipc_outgoing_message message{};
+  message.struct_size = sizeof(message);
+  message.type = GWIPC_MESSAGE_OUTPUT_REMOVE;
+  message.payload = payload.data();
+  message.payload_size = payload.size();
+  std::uint64_t sequence = 99;
+  require(gwipc_connection_enqueue_with_sequence(connection, &message,
+                                                 &sequence) ==
+              GWIPC_STATUS_OK &&
+              sequence == 2 && connection->next_send_sequence == 3,
+          "sequence-returning enqueue reports the assigned sequence");
+  gwipc_connection_destroy(connection);
+
+  connection = established_connection();
+  connection->config.maximum_queued_bytes = 47;
+  sequence = 99;
+  require(gwipc_connection_enqueue_with_sequence(connection, &message,
+                                                 &sequence) ==
+              GWIPC_STATUS_LIMIT_EXCEEDED &&
+              sequence == 0 && connection->next_send_sequence == 1 &&
+              connection->outgoing.empty(),
+          "failed enqueue clears output without consuming a sequence");
+  gwipc_connection_destroy(connection);
+
+  sequence = 99;
+  require(gwipc_connection_enqueue_with_sequence(nullptr, &message,
+                                                 &sequence) ==
+              GWIPC_STATUS_INVALID_ARGUMENT &&
+              sequence == 0,
+          "invalid enqueue clears the sequence output");
+  require(gwipc_connection_enqueue_with_sequence(nullptr, &message, nullptr) ==
+              GWIPC_STATUS_INVALID_ARGUMENT,
+          "sequence-returning enqueue requires an output pointer");
+}
+
 struct RlimitGuard {
   rlimit original{};
   ~RlimitGuard() { (void)::setrlimit(RLIMIT_NOFILE, &original); }
@@ -459,6 +501,7 @@ void test_frame_acknowledgement_correlation() {
 
 int main() {
   test_output_cap_is_atomic();
+  test_enqueue_reports_assigned_sequence_atomically();
   test_fd_duplication_failure_is_atomic();
   test_send_sequence_exhaustion();
   test_receive_sequence_exhaustion();

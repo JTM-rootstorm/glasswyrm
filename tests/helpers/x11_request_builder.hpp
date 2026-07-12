@@ -22,6 +22,11 @@ class X11RequestBuilder {
       std::uint16_t border_width = 0) const;
   [[nodiscard]] std::vector<std::uint8_t> destroy_window(
       std::uint32_t window) const;
+  [[nodiscard]] std::vector<std::uint8_t> change_window_attributes(
+      std::uint32_t window, std::uint32_t value_mask,
+      std::span<const std::uint32_t> values) const;
+  [[nodiscard]] std::vector<std::uint8_t> get_window_attributes(
+      std::uint32_t window) const;
   [[nodiscard]] std::vector<std::uint8_t> get_geometry(
       std::uint32_t drawable) const;
   [[nodiscard]] std::vector<std::uint8_t> query_tree(

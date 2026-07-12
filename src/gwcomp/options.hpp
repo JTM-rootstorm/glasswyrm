@@ -10,6 +10,7 @@ namespace glasswyrm::compositor {
 struct Options {
   std::string ipc_socket;
   std::string dump_dir;
+  std::optional<std::string> scene_manifest;
   bool once{false};
   std::optional<std::uint64_t> max_frames;
 };

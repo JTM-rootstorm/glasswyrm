@@ -4,19 +4,21 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 5. `glasswyrmd`
-retains its tested Milestone 2 local X11 setup and bounded headless core request
-behavior, and `libgwipc` provides the tested Milestone 3 versioned local IPC
-foundation.
+The project has completed Milestone 6. `glasswyrmd` retains its standalone
+Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
+headless, metadata-only top-level lifecycle.
 Milestone 4 has added tested scene/damage, read-only buffer import,
 software rendering, bounded headless output, and deterministic PPM dumps.
 `gwcomp` accepts and presents every repository-owned synthetic producer
 scenario with correlated acknowledgements, buffer releases, reconnect proofs,
 and exact-pixel golden coverage. `gwm` is now a separate synthetic policy
 service with deterministic placement, stacking, focus, visibility, state, and
-policy-snapshot behavior. It is not connected to `glasswyrmd` or `gwcomp`;
-there is still no X11 mapping, event delivery, input, three-process lifecycle,
-or DRM/KMS output. Runtime tools remain placeholders.
+policy-snapshot behavior. Integrated startup, full policy snapshots,
+metadata-only compositor scenes, deferred X11 lifecycle barriers, and
+structural event routing are implemented and Milestone 6 acceptance is complete.
+There
+is still no client drawing, input, broad X11 application support, or DRM/KMS
+output. Runtime tools remain placeholders.
 
 ## Build
 
@@ -79,7 +81,9 @@ socket. The defaults create display `:0` at `/tmp/.X11-unix/X0`:
 The complete command line is:
 
 ```text
-glasswyrmd [--display N] [--socket-dir PATH] [--help] [--version]
+glasswyrmd [--display N] [--socket-dir PATH]
+            [--wm-socket PATH --compositor-socket PATH]
+            [--help] [--version]
 ```
 
 Milestone 2 accepts exactly X11 protocol 11.0 with zero-length authorization
@@ -93,6 +97,23 @@ query geometry and the window tree, intern and name atoms, manipulate typed
 window properties, use a synthetic focus reply for synchronization, and send
 no-ops. Unsupported core requests return `BadRequest`; recoverable request
 errors leave the connection usable.
+
+For the explicit integrated path, start the listeners before the server:
+
+```sh
+./build/src/gwm --ipc-socket /tmp/glasswyrm-gwm.sock
+./build/src/gwcomp --ipc-socket /tmp/glasswyrm-gwcomp.sock \
+  --dump-dir /tmp/glasswyrm-dumps \
+  --scene-manifest /tmp/glasswyrm-scenes.jsonl
+./build/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock
+```
+
+`glasswyrmd` does not create `/tmp/.X11-unix/X99` until both peer bootstraps
+are accepted. Mapped windows on this path have policy and scene metadata but no
+client content. Repository-owned raw, XCB, and restart-hold probes exercise the
+integrated path without claiming normal application compatibility.
 
 ## Setup probes
 
@@ -138,33 +159,32 @@ core error. It never maps or displays the window.
 
 ## Current binaries
 
-- `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
-  headless request profile.
-- `gwm`: owns the emerging window-management policy truth; its M5 synthetic
-  ProtocolServer boundary is host- and Gentoo-VM-tested.
-- `gwcomp`: owns the emerging headless composition and final display authority;
-  its basic synthetic accepted-frame path is live and golden-tested.
+- `glasswyrmd`: owns X11 protocol and resource truth; implements standalone M2
+  behavior and the accepted explicit integrated M6 lifecycle.
+- `gwm`: owns window-management policy truth; it accepts lifecycle-extended
+  complete policy snapshots from `glasswyrmd`.
+- `gwcomp`: owns headless composition and final display authority; it retains
+  the M4 raster path and accepts M6 metadata-only scenes without fake buffers.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.3 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.4 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
-credentials, bounded queues, descriptor passing, snapshots, and the first
-output/surface/buffer/damage/frame and window-policy vocabularies. Wire 1.0 and
+credentials, bounded queues, descriptor passing, snapshots, and compositor,
+window-policy, and lifecycle vocabularies. Wire 1.0 and
 SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
 control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
-Runtime tools still print their Milestone 0 placeholder status and exit. `gwm`
-runs a GWIPC listener, negotiates one synthetic `ProtocolServer`, and emits
-deterministic complete policy snapshots. `gwcomp` runs a separate GWIPC
-listener, negotiates a `TestProducer`, and
-renders its validated shared-memory buffers headlessly, but does not communicate
-with `glasswyrmd` or `gwm` or access display hardware. See [`docs/compositor/`](docs/compositor/) for its
-implemented boundary and M4 formats.
+Runtime tools still print their Milestone 0 placeholder status and exit. The
+three runtime processes communicate only in explicit integrated mode; there is
+no direct `gwm` to `gwcomp` socket. See the
+[M6 topology](docs/architecture/M6_RUNTIME_TOPOLOGY.md) and
+[X11 profile](docs/protocols/x11-milestone-6.md) for the implemented boundary
+and tested compatibility boundary.
 
 ## Project Layout
 
@@ -244,8 +264,20 @@ hash validation, malformed-peer isolation, and a hardened transient
 evidence. The terminal-only Gentoo acceptance run passes without Xorg,
 Xwayland, DRM, or input devices.
 
+The fixed Gentoo acceptance command is:
+
+```sh
+./tools/gw-vm milestone6-runtime-test --yes
+```
+
+It runs the component build matrix, sanitizer suite, raw and XCB probes, live
+peer-restart hold probe, fixture checks, and artifact validation with Xorg and
+Xwayland absent.
+
 ## Compatibility
 
-Glasswyrm claims only the tested behavior documented in
-[`docs/protocols/x11-milestone-2.md`](docs/protocols/x11-milestone-2.md). It does
-not claim compatibility with normal X11 applications.
+Glasswyrm claims the standalone behavior documented in
+[`docs/protocols/x11-milestone-2.md`](docs/protocols/x11-milestone-2.md). The
+[Milestone 6 profile](docs/protocols/x11-milestone-6.md) records the narrower
+integrated behavior accepted for M6. Neither is a compatibility
+claim for normal X11 applications.

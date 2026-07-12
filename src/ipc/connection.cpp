@@ -4,6 +4,7 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 
 #include <fcntl.h>
@@ -41,6 +42,8 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_SURFACE_UPSERT:
     case GWIPC_MESSAGE_SURFACE_REMOVE:
       return GWIPC_CAP_SURFACE_STATE;
+    case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT:
+      return GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_WINDOW_LIFECYCLE;
     case GWIPC_MESSAGE_BUFFER_ATTACH:
       return GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS;
     case GWIPC_MESSAGE_SURFACE_DAMAGE:
@@ -54,6 +57,8 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
       return GWIPC_CAP_WINDOW_POLICY;
+    case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT:
+      return GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_WINDOW_LIFECYCLE;
     default:
       return 0;
   }
@@ -76,6 +81,7 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_OUTPUT_REMOVE:
     case GWIPC_MESSAGE_SURFACE_UPSERT:
     case GWIPC_MESSAGE_SURFACE_REMOVE:
+    case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT:
     case GWIPC_MESSAGE_BUFFER_ATTACH:
     case GWIPC_MESSAGE_BUFFER_DETACH:
     case GWIPC_MESSAGE_BUFFER_RELEASE:
@@ -85,6 +91,7 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT:
     case GWIPC_MESSAGE_POLICY_WINDOW_UPSERT:
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE:
+    case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT:
     case GWIPC_MESSAGE_POLICY_COMMIT:
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
@@ -272,6 +279,9 @@ gwipc_status validate_application(gwipc_connection& connection,
     case GWIPC_MESSAGE_SURFACE_UPSERT: {
       wire::SurfaceUpsert value;
       codec = wire::decode(payload, value);
+      if (codec == wire::CodecStatus::Ok && value.presentation_flags != 0 &&
+          (connection.peer.capabilities & GWIPC_CAP_WINDOW_LIFECYCLE) == 0)
+        return GWIPC_STATUS_CAPABILITY_MISMATCH;
       break;
     }
     case GWIPC_MESSAGE_SURFACE_REMOVE: {
@@ -361,6 +371,20 @@ gwipc_status validate_application(gwipc_connection& connection,
       wire::PolicyAcknowledged value;
       codec = wire::decode(payload, value);
       if (flags != GWIPC_FLAG_REPLY)
+        return GWIPC_STATUS_PROTOCOL_ERROR;
+      break;
+    }
+    case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT: {
+      wire::PolicyLifecycleWindowUpsert value;
+      codec = wire::decode(payload, value);
+      if (flags != 0 && flags != GWIPC_FLAG_SNAPSHOT_ITEM)
+        return GWIPC_STATUS_PROTOCOL_ERROR;
+      break;
+    }
+    case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT: {
+      wire::SurfacePolicyUpsert value;
+      codec = wire::decode(payload, value);
+      if (flags != GWIPC_FLAG_SNAPSHOT_ITEM)
         return GWIPC_STATUS_PROTOCOL_ERROR;
       break;
     }
@@ -1109,8 +1133,11 @@ gwipc_status gwipc_connection_process_poll_events(gwipc_connection* connection,
   }
 }
 
-gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
-                                      const gwipc_outgoing_message* message) {
+gwipc_status gwipc_connection_enqueue_with_sequence(
+    gwipc_connection* connection, const gwipc_outgoing_message* message,
+    std::uint64_t* out_sequence) {
+  if (!out_sequence) return GWIPC_STATUS_INVALID_ARGUMENT;
+  *out_sequence = 0;
   try {
   if (!connection || !message ||
       message->struct_size < sizeof(*message) ||
@@ -1214,6 +1241,7 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
       connection->incoming_frame_commits.erase(message->reply_to);
     if (policy_acknowledges_incoming)
       connection->incoming_policy_commits.erase(message->reply_to);
+    *out_sequence = pending_sequence;
   } else if (ping_inserted) {
     connection->pending_ping_nonces.erase(pending_sequence);
   }
@@ -1227,6 +1255,13 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
   } catch (...) {
     return GWIPC_STATUS_SYSTEM_ERROR;
   }
+}
+
+gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
+                                      const gwipc_outgoing_message* message) {
+  std::uint64_t ignored_sequence = 0;
+  return gwipc_connection_enqueue_with_sequence(connection, message,
+                                                &ignored_sequence);
 }
 
 gwipc_status gwipc_connection_receive(gwipc_connection* connection,

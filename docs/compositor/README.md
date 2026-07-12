@@ -9,6 +9,8 @@ The documents here define its implemented contract:
   interpretation and integer blending.
 - [Frame dumps](FRAME_DUMPS.md): binary PPM layout, manifest, hash, and golden
   update procedure.
+- [M6 metadata-only surfaces](M6_METADATA_SURFACES.md): ProtocolServer scene
+  metadata, policy pairing, manifest behavior, and the no-raster boundary.
 
 Milestone 4 is complete. The repository proves the scene, read-only buffer
 mapping, renderer, output, dump, producer lifecycle, release, rejection, and

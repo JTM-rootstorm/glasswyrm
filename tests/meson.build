@@ -6,6 +6,20 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+x11_event_test = executable(
+  'x11_event_test',
+  files('protocol/x11_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+)
+test('x11-structural-events', x11_event_test, timeout: 10)
+
+x11_lifecycle_request_test = executable(
+  'x11_lifecycle_request_test',
+  files('protocol/x11_lifecycle_request_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+)
+test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
+
 test_source_root_include = include_directories('..')
 
 if get_option('gwm')
@@ -72,7 +86,120 @@ if get_option('gwm')
 
 endif
 
+if get_option('glasswyrmd')
+  glasswyrmd_options_test = executable(
+    'glasswyrmd_options_test',
+    files('unit/glasswyrmd_options_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+  event_router_test = executable(
+    'event_router_test',
+    files('unit/event_router_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('event-router', event_router_test, timeout: 10)
+  client_connection_deferred_test = executable(
+    'client_connection_deferred_test',
+    files('unit/client_connection_deferred_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('client-connection-deferred', client_connection_deferred_test,
+       timeout: 10)
+  if get_option('libgwipc') and get_option('gwm') and get_option('gwcomp')
+    glasswyrmd_peer_bootstrap_test = executable(
+      'glasswyrmd_peer_bootstrap_test',
+      files('integration/glasswyrmd_peer_bootstrap_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-peer-bootstrap',
+      glasswyrmd_peer_bootstrap_test,
+      args: [gwm_program.full_path(), gwcomp_program.full_path()],
+      depends: [gwm_program, gwcomp_program],
+      timeout: 15,
+    )
+    runtime_bridge_transaction_test = executable(
+      'runtime_bridge_transaction_test',
+      files('integration/runtime_bridge_transaction_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'runtime-bridge-transaction',
+      runtime_bridge_transaction_test,
+      args: [gwm_program.full_path(), gwcomp_program.full_path()],
+      depends: [gwm_program, gwcomp_program],
+      timeout: 15,
+    )
+    glasswyrmd_integrated_startup_test = executable(
+      'glasswyrmd_integrated_startup_test',
+      files('integration/glasswyrmd_integrated_startup_test.cpp'),
+    )
+    test(
+      'glasswyrmd-integrated-startup',
+      glasswyrmd_integrated_startup_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 20,
+    )
+    glasswyrmd_integrated_lifecycle_test = executable(
+      'glasswyrmd_integrated_lifecycle_test',
+      files(
+        'integration/glasswyrmd_integrated_lifecycle_test.cpp',
+        'helpers/x11_fake_client.cpp',
+        'helpers/x11_request_builder.cpp',
+      ),
+      dependencies: [gw_x11_setup_dep],
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-integrated-lifecycle',
+      glasswyrmd_integrated_lifecycle_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 45,
+    )
+  endif
+endif
+
+if get_option('glasswyrmd') and get_option('libgwipc')
+  lifecycle_projection_test = executable(
+    'lifecycle_projection_test',
+    files('unit/lifecycle_projection_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('lifecycle-projection', lifecycle_projection_test, timeout: 10)
+endif
+
 if get_option('gwcomp')
+  m6_fixture_test = executable(
+    'm6_fixture_test',
+    files('unit/m6_fixture_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep, gw_x11_setup_dep],
+    include_directories: test_source_root_include,
+  )
+  test(
+    'm6-fixtures',
+    m6_fixture_test,
+    args: [meson.project_source_root() / 'tests/fixtures/m6'],
+    timeout: 10,
+  )
+  m6_fixture_validate = find_program('tools/m6_fixture_validate.sh')
+  test(
+    'm6-fixture-checksums',
+    m6_fixture_validate,
+    args: [meson.project_source_root() / 'tests/fixtures/m6'],
+    timeout: 10,
+  )
+
   gwcomp_options_test = executable(
     'gwcomp_options_test',
     files('unit/gwcomp_options_test.cpp'),
@@ -80,6 +207,27 @@ if get_option('gwcomp')
     include_directories: test_source_root_include,
   )
   test('gwcomp-options', gwcomp_options_test, timeout: 10)
+
+  gwcomp_metadata_scene_test = executable(
+    'gwcomp_metadata_scene_test',
+    files('unit/gwcomp_metadata_scene_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10)
+
+  gwcomp_metadata_process_test = executable(
+    'gwcomp_metadata_process_test',
+    files('integration/gwcomp_metadata_process_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwcomp-metadata-process',
+    gwcomp_metadata_process_test,
+    args: [gwcomp_program.full_path()],
+    depends: gwcomp_program,
+    timeout: 15,
+  )
 
   gwcomp_process_test = executable(
     'gwcomp_process_test',
@@ -206,6 +354,14 @@ if get_option('libgwipc')
   )
   test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10)
 
+  gwipc_lifecycle_contract_test = executable(
+    'gwipc_lifecycle_contract_test',
+    files('unit/ipc/lifecycle_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10)
+
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',
     files('unit/ipc/public_contract_api_test.cpp'),
@@ -324,6 +480,9 @@ if get_option('glasswyrmd')
     ['resource-id', 'resource_id_test.cpp'],
     ['resource-table', 'resource_table_test.cpp'],
     ['window-tree', 'window_tree_test.cpp'],
+    ['server-lifecycle-state', 'server_lifecycle_state_test.cpp'],
+    ['local-lifecycle-dispatch', 'local_lifecycle_dispatch_test.cpp'],
+    ['lifecycle-coordinator', 'lifecycle_coordinator_test.cpp'],
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
@@ -388,8 +547,21 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
 
+  x11_milestone6_probe = executable(
+    'x11_milestone6_probe',
+    files('integration/x11_milestone6_probe.cpp'),
+    dependencies: x11_fake_client_dep,
+    include_directories: test_source_root_include,
+  )
+
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
+    m6_restart_hold_probe = executable(
+      'm6_restart_hold_probe',
+      'xcb/m6_restart_hold_probe.c',
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
     xcb_setup_probe = executable(
       'xcb_setup_probe',
       files('xcb/xcb_setup_probe.c'),
@@ -398,6 +570,11 @@ if get_option('glasswyrmd')
     xcb_milestone2_probe = executable(
       'xcb_milestone2_probe',
       files('xcb/xcb_milestone2_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
+    xcb_milestone6_probe = executable(
+      'xcb_milestone6_probe',
+      files('xcb/xcb_milestone6_probe.c'),
       dependencies: xcb_test_dependency,
     )
   endif

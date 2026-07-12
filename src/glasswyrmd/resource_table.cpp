@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <limits>
 #include <new>
+#include <unordered_set>
 
 namespace glasswyrm::server {
 namespace {
@@ -28,6 +29,7 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   root.depth = screen.root_depth;
   root.window_class = WindowClass::InputOutput;
   root.visual = screen.root_visual;
+  root.map_state = MapState::Viewable;
   root.attributes.colormap = screen.default_colormap;
   resources_.emplace(
       screen.root_window,
@@ -55,6 +57,112 @@ WindowResource* ResourceTable::find_window(const std::uint32_t xid) noexcept {
   auto* resource = find(xid);
   return resource == nullptr ? nullptr
                              : std::get_if<WindowResource>(&resource->payload);
+}
+
+bool ResourceTable::is_policy_candidate(const std::uint32_t xid) const noexcept {
+  const auto* window = find_window(xid);
+  return window && window->parent == screen_.root_window &&
+         window->window_class == WindowClass::InputOutput;
+}
+
+void ResourceTable::recompute_map_states_from(const std::uint32_t xid,
+                                              const bool parent_viewable) {
+  auto* window = find_window(xid);
+  if (!window) return;
+  const bool candidate = is_policy_candidate(xid);
+  if (!window->map_requested) window->map_state = MapState::Unmapped;
+  else if (candidate && !window->policy_visible) window->map_state = MapState::Unmapped;
+  else window->map_state = parent_viewable ? MapState::Viewable : MapState::Unviewable;
+  const bool viewable = window->map_state == MapState::Viewable;
+  const auto children = window->children;
+  for (const auto child : children) recompute_map_states_from(child, viewable);
+}
+
+void ResourceTable::recompute_map_states(const std::uint32_t xid) {
+  if (xid == screen_.root_window) {
+    auto* root = find_window(xid); root->map_state = MapState::Viewable;
+    const auto children = root->children;
+    for (const auto child : children) recompute_map_states_from(child, true);
+    return;
+  }
+  auto* window = find_window(xid);
+  if (!window) return;
+  const auto* parent = find_window(window->parent);
+  recompute_map_states_from(xid, parent && parent->map_state == MapState::Viewable);
+}
+
+LocalLifecycleStatus ResourceTable::set_local_map_intent(const std::uint32_t xid,
+                                                         const bool mapped) {
+  auto* window = find_window(xid);
+  if (!window) return LocalLifecycleStatus::BadWindow;
+  if (xid == screen_.root_window || is_policy_candidate(xid))
+    return LocalLifecycleStatus::BadMatch;
+  window->map_requested = mapped;
+  recompute_map_states(xid);
+  return LocalLifecycleStatus::Success;
+}
+
+LocalLifecycleStatus ResourceTable::configure_local(
+    const std::uint32_t xid, const LocalConfigure& configure) {
+  auto* window = find_window(xid);
+  if (!window) return LocalLifecycleStatus::BadWindow;
+  if (xid == screen_.root_window || is_policy_candidate(xid))
+    return LocalLifecycleStatus::BadMatch;
+  if ((configure.width && (*configure.width == 0 || *configure.width > UINT16_MAX)) ||
+      (configure.height && (*configure.height == 0 || *configure.height > UINT16_MAX)) ||
+      (configure.border_width && *configure.border_width > UINT16_MAX) ||
+      (configure.x && (*configure.x < INT16_MIN || *configure.x > INT16_MAX)) ||
+      (configure.y && (*configure.y < INT16_MIN || *configure.y > INT16_MAX)))
+    return LocalLifecycleStatus::BadValue;
+  auto* parent = find_window(window->parent);
+  if (!parent) return LocalLifecycleStatus::BadWindow;
+  if (configure.sibling) {
+    if (*configure.sibling == xid) return LocalLifecycleStatus::BadMatch;
+    const auto* sibling = find_window(*configure.sibling);
+    if (!sibling || sibling->parent != window->parent ||
+        configure.stack_mode == LifecycleStackMode::None)
+      return LocalLifecycleStatus::BadMatch;
+  }
+  if (configure.x) window->x = static_cast<std::int16_t>(*configure.x);
+  if (configure.y) window->y = static_cast<std::int16_t>(*configure.y);
+  if (configure.width) window->width = static_cast<std::uint16_t>(*configure.width);
+  if (configure.height) window->height = static_cast<std::uint16_t>(*configure.height);
+  if (configure.border_width)
+    window->border_width = static_cast<std::uint16_t>(*configure.border_width);
+  window->requested_x = window->x; window->requested_y = window->y;
+  window->requested_width = window->width; window->requested_height = window->height;
+  window->requested_border_width = window->border_width;
+  if (configure.stack_mode != LifecycleStackMode::None) {
+    std::erase(parent->children, xid);
+    if (!configure.sibling) {
+      if (configure.stack_mode == LifecycleStackMode::Above) parent->children.push_back(xid);
+      else parent->children.insert(parent->children.begin(), xid);
+    } else {
+      auto position = std::find(parent->children.begin(), parent->children.end(),
+                                *configure.sibling);
+      if (configure.stack_mode == LifecycleStackMode::Above) ++position;
+      parent->children.insert(position, xid);
+    }
+  }
+  return LocalLifecycleStatus::Success;
+}
+
+bool ResourceTable::reorder_root_children(
+    const std::vector<std::uint32_t>& visible_bottom_to_top) {
+  auto* root = find_window(screen_.root_window);
+  if (!root) return false;
+  std::vector<std::uint32_t> result;
+  result.reserve(root->children.size());
+  for (const auto child : root->children)
+    if (std::find(visible_bottom_to_top.begin(), visible_bottom_to_top.end(), child) ==
+        visible_bottom_to_top.end()) result.push_back(child);
+  for (const auto child : visible_bottom_to_top) {
+    if (!is_policy_candidate(child) ||
+        std::find(result.begin(), result.end(), child) != result.end()) return false;
+    result.push_back(child);
+  }
+  root->children = std::move(result);
+  return true;
 }
 
 bool ResourceTable::valid_new_resource_id(
@@ -85,7 +193,15 @@ CreateWindowStatus ResourceTable::create_window(
   window.width = spec.width;
   window.height = spec.height;
   window.border_width = spec.border_width;
+  window.requested_x = spec.x;
+  window.requested_y = spec.y;
+  window.requested_width = spec.width;
+  window.requested_height = spec.height;
+  window.requested_border_width = spec.border_width;
   window.attributes = spec.attributes;
+  if (spec.initial_event_mask != 0) {
+    window.event_selections.emplace(owner, spec.initial_event_mask);
+  }
 
   if (spec.window_class == WindowClass::CopyFromParent) {
     window.window_class = parent->window_class;
@@ -149,8 +265,59 @@ DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
   if (find_window(xid) == nullptr) {
     return DestroyWindowStatus::BadWindow;
   }
+  const auto plan = capture_destroy_plan(xid);
+  if (!plan) return DestroyWindowStatus::BadWindow;
+  return commit_destroy_plan(*plan, result);
+}
+
+std::optional<WindowDestroyPlan> ResourceTable::capture_destroy_plan(
+    const std::uint32_t xid) const {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  if (xid == screen_.root_window || !find_window(xid)) return std::nullopt;
+  WindowDestroyPlan plan;
+  plan.root = xid;
+  std::vector<std::pair<std::uint32_t, bool>> stack{{xid, false}};
+  while (!stack.empty()) {
+    const auto [current, expanded] = stack.back();
+    stack.pop_back();
+    const auto* window = find_window(current);
+    if (!window) return std::nullopt;
+    if (!expanded) {
+      stack.emplace_back(current, true);
+      for (const auto child : window->children)
+        stack.emplace_back(child, false);
+      continue;
+    }
+    ClientCleanupWindow entry{current, window->parent, {}, {}, std::nullopt};
+    entry.owner = find(current)->owner;
+    for (const auto& [client, mask] : window->event_selections)
+      if ((mask & kStructureNotifyMask) != 0)
+        entry.structure_recipients.push_back(client);
+    if (const auto* parent = find_window(window->parent))
+      for (const auto& [client, mask] : parent->event_selections)
+        if ((mask & kSubstructureNotifyMask) != 0)
+          entry.substructure_recipients.push_back(client);
+    std::sort(entry.structure_recipients.begin(),
+              entry.structure_recipients.end());
+    std::sort(entry.substructure_recipients.begin(),
+              entry.substructure_recipients.end());
+    plan.postorder.push_back(std::move(entry));
+  }
+  return plan;
+}
+
+DestroyWindowStatus ResourceTable::commit_destroy_plan(
+    const WindowDestroyPlan& plan, CleanupResult* result) {
+  const auto current = capture_destroy_plan(plan.root);
+  if (!current || current->postorder.size() != plan.postorder.size())
+    return DestroyWindowStatus::BadWindow;
+  for (std::size_t index = 0; index < plan.postorder.size(); ++index)
+    if (current->postorder[index].xid != plan.postorder[index].xid ||
+        current->postorder[index].parent != plan.postorder[index].parent)
+      return DestroyWindowStatus::BadWindow;
   CleanupResult local;
-  destroy_window_tree(xid, local);
+  for (const auto& entry : plan.postorder) destroy_leaf(entry.xid, local);
   if (result != nullptr) {
     result->resources_destroyed += local.resources_destroyed;
     result->property_bytes_released += local.property_bytes_released;
@@ -193,38 +360,139 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
   result.property_bytes_released += property_bytes;
 }
 
-void ResourceTable::destroy_window_tree(const std::uint32_t xid,
-                                        CleanupResult& result) {
-  std::uint32_t current = xid;
-  while (true) {
-    auto* window = find_window(current);
-    if (window == nullptr || current == screen_.root_window) {
-      return;
-    }
-    if (!window->children.empty()) {
-      current = window->children.back();
-      continue;
-    }
-    const std::uint32_t parent = window->parent;
-    const bool finished = current == xid;
-    destroy_leaf(current, result);
-    if (finished) {
-      return;
-    }
-    current = parent;
-  }
+CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
+  const auto plan = prepare_client_cleanup(owner);
+  return commit_client_cleanup(plan);
 }
 
-CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
-  CleanupResult result;
-  while (true) {
-    const auto iterator = resources_by_owner_.find(owner);
-    if (iterator == resources_by_owner_.end() || iterator->second.empty()) {
-      break;
+ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  remove_event_selections(owner);
+  ClientCleanupPlan plan;
+  plan.owner = owner;
+  const auto owned = resources_by_owner_.find(owner);
+  if (owned == resources_by_owner_.end()) return plan;
+
+  for (auto iterator = owned->second.rbegin(); iterator != owned->second.rend();
+       ++iterator) {
+    const auto xid = *iterator;
+    const auto* window = find_window(xid);
+    if (!window) continue;
+    bool covered = false;
+    auto parent = window->parent;
+    while (parent != 0 && parent != screen_.root_window) {
+      const auto* record = find(parent);
+      if (!record) break;
+      if (record->owner == owner) {
+        covered = true;
+        break;
+      }
+      const auto* parent_window = find_window(parent);
+      if (!parent_window) break;
+      parent = parent_window->parent;
     }
-    destroy_window_tree(iterator->second.back(), result);
+    if (!covered) plan.roots.push_back(xid);
+  }
+
+  std::unordered_set<std::uint32_t> captured;
+  for (const auto root : plan.roots) {
+    std::vector<std::pair<std::uint32_t, bool>> stack{{root, false}};
+    while (!stack.empty()) {
+      const auto [xid, expanded] = stack.back();
+      stack.pop_back();
+      auto* window = find_window(xid);
+      if (!window) continue;
+      if (expanded) {
+        if (!captured.insert(xid).second) continue;
+        window->cleanup_pending = true;
+        plan.affects_policy = plan.affects_policy || is_policy_candidate(xid);
+        ClientCleanupWindow captured_window{xid, window->parent, {}, {},
+                                             std::nullopt};
+        captured_window.owner = find(xid)->owner;
+        for (const auto& [client, mask] : window->event_selections)
+          if ((mask & kStructureNotifyMask) != 0)
+            captured_window.structure_recipients.push_back(client);
+        if (const auto* parent = find_window(window->parent))
+          for (const auto& [client, mask] : parent->event_selections)
+            if ((mask & kSubstructureNotifyMask) != 0)
+              captured_window.substructure_recipients.push_back(client);
+        std::sort(captured_window.structure_recipients.begin(),
+                  captured_window.structure_recipients.end());
+        std::sort(captured_window.substructure_recipients.begin(),
+                  captured_window.substructure_recipients.end());
+        plan.postorder.push_back(std::move(captured_window));
+        continue;
+      }
+      stack.emplace_back(xid, true);
+      for (const auto child : window->children)
+        stack.emplace_back(child, false);
+    }
+  }
+  return plan;
+}
+
+CleanupResult ResourceTable::commit_client_cleanup(
+    const ClientCleanupPlan& plan) {
+  CleanupResult result;
+  for (const auto root : plan.roots) {
+    const auto destroy = capture_destroy_plan(root);
+    if (destroy) (void)commit_destroy_plan(*destroy, &result);
   }
   return result;
+}
+
+bool ResourceTable::cleanup_pending(const std::uint32_t xid) const noexcept {
+  const auto* window = find_window(xid);
+  return window && window->cleanup_pending;
+}
+
+bool ResourceTable::set_event_selection(const std::uint32_t window_id,
+                                        const ClientId client,
+                                        const std::uint32_t mask) {
+  auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return false;
+  }
+  if (mask == 0) {
+    window->event_selections.erase(client);
+  } else {
+    window->event_selections.insert_or_assign(client, mask);
+  }
+  return true;
+}
+
+std::uint32_t ResourceTable::event_selection(
+    const std::uint32_t window_id, const ClientId client) const noexcept {
+  const auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return 0;
+  }
+  const auto iterator = window->event_selections.find(client);
+  return iterator == window->event_selections.end() ? 0 : iterator->second;
+}
+
+std::uint32_t ResourceTable::all_event_selections(
+    const std::uint32_t window_id) const noexcept {
+  const auto* window = find_window(window_id);
+  if (window == nullptr) {
+    return 0;
+  }
+  std::uint32_t result = 0;
+  for (const auto& [client, mask] : window->event_selections) {
+    static_cast<void>(client);
+    result |= mask;
+  }
+  return result;
+}
+
+void ResourceTable::remove_event_selections(const ClientId client) noexcept {
+  for (auto& [xid, record] : resources_) {
+    static_cast<void>(xid);
+    if (auto* window = std::get_if<WindowResource>(&record.payload)) {
+      window->event_selections.erase(client);
+    }
+  }
 }
 
 PropertyMutationStatus ResourceTable::change_property(

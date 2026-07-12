@@ -18,6 +18,9 @@ GWIPC_API gwipc_connection_state gwipc_connection_get_state(
     const gwipc_connection *connection);
 GWIPC_API gwipc_status gwipc_connection_enqueue(
     gwipc_connection *connection, const gwipc_outgoing_message *message);
+GWIPC_API gwipc_status gwipc_connection_enqueue_with_sequence(
+    gwipc_connection *connection, const gwipc_outgoing_message *message,
+    uint64_t *out_sequence);
 GWIPC_API gwipc_status gwipc_connection_receive(
     gwipc_connection *connection, gwipc_message **out_message);
 GWIPC_API gwipc_peer_info gwipc_connection_peer_info(

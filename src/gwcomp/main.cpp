@@ -18,11 +18,18 @@
 
 namespace {
 
-constexpr std::uint64_t kRequiredCapabilities =
+constexpr std::uint64_t kM4Capabilities =
     GWIPC_CAP_FD_PASSING | GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE |
     GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_SDR_COLOR_METADATA |
     GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
+constexpr std::uint64_t kCommonCapabilities =
+    GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
+    GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
+constexpr std::uint64_t kM6Capabilities =
+    kCommonCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
+constexpr std::uint64_t kOfferedCapabilities =
+    kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 int signal_write_fd = -1;
@@ -163,9 +170,11 @@ int run(const glasswyrm::compositor::Options& options) {
   listener_options.struct_size = sizeof(listener_options);
   listener_options.path = options.ipc_socket.c_str();
   listener_options.local_role = GWIPC_ROLE_COMPOSITOR;
-  listener_options.accepted_peer_roles = GWIPC_ROLE_BIT(GWIPC_ROLE_TEST_PRODUCER);
-  listener_options.offered_capabilities = kRequiredCapabilities;
-  listener_options.required_peer_capabilities = kRequiredCapabilities;
+  listener_options.accepted_peer_roles =
+      GWIPC_ROLE_BIT(GWIPC_ROLE_TEST_PRODUCER) |
+      GWIPC_ROLE_BIT(GWIPC_ROLE_PROTOCOL_SERVER);
+  listener_options.offered_capabilities = kOfferedCapabilities;
+  listener_options.required_peer_capabilities = kCommonCapabilities;
   listener_options.maximum_payload = GWIPC_DEFAULT_MAXIMUM_PAYLOAD;
   listener_options.maximum_fd_count = GWIPC_DEFAULT_MAXIMUM_FDS;
   listener_options.maximum_queued_bytes = GWIPC_DEFAULT_MAXIMUM_QUEUED_BYTES;
@@ -186,7 +195,11 @@ int run(const glasswyrm::compositor::Options& options) {
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
 
   std::unique_ptr<gwipc_connection, ConnectionDeleter> producer;
-  gw::compositor::Compositor compositor(options.dump_dir);
+  std::optional<std::filesystem::path> manifest_path;
+  if (options.scene_manifest) manifest_path = *options.scene_manifest;
+  gw::compositor::Compositor compositor(options.dump_dir, manifest_path);
+  bool peer_validated = false;
+  gwipc_role peer_role = GWIPC_ROLE_UNKNOWN;
   bool accepted_any_frame = false;
   bool stop_after_flush = false;
   bool stopping = false;
@@ -219,14 +232,37 @@ int run(const glasswyrm::compositor::Options& options) {
         const auto peer = gwipc_connection_peer_info(producer.get());
         std::fprintf(stderr, "gwcomp: producer connected pid=%d uid=%u\n",
                      peer.pid, peer.uid);
+        peer_validated = false;
+        peer_role = GWIPC_ROLE_UNKNOWN;
       }
     }
     if (producer && descriptors[1].revents != 0)
       (void)gwipc_connection_process_poll_events(producer.get(),
                                                  descriptors[1].revents);
+    if (producer && !peer_validated &&
+        gwipc_connection_get_state(producer.get()) ==
+            GWIPC_CONNECTION_ESTABLISHED) {
+      const auto info = gwipc_connection_peer_info(producer.get());
+      peer_role = info.role;
+      const auto required = peer_role == GWIPC_ROLE_TEST_PRODUCER
+                                ? kM4Capabilities
+                                : peer_role == GWIPC_ROLE_PROTOCOL_SERVER
+                                      ? kM6Capabilities
+                                      : UINT64_MAX;
+      if ((info.capabilities & required) != required) {
+        std::fprintf(stderr,
+                     "gwcomp: peer role=%u missing role-specific capabilities\n",
+                     static_cast<unsigned>(peer_role));
+        compositor.disconnect();
+        producer.reset();
+        peer_role = GWIPC_ROLE_UNKNOWN;
+      } else {
+        peer_validated = true;
+      }
+    }
     std::size_t messages = 0;
     std::size_t payload_bytes = 0;
-    while (producer && messages < kMaximumMessagesPerTurn &&
+    while (producer && peer_validated && messages < kMaximumMessagesPerTurn &&
            payload_bytes < kMaximumPayloadBytesPerTurn) {
       gwipc_message* raw_message = nullptr;
       if (gwipc_connection_receive(producer.get(), &raw_message) !=
@@ -266,24 +302,35 @@ int run(const glasswyrm::compositor::Options& options) {
           applied = compositor.apply(*gwipc_decoded_output_remove(contract.get())); break;
         case GWIPC_MESSAGE_SURFACE_UPSERT:
           applied = compositor.apply(*gwipc_decoded_surface_upsert(contract.get())); break;
+        case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT:
+          applied = peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&
+                    compositor.apply(
+                        *gwipc_decoded_surface_policy_upsert(contract.get()));
+          break;
         case GWIPC_MESSAGE_SURFACE_REMOVE:
           applied = compositor.apply(*gwipc_decoded_surface_remove(contract.get())); break;
         case GWIPC_MESSAGE_SURFACE_DAMAGE:
-          applied = compositor.apply(*gwipc_decoded_surface_damage(contract.get())); break;
+          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+                    compositor.apply(*gwipc_decoded_surface_damage(contract.get()));
+          break;
         case GWIPC_MESSAGE_BUFFER_ATTACH: {
           int fd = -1;
           std::string error;
-          applied = gwipc_message_take_fd(message.get(), 0, &fd) == GWIPC_STATUS_OK &&
+          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+                    gwipc_message_take_fd(message.get(), 0, &fd) == GWIPC_STATUS_OK &&
                     compositor.attach(*gwipc_decoded_buffer_attach(contract.get()), fd, error);
           if (!applied) std::fprintf(stderr, "gwcomp: buffer rejected: %s\n", error.c_str());
           break;
         }
         case GWIPC_MESSAGE_BUFFER_DETACH:
-          applied = compositor.detach(*gwipc_decoded_buffer_detach(contract.get())); break;
+          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+                    compositor.detach(*gwipc_decoded_buffer_detach(contract.get()));
+          break;
         case GWIPC_MESSAGE_FRAME_COMMIT: {
           const auto& commit = *gwipc_decoded_frame_commit(contract.get());
           std::string error;
-          auto frame = compositor.commit(commit, error);
+          auto frame = compositor.commit(
+              commit, error, peer_role == GWIPC_ROLE_PROTOCOL_SERVER);
           if ((gwipc_message_flags(message.get()) & GWIPC_FLAG_ACK_REQUIRED) == 0)
             frame.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
           (void)enqueue_ack(producer.get(), message.get(), commit, frame);
@@ -314,6 +361,8 @@ int run(const glasswyrm::compositor::Options& options) {
       std::fprintf(stderr, "gwcomp: producer disconnected, cleared surfaces=0 buffers=0\n");
       compositor.disconnect();
       producer.reset();
+      peer_validated = false;
+      peer_role = GWIPC_ROLE_UNKNOWN;
       if ((options.once && accepted_any_frame) || stop_after_flush) stopping = true;
     }
   }

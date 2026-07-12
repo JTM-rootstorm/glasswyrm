@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -38,6 +39,11 @@ class RequestWorkBudget {
 
 class ClientConnection {
  public:
+  using DeferredHandler =
+      std::function<bool(ClientConnection&, const DispatchResult&)>;
+  using StructuralTransitionHandler =
+      std::function<void(const std::vector<StructuralTransition>&)>;
+  using DispatchBlockToken = std::uint64_t;
   enum class State {
     AwaitingSetup,
     Established,
@@ -46,7 +52,10 @@ class ClientConnection {
   };
 
   ClientConnection(int descriptor, std::uint64_t identifier,
-                   std::uint32_t resource_id_base, ServerState& server_state);
+                   std::uint32_t resource_id_base, ServerState& server_state,
+                   bool integrated_lifecycle = false,
+                   DeferredHandler deferred_handler = {},
+                   StructuralTransitionHandler transition_handler = {});
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -60,9 +69,23 @@ class ClientConnection {
     return resource_id_base_;
   }
   [[nodiscard]] State state() const { return state_; }
+  [[nodiscard]] gw::protocol::x11::ByteOrder byte_order() const noexcept {
+    return byte_order_;
+  }
+  [[nodiscard]] std::uint64_t last_request_sequence() const noexcept {
+    return request_sequence_;
+  }
+  [[nodiscard]] bool enqueue_server_packet(std::vector<std::uint8_t> bytes);
+  void set_dispatch_blocked(DispatchBlockToken token) noexcept;
+  [[nodiscard]] bool clear_dispatch_blocked(DispatchBlockToken token) noexcept;
+  [[nodiscard]] bool dispatch_blocked() const noexcept {
+    return dispatch_block_token_.has_value();
+  }
+  void mark_transport_closed() noexcept;
   [[nodiscard]] short poll_events() const;
   [[nodiscard]] bool needs_service() const noexcept {
-    return state_ == State::Established && !pending_input_.empty();
+    return state_ == State::Established && !dispatch_blocked() &&
+           !pending_input_.empty();
   }
 
   void handle_events(short events);
@@ -86,7 +109,6 @@ class ClientConnection {
                              bool close_after = false);
   void close_with_log(const char* reason);
   void close_after_output(const char* reason);
-  void cleanup_resources();
 
   static constexpr std::size_t kMaximumQueuedOutput = 1024U * 1024U;
   int descriptor_ = -1;
@@ -102,7 +124,10 @@ class ClientConnection {
   std::deque<OutputPacket> output_queue_;
   std::size_t queued_output_bytes_ = 0;
   std::vector<std::uint8_t> pending_input_;
-  bool resources_cleaned_ = false;
+  std::optional<DispatchBlockToken> dispatch_block_token_;
+  bool integrated_lifecycle_{false};
+  DeferredHandler deferred_handler_;
+  StructuralTransitionHandler transition_handler_;
 };
 
 }  // namespace glasswyrm::server

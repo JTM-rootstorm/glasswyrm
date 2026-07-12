@@ -32,6 +32,13 @@ enum class CreateWindowStatus {
 };
 
 enum class DestroyWindowStatus { Success, BadWindow, RootPreserved };
+enum class LocalLifecycleStatus { Success, BadWindow, BadMatch, BadValue };
+struct LocalConfigure {
+  std::optional<std::int32_t> x, y;
+  std::optional<std::uint32_t> width, height, border_width;
+  std::optional<std::uint32_t> sibling;
+  LifecycleStackMode stack_mode{LifecycleStackMode::None};
+};
 enum class PropertyMutationStatus {
   Success,
   BadWindow,
@@ -43,6 +50,26 @@ enum class PropertyReadStatus { Success, BadWindow, BadValue };
 struct CleanupResult {
   std::size_t resources_destroyed{0};
   std::size_t property_bytes_released{0};
+};
+
+struct ClientCleanupWindow {
+  std::uint32_t xid{0};
+  std::uint32_t parent{0};
+  std::vector<ClientId> structure_recipients;
+  std::vector<ClientId> substructure_recipients;
+  std::optional<ClientId> owner;
+};
+
+struct WindowDestroyPlan {
+  std::uint32_t root{0};
+  std::vector<ClientCleanupWindow> postorder;
+};
+
+struct ClientCleanupPlan {
+  ClientId owner{0};
+  std::vector<std::uint32_t> roots;
+  std::vector<ClientCleanupWindow> postorder;
+  bool affects_policy{false};
 };
 
 struct PropertyReadResult {
@@ -74,6 +101,14 @@ class ResourceTable {
   [[nodiscard]] const WindowResource* find_window(
       std::uint32_t xid) const noexcept;
   [[nodiscard]] WindowResource* find_window(std::uint32_t xid) noexcept;
+  [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
+  [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
+                                                          bool mapped);
+  [[nodiscard]] LocalLifecycleStatus configure_local(
+      std::uint32_t xid, const LocalConfigure& configure);
+  void recompute_map_states(std::uint32_t xid);
+  [[nodiscard]] bool reorder_root_children(
+      const std::vector<std::uint32_t>& visible_bottom_to_top);
 
   [[nodiscard]] bool valid_new_resource_id(std::uint32_t xid,
                                            std::uint32_t resource_base,
@@ -83,7 +118,22 @@ class ResourceTable {
       const WindowCreateSpec& spec);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
+  [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
+      std::uint32_t xid) const;
+  [[nodiscard]] DestroyWindowStatus commit_destroy_plan(
+      const WindowDestroyPlan& plan, CleanupResult* result = nullptr);
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner);
+  [[nodiscard]] ClientCleanupPlan prepare_client_cleanup(ClientId owner);
+  [[nodiscard]] CleanupResult commit_client_cleanup(
+      const ClientCleanupPlan& plan);
+  [[nodiscard]] bool cleanup_pending(std::uint32_t xid) const noexcept;
+  [[nodiscard]] bool set_event_selection(std::uint32_t window, ClientId client,
+                                         std::uint32_t mask);
+  [[nodiscard]] std::uint32_t event_selection(std::uint32_t window,
+                                              ClientId client) const noexcept;
+  [[nodiscard]] std::uint32_t all_event_selections(
+      std::uint32_t window) const noexcept;
+  void remove_event_selections(ClientId client) noexcept;
 
   [[nodiscard]] PropertyMutationStatus change_property(
       std::uint32_t window, std::uint32_t property_atom, Property value,
@@ -105,8 +155,8 @@ class ResourceTable {
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
-  void destroy_window_tree(std::uint32_t xid, CleanupResult& result);
   void destroy_leaf(std::uint32_t xid, CleanupResult& result);
+  void recompute_map_states_from(std::uint32_t xid, bool parent_viewable);
 
   ScreenModel screen_;
   ResourceLimits limits_;

@@ -20,7 +20,8 @@ Documents:
 - [Policy Algorithm](POLICY_ALGORITHM.md)
 - [Policy Snapshots](POLICY_SNAPSHOTS.md)
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md)
+- [M6 Lifecycle Policy](M6_LIFECYCLE_POLICY.md)
 
-This directory documents only the synthetic M5 boundary. `glasswyrmd` and
-`gwcomp` do not connect to `gwm`; X11 mapping, input, decoration rendering,
-multiple workspaces, and real display integration remain deferred.
+M6 adds an explicit `glasswyrmd` lifecycle peer while preserving the M5
+synthetic regression boundary. Input, decoration rendering, multiple
+workspaces, and real display integration remain deferred.

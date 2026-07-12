@@ -13,3 +13,5 @@ Current decisions:
 - [0004: Add Headless Core X11 Resource State](0004-milestone-2-core-resources.md)
 - [0005: Establish a Versioned Local IPC Foundation](0005-versioned-ipc-foundation.md)
 - [0006: Use a Transactional Headless Compositor](0006-headless-compositor-synthetic-surfaces.md)
+- [0007: Run Window-Management Policy as a Separate Service](0007-window-manager-policy-scaffold.md)
+- [0008: Route Top-Level Lifecycle Through Three Processes](0008-three-process-window-lifecycle.md)

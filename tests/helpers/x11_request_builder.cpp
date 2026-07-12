@@ -74,6 +74,27 @@ std::vector<std::uint8_t> X11RequestBuilder::destroy_window(
   return finish_request(std::move(writer), order_);
 }
 
+std::vector<std::uint8_t> X11RequestBuilder::change_window_attributes(
+    std::uint32_t window, std::uint32_t value_mask,
+    std::span<const std::uint32_t> values) const {
+  if (static_cast<std::size_t>(std::popcount(value_mask)) != values.size()) {
+    throw std::invalid_argument(
+        "ChangeWindowAttributes mask/value count mismatch");
+  }
+  auto writer = header(2, 0, order_);
+  writer.write_u32(window);
+  writer.write_u32(value_mask);
+  for (const auto value : values) writer.write_u32(value);
+  return finish_request(std::move(writer), order_);
+}
+
+std::vector<std::uint8_t> X11RequestBuilder::get_window_attributes(
+    std::uint32_t window) const {
+  auto writer = header(3, 0, order_);
+  writer.write_u32(window);
+  return finish_request(std::move(writer), order_);
+}
+
 std::vector<std::uint8_t> X11RequestBuilder::get_geometry(
     std::uint32_t drawable) const {
   auto writer = header(14, 0, order_);

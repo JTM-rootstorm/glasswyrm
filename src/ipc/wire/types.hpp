@@ -27,6 +27,7 @@ enum class MessageType : std::uint16_t {
   OutputRemove = 0x0101,
   SurfaceUpsert = 0x0110,
   SurfaceRemove = 0x0111,
+  SurfacePolicyUpsert = 0x0112,
   BufferAttach = 0x0120,
   BufferDetach = 0x0121,
   BufferRelease = 0x0122,
@@ -36,6 +37,7 @@ enum class MessageType : std::uint16_t {
   PolicyContextUpsert = 0x0200,
   PolicyWindowUpsert = 0x0201,
   PolicyWindowRemove = 0x0202,
+  PolicyLifecycleWindowUpsert = 0x0203,
   PolicyCommit = 0x0210,
   PolicyWindowState = 0x0211,
   PolicyAcknowledged = 0x0212,
@@ -78,9 +80,10 @@ enum class Capability : std::uint64_t {
   FrameAcknowledgement = 1ULL << 8U,
   TraceMetadata = 1ULL << 9U,
   WindowPolicy = 1ULL << 10U,
+  WindowLifecycle = 1ULL << 11U,
 };
 
-inline constexpr std::uint64_t kKnownCapabilities = 0x7ffULL;
+inline constexpr std::uint64_t kKnownCapabilities = 0xfffULL;
 
 enum class RejectReason : std::uint16_t {
   IncompatibleVersion = 1,

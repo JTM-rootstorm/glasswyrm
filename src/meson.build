@@ -10,6 +10,8 @@ gw_x11_setup_lib = static_library(
     'protocol/x11/setup.cpp',
     'protocol/x11/request.cpp',
     'protocol/x11/reply.cpp',
+    'protocol/x11/event.cpp',
+    'protocol/x11/lifecycle_request.cpp',
   ),
   include_directories: include_directories('.'),
 )
@@ -81,6 +83,7 @@ if get_option('libgwipc')
     'ipc/wire/control.cpp',
     'ipc/wire/compositor_contract.cpp',
     'ipc/wire/policy_contract.cpp',
+    'ipc/wire/lifecycle_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
   gwipc_wire_lib = static_library(
@@ -118,7 +121,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.3.0',
+    version: '0.4.0',
     soversion: '0',
     install: true,
   )
@@ -141,6 +144,7 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/contracts.h',
     '../include/glasswyrm/ipc/control.h',
     '../include/glasswyrm/ipc/policy.h',
+    '../include/glasswyrm/ipc/lifecycle.h',
     subdir: 'glasswyrm/ipc',
   )
 
@@ -150,7 +154,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.3.0',
+    version: '0.4.0',
   )
 endif
 
@@ -162,6 +166,8 @@ if get_option('glasswyrmd')
       'glasswyrmd/resource_table.cpp',
       'glasswyrmd/atom_table.cpp',
       'glasswyrmd/server_state.cpp',
+      'glasswyrmd/lifecycle_snapshot.cpp',
+      'glasswyrmd/lifecycle_coordinator.cpp',
       'glasswyrmd/request_dispatcher.cpp',
     ),
     dependencies: gw_x11_setup_dep,
@@ -172,19 +178,33 @@ if get_option('glasswyrmd')
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),
   )
+  gw_server_core_sources = files(
+    'glasswyrmd/options.cpp',
+    'glasswyrmd/client_connection.cpp',
+    'glasswyrmd/event_router.cpp',
+    'glasswyrmd/server.cpp',
+  )
+  gw_server_core_dependencies = [gw_server_state_dep]
+  if get_option('libgwipc')
+    gw_server_core_sources += files(
+      'glasswyrmd/peer_transport.cpp',
+      'glasswyrmd/policy_peer.cpp',
+      'glasswyrmd/compositor_peer.cpp',
+      'glasswyrmd/lifecycle_projection.cpp',
+      'glasswyrmd/runtime_bridge.cpp',
+    )
+    gw_server_core_dependencies += gwipc_dep
+  endif
   gw_server_core_lib = static_library(
     'gw-server-core',
-    files(
-      'glasswyrmd/options.cpp',
-      'glasswyrmd/client_connection.cpp',
-      'glasswyrmd/server.cpp',
-    ),
-    dependencies: gw_server_state_dep,
+    gw_server_core_sources,
+    dependencies: gw_server_core_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
+    cpp_args: get_option('libgwipc') ? ['-DGW_SERVER_HAS_IPC=1'] : [],
   )
   gw_server_core_dep = declare_dependency(
     link_with: gw_server_core_lib,
-    dependencies: gw_server_state_dep,
+    dependencies: gw_server_core_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   glasswyrmd_program = executable(
@@ -231,7 +251,8 @@ endif
 if get_option('gwcomp')
   gwcomp_options_lib = static_library(
     'gwcomp-options',
-    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp'),
+    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp',
+          'gwcomp/scene_manifest.cpp'),
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
                    gw_render_software_dep, gw_headless_dep],

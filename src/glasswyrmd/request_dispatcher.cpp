@@ -3,8 +3,10 @@
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/core.hpp"
 #include "protocol/x11/reply.hpp"
+#include "protocol/x11/lifecycle_request.hpp"
 
 #include <bit>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -32,6 +34,125 @@ bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
   return request.bytes.size() == size;
 }
 
+std::optional<StructuralEventState> capture_structural_state(
+    const ResourceTable& resources, const std::uint32_t target) {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  const auto* window = resources.find_window(target);
+  if (!window) return std::nullopt;
+  const auto* parent = resources.find_window(window->parent);
+  StructuralEventState state{};
+  state.target = target;
+  state.parent = window->parent;
+  state.x = window->x;
+  state.y = window->y;
+  state.width = window->width;
+  state.height = window->height;
+  state.border_width = window->border_width;
+  state.override_redirect = window->attributes.override_redirect;
+  state.mapped = window->map_requested;
+  state.viewable = window->map_state == MapState::Viewable;
+  if (parent) {
+    const auto position = std::ranges::find(parent->children, target);
+    if (position != parent->children.end() &&
+        std::next(position) != parent->children.end())
+      state.above_sibling = *std::next(position);
+  }
+  for (const auto& [client, mask] : window->event_selections)
+    if ((mask & kStructureNotifyMask) != 0)
+      state.structure_recipients.push_back(client);
+  if (parent)
+    for (const auto& [client, mask] : parent->event_selections)
+      if ((mask & kSubstructureNotifyMask) != 0)
+        state.substructure_recipients.push_back(client);
+  std::sort(state.structure_recipients.begin(),
+            state.structure_recipients.end());
+  std::sort(state.substructure_recipients.begin(),
+            state.substructure_recipients.end());
+  return state;
+}
+
+constexpr std::uint32_t kWindowAttributeMask = 0x00007fffU;
+constexpr std::uint32_t kCoreEventMask = 0x01ffffffU;
+constexpr std::uint32_t kDoNotPropagateMask = 0x0000204fU;
+constexpr std::uint32_t kButtonPressMask = 1U << 2U;
+constexpr std::uint32_t kResizeRedirectMask = 1U << 18U;
+constexpr std::uint32_t kSubstructureRedirectMask = 1U << 20U;
+
+struct DecodedWindowAttributes {
+  WindowAttributes attributes;
+  std::optional<std::uint32_t> event_mask;
+  x11::CoreErrorCode error{x11::CoreErrorCode::BadImplementation};
+  std::uint32_t bad_value{0};
+  bool success{false};
+};
+
+DecodedWindowAttributes decode_window_attributes(
+    x11::ByteReader& reader, const std::uint32_t value_mask,
+    WindowAttributes attributes, const std::uint32_t default_colormap) {
+  DecodedWindowAttributes result;
+  result.attributes = attributes;
+  for (std::uint32_t bit = 0; bit < 15; ++bit) {
+    if ((value_mask & (std::uint32_t{1} << bit)) == 0) continue;
+    std::uint32_t value = 0;
+    if (!reader.read_u32(value)) return result;
+    result.bad_value = value;
+    switch (bit) {
+      case 0:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
+        result.attributes.background_pixmap = value;
+        break;
+      case 1: result.attributes.background_pixel = value; break;
+      case 2:
+        if (value != 0) { result.error = x11::CoreErrorCode::BadPixmap; return result; }
+        result.attributes.border_pixmap = value;
+        break;
+      case 3: result.attributes.border_pixel = value; break;
+      case 4:
+        if (value > 10) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.bit_gravity = static_cast<std::uint8_t>(value);
+        break;
+      case 5:
+        if (value > 10) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.window_gravity = static_cast<std::uint8_t>(value);
+        break;
+      case 6:
+        if (value > 2) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.backing_store = static_cast<std::uint8_t>(value);
+        break;
+      case 7: result.attributes.backing_planes = value; break;
+      case 8: result.attributes.backing_pixel = value; break;
+      case 9:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.override_redirect = value != 0;
+        break;
+      case 10:
+        if (value > 1) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.save_under = value != 0;
+        break;
+      case 11:
+        if ((value & ~kCoreEventMask) != 0) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.event_mask = value;
+        break;
+      case 12:
+        if ((value & ~kDoNotPropagateMask) != 0) { result.error = x11::CoreErrorCode::BadValue; return result; }
+        result.attributes.do_not_propagate_mask = value;
+        break;
+      case 13:
+        if (value != 0 && value != default_colormap) { result.error = x11::CoreErrorCode::BadColormap; return result; }
+        result.attributes.colormap = value;
+        break;
+      case 14:
+        if (value != 0) { result.error = x11::CoreErrorCode::BadCursor; return result; }
+        result.attributes.cursor = value;
+        break;
+      default: break;
+    }
+  }
+  result.success = true;
+  return result;
+}
+
 std::uint32_t property_bad_atom(const ServerState& state,
                                 const std::uint32_t property,
                                 const std::uint32_t type,
@@ -47,7 +168,6 @@ std::uint32_t property_bad_atom(const ServerState& state,
 
 DispatchResult create_window(ServerState& state, const DispatchContext& context,
                              const x11::FramedRequest& request) {
-  constexpr std::uint32_t kKnownMask = 0x00007fffU;
   if (request.bytes.size() < 32) {
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
@@ -73,7 +193,7 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   if (window_class > static_cast<std::uint16_t>(WindowClass::InputOnly)) {
     return error(context, request, x11::CoreErrorCode::BadValue, window_class);
   }
-  if ((value_mask & ~kKnownMask) != 0) {
+  if ((value_mask & ~kWindowAttributeMask) != 0) {
     return error(context, request, x11::CoreErrorCode::BadValue, value_mask);
   }
   const std::size_t value_count =
@@ -83,87 +203,40 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
 
-  for (std::uint32_t bit = 0; bit < 15; ++bit) {
-    if ((value_mask & (std::uint32_t{1} << bit)) == 0) {
-      continue;
-    }
-    std::uint32_t value = 0;
-    if (!reader.read_u32(value)) {
-      return error(context, request, x11::CoreErrorCode::BadLength);
-    }
-    switch (bit) {
-      case 0:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadPixmap, value);
-        }
-        spec.attributes.background_pixmap = value;
-        break;
-      case 1: spec.attributes.background_pixel = value; break;
-      case 2:
-        if (value != 0) {
-          return error(context, request, x11::CoreErrorCode::BadPixmap, value);
-        }
-        spec.attributes.border_pixmap = value;
-        break;
-      case 3: spec.attributes.border_pixel = value; break;
-      case 4:
-        if (value > 10) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.bit_gravity = static_cast<std::uint8_t>(value);
-        break;
-      case 5:
-        if (value > 10) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.window_gravity = static_cast<std::uint8_t>(value);
-        break;
-      case 6:
-        if (value > 2) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.backing_store = static_cast<std::uint8_t>(value);
-        break;
-      case 7: spec.attributes.backing_planes = value; break;
-      case 8: spec.attributes.backing_pixel = value; break;
-      case 9:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.override_redirect = value != 0;
-        break;
-      case 10:
-        if (value > 1) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.save_under = value != 0;
-        break;
-      case 11:
-        if ((value & ~0x01ffffffU) != 0) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.event_mask = value;
-        break;
-      case 12:
-        if ((value & ~0x0000204fU) != 0) {
-          return error(context, request, x11::CoreErrorCode::BadValue, value);
-        }
-        spec.attributes.do_not_propagate_mask = value;
-        break;
-      case 13:
-        if (value != 0 && value != state.screen().default_colormap) {
-          return error(context, request, x11::CoreErrorCode::BadColormap,
-                       value);
-        }
-        spec.attributes.colormap = value;
-        break;
-      case 14:
-        if (value != 0) {
-          return error(context, request, x11::CoreErrorCode::BadCursor, value);
-        }
-        spec.attributes.cursor = value;
-        break;
-      default: break;
+  auto decoded = decode_window_attributes(reader, value_mask, spec.attributes,
+                                          state.screen().default_colormap);
+  if (!decoded.success) return error(context, request, decoded.error, decoded.bad_value);
+  spec.attributes = decoded.attributes;
+  spec.initial_event_mask = decoded.event_mask.value_or(0);
+
+  const auto* parent = state.resources().find_window(spec.parent);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(spec.parent))
+    return error(context, request, x11::CoreErrorCode::BadWindow, spec.parent);
+  const bool policy_candidate =
+      parent != nullptr && spec.parent == state.screen().root_window &&
+      (spec.window_class == WindowClass::InputOutput ||
+       (spec.window_class == WindowClass::CopyFromParent &&
+        parent->window_class == WindowClass::InputOutput));
+  if (context.integrated_lifecycle && policy_candidate) {
+    auto staged = state;
+    const auto status = staged.resources().create_window(
+        context.client_id, context.resource_base, context.resource_mask, spec);
+    switch (status) {
+      case CreateWindowStatus::Success:
+        return DispatchResult::deferred_create_window(std::move(spec));
+      case CreateWindowStatus::BadIdChoice:
+        return error(context, request, x11::CoreErrorCode::BadIDChoice,
+                     spec.xid);
+      case CreateWindowStatus::BadWindow:
+        return error(context, request, x11::CoreErrorCode::BadWindow,
+                     spec.parent);
+      case CreateWindowStatus::BadValue:
+        return error(context, request, x11::CoreErrorCode::BadValue);
+      case CreateWindowStatus::BadMatch:
+        return error(context, request, x11::CoreErrorCode::BadMatch);
+      case CreateWindowStatus::BadAlloc:
+        return error(context, request, x11::CoreErrorCode::BadAlloc);
     }
   }
 
@@ -195,11 +268,140 @@ DispatchResult destroy_window(ServerState& state,
   if (!reader.read_u32(window)) {
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
-  const auto status = state.resources().destroy_window(window);
+  if (context.integrated_lifecycle && state.resources().cleanup_pending(window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
+  if (window == state.screen().root_window) return {};
+  if (context.integrated_lifecycle &&
+      state.resources().is_policy_candidate(window)) {
+    return DispatchResult::deferred_destroy_window(window);
+  }
+  const auto destroyed = state.resources().capture_destroy_plan(window);
+  if (!destroyed)
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
+  DispatchResult result;
+  result.structural_transitions.reserve(destroyed->postorder.size());
+  for (const auto& item : destroyed->postorder) {
+    StructuralEventState before{};
+    before.target = item.xid;
+    before.parent = item.parent;
+    before.structure_recipients = item.structure_recipients;
+    before.substructure_recipients = item.substructure_recipients;
+    result.structural_transitions.push_back(
+        {StructuralTransitionKind::Destroy, std::move(before), std::nullopt});
+  }
+  const auto status = state.resources().commit_destroy_plan(*destroyed);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
+  return result;
+}
+
+DispatchResult change_window_attributes(
+    ServerState& state, const DispatchContext& context,
+    const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t window_id = 0;
+  std::uint32_t value_mask = 0;
+  if (!reader.read_u32(window_id) || !reader.read_u32(value_mask)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  if ((value_mask & ~kWindowAttributeMask) != 0) {
+    return error(context, request, x11::CoreErrorCode::BadValue, value_mask);
+  }
+  const auto value_count = static_cast<std::size_t>(std::popcount(value_mask));
+  if (!exact_size(request, 12 + value_count * 4)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  auto* window = state.resources().find_window(window_id);
+  if (window == nullptr) {
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  }
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(window_id))
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  auto decoded = decode_window_attributes(reader, value_mask,
+                                          window->attributes,
+                                          state.screen().default_colormap);
+  if (!decoded.success) {
+    return error(context, request, decoded.error, decoded.bad_value);
+  }
+  if ((value_mask & (1U << 9U)) != 0 &&
+      window_id == state.screen().root_window) {
+    return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
+  }
+  const bool defer_override =
+      context.integrated_lifecycle && (value_mask & (1U << 9U)) != 0 &&
+      state.resources().is_policy_candidate(window_id) &&
+      window->map_requested &&
+      decoded.attributes.override_redirect !=
+          window->attributes.override_redirect;
+  const bool proposed_override = decoded.attributes.override_redirect;
+  if (decoded.event_mask.has_value()) {
+    const auto selected = *decoded.event_mask;
+    if ((selected & (kResizeRedirectMask | kSubstructureRedirectMask)) != 0) {
+      return error(context, request, x11::CoreErrorCode::BadAccess, selected);
+    }
+    if ((selected & kButtonPressMask) != 0) {
+      for (const auto& [client, mask] : window->event_selections) {
+        if (client != context.client_id && (mask & kButtonPressMask) != 0) {
+          return error(context, request, x11::CoreErrorCode::BadAccess,
+                       selected);
+        }
+      }
+    }
+    // Updating the selection first preserves atomicity if insertion allocates.
+    if (!state.resources().set_event_selection(window_id, context.client_id,
+                                               selected)) {
+      return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+    }
+  }
+  if (defer_override)
+    decoded.attributes.override_redirect = window->attributes.override_redirect;
+  window->attributes = decoded.attributes;
+  if (defer_override)
+    return DispatchResult::deferred_override_change(window_id,
+                                                    proposed_override);
   return {};
+}
+
+DispatchResult get_window_attributes(ServerState& state,
+                                     const DispatchContext& context,
+                                     const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) {
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t window_id = 0;
+  (void)reader.read_u32(window_id);
+  const auto* window = state.resources().find_window(window_id);
+  if (window == nullptr) {
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  }
+  x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                          window->attributes.backing_store);
+  reply.write_u32(window->visual);
+  reply.write_u16(static_cast<std::uint16_t>(window->window_class));
+  reply.write_u8(window->attributes.bit_gravity);
+  reply.write_u8(window->attributes.window_gravity);
+  reply.write_u32(window->attributes.backing_planes);
+  reply.write_u32(window->attributes.backing_pixel);
+  reply.write_u8(window->attributes.save_under ? 1 : 0);
+  reply.write_u8(window->attributes.colormap == state.screen().default_colormap
+                     ? 1
+                     : 0);
+  reply.write_u8(static_cast<std::uint8_t>(window->map_state));
+  reply.write_u8(window->attributes.override_redirect ? 1 : 0);
+  reply.write_u32(window->attributes.colormap);
+  reply.write_payload_u32(state.resources().all_event_selections(window_id));
+  reply.write_payload_u32(
+      state.resources().event_selection(window_id, context.client_id));
+  reply.write_payload_u16(static_cast<std::uint16_t>(
+      window->attributes.do_not_propagate_mask));
+  reply.write_payload_u16(0);
+  return {std::move(reply).finish()};
 }
 
 DispatchResult get_geometry(ServerState& state,
@@ -514,8 +716,107 @@ DispatchResult get_input_focus(const ServerState& state,
     return error(context, request, x11::CoreErrorCode::BadLength);
   }
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 0);
-  reply.write_u32(state.screen().root_window);
+  reply.write_u32(state.focused_window());
   return {std::move(reply).finish()};
+}
+
+DispatchResult lifecycle_decode_error(const DispatchContext& context,
+                                      const x11::FramedRequest& request,
+                                      x11::LifecycleDecodeStatus status) {
+  if (status == x11::LifecycleDecodeStatus::BadValue)
+    return error(context, request, x11::CoreErrorCode::BadValue);
+  if (status == x11::LifecycleDecodeStatus::BadMatch)
+    return error(context, request, x11::CoreErrorCode::BadMatch);
+  return error(context, request, x11::CoreErrorCode::BadLength);
+}
+
+DispatchResult map_window(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request, bool mapped) {
+  x11::WindowLifecycleRequest decoded;
+  const auto status = mapped
+      ? x11::decode_map_window(request.bytes, context.byte_order, decoded)
+      : x11::decode_unmap_window(request.bytes, context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  if (!state.resources().find_window(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (decoded.window == state.screen().root_window) return {};
+  if (state.resources().is_policy_candidate(decoded.window) &&
+      context.integrated_lifecycle)
+    return DispatchResult::deferred(decoded.window, {}, mapped);
+  if (state.resources().is_policy_candidate(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto before = capture_structural_state(state.resources(), decoded.window);
+  switch (state.resources().set_local_map_intent(decoded.window, mapped)) {
+    case LocalLifecycleStatus::Success: {
+      DispatchResult result;
+      result.structural_transitions.push_back(
+          {mapped ? StructuralTransitionKind::Map
+                  : StructuralTransitionKind::Unmap,
+           before, capture_structural_state(state.resources(), decoded.window)});
+      return result;
+    }
+    case LocalLifecycleStatus::BadWindow:
+      return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+    case LocalLifecycleStatus::BadMatch:
+      return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+    case LocalLifecycleStatus::BadValue:
+      return error(context, request, x11::CoreErrorCode::BadValue);
+  }
+  return error(context, request, x11::CoreErrorCode::BadImplementation);
+}
+
+DispatchResult configure_window(ServerState& state,
+                                const DispatchContext& context,
+                                const x11::FramedRequest& request) {
+  x11::ConfigureWindowRequest decoded;
+  const auto status = x11::decode_configure_window(request.bytes,
+                                                    context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  if (!state.resources().find_window(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  if (decoded.window == state.screen().root_window)
+    return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+  if (decoded.stack_mode && *decoded.stack_mode != x11::CoreStackMode::Above &&
+      *decoded.stack_mode != x11::CoreStackMode::Below)
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 static_cast<std::uint32_t>(*decoded.stack_mode));
+  if (state.resources().is_policy_candidate(decoded.window) &&
+      context.integrated_lifecycle)
+    return DispatchResult::deferred(decoded.window, decoded);
+  if (state.resources().is_policy_candidate(decoded.window))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  LocalConfigure local{decoded.x, decoded.y, decoded.width, decoded.height,
+                       decoded.border_width, decoded.sibling,
+                       decoded.stack_mode == x11::CoreStackMode::Above
+                           ? LifecycleStackMode::Above
+                           : decoded.stack_mode == x11::CoreStackMode::Below
+                                 ? LifecycleStackMode::Below
+                                 : LifecycleStackMode::None};
+  const auto before = capture_structural_state(state.resources(), decoded.window);
+  switch (state.resources().configure_local(decoded.window, local)) {
+    case LocalLifecycleStatus::Success: {
+      DispatchResult result;
+      result.structural_transitions.push_back(
+          {StructuralTransitionKind::Configure, before,
+           capture_structural_state(state.resources(), decoded.window)});
+      return result;
+    }
+    case LocalLifecycleStatus::BadWindow:
+      return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+    case LocalLifecycleStatus::BadMatch:
+      return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
+    case LocalLifecycleStatus::BadValue:
+      return error(context, request, x11::CoreErrorCode::BadValue);
+  }
+  return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
 
 }  // namespace
@@ -527,6 +828,16 @@ DispatchResult dispatch_request(ServerState& state,
     switch (static_cast<x11::CoreOpcode>(request.opcode)) {
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);
+      case x11::CoreOpcode::ChangeWindowAttributes:
+        return change_window_attributes(state, context, request);
+      case x11::CoreOpcode::MapWindow:
+        return map_window(state, context, request, true);
+      case x11::CoreOpcode::UnmapWindow:
+        return map_window(state, context, request, false);
+      case x11::CoreOpcode::ConfigureWindow:
+        return configure_window(state, context, request);
+      case x11::CoreOpcode::GetWindowAttributes:
+        return get_window_attributes(state, context, request);
       case x11::CoreOpcode::DestroyWindow:
         return destroy_window(state, context, request);
       case x11::CoreOpcode::GetGeometry:

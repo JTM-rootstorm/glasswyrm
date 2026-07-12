@@ -1,0 +1,66 @@
+#pragma once
+
+#include "glasswyrmd/compositor_peer.hpp"
+#include "glasswyrmd/policy_peer.hpp"
+
+#include <chrono>
+#include <string>
+
+namespace glasswyrm::server {
+
+class RuntimeBridge {
+public:
+  using Clock = std::chrono::steady_clock;
+
+  RuntimeBridge(std::string policy_path, std::string compositor_path,
+                gw::protocol::x11::ScreenModel screen,
+                std::chrono::milliseconds deadline = std::chrono::seconds(10));
+
+  void start(Clock::time_point now = Clock::now()) noexcept;
+  [[nodiscard]] bool service(short policy_revents, short compositor_revents,
+                             Clock::time_point now, std::string &error);
+  [[nodiscard]] int policy_fd() const noexcept { return policy_.fd(); }
+  [[nodiscard]] short policy_events() const noexcept {
+    return policy_.wanted_events();
+  }
+  [[nodiscard]] int compositor_fd() const noexcept { return compositor_.fd(); }
+  [[nodiscard]] short compositor_events() const noexcept {
+    return compositor_.wanted_events();
+  }
+  [[nodiscard]] bool ready() const noexcept;
+  [[nodiscard]] int poll_timeout_ms(Clock::time_point now) const noexcept;
+  [[nodiscard]] bool submit_policy(const PolicySnapshotSubmission& submission,
+                                   std::string& error);
+  [[nodiscard]] bool policy_result_ready() const noexcept;
+  [[nodiscard]] bool policy_rejected_ready() const noexcept;
+  [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
+    return policy_.result();
+  }
+  [[nodiscard]] bool submit_compositor(
+      const CompositorSnapshotSubmission& submission, std::string& error);
+  [[nodiscard]] bool compositor_result_ready() const noexcept;
+  [[nodiscard]] bool compositor_rejected_ready() const noexcept;
+  [[nodiscard]] bool prepare_rollback() noexcept;
+  void clear_transaction_result() noexcept;
+
+private:
+  enum class Stage { Policy, Compositor, Ready, Failed };
+  void schedule_retry(Clock::time_point now) noexcept;
+
+  PolicyPeer policy_;
+  CompositorPeer compositor_;
+  Stage stage_{Stage::Policy};
+  Clock::time_point deadline_{};
+  Clock::time_point retry_at_{};
+  std::chrono::milliseconds deadline_duration_;
+  unsigned retry_index_{};
+  enum class TransactionStage { None, Policy, PolicyReady, PolicyRejected,
+                                Compositor, Complete, CompositorRejected };
+  TransactionStage transaction_stage_{TransactionStage::None};
+  TransactionStage resume_transaction_stage_{TransactionStage::None};
+  PolicySnapshotSubmission pending_policy_;
+  CompositorSnapshotSubmission pending_compositor_;
+  bool recovering_{};
+};
+
+} // namespace glasswyrm::server
