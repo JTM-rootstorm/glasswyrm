@@ -205,6 +205,15 @@ if get_option('gwm')
     link_with: gw_wm_policy_lib,
     include_directories: include_directories('.'),
   )
+  gwm_options_lib = static_library(
+    'gwm-options',
+    files('gwm/options.cpp'),
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gwm_options_dep = declare_dependency(
+    link_with: gwm_options_lib,
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
   executable(
     'gwm',
     files('gwm/main.cpp'),
