@@ -16,6 +16,20 @@ if get_option('gwcomp')
     include_directories: test_source_root_include,
   )
   test('gwcomp-options', gwcomp_options_test, timeout: 10)
+
+  gwcomp_process_test = executable(
+    'gwcomp_process_test',
+    files('integration/gwcomp_process_test.cpp'),
+    dependencies: gwipc_dep,
+    include_directories: test_source_root_include,
+  )
+  test(
+    'gwcomp-process',
+    gwcomp_process_test,
+    args: [gwcomp_program.full_path()],
+    depends: gwcomp_program,
+    timeout: 15,
+  )
 endif
 
 if get_option('gwcomp')

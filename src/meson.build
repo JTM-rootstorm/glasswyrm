@@ -210,7 +210,7 @@ if get_option('gwcomp')
     link_with: gwcomp_options_lib,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
-  executable(
+  gwcomp_program = executable(
     'gwcomp',
     files('gwcomp/main.cpp'),
     dependencies: [gwcomp_options_dep, gwipc_dep, gw_compositor_geometry_dep,
