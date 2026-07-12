@@ -63,7 +63,7 @@ std::optional<LifecycleSnapshot> apply_policy_result(
 CompositorSnapshotSubmission project_compositor(const LifecycleSnapshot& snapshot,
                                                 std::uint64_t commit,
                                                 std::uint64_t generation) {
-  CompositorSnapshotSubmission output{commit,generation,{},{}};
+  CompositorSnapshotSubmission output{commit,generation,{},{},{},{}};
   for(const auto& [id,value]:snapshot.windows){
     gwipc_surface_upsert surface{};surface.struct_size=sizeof(surface);surface.surface_id=(UINT64_C(1)<<32)|id;
     surface.x11_window_id=id;surface.output_id=snapshot.output_id;surface.logical_x=value.applied_x;surface.logical_y=value.applied_y;
