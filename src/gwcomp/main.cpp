@@ -200,6 +200,7 @@ int run(const glasswyrm::compositor::Options& options) {
   gw::compositor::Compositor compositor(options.dump_dir, manifest_path);
   bool peer_validated = false;
   gwipc_role peer_role = GWIPC_ROLE_UNKNOWN;
+  std::optional<gw::compositor::PeerProfile> peer_profile;
   bool accepted_any_frame = false;
   bool stop_after_flush = false;
   bool stopping = false;
@@ -234,6 +235,7 @@ int run(const glasswyrm::compositor::Options& options) {
                      peer.pid, peer.uid);
         peer_validated = false;
         peer_role = GWIPC_ROLE_UNKNOWN;
+        peer_profile.reset();
       }
     }
     if (producer && descriptors[1].revents != 0)
@@ -244,19 +246,17 @@ int run(const glasswyrm::compositor::Options& options) {
             GWIPC_CONNECTION_ESTABLISHED) {
       const auto info = gwipc_connection_peer_info(producer.get());
       peer_role = info.role;
-      const auto required = peer_role == GWIPC_ROLE_TEST_PRODUCER
-                                ? kM4Capabilities
-                                : peer_role == GWIPC_ROLE_PROTOCOL_SERVER
-                                      ? kM6Capabilities
-                                      : UINT64_MAX;
-      if ((info.capabilities & required) != required) {
+      peer_profile = gw::compositor::select_peer_profile(
+          peer_role, info.capabilities);
+      if (!peer_profile) {
         std::fprintf(stderr,
-                     "gwcomp: peer role=%u missing role-specific capabilities\n",
+                     "gwcomp: peer role=%u has invalid role capability profile\n",
                      static_cast<unsigned>(peer_role));
         compositor.disconnect();
         producer.reset();
         peer_role = GWIPC_ROLE_UNKNOWN;
       } else {
+        compositor.set_peer_profile(*peer_profile);
         peer_validated = true;
       }
     }
@@ -310,27 +310,29 @@ int run(const glasswyrm::compositor::Options& options) {
         case GWIPC_MESSAGE_SURFACE_REMOVE:
           applied = compositor.apply(*gwipc_decoded_surface_remove(contract.get())); break;
         case GWIPC_MESSAGE_SURFACE_DAMAGE:
-          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+          applied = peer_profile !=
+                        gw::compositor::PeerProfile::M6MetadataProtocolServer &&
                     compositor.apply(*gwipc_decoded_surface_damage(contract.get()));
           break;
         case GWIPC_MESSAGE_BUFFER_ATTACH: {
           int fd = -1;
           std::string error;
-          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+          applied = peer_profile !=
+                        gw::compositor::PeerProfile::M6MetadataProtocolServer &&
                     gwipc_message_take_fd(message.get(), 0, &fd) == GWIPC_STATUS_OK &&
                     compositor.attach(*gwipc_decoded_buffer_attach(contract.get()), fd, error);
           if (!applied) std::fprintf(stderr, "gwcomp: buffer rejected: %s\n", error.c_str());
           break;
         }
         case GWIPC_MESSAGE_BUFFER_DETACH:
-          applied = peer_role == GWIPC_ROLE_TEST_PRODUCER &&
+          applied = peer_profile !=
+                        gw::compositor::PeerProfile::M6MetadataProtocolServer &&
                     compositor.detach(*gwipc_decoded_buffer_detach(contract.get()));
           break;
         case GWIPC_MESSAGE_FRAME_COMMIT: {
           const auto& commit = *gwipc_decoded_frame_commit(contract.get());
           std::string error;
-          auto frame = compositor.commit(
-              commit, error, peer_role == GWIPC_ROLE_PROTOCOL_SERVER);
+          auto frame = compositor.commit(commit, error);
           if ((gwipc_message_flags(message.get()) & GWIPC_FLAG_ACK_REQUIRED) == 0)
             frame.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
           (void)enqueue_ack(producer.get(), message.get(), commit, frame);
@@ -363,6 +365,7 @@ int run(const glasswyrm::compositor::Options& options) {
       producer.reset();
       peer_validated = false;
       peer_role = GWIPC_ROLE_UNKNOWN;
+      peer_profile.reset();
       if ((options.once && accepted_any_frame) || stop_after_flush) stopping = true;
     }
   }

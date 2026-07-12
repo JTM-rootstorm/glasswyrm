@@ -18,6 +18,15 @@
 
 namespace gw::compositor {
 
+enum class PeerProfile {
+  M4TestProducer,
+  M6MetadataProtocolServer,
+  M7BufferedProtocolServer,
+};
+
+[[nodiscard]] std::optional<PeerProfile>
+select_peer_profile(gwipc_role role, std::uint64_t capabilities) noexcept;
+
 struct PresentedFrame {
   gwipc_frame_result result{GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA};
   std::uint64_t generation{};
@@ -31,6 +40,8 @@ public:
       std::filesystem::path dump_directory,
       std::optional<std::filesystem::path> scene_manifest = std::nullopt);
 
+  void set_peer_profile(PeerProfile profile) noexcept { profile_ = profile; }
+  [[nodiscard]] PeerProfile peer_profile() const noexcept { return profile_; }
   [[nodiscard]] bool begin_snapshot();
   [[nodiscard]] bool end_snapshot();
   void abort_snapshot();
@@ -44,8 +55,7 @@ public:
                             std::string& error);
   [[nodiscard]] bool detach(const gwipc_buffer_detach& value);
   [[nodiscard]] PresentedFrame commit(const gwipc_frame_commit& value,
-                                      std::string& error,
-                                      bool metadata_only_peer = false);
+                                      std::string& error);
   void disconnect();
 
   [[nodiscard]] const std::map<std::uint64_t, gwipc_buffer_release_reason>&
@@ -74,6 +84,7 @@ private:
   bool snapshot_invalid_{};
   std::set<std::uint64_t> snapshot_surface_ids_;
   std::set<std::uint64_t> snapshot_policy_ids_;
+  PeerProfile profile_{PeerProfile::M4TestProducer};
 };
 
 } // namespace gw::compositor
