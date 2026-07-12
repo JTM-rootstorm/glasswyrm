@@ -224,7 +224,7 @@ if get_option('glasswyrmd')
         'integration/glasswyrmd_input_recovery_test.cpp',
         'helpers/synthetic_input_client.cpp',
       ),
-      dependencies: gwipc_dep,
+      dependencies: [gwipc_dep, gw_x11_setup_dep],
       include_directories: test_source_root_include,
     )
     test(
