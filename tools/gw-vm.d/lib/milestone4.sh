@@ -38,6 +38,7 @@ failure_stage=dependency-preparation
 full_tests=not-run sanitizer=not-run compositor_only=not-run ipc_only=not-run
 typed_consumers=not-run basic_frame=not-run damage_frame=not-run stacking=not-run
 visibility=not-run clipping=not-run opacity=not-run buffer_release=not-run
+detach_remove=not-run unknown_reference=not-run
 invalid_metadata_isolation=not-run invalid_buffer_isolation=not-run
 malformed_peer_isolation=not-run reconnect_snapshot=not-run golden_hash_count=0
 frame_archive=not-run systemd_runtime=not-run socket_cleanup=not-run
@@ -104,7 +105,7 @@ failure_stage=compositor-only-build-and-test
 { meson setup "$gwcomp_build_dir" "$source_dir" -Dwerror=true -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false -Dheadless_backend=true -Drender_software=true; meson compile -C "$gwcomp_build_dir"; meson test -C "$gwcomp_build_dir" --print-errorlogs; } 2>&1 | tee -a "$meson_log"
 compositor_only=passed
 failure_stage=ipc-only-regression
-{ meson setup "$ipc_build_dir" "$source_dir" -Dwerror=true -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false; meson compile -C "$ipc_build_dir"; meson test -C "$ipc_build_dir" --print-errorlogs; } 2>&1 | tee -a "$meson_log"
+{ meson setup "$ipc_build_dir" "$source_dir" --prefix=/usr -Dwerror=true -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false; meson compile -C "$ipc_build_dir"; meson test -C "$ipc_build_dir" --print-errorlogs; } 2>&1 | tee -a "$meson_log"
 ipc_only=passed
 DESTDIR="$install_root" meson install -C "$ipc_build_dir" >>"$meson_log" 2>&1
 staged_lib_dir="$install_root/usr/lib64"; [[ -d "$staged_lib_dir" ]] || staged_lib_dir="$install_root/usr/lib"
