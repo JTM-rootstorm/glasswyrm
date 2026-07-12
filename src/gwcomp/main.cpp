@@ -26,8 +26,6 @@ constexpr std::uint64_t kM4Capabilities =
 constexpr std::uint64_t kCommonCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
-constexpr std::uint64_t kM6Capabilities =
-    kCommonCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr std::uint64_t kOfferedCapabilities =
     kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
