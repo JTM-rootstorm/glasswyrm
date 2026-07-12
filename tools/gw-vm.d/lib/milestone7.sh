@@ -58,7 +58,7 @@ record_facts() {
   journalctl -u gwm-m7.service --no-pager >"$artifact_dir/milestone7-gwm-journal.log" 2>&1
   journalctl -u gwcomp-m7.service --no-pager >"$artifact_dir/milestone7-gwcomp-journal.log" 2>&1
   systemctl reset-failed glasswyrmd-m7.service gwm-m7.service gwcomp-m7.service >/dev/null 2>&1
-  rm -rf /run/glasswyrm-m7 /tmp/.X11-unix/X99
+  rm -rf /run/glasswyrm-m7-gwm /run/glasswyrm-m7-gwcomp /tmp/.X11-unix/X99
   api_version=unknown; wire_version=unknown
   if [[ -x "$ipc_build_dir/tests/gwipc_wire_probe" ]]; then
     api_version="$("$ipc_build_dir/tests/gwipc_wire_probe" --print-api-version 2>/dev/null || printf unknown)"
@@ -100,19 +100,20 @@ for source in gwipc_cpp_consumer.cpp gwipc_policy_cpp_consumer.cpp gwipc_lifecyc
 api04_consumers=passed
 failure_stage=integrated-three-process-probe
 meson test -C "$runtime_build_dir" --print-errorlogs glasswyrmd-integrated-lifecycle 2>&1 | tee -a "$raw_log"
-runtime_dir=/run/glasswyrm-m7
-rm -rf "$runtime_dir" /tmp/.X11-unix/X99; mkdir -p "$runtime_dir" /tmp/.X11-unix
+gwm_socket=/run/glasswyrm-m7-gwm/gwm.sock
+comp_socket=/run/glasswyrm-m7-gwcomp/gwcomp.sock
+rm -rf /run/glasswyrm-m7-gwm /run/glasswyrm-m7-gwcomp /tmp/.X11-unix/X99; mkdir -p /tmp/.X11-unix
 unit_properties=(--property=Type=exec --property=Restart=no --property=NoNewPrivileges=yes --property=PrivateDevices=yes --property=RestrictAddressFamilies=AF_UNIX --property=CapabilityBoundingSet= --property=AmbientCapabilities=)
-systemd-run --unit=gwm-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwm --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwm" --ipc-socket "$runtime_dir/gwm.sock"
-systemd-run --unit=gwcomp-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwcomp --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwcomp" --ipc-socket "$runtime_dir/gwcomp.sock" --dump-dir "$dump_dir" --scene-manifest "$scene_dir/scene.jsonl"
-for socket in "$runtime_dir/gwm.sock" "$runtime_dir/gwcomp.sock"; do for _ in {1..200}; do [[ -S "$socket" ]] && break; sleep .05; done; [[ -S "$socket" ]]; done
+systemd-run --unit=gwm-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwm --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwm" --ipc-socket "$gwm_socket"
+systemd-run --unit=gwcomp-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwcomp --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwcomp" --ipc-socket "$comp_socket" --dump-dir "$dump_dir" --scene-manifest "$scene_dir/scene.jsonl"
+for socket in "$gwm_socket" "$comp_socket"; do for _ in {1..200}; do [[ -S "$socket" ]] && break; sleep .05; done; [[ -S "$socket" ]]; done
 # First prove that the accepted M6 metadata-only launch still emits no pixels.
-systemd-run --unit=glasswyrmd-m7 "${unit_properties[@]}" --property=PrivateTmp=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$runtime_dir/gwm.sock" --compositor-socket "$runtime_dir/gwcomp.sock"
+systemd-run --unit=glasswyrmd-m7 "${unit_properties[@]}" --property=PrivateTmp=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$gwm_socket" --compositor-socket "$comp_socket"
 for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .05; done; [[ -S /tmp/.X11-unix/X99 ]]
 "$runtime_build_dir/tests/x11_milestone6_probe" --display :99 --byte-order little >>"$raw_log" 2>&1
 [[ ! -e "$dump_dir/frames.jsonl" ]]; m6_metadata_regression=passed
 systemctl stop glasswyrmd-m7.service; rm -f /tmp/.X11-unix/X99
-systemd-run --unit=glasswyrmd-m7 "${unit_properties[@]}" --property=PrivateTmp=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$runtime_dir/gwm.sock" --compositor-socket "$runtime_dir/gwcomp.sock" --software-content
+systemd-run --unit=glasswyrmd-m7 "${unit_properties[@]}" --property=PrivateTmp=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$gwm_socket" --compositor-socket "$comp_socket" --software-content
 for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .05; done; [[ -S /tmp/.X11-unix/X99 ]]
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order little --scenario draw >>"$raw_log" 2>&1; raw_little=passed
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order big --scenario draw >>"$raw_log" 2>&1; raw_big=passed image_byte_order=passed
@@ -128,11 +129,11 @@ buffer_release=passed
 for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
 [[ -f "$control_dir/ready" ]] || { wait "$hold_pid"; exit 1; }
 systemctl restart gwcomp-m7.service
-for _ in {1..200}; do systemctl is-active --quiet gwcomp-m7.service && [[ -S "$runtime_dir/gwcomp.sock" ]] && break; sleep .05; done
-systemctl is-active --quiet gwcomp-m7.service; [[ -S "$runtime_dir/gwcomp.sock" ]]; sleep .25; compositor_restart=passed
+for _ in {1..200}; do systemctl is-active --quiet gwcomp-m7.service && [[ -S "$comp_socket" ]] && break; sleep .05; done
+systemctl is-active --quiet gwcomp-m7.service; [[ -S "$comp_socket" ]]; sleep .25; compositor_restart=passed
 systemctl restart gwm-m7.service
-for _ in {1..200}; do systemctl is-active --quiet gwm-m7.service && [[ -S "$runtime_dir/gwm.sock" ]] && break; sleep .05; done
-systemctl is-active --quiet gwm-m7.service; [[ -S "$runtime_dir/gwm.sock" ]]; sleep .25; gwm_restart=passed
+for _ in {1..200}; do systemctl is-active --quiet gwm-m7.service && [[ -S "$gwm_socket" ]] && break; sleep .05; done
+systemctl is-active --quiet gwm-m7.service; [[ -S "$gwm_socket" ]]; sleep .25; gwm_restart=passed
 touch "$control_dir/continue"; wait "$hold_pid"
 grep -F '"connection_preserved":true' "$restart_result"; connection_survival=passed
 grep -F '"post_restart_drawing":true' "$restart_result"; post_restart_drawing=passed
