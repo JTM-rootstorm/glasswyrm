@@ -168,39 +168,41 @@ int main(int argc, char** argv) try {
 
   std::vector<Event> events;
   auto add = [&](Event event) { events.push_back(event); };
+  const auto initial = input.barrier(1);
+  const auto start_time = initial.time_ms + 1;
   if (options.scenario == "routing" || options.scenario == "propagation") {
-    const auto motion_ack = input.motion(1, 2, 80, 80);
+    const auto motion_ack = input.motion(2, start_time, 80, 80);
     require(motion_ack.result == GWIPC_SYNTHETIC_INPUT_ACCEPTED,
             "motion was not accepted");
     add(wait_for(x11_client, 6));
-    require(events.back().time == 2 && events.back().event == window,
+    require(events.back().time == start_time && events.back().event == window,
             "motion target or time mismatch");
-    const auto press_ack = input.button(2, 3, 1, true);
+    const auto press_ack = input.button(3, start_time + 1, 1, true);
     require(press_ack.result == GWIPC_SYNTHETIC_INPUT_ACCEPTED ||
                 press_ack.result == GWIPC_SYNTHETIC_INPUT_FOCUS_UNCHANGED,
             "button press was not accepted");
     add(wait_for(x11_client, 4));
-    const auto release_ack = input.button(3, 4, 1, false);
+    const auto release_ack = input.button(4, start_time + 2, 1, false);
     require(release_ack.result == GWIPC_SYNTHETIC_INPUT_ACCEPTED,
             "button release was not accepted");
     add(wait_for(x11_client, 5));
-    (void)input.barrier(4);
+    (void)input.barrier(5);
   } else if (options.scenario == "state") {
-    (void)input.motion(1, 2, 80, 80);
+    (void)input.motion(2, start_time, 80, 80);
     add(wait_for(x11_client, 6));
-    (void)input.key(2, 3, 50, true); add(wait_for(x11_client, 2));
-    (void)input.key(3, 4, 38, true); add(wait_for(x11_client, 2));
+    (void)input.key(3, start_time + 1, 50, true); add(wait_for(x11_client, 2));
+    (void)input.key(4, start_time + 2, 38, true); add(wait_for(x11_client, 2));
     require(events.back().state == x11::state_mask::Shift,
             "shift state was not present on key event");
-    (void)input.key(4, 5, 38, false); add(wait_for(x11_client, 3));
-    (void)input.key(5, 6, 50, false); add(wait_for(x11_client, 3));
+    (void)input.key(5, start_time + 3, 38, false); add(wait_for(x11_client, 3));
+    (void)input.key(6, start_time + 4, 50, false); add(wait_for(x11_client, 3));
   } else {
-    const auto invalid = input.button(1, 2, 1, false);
+    const auto invalid = input.button(2, start_time, 1, false);
     require(invalid.result == GWIPC_SYNTHETIC_INPUT_INVALID_TRANSITION &&
                 invalid.delivered_event_count == 0,
             "invalid transition acknowledgement mismatch");
     x11_client.sync();
-    (void)input.barrier(2);
+    (void)input.barrier(3);
   }
 
   std::cout << "{\"byte_order\":\""
