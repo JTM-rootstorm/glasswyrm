@@ -218,6 +218,23 @@ if get_option('glasswyrmd')
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 45,
     )
+    glasswyrmd_input_recovery_test = executable(
+      'glasswyrmd_input_recovery_test',
+      files(
+        'integration/glasswyrmd_input_recovery_test.cpp',
+        'helpers/synthetic_input_client.cpp',
+      ),
+      dependencies: gwipc_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-input-recovery',
+      glasswyrmd_input_recovery_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 30,
+    )
   endif
 endif
 
