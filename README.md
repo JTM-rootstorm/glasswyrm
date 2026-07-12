@@ -4,9 +4,12 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 6. `glasswyrmd` retains its standalone
+The project has completed Milestone 7. `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
-headless, metadata-only top-level lifecycle.
+headless top-level lifecycle. The accepted M6 metadata-only mode remains the
+default; the explicit M7 `--software-content` mode adds depth-24 pixmaps,
+graphics contexts, core software raster requests, exposure events, and
+buffered top-level window publication.
 Milestone 4 has added tested scene/damage, read-only buffer import,
 software rendering, bounded headless output, and deterministic PPM dumps.
 `gwcomp` accepts and presents every repository-owned synthetic producer
@@ -15,10 +18,11 @@ and exact-pixel golden coverage. `gwm` is now a separate synthetic policy
 service with deterministic placement, stacking, focus, visibility, state, and
 policy-snapshot behavior. Integrated startup, full policy snapshots,
 metadata-only compositor scenes, deferred X11 lifecycle barriers, and
-structural event routing are implemented and Milestone 6 acceptance is complete.
-There
-is still no client drawing, input, broad X11 application support, or DRM/KMS
-output. Runtime tools remain placeholders.
+structural event routing are implemented and remain covered by the M6
+regression path. Milestone 7 adds the first honestly painted client windows
+without moving X11 raster semantics into `gwcomp`. There is still no input,
+text or font rendering, child-window composition, broad X11 application
+support, or DRM/KMS output. Runtime tools remain placeholders.
 
 ## Build
 
@@ -83,6 +87,7 @@ The complete command line is:
 ```text
 glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
+            [--software-content]
             [--help] [--version]
 ```
 
@@ -114,6 +119,19 @@ For the explicit integrated path, start the listeners before the server:
 are accepted. Mapped windows on this path have policy and scene metadata but no
 client content. Repository-owned raw, XCB, and restart-hold probes exercise the
 integrated path without claiming normal application compatibility.
+
+Add `--software-content` to enable the Milestone 7 buffered reference path:
+
+```sh
+./build/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock \
+  --software-content
+```
+
+This opt-in profile supports the documented depth-24 drawable and GXcopy
+subset only. It is intended for repository-owned toy clients and does not
+claim input or normal application compatibility.
 
 ## Setup probes
 
@@ -159,12 +177,13 @@ core error. It never maps or displays the window.
 
 ## Current binaries
 
-- `glasswyrmd`: owns X11 protocol and resource truth; implements standalone M2
-  behavior and the accepted explicit integrated M6 lifecycle.
+- `glasswyrmd`: owns X11 protocol and resource truth; implements standalone M2,
+  the accepted integrated M6 lifecycle, and the opt-in M7 drawable bridge.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
 - `gwcomp`: owns headless composition and final display authority; it retains
-  the M4 raster path and accepts M6 metadata-only scenes without fake buffers.
+  the M4 raster path, accepts M6 metadata-only scenes without fake buffers, and
+  accepts buffered ProtocolServer surfaces in M7 software-content mode.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -274,10 +293,22 @@ It runs the component build matrix, sanitizer suite, raw and XCB probes, live
 peer-restart hold probe, fixture checks, and artifact validation with Xorg and
 Xwayland absent.
 
+The Milestone 7 rendering acceptance command is:
+
+```sh
+./tools/gw-vm milestone7-runtime-test --yes
+```
+
+It preserves the M6 metadata/no-PPM substage, then validates both client byte
+orders, drawable resources, exposure events, deterministic buffered frames,
+buffer replacement and release, and live compositor/GWM restart replay.
+
 ## Compatibility
 
 Glasswyrm claims the standalone behavior documented in
 [`docs/protocols/x11-milestone-2.md`](docs/protocols/x11-milestone-2.md). The
 [Milestone 6 profile](docs/protocols/x11-milestone-6.md) records the narrower
-integrated behavior accepted for M6. Neither is a compatibility
-claim for normal X11 applications.
+integrated behavior accepted for M6. The
+[Milestone 7 profile](docs/protocols/x11-milestone-7.md) records the exact
+opt-in drawable and raster subset. None is a compatibility claim for normal
+X11 applications.
