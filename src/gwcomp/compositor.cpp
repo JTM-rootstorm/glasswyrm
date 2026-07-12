@@ -152,6 +152,22 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value, std::string& 
     }
   }
 
+  DamageRegion attachment_damage(
+      Rectangle{0, 0, staged.output->logical_width, staged.output->logical_height});
+  for (const auto& rectangle : result.damage) attachment_damage.add(rectangle);
+  for (const auto& [surface_id, surface] : staged.surfaces) {
+    if (!surface.visible) continue;
+    const auto old = committed_attachments_.find(surface_id);
+    const auto now = pending_attachments_.find(surface_id);
+    const bool changed = old == committed_attachments_.end()
+                             ? now != pending_attachments_.end()
+                             : now == pending_attachments_.end() || old->second != now->second;
+    if (changed)
+      if (const auto bounds = surface_bounds(surface, *staged.output))
+        attachment_damage.add(*bounds);
+  }
+  result.damage = attachment_damage.rectangles();
+
   glasswyrm::headless::Output scratch;
   if (!scratch.configure(staged.output->output_id, staged.output->logical_width,
                          staged.output->logical_height, error)) {
