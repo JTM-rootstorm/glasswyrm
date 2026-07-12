@@ -546,6 +546,11 @@ if get_option('glasswyrmd')
       files('xcb/xcb_milestone2_probe.c'),
       dependencies: xcb_test_dependency,
     )
+    xcb_milestone6_probe = executable(
+      'xcb_milestone6_probe',
+      files('xcb/xcb_milestone6_probe.c'),
+      dependencies: xcb_test_dependency,
+    )
   endif
 endif
 
