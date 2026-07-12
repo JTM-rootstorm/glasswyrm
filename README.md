@@ -4,8 +4,7 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 4 and has a host-tested Milestone 5 policy
-service awaiting its required real Gentoo VM acceptance run. `glasswyrmd`
+The project has completed Milestone 5. `glasswyrmd`
 retains its tested Milestone 2 local X11 setup and bounded headless core request
 behavior, and `libgwipc` provides the tested Milestone 3 versioned local IPC
 foundation.
@@ -142,7 +141,7 @@ core error. It never maps or displays the window.
 - `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
   headless request profile.
 - `gwm`: owns the emerging window-management policy truth; its M5 synthetic
-  ProtocolServer boundary is host-tested.
+  ProtocolServer boundary is host- and Gentoo-VM-tested.
 - `gwcomp`: owns the emerging headless composition and final display authority;
   its basic synthetic accepted-frame path is live and golden-tested.
 - `gwctl`: future runtime control utility.
@@ -242,8 +241,8 @@ The fixed M5 harness runs strict, sanitizer, GWM-only, and IPC-only builds,
 staged legacy/API 0.3 consumers, every synthetic policy scenario, exact JSON
 hash validation, malformed-peer isolation, and a hardened transient
 `gwm-m5.service`. It collects `milestone5-policies.tar` and strict summary
-evidence. The harness is host-tested; a passing real Gentoo guest run remains
-required before the roadmap marks M5 complete.
+evidence. The terminal-only Gentoo acceptance run passes without Xorg,
+Xwayland, DRM, or input devices.
 
 ## Compatibility
 
