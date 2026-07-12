@@ -123,6 +123,7 @@ failure_stage=systemd-runtime
 [[ ! -e "$socket_path" ]]
 systemd-run --unit="$unit" --property=Type=exec --property=NoNewPrivileges=yes \
   --property=PrivateDevices=yes --property=PrivateTmp=yes \
+  --property="BindReadOnlyPaths=$gwcomp_build_dir" --property="BindPaths=$frame_dir" \
   --property=RestrictAddressFamilies=AF_UNIX --property=CapabilityBoundingSet= \
   --property=AmbientCapabilities= --property=Restart=no \
   --property=RuntimeDirectory=glasswyrm-m4 --property=RuntimeDirectoryMode=0700 \
