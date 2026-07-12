@@ -1,4 +1,5 @@
 #include "gwcomp/options.hpp"
+#include "gwcomp/compositor.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -81,20 +82,15 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
   return true;
 }
 
-bool enqueue_incomplete_ack(gwipc_connection* connection,
-                            const gwipc_message* message) {
-  gwipc_decoded_contract* raw_contract = nullptr;
-  if (gwipc_contract_decode_message(message, &raw_contract) != GWIPC_STATUS_OK)
-    return false;
-  std::unique_ptr<gwipc_decoded_contract, ContractDeleter> contract(raw_contract);
-  const auto* commit = gwipc_decoded_frame_commit(contract.get());
-  if (!commit) return false;
+bool enqueue_ack(gwipc_connection* connection, const gwipc_message* message,
+                 const gwipc_frame_commit& commit,
+                 const gw::compositor::PresentedFrame& frame) {
   gwipc_frame_acknowledged acknowledged{};
   acknowledged.struct_size = sizeof(acknowledged);
-  acknowledged.commit_id = commit->commit_id;
-  acknowledged.output_id = commit->output_id;
-  acknowledged.presented_generation = 0;
-  acknowledged.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+  acknowledged.commit_id = commit.commit_id;
+  acknowledged.output_id = commit.output_id;
+  acknowledged.presented_generation = frame.generation;
+  acknowledged.result = frame.result;
   gwipc_contract_payload* raw_payload = nullptr;
   if (gwipc_contract_encode_frame_acknowledged(&acknowledged, &raw_payload) !=
       GWIPC_STATUS_OK)
@@ -107,6 +103,30 @@ bool enqueue_incomplete_ack(gwipc_connection* connection,
   outgoing.type = GWIPC_MESSAGE_FRAME_ACKNOWLEDGED;
   outgoing.flags = GWIPC_FLAG_REPLY;
   outgoing.reply_to = gwipc_message_sequence(message);
+  outgoing.payload = bytes;
+  outgoing.payload_size = size;
+  const auto status = gwipc_connection_enqueue(connection, &outgoing);
+  if (status != GWIPC_STATUS_OK)
+    std::fprintf(stderr, "gwcomp: acknowledgement enqueue failed: %s\n",
+                 gwipc_status_string(status));
+  return status == GWIPC_STATUS_OK;
+}
+
+bool enqueue_release(gwipc_connection* connection, std::uint64_t buffer_id,
+                     gwipc_buffer_release_reason reason) {
+  gwipc_buffer_release release{};
+  release.struct_size = sizeof(release);
+  release.buffer_id = buffer_id;
+  release.reason = reason;
+  gwipc_contract_payload* raw_payload = nullptr;
+  if (gwipc_contract_encode_buffer_release(&release, &raw_payload) != GWIPC_STATUS_OK)
+    return false;
+  std::unique_ptr<gwipc_contract_payload, PayloadDeleter> payload(raw_payload);
+  std::size_t size = 0;
+  const auto* bytes = gwipc_contract_payload_data(payload.get(), &size);
+  gwipc_outgoing_message outgoing{};
+  outgoing.struct_size = sizeof(outgoing);
+  outgoing.type = GWIPC_MESSAGE_BUFFER_RELEASE;
   outgoing.payload = bytes;
   outgoing.payload_size = size;
   return gwipc_connection_enqueue(connection, &outgoing) == GWIPC_STATUS_OK;
@@ -156,6 +176,9 @@ int run(const glasswyrm::compositor::Options& options) {
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
 
   std::unique_ptr<gwipc_connection, ConnectionDeleter> producer;
+  gw::compositor::Compositor compositor(options.dump_dir);
+  bool accepted_any_frame = false;
+  bool stop_after_flush = false;
   bool stopping = false;
   while (!stopping) {
     pollfd descriptors[3] = {
@@ -204,15 +227,84 @@ int run(const glasswyrm::compositor::Options& options) {
       (void)gwipc_message_payload(message.get(), &size);
       payload_bytes += size;
       ++messages;
-      if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_FRAME_COMMIT) {
-        (void)enqueue_incomplete_ack(producer.get(), message.get());
-        std::fprintf(stderr, "gwcomp: frame rejected result=RejectedIncompleteMetadata\n");
+      const auto type = gwipc_message_type(message.get());
+      if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN) {
+        if (!compositor.begin_snapshot())
+          std::fprintf(stderr, "gwcomp: rejected invalid snapshot begin\n");
+        continue;
       }
+      if (type == GWIPC_MESSAGE_SNAPSHOT_END) {
+        if (!compositor.end_snapshot())
+          std::fprintf(stderr, "gwcomp: rejected invalid snapshot end\n");
+        continue;
+      }
+      if (type == GWIPC_MESSAGE_SNAPSHOT_ABORT) {
+        compositor.abort_snapshot();
+        continue;
+      }
+      gwipc_decoded_contract* raw_contract = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw_contract) != GWIPC_STATUS_OK) {
+        std::fprintf(stderr, "gwcomp: rejected undecodable contract type=0x%04x\n", type);
+        continue;
+      }
+      std::unique_ptr<gwipc_decoded_contract, ContractDeleter> contract(raw_contract);
+      bool applied = true;
+      switch (type) {
+        case GWIPC_MESSAGE_OUTPUT_UPSERT:
+          applied = compositor.apply(*gwipc_decoded_output_upsert(contract.get())); break;
+        case GWIPC_MESSAGE_OUTPUT_REMOVE:
+          applied = compositor.apply(*gwipc_decoded_output_remove(contract.get())); break;
+        case GWIPC_MESSAGE_SURFACE_UPSERT:
+          applied = compositor.apply(*gwipc_decoded_surface_upsert(contract.get())); break;
+        case GWIPC_MESSAGE_SURFACE_REMOVE:
+          applied = compositor.apply(*gwipc_decoded_surface_remove(contract.get())); break;
+        case GWIPC_MESSAGE_SURFACE_DAMAGE:
+          applied = compositor.apply(*gwipc_decoded_surface_damage(contract.get())); break;
+        case GWIPC_MESSAGE_BUFFER_ATTACH: {
+          int fd = -1;
+          std::string error;
+          applied = gwipc_message_take_fd(message.get(), 0, &fd) == GWIPC_STATUS_OK &&
+                    compositor.attach(*gwipc_decoded_buffer_attach(contract.get()), fd, error);
+          if (!applied) std::fprintf(stderr, "gwcomp: buffer rejected: %s\n", error.c_str());
+          break;
+        }
+        case GWIPC_MESSAGE_BUFFER_DETACH:
+          applied = compositor.detach(*gwipc_decoded_buffer_detach(contract.get())); break;
+        case GWIPC_MESSAGE_FRAME_COMMIT: {
+          const auto& commit = *gwipc_decoded_frame_commit(contract.get());
+          std::string error;
+          auto frame = compositor.commit(commit, error);
+          if ((gwipc_message_flags(message.get()) & GWIPC_FLAG_ACK_REQUIRED) == 0)
+            frame.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+          (void)enqueue_ack(producer.get(), message.get(), commit, frame);
+          for (const auto& [buffer_id, reason] : compositor.releases())
+            (void)enqueue_release(producer.get(), buffer_id, reason);
+          compositor.clear_releases();
+          if (frame.result == GWIPC_FRAME_ACCEPTED) {
+            accepted_any_frame = true;
+            std::fprintf(stderr, "gwcomp: frame accepted commit=%llu frame=%llu hash=%016llx\n",
+                         static_cast<unsigned long long>(commit.commit_id),
+                         static_cast<unsigned long long>(frame.ordinal),
+                         static_cast<unsigned long long>(frame.hash));
+            if (options.max_frames && compositor.accepted_frames() == *options.max_frames)
+              stop_after_flush = true;
+          } else {
+            std::fprintf(stderr, "gwcomp: frame rejected result=%u reason=%s\n",
+                         static_cast<unsigned>(frame.result), error.c_str());
+          }
+          break;
+        }
+        default: applied = false; break;
+      }
+      if (!applied && type != GWIPC_MESSAGE_FRAME_COMMIT)
+        std::fprintf(stderr, "gwcomp: rejected contract type=0x%04x\n", type);
     }
     if (producer && gwipc_connection_get_state(producer.get()) ==
                         GWIPC_CONNECTION_CLOSED) {
       std::fprintf(stderr, "gwcomp: producer disconnected, cleared surfaces=0 buffers=0\n");
+      compositor.disconnect();
       producer.reset();
+      if ((options.once && accepted_any_frame) || stop_after_flush) stopping = true;
     }
   }
 
