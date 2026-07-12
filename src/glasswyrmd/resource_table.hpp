@@ -48,7 +48,7 @@ enum class PropertyMutationStatus {
   BadAlloc,
 };
 enum class PropertyReadStatus { Success, BadWindow, BadValue };
-enum class CreatePixmapStatus { Success, BadIdChoice, BadDrawable, BadValue, BadAlloc };
+enum class CreatePixmapStatus { Success, BadIdChoice, BadDrawable, BadValue, BadMatch, BadAlloc };
 enum class FreePixmapStatus { Success, BadPixmap };
 enum class CreateGcStatus { Success, BadIdChoice, BadDrawable, BadMatch, BadAlloc };
 enum class FreeGcStatus { Success, BadGContext };

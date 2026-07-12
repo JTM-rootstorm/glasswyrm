@@ -527,6 +527,7 @@ DispatchResult create_pixmap(ServerState& state, const DispatchContext& context,
     case CreatePixmapStatus::BadIdChoice: return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);
     case CreatePixmapStatus::BadDrawable: return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
     case CreatePixmapStatus::BadValue: return error(context, request, x11::CoreErrorCode::BadValue, request.data == 24 && width && height ? 0 : request.data);
+    case CreatePixmapStatus::BadMatch: return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
     case CreatePixmapStatus::BadAlloc: return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
   return {};
@@ -623,7 +624,8 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
   const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
-  if (!valid) return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+  if (!valid) return error(context, request, known_drawable(state.resources(), drawable)
+      ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
   struct Fill { geometry::Rectangle rectangle; }; std::vector<Fill> fills;
   fills.reserve((request.bytes.size() - 12U) / 8U);
   while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
