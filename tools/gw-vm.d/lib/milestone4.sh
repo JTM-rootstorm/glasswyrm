@@ -74,7 +74,7 @@ record_facts() {
     printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' "$(meson --version)" "$(ninja --version)" "$(systemctl --version | head -n1)"
     printf 'api_version=%s\nwire_version=%s\n' "$api_version" "$wire_version"
     if package_installed x11-base/xorg-server || package_installed x11-base/xwayland; then echo x_servers_absent=false; else echo x_servers_absent=true; fi
-    for key in full_tests sanitizer compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot golden_hash_count frame_archive systemd_runtime socket_cleanup; do
+    for key in full_tests sanitizer compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release detach_remove unknown_reference invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot golden_hash_count frame_archive systemd_runtime socket_cleanup; do
       printf '%s=%s\n' "$key" "${!key}"
     done
   } >"$facts"
@@ -135,6 +135,8 @@ run_producer basic "$producer_log"; basic_frame=passed
 run_producer damage-update "$producer_log"; damage_frame=passed
 for scenario in stacking visibility clipping opacity; do run_producer "$scenario" "$producer_log"; printf -v "$scenario" %s passed; done
 run_producer buffer-replace "$release_log"; grep -F buffer-released "$release_log"; buffer_release=passed
+run_producer detach-remove "$release_log"; grep -F 'reason=2' "$release_log"; detach_remove=passed
+run_producer unknown-reference "$producer_log"; unknown_reference=passed
 before="$(sha256sum "$frame_dir/frames.jsonl")"
 run_producer invalid-metadata "$malformed_log"; systemctl is-active --quiet "$unit"; [[ "$(sha256sum "$frame_dir/frames.jsonl")" == "$before" ]]; invalid_metadata_isolation=passed
 run_producer invalid-buffer "$malformed_log"; systemctl is-active --quiet "$unit"; [[ "$(sha256sum "$frame_dir/frames.jsonl")" == "$before" ]]; invalid_buffer_isolation=passed
