@@ -95,7 +95,7 @@ CodecStatus decode(std::span<const std::uint8_t> b, PolicyWindowUpsert &v) {
   x.attention_requested = a;
   if (!x.window_id || !x.requested_width || !x.requested_height || wt > 3 ||
       mi > 1 || o > 1 || !tri(d) || f > 1 || m > 1 || n > 1 || a > 1 ||
-      !x.creation_serial || (mi == 0 ? x.map_serial != 0 : x.map_serial == 0) ||
+      !x.creation_serial || (mi != 0 && x.map_serial == 0) ||
       x.flags || z16 || z)
     return CodecStatus::InvalidValue;
   v = x;

@@ -148,8 +148,9 @@ void invalid_values() {
   require(decode(wb, dw) == CodecStatus::InvalidValue,
           "invalid window enum rejected");
   window.map_intent = PolicyMapIntent::Unmapped;
-  require(decode(encode(window), dw) == CodecStatus::InvalidValue,
-          "unmapped window with map serial rejected");
+  require(decode(encode(window), dw) == CodecStatus::Ok &&
+              dw.map_serial == window.map_serial,
+          "unmapped window retains its ordering serial");
   PolicyWindowState state{10,
                           0,
                           2,

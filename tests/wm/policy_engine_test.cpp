@@ -148,7 +148,7 @@ void transients_override_and_states() {
               evaluated.policy.windows.at(50).final_y == 90,
           "nested transients resolve geometry and depth-first stacking");
 
-  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 0;
+  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 99;
   raw.windows.at(20).fullscreen_requested = true;
   raw.windows.at(20).maximized_requested = true;
   raw.windows.at(20).minimized_requested = true;
