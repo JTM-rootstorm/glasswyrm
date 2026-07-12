@@ -704,6 +704,20 @@ int Server::run() {
           return 1;
         }
       }
+      if (lifecycle && bridge->policy_rejected_ready() &&
+          !lifecycle->policy_rejected()) {
+        std::fprintf(stderr,
+                     "glasswyrmd: policy rejection transition failed\n");
+        close_signal_pipe();
+        return 1;
+      }
+      if (lifecycle && bridge->compositor_rejected_ready() &&
+          !lifecycle->compositor_rejected()) {
+        std::fprintf(stderr,
+                     "glasswyrmd: compositor rollback transition failed\n");
+        close_signal_pipe();
+        return 1;
+      }
       if (lifecycle && bridge->compositor_result_ready() &&
           !lifecycle->compositor_accepted()) {
         std::fprintf(stderr,

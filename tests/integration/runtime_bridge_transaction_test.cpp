@@ -101,6 +101,27 @@ int main(int argc, char** argv) {
   require(bridge.policy_result().generation == 4,
           "restarted policy peer completes the retained transaction");
 
+  gwipc_policy_lifecycle_window_upsert unsupported{};
+  unsupported.struct_size = sizeof(unsupported);
+  unsupported.window.struct_size = sizeof(unsupported.window);
+  unsupported.window.window_id = 100;
+  unsupported.window.parent_window_id = 1;
+  unsupported.window.workspace_id = 2;
+  unsupported.window.requested_width = 64;
+  unsupported.window.requested_height = 64;
+  unsupported.window.window_type = GWIPC_POLICY_WINDOW_NORMAL;
+  unsupported.window.map_intent = GWIPC_POLICY_UNMAPPED;
+  unsupported.window.decoration_preference = GWIPC_TRI_STATE_UNKNOWN;
+  unsupported.window.creation_serial = 1;
+  unsupported.stack_mode = GWIPC_POLICY_STACK_NONE;
+  require(bridge.prepare_rollback() &&
+              bridge.submit_policy({5, 5, {unsupported}}, error),
+          "submit wire-valid unsupported policy metadata");
+  drive_until(bridge, [&] { return bridge.policy_rejected_ready(); },
+              "semantic policy rejection timed out");
+  require(bridge.prepare_rollback(),
+          "semantic rejection remains available to coordinator rollback");
+
   bridge.start();
   require(!bridge.policy_result_ready() &&
               !bridge.compositor_result_ready() &&
