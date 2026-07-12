@@ -281,9 +281,13 @@ CreatePixmapStatus ResourceTable::create_pixmap(
     const std::uint16_t width, const std::uint16_t height) {
   if (!valid_new_resource_id(xid, resource_base, resource_mask))
     return CreatePixmapStatus::BadIdChoice;
-  const auto valid_anchor = drawable == screen_.root_window || find_window(drawable) ||
-                            find_pixmap(drawable);
+  const auto* anchor_window = find_window(drawable);
+  const auto valid_anchor = drawable == screen_.root_window || anchor_window || find_pixmap(drawable);
   if (!valid_anchor) return CreatePixmapStatus::BadDrawable;
+  if (anchor_window && drawable != screen_.root_window &&
+      (anchor_window->parent != screen_.root_window ||
+       anchor_window->window_class != WindowClass::InputOutput || anchor_window->depth != 24))
+    return CreatePixmapStatus::BadMatch;
   if (depth != 24 || width == 0 || height == 0)
     return CreatePixmapStatus::BadValue;
   if (resource_count(ResourceType::Pixmap) >= limits_.maximum_pixmaps)
@@ -331,7 +335,12 @@ CreateGcStatus ResourceTable::create_gc(
     return CreateGcStatus::BadIdChoice;
   std::uint8_t depth = 0;
   if (drawable == screen_.root_window) depth = screen_.root_depth;
-  else if (const auto* window = find_window(drawable)) depth = window->depth;
+  else if (const auto* window = find_window(drawable)) {
+    if (window->parent != screen_.root_window ||
+        window->window_class != WindowClass::InputOutput)
+      return CreateGcStatus::BadMatch;
+    depth = window->depth;
+  }
   else if (const auto* pixmap = find_pixmap(drawable)) depth = pixmap->depth;
   else return CreateGcStatus::BadDrawable;
   if (depth != 24) return CreateGcStatus::BadMatch;
