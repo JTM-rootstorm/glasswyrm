@@ -4,6 +4,7 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/policy_contract.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <fcntl.h>
@@ -24,7 +25,7 @@ using gw::test::require;
 
 constexpr auto kCapabilities =
     GWIPC_CAP_FD_PASSING | GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE |
-    GWIPC_CAP_MEMFD_BUFFERS;
+    GWIPC_CAP_MEMFD_BUFFERS | GWIPC_CAP_WINDOW_POLICY;
 
 struct RawPair {
   gwipc_connection* connection{new gwipc_connection};
@@ -81,12 +82,14 @@ gwipc_status enqueue(gwipc_connection* connection, std::uint16_t type,
 
 void send_record(int socket, std::uint64_t sequence, std::uint16_t type,
                  std::uint32_t flags,
-                 std::span<const std::uint8_t> payload = {}) {
+                 std::span<const std::uint8_t> payload = {},
+                 std::uint64_t reply_to = 0) {
   gw::ipc::wire::Envelope envelope;
   envelope.type = static_cast<gw::ipc::wire::MessageType>(type);
   envelope.flags = flags;
   envelope.payload_size = static_cast<std::uint32_t>(payload.size());
   envelope.sequence = sequence;
+  envelope.reply_to = reply_to;
   const auto header = gw::ipc::wire::encode_envelope(envelope);
   std::vector<std::uint8_t> record(header.begin(), header.end());
   record.insert(record.end(), payload.begin(), payload.end());
@@ -102,6 +105,55 @@ void send_record(int socket, std::uint64_t sequence, std::uint16_t type,
                  sent, errno);
   require(sent == static_cast<ssize_t>(record.size()),
           "send wire record");
+}
+
+void test_policy_commit_correlation() {
+  RawPair pair;
+  const auto commit = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyCommit{41, 7, 0});
+  require(enqueue(pair.connection, GWIPC_MESSAGE_POLICY_COMMIT,
+                  GWIPC_FLAG_ACK_REQUIRED, commit) == GWIPC_STATUS_OK &&
+              pair.connection->pending_policy_commits.at(1) == 41,
+          "outgoing policy commit records correlation identity");
+  const auto acknowledged = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyAcknowledged{
+          41, 7, 8, 9, 2, gw::ipc::wire::PolicyResult::Accepted});
+  send_record(pair.peer, 1, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, acknowledged, 1);
+  require(gwipc_connection_process_poll_events(pair.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              pair.connection->pending_policy_commits.empty(),
+          "matching policy acknowledgement clears correlation state");
+
+  RawPair incoming;
+  const auto incoming_commit = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyCommit{55, 9, 0});
+  send_record(incoming.peer, 1, GWIPC_MESSAGE_POLICY_COMMIT,
+              GWIPC_FLAG_ACK_REQUIRED, incoming_commit);
+  require(gwipc_connection_process_poll_events(incoming.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              incoming.connection->incoming_policy_commits.at(1) == 55,
+          "incoming policy commit records reply identity");
+  const auto reply = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyAcknowledged{
+          55, 9, 10, 11, 1, gw::ipc::wire::PolicyResult::Accepted});
+  require(enqueue(incoming.connection, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
+                  GWIPC_FLAG_REPLY, reply, 1) == GWIPC_STATUS_OK &&
+              incoming.connection->incoming_policy_commits.empty(),
+          "outgoing policy acknowledgement matches incoming commit");
+
+  RawPair mismatch;
+  require(enqueue(mismatch.connection, GWIPC_MESSAGE_POLICY_COMMIT,
+                  GWIPC_FLAG_ACK_REQUIRED, commit) == GWIPC_STATUS_OK,
+          "queue policy commit before mismatched reply");
+  const auto wrong = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyAcknowledged{
+          42, 7, 8, 9, 2, gw::ipc::wire::PolicyResult::Accepted});
+  send_record(mismatch.peer, 1, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, wrong, 1);
+  require(gwipc_connection_process_poll_events(mismatch.connection, POLLIN) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "mismatched policy acknowledgement is rejected");
 }
 
 void test_outgoing_snapshot_violations_are_atomic() {
@@ -293,6 +345,7 @@ void test_message_descriptor_ownership() {
 }  // namespace
 
 int main() {
+  test_policy_commit_correlation();
   test_outgoing_snapshot_violations_are_atomic();
   test_incoming_snapshot_violation_closes_after_error();
   test_disconnect_marks_both_snapshot_directions_aborted();

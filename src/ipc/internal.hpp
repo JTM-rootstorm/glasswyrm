@@ -21,7 +21,7 @@ inline constexpr std::uint32_t kKnownCapabilities =
     GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_SCALE_METADATA |
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT |
-    GWIPC_CAP_TRACE_METADATA;
+    GWIPC_CAP_TRACE_METADATA | GWIPC_CAP_WINDOW_POLICY;
 
 struct Config {
   std::string path;
@@ -107,6 +107,8 @@ struct gwipc_connection {
   std::unordered_map<std::uint64_t, std::uint64_t> pending_ping_nonces;
   std::unordered_map<std::uint64_t, std::uint64_t> pending_frame_commits;
   std::unordered_map<std::uint64_t, std::uint64_t> incoming_frame_commits;
+  std::unordered_map<std::uint64_t, std::uint64_t> pending_policy_commits;
+  std::unordered_map<std::uint64_t, std::uint64_t> incoming_policy_commits;
   gw::ipc::SnapshotState outgoing_snapshot;
   gw::ipc::SnapshotState incoming_snapshot;
 

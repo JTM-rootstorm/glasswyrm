@@ -80,6 +80,7 @@ if get_option('libgwipc')
     'ipc/wire/envelope.cpp',
     'ipc/wire/control.cpp',
     'ipc/wire/compositor_contract.cpp',
+    'ipc/wire/policy_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
   gwipc_wire_lib = static_library(
@@ -101,6 +102,7 @@ if get_option('libgwipc')
     files(
       'ipc/public_api.cpp',
       'ipc/contract_api.cpp',
+      'ipc/control_api.cpp',
       'ipc/message.cpp',
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
@@ -116,7 +118,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.2.0',
+    version: '0.3.0',
     soversion: '0',
     install: true,
   )
@@ -137,6 +139,8 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/connection.h',
     '../include/glasswyrm/ipc/message.h',
     '../include/glasswyrm/ipc/contracts.h',
+    '../include/glasswyrm/ipc/control.h',
+    '../include/glasswyrm/ipc/policy.h',
     subdir: 'glasswyrm/ipc',
   )
 
@@ -146,7 +150,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.2.0',
+    version: '0.3.0',
   )
 endif
 
@@ -192,11 +196,35 @@ if get_option('glasswyrmd')
 endif
 
 if get_option('gwm')
-  executable(
+  gw_wm_policy_lib = static_library(
+    'gw-wm-policy',
+    files('wm/policy_engine.cpp', 'wm/transaction.cpp'),
+    include_directories: include_directories('.'),
+  )
+  gw_wm_policy_dep = declare_dependency(
+    link_with: gw_wm_policy_lib,
+    include_directories: include_directories('.'),
+  )
+  gwm_options_lib = static_library(
+    'gwm-options',
+    files('gwm/options.cpp'),
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gwm_options_dep = declare_dependency(
+    link_with: gwm_options_lib,
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gwm_program = executable(
     'gwm',
     files('gwm/main.cpp'),
-    dependencies: gw_scaffold_dep,
+    dependencies: [gwm_options_dep, gw_wm_policy_dep, gwipc_dep],
     install: true,
+  )
+  gwm_m5_producer_program = executable(
+    'gwm_m5_producer',
+    files('../tests/integration/gwm_m5_producer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
   )
 endif
 

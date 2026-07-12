@@ -10,3 +10,8 @@ GWIPC_0.2 {
     gwipc_contract_*;
     gwipc_decoded_*;
 } GWIPC_0.1;
+
+GWIPC_0.3 {
+  global:
+    gwipc_control_*;
+} GWIPC_0.2;

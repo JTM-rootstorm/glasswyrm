@@ -36,6 +36,27 @@ is_true() {
   [[ "$1" == "true" ]]
 }
 
+semantic_version_at_least() {
+  local actual=$1 minimum=$2
+  local actual_major actual_minor actual_patch
+  local minimum_major minimum_minor minimum_patch
+  [[ $actual =~ ^([0-9]{1,5})\.([0-9]{1,5})\.([0-9]{1,5})$ ]] || return 1
+  actual_major=$((10#${BASH_REMATCH[1]}))
+  actual_minor=$((10#${BASH_REMATCH[2]}))
+  actual_patch=$((10#${BASH_REMATCH[3]}))
+  ((actual_major <= 65535 && actual_minor <= 65535 && actual_patch <= 65535)) || return 1
+  [[ $minimum =~ ^([0-9]{1,5})\.([0-9]{1,5})\.([0-9]{1,5})$ ]] || return 1
+  minimum_major=$((10#${BASH_REMATCH[1]}))
+  minimum_minor=$((10#${BASH_REMATCH[2]}))
+  minimum_patch=$((10#${BASH_REMATCH[3]}))
+  ((minimum_major <= 65535 && minimum_minor <= 65535 && minimum_patch <= 65535)) || return 1
+
+  ((actual_major > minimum_major)) ||
+    ((actual_major == minimum_major && actual_minor > minimum_minor)) ||
+    ((actual_major == minimum_major && actual_minor == minimum_minor &&
+      actual_patch >= minimum_patch))
+}
+
 require_no_extra_args() {
   local command_name="$1"
   shift

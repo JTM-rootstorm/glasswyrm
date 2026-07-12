@@ -1,0 +1,28 @@
+{
+  "scenario": "fullscreen",
+  "commit_id": 100,
+  "producer_generation": 1,
+  "applied_generation": 1,
+  "result": "Accepted",
+  "policy_hash": "109addad556d4a1e",
+  "window_count": 1,
+  "windows": [
+    {
+      "window_id": 1501,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 768,
+      "stacking": 0,
+      "visible": true,
+      "focused": true,
+      "managed": true,
+      "decoration_eligible": false,
+      "applied_state": "Fullscreen",
+      "fullscreen_eligible": "True",
+      "direct_scanout_eligible": "Unknown"
+    }
+  ]
+}
