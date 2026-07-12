@@ -352,7 +352,7 @@ int Server::run() {
     ClientId owner{};
     std::uint32_t resource_base{}, resource_mask{};
     std::uint64_t creation_serial{};
-    bool destroy{};
+    std::optional<WindowDestroyPlan> destroy;
     std::optional<ClientCleanupPlan> cleanup;
   };
   std::map<std::uint64_t, PendingMutation> pending_mutations;
@@ -432,7 +432,12 @@ int Server::run() {
             *pending.create, pending.creation_serial, snapshot);
       } else if (active && mutation != pending_mutations.end() &&
                  mutation->second.destroy) {
-        committed = state_.commit_destroy_lifecycle(active->window, snapshot);
+        auto staged = state_;
+        committed = staged.resources().commit_destroy_plan(
+                        *mutation->second.destroy) ==
+                    DestroyWindowStatus::Success;
+        committed = committed && staged.commit_lifecycle(snapshot);
+        if (committed) state_ = std::move(staged);
       } else if (active && mutation != pending_mutations.end() &&
                  mutation->second.cleanup) {
         auto staged = state_;
@@ -463,7 +468,18 @@ int Server::run() {
         recipients.reserve(clients_.size());
         for (const auto& client : clients_) recipients.push_back(client.get());
         EventRouter router(state_.resources());
-        if (operation->kind == LifecycleOperationKind::ClientCleanup &&
+        if (operation->kind == LifecycleOperationKind::Destroy &&
+            mutation != pending_mutations.end() && mutation->second.destroy) {
+          for (const auto& item : mutation->second.destroy->postorder) {
+            StructuralEventState before{};
+            before.target = item.xid;
+            before.parent = item.parent;
+            before.structure_recipients = item.structure_recipients;
+            before.substructure_recipients = item.substructure_recipients;
+            (void)router.route_transition(StructuralTransitionKind::Destroy,
+                                          before, std::nullopt, recipients);
+          }
+        } else if (operation->kind == LifecycleOperationKind::ClientCleanup &&
             mutation != pending_mutations.end() && mutation->second.cleanup) {
           for (const auto& item : mutation->second.cleanup->postorder) {
             StructuralEventState before{};
@@ -528,13 +544,18 @@ int Server::run() {
       } else if (result.deferred_destroy) {
         operation.kind = LifecycleOperationKind::Destroy;
         auto destroy = state_.propose_destroy_lifecycle(result.deferred_window);
-        if (!destroy) return false;
+        auto plan = state_.resources().capture_destroy_plan(
+            result.deferred_window);
+        if (!destroy || !plan) return false;
         proposed = std::move(*destroy);
-        mutation.destroy = true;
+        mutation.destroy = std::move(*plan);
       } else {
       auto found = proposed.windows.find(result.deferred_window);
       if (found == proposed.windows.end()) return false;
-      if (result.deferred_configure) {
+      if (result.deferred_override_redirect) {
+        operation.kind = LifecycleOperationKind::OverrideChange;
+        found->second.override_redirect = *result.deferred_override_redirect;
+      } else if (result.deferred_configure) {
         operation.kind = LifecycleOperationKind::Configure;
         const auto& request = *result.deferred_configure;
         if (request.x) found->second.requested_x = *request.x;
@@ -575,6 +596,8 @@ int Server::run() {
              client.last_request_sequence(), 0,
              static_cast<std::uint8_t>(result.deferred_configure
                                            ? gw::protocol::x11::CoreOpcode::ConfigureWindow
+                                           : result.deferred_override_redirect
+                                                 ? gw::protocol::x11::CoreOpcode::ChangeWindowAttributes
                                            : result.deferred_map
                                                  ? gw::protocol::x11::CoreOpcode::MapWindow
                                                  : gw::protocol::x11::CoreOpcode::UnmapWindow),

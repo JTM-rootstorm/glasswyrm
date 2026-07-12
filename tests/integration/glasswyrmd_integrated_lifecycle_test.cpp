@@ -222,6 +222,17 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
   gw::test::require(reply[0] == 1 &&
                         gw::test::read_wire_u16(reply.data() + 16, order) == 2,
                     "unmapped top-level windows remain in root tree");
+  session.client.send_all(window_request(
+      session.wire, x11::CoreOpcode::DestroyWindow, first, order));
+  event = session.packet();
+  gw::test::require(
+      event[0] == 17 && gw::test::read_wire_u16(event.data() + 2, order) == 24,
+      "accepted top-level destroy emits DestroyNotify at its sequence");
+  session.client.send_all(session.wire.query_tree(1));
+  reply = session.reply();
+  gw::test::require(reply[0] == 1 &&
+                        gw::test::read_wire_u16(reply.data() + 16, order) == 1,
+                    "destroyed top-level window leaves committed root tree");
 }
 } // namespace
 
