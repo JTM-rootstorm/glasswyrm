@@ -920,113 +920,36 @@ render: add ARGB over XRGB reference blend path
 docs: record initial protocol compatibility tiers
 ```
 
-## 25. Initial milestones
+## 25. Milestone roadmap
 
-### Milestone 0: Repository skeleton
+The implementation roadmap is intentionally split into narrow, independently
+testable milestones. Completed milestones describe only behavior proven by the
+repository's tests and acceptance harnesses.
 
-Deliverables:
+```text
+M0  Repository skeleton                         complete
+M1  X11 setup service                           complete
+M2  Core protocol and resources                 complete
+M3  Versioned IPC foundation                    complete
+M4  Headless compositor and synthetic surfaces
+M5  Window-manager policy scaffold
+M6  Three-process mapped-window lifecycle
+M7  Drawable and software-rendering bridge
+M8  Synthetic input and event routing
+M9  Simple real X11 clients
+M10 DRM/KMS software scanout
+M11 Interactive desktop baseline
+M12 Efficient buffers and game-oriented clients
+M13 Output model and per-output scaling
+M14 Variable refresh rate
+M15 Color management and HDR
+M16 Toolkit and daily-driver expansion
+```
 
-- Build system skeleton.
-- Directory structure.
-- Minimal README.
-- Spec and agent instructions.
-- Empty or stub test harness.
-
-Success criteria:
-
-- Project configures.
-- Project builds a placeholder binary.
-- Test runner executes at least one placeholder test.
-
-### Milestone 1: X11 handshake and fake client tests
-
-Deliverables:
-
-- Unix socket accept loop.
-- X11 setup handshake parser and reply.
-- Byte-order handling.
-- Basic client state.
-- Unit tests for valid/invalid handshakes.
-
-Success criteria:
-
-- Toy client can connect and complete setup.
-- Invalid clients fail cleanly.
-
-### Milestone 2: Resource table and basic requests
-
-Deliverables:
-
-- Resource ID table.
-- Basic request dispatch.
-- Error replies.
-- Create/destroy window stubs.
-- Atom/property basics.
-
-Success criteria:
-
-- Toy client can create and destroy resources.
-- Resource leaks are detectable in tests.
-
-### Milestone 3: Headless compositor and IPC scaffold
-
-Deliverables:
-
-- `libgwipc` skeleton for versioned server/WM/compositor messages.
-- `gwcomp` headless output.
-- Software framebuffer.
-- Synthetic surface import/update path.
-- Pixel dump tests.
-
-Success criteria:
-
-- `gwcomp` imports a synthetic surface and presents it in a framebuffer dump.
-- Missing required surface metadata is rejected or logged instead of silently
-  guessed.
-- Pixel tests are deterministic.
-
-### Milestone 4: Simple real X clients
-
-Deliverables:
-
-- Enough protocol support for simple clients.
-- Basic input events.
-- Minimal `gwm` process, or an explicitly labeled built-in test policy mode, for placement and focus.
-- Basic window management policy.
-- Server/WM/compositor IPC path for mapped windows.
-
-Success criteria:
-
-- Run simple XCB clients.
-- Run `xeyes` or `xclock` if practical.
-- Map, place, focus, and restack simple windows through `gwm` without making `gwcomp` own X11 protocol semantics.
-
-### Milestone 5: DRM/KMS backend
-
-Deliverables:
-
-- Basic DRM device discovery.
-- Connector/mode selection.
-- Dumb-buffer scanout or equivalent early path.
-- TTY/recovery notes.
-
-Success criteria:
-
-- Glasswyrm can display a test scene on real hardware.
-- Headless tests remain the default validation path.
-
-### Milestone 6: Modern display experiments
-
-Deliverables:
-
-- `GW_SCALE` sketch and prototype.
-- VRR capability discovery and policy sketch.
-- HDR/color metadata internal structs.
-- Server/WM/compositor metadata contract for scale, color, HDR, presentation, and fullscreen/direct-scanout policy.
-
-Success criteria:
-
-- Modern-display features have explicit prototypes without destabilizing the core server, window manager, or compositor authority boundaries.
+Milestone 4 proves the compositor-facing architecture with a synthetic producer
+and deterministic headless output. It does not connect `glasswyrmd` or `gwm`,
+map X11 windows, route input, or access display hardware. Those boundaries stay
+deferred to the later milestones listed above.
 
 ## 26. Definition of done
 
