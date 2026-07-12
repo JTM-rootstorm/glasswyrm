@@ -4,3 +4,9 @@ GWIPC_0.1 {
   local:
     *;
 };
+
+GWIPC_0.2 {
+  global:
+    gwipc_contract_*;
+    gwipc_decoded_*;
+} GWIPC_0.1;
