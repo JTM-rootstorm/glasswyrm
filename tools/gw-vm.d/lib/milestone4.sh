@@ -63,6 +63,8 @@ record_facts() {
   else
     echo 'systemd invocation ID was not recorded' >"$journal_log"; journal_status=1
   fi
+  systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+  systemctl daemon-reload >/dev/null 2>&1 || true
   if ((status == 0 && journal_status != 0)); then status=$journal_status; failure_stage=journal-collection; fi
   if [[ -x "$ipc_build_dir/tests/gwipc_wire_probe" ]]; then
     api_version="$("$ipc_build_dir/tests/gwipc_wire_probe" --print-api-version 2>/dev/null || printf unknown)"
@@ -121,6 +123,9 @@ malformed="$build_dir/tests/gwipc_probe_client"
 test -x "$gwcomp"; test -x "$producer"; test -x "$malformed"
 failure_stage=systemd-runtime
 [[ ! -e "$socket_path" ]]
+systemctl stop "$unit" >/dev/null 2>&1 || true
+systemctl reset-failed "$unit" >/dev/null 2>&1 || true
+systemctl daemon-reload
 systemd-run --unit="$unit" --property=Type=exec --property=NoNewPrivileges=yes \
   --property=PrivateDevices=yes --property=PrivateTmp=yes \
   --property="BindReadOnlyPaths=$gwcomp_build_dir" --property="BindPaths=$frame_dir" \
