@@ -1,6 +1,8 @@
 #include <glasswyrm/ipc.h>
 
 #include <poll.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -55,7 +57,7 @@ bool pump(gwipc_connection *c) {
     (void)gwipc_connection_process_poll_events(c, p.revents);
   return gwipc_connection_get_state(c) != GWIPC_CONNECTION_CLOSED;
 }
-Connection connect_to(const std::string &path) {
+Connection connect_to(const std::string &path, bool buffered) {
   gwipc_connection_options o{};
   o.struct_size = sizeof(o);
   o.path = path.c_str();
@@ -65,6 +67,9 @@ Connection connect_to(const std::string &path) {
       GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
       GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT |
       GWIPC_CAP_WINDOW_LIFECYCLE;
+  if (buffered)
+    o.offered_capabilities |= GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
+                              GWIPC_CAP_DAMAGE_REGIONS;
   o.required_peer_capabilities = o.offered_capabilities;
   o.instance_label = "metadata-process-test";
   gwipc_connection *raw = nullptr;
@@ -98,6 +103,26 @@ void contract(gwipc_connection *c, std::uint16_t type, std::uint32_t flags,
           "enqueue contract");
 }
 template <class V, class E>
+void contract_fd(gwipc_connection *c, std::uint16_t type, std::uint32_t flags,
+                 const V &v, E encode, int fd) {
+  gwipc_contract_payload *raw = nullptr;
+  require(encode(&v, &raw) == GWIPC_STATUS_OK, "encode descriptor contract");
+  std::unique_ptr<gwipc_contract_payload, PD> p(raw);
+  std::size_t n = 0;
+  auto *b = gwipc_contract_payload_data(p.get(), &n);
+  gwipc_outgoing_message m{};
+  m.struct_size = sizeof(m);
+  m.type = type;
+  m.flags = flags;
+  m.payload = b;
+  m.payload_size = n;
+  m.fds = &fd;
+  m.fd_count = 1;
+  require(gwipc_connection_enqueue(c, &m) == GWIPC_STATUS_OK,
+          "enqueue descriptor contract");
+  (void)::close(fd);
+}
+template <class V, class E>
 void control(gwipc_connection *c, std::uint16_t type, const V &v, E encode) {
   gwipc_control_payload *raw = nullptr;
   require(encode(&v, &raw) == GWIPC_STATUS_OK, "encode control");
@@ -121,13 +146,13 @@ gwipc_sdr_color_metadata srgb() {
           0,
           0};
 }
-void send_scene(gwipc_connection *c) {
+void send_scene(gwipc_connection *c, bool buffered) {
   gwipc_snapshot_begin b{};
   b.struct_size = sizeof(b);
   b.snapshot_id = 1;
   b.domain = GWIPC_SNAPSHOT_COMPLETE_SESSION;
   b.generation = 1;
-  b.expected_item_count = 3;
+  b.expected_item_count = buffered ? 4 : 3;
   control(c, GWIPC_MESSAGE_SNAPSHOT_BEGIN, b,
           gwipc_control_encode_snapshot_begin);
   gwipc_output_upsert o{};
@@ -154,7 +179,7 @@ void send_scene(gwipc_connection *c) {
   s.opacity = GWIPC_OPACITY_ONE;
   s.scale_numerator = s.scale_denominator = 1;
   s.color = srgb();
-  s.presentation_flags = GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  s.presentation_flags = buffered ? 0 : GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
   s.fullscreen_eligible = GWIPC_TRI_STATE_FALSE;
   s.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
   contract(c, GWIPC_MESSAGE_SURFACE_UPSERT, GWIPC_FLAG_SNAPSHOT_ITEM, s,
@@ -171,11 +196,39 @@ void send_scene(gwipc_connection *c) {
   p.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
   contract(c, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT, GWIPC_FLAG_SNAPSHOT_ITEM, p,
            gwipc_contract_encode_surface_policy_upsert);
+  if (buffered) {
+    gwipc_buffer_attach a{};
+    a.struct_size = sizeof(a);
+    a.buffer_id = 11;
+    a.surface_id = s.surface_id;
+    a.width = s.logical_width;
+    a.height = s.logical_height;
+    a.stride = s.logical_width * 4U;
+    a.pixel_format = GWIPC_PIXEL_FORMAT_XRGB8888;
+    a.alpha_semantics = GWIPC_ALPHA_OPAQUE;
+    a.storage_size = static_cast<std::uint64_t>(a.stride) * a.height;
+    a.color = srgb();
+    a.synchronization = GWIPC_SYNCHRONIZATION_NONE;
+    const int fd = ::memfd_create("gwcomp-m7-process",
+                                  MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    require(fd >= 0 && ::ftruncate(fd, static_cast<off_t>(a.storage_size)) == 0,
+            "create buffered scene memfd");
+    const std::uint32_t green = UINT32_C(0x0000ff00);
+    for (std::uint64_t offset = 0; offset < a.storage_size;
+         offset += sizeof(green))
+      require(::pwrite(fd, &green, sizeof(green), static_cast<off_t>(offset)) ==
+                  sizeof(green),
+              "populate buffered scene memfd");
+    require(::fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) == 0,
+            "seal buffered scene memfd");
+    contract_fd(c, GWIPC_MESSAGE_BUFFER_ATTACH, GWIPC_FLAG_SNAPSHOT_ITEM, a,
+                gwipc_contract_encode_buffer_attach, fd);
+  }
   gwipc_snapshot_end e{};
   e.struct_size = sizeof(e);
   e.snapshot_id = 1;
   e.generation = 1;
-  e.actual_item_count = 3;
+  e.actual_item_count = buffered ? 4 : 3;
   control(c, GWIPC_MESSAGE_SNAPSHOT_END, e, gwipc_control_encode_snapshot_end);
   gwipc_frame_commit f{};
   f.struct_size = sizeof(f);
@@ -213,40 +266,57 @@ int main(int argc, char **argv) {
   char temp[] = "/tmp/gwcomp-metadata-process-XXXXXX";
   require(::mkdtemp(temp), "temporary directory");
   std::filesystem::path root = temp;
-  auto socket = (root / "gwcomp.sock").string();
-  auto dumps = (root / "dumps").string();
-  auto manifest = (root / "scene/scenes.jsonl").string();
-  pid_t child = ::fork();
-  require(child >= 0, "fork gwcomp");
-  if (child == 0) {
-    ::execl(argv[1], argv[1], "--ipc-socket", socket.c_str(), "--dump-dir",
-            dumps.c_str(), "--scene-manifest", manifest.c_str(), "--max-frames",
-            "1", nullptr);
-    _exit(127);
+  for (const bool buffered : {false, true}) {
+    const auto case_root = root / (buffered ? "m7" : "m6");
+    std::filesystem::create_directories(case_root);
+    auto socket = (case_root / "gwcomp.sock").string();
+    auto dumps = (case_root / "dumps").string();
+    auto manifest = (case_root / "scene/scenes.jsonl").string();
+    pid_t child = ::fork();
+    require(child >= 0, "fork gwcomp");
+    if (child == 0) {
+      ::execl(argv[1], argv[1], "--ipc-socket", socket.c_str(), "--dump-dir",
+              dumps.c_str(), "--scene-manifest", manifest.c_str(),
+              "--max-frames", "1", nullptr);
+      _exit(127);
+    }
+    struct stat st{};
+    for (int i = 0; i < 200 && ::lstat(socket.c_str(), &st) != 0; ++i)
+      (void)::usleep(10000);
+    require(S_ISSOCK(st.st_mode), "listener ready");
+    auto c = connect_to(socket, buffered);
+    send_scene(c.get(), buffered);
+    receive_ack(c.get());
+    c.reset();
+    int status = 0;
+    require(::waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+                WEXITSTATUS(status) == 0,
+            "gwcomp exits cleanly");
+    if (buffered) {
+      require(std::filesystem::is_regular_file(
+                  std::filesystem::path(dumps) / "frames.jsonl"),
+              "buffered scene creates frame manifest");
+      require(std::filesystem::is_regular_file(
+                  std::filesystem::path(dumps) /
+                  "frame-000001-output-0000000000000001.ppm"),
+              "buffered scene creates PPM");
+    } else {
+      require(std::filesystem::is_regular_file(manifest),
+              "scene manifest exists");
+      std::ifstream in(manifest);
+      std::string json{std::istreambuf_iterator<char>(in), {}};
+      require(json.find("\"surface_count\":1") != std::string::npos &&
+                  json.find("\"x11_window_id\":1001") != std::string::npos,
+              "manifest records metadata scene");
+      require(!std::filesystem::exists(
+                  std::filesystem::path(dumps) / "frames.jsonl"),
+              "metadata scene creates no frame manifest");
+      for (auto const &e :
+           std::filesystem::recursive_directory_iterator(case_root))
+        require(e.path().extension() != ".ppm",
+                "metadata scene creates no PPM");
+    }
   }
-  struct stat st{};
-  for (int i = 0; i < 200 && ::lstat(socket.c_str(), &st) != 0; ++i)
-    (void)::usleep(10000);
-  require(S_ISSOCK(st.st_mode), "listener ready");
-  auto c = connect_to(socket);
-  send_scene(c.get());
-  receive_ack(c.get());
-  c.reset();
-  int status = 0;
-  require(::waitpid(child, &status, 0) == child && WIFEXITED(status) &&
-              WEXITSTATUS(status) == 0,
-          "gwcomp exits cleanly");
-  require(std::filesystem::is_regular_file(manifest), "scene manifest exists");
-  std::ifstream in(manifest);
-  std::string json{std::istreambuf_iterator<char>(in), {}};
-  require(json.find("\"surface_count\":1") != std::string::npos &&
-              json.find("\"x11_window_id\":1001") != std::string::npos,
-          "manifest records metadata scene");
-  require(
-      !std::filesystem::exists(std::filesystem::path(dumps) / "frames.jsonl"),
-      "metadata scene creates no frame manifest");
-  for (auto const &e : std::filesystem::recursive_directory_iterator(root))
-    require(e.path().extension() != ".ppm", "metadata scene creates no PPM");
   std::error_code ignored;
   std::filesystem::remove_all(root, ignored);
 }

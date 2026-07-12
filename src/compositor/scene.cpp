@@ -49,7 +49,7 @@ bool valid_surface(const SurfaceUpsert& surface) {
   const bool metadata_only =
       surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
   if (surface.surface_id == 0 ||
-      (metadata_only ? surface.x11_window_id == 0 : surface.x11_window_id != 0) ||
+      (metadata_only && surface.x11_window_id == 0) ||
       surface.parent_surface_id != 0 || surface.output_id == 0 ||
       surface.transform != GWIPC_TRANSFORM_NORMAL ||
       surface.scale_numerator != 1 || surface.scale_denominator != 1 ||
@@ -207,9 +207,6 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
         result.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
         return result;
       }
-    } else if (policy != pending_.surface_policies.end()) {
-      result.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      return result;
     }
   }
   for (const auto& [id, unused] : pending_.surface_policies) {

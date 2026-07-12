@@ -27,7 +27,6 @@ rejection leaves committed server state unchanged. A later compositor
 rejection requires replay of committed policy and scene state.
 
 Unit and process tests cover deterministic policy output, complete lifecycle
-upserts, correlated replies and hashes, coordinator rollback/replay phases, and
-the M5 regression path. Full live-peer restart and golden M6 scenario fixtures
-remain acceptance work and are not claimed complete here.
-
+upserts, correlated replies and hashes, coordinator rollback/replay phases, the
+M5 regression path, live-peer restart recovery, and the accepted golden M6
+scenario fixtures.

@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/client_connection.hpp"
 #include "glasswyrmd/resource_table.hpp"
+#include "core/geometry/rectangle.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,9 @@ public:
                   std::uint16_t width, std::uint16_t height,
                   std::uint16_t border_width, bool override_redirect,
                   std::span<ClientConnection *const> clients) const;
+  [[nodiscard]] std::size_t route_expose(
+      std::uint32_t window, std::span<const glasswyrm::geometry::Rectangle> rectangles,
+      std::span<ClientConnection *const> clients) const;
 
 private:
   const ResourceTable &resources_;

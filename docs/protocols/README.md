@@ -11,3 +11,4 @@ Current compatibility status:
 - [X11 Milestone 1 compatibility](x11-milestone-1.md)
 - [X11 Milestone 2 compatibility](x11-milestone-2.md)
 - [X11 Milestone 6 profile](x11-milestone-6.md)
+- [X11 Milestone 7 drawable and raster profile](x11-milestone-7.md)

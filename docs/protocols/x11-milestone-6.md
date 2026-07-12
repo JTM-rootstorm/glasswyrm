@@ -35,7 +35,6 @@ Mapped top-level windows have metadata and policy state but no client content.
 Authorization remains the earlier unauthenticated local research boundary.
 
 The raw three-process integration test exercises little- and big-endian
-map/configure/unmap barriers, queries, event sequences, and no-op suppression.
-Create/destroy and restart scenario coverage is still being completed; support
-claims should follow passing acceptance evidence.
-
+create/map/configure/unmap/destroy barriers, queries, event sequences, and
+no-op suppression. The fixed restart scenario proves the same live XCB
+connection survives compositor and window-manager restarts.

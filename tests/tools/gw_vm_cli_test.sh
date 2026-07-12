@@ -379,6 +379,62 @@ FACTS
       printf '{"completed":true,"connection_preserved":true}\n'
       ;;
     milestone6-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone7-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.4.0
+soversion=0
+wire_version=1.0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+xcb_proto=x11-base/xcb-proto-1.17.0
+scene_manifest=absent
+x_servers_absent=true
+full_tests=passed
+sanitizer=passed
+runtime_build=passed
+server_standalone=passed
+server_ipc=passed
+gwm_only=passed
+gwcomp_only=passed
+ipc_only=passed
+api04_consumers=passed
+m4_pixel_regression=passed
+m5_policy_regression=passed
+m6_metadata_regression=passed
+raw_little=passed
+raw_big=passed
+image_byte_order=passed
+exposure_events=passed
+malformed_x11=passed
+malformed_gwipc=passed
+x11_resources=passed
+raster_requests=passed
+plane_mask=passed
+damage_coalescing=passed
+xcb_drawing=passed
+final_frame_golden=passed
+buffer_release=passed
+compositor_restart=passed
+gwm_restart=passed
+connection_survival=passed
+replay_hash=passed
+post_restart_hash=passed
+post_restart_drawing=passed
+rendering_archive=passed
+FACTS
+      if [[ ${GW_VM_TEST_BAD_M7_FACTS:-0} == 1 ]]; then
+        printf 'final_frame_golden=failed\nscenario_exit=1\n'
+      fi
+      if [[ ${GW_VM_TEST_BAD_M7_REPLAY:-0} == 1 ]]; then
+        printf 'replay_hash=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone7-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -430,6 +486,15 @@ if [[ "$*" == *milestone6-lifecycle.tar* ]]; then
   (cd "$scratch" && sha256sum scene.jsonl >SHA256SUMS && tar -cf "$destination" scene.jsonl SHA256SUMS)
   rm -rf "$scratch"
 fi
+if [[ "$*" == *milestone7-rendering.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  printf 'P6\n1 1\n255\n000' >"$scratch/final.ppm"
+  printf '{}\n' >"$scratch/frames.jsonl"
+  printf '{}\n' >"$scratch/xcb-result.json"
+  printf '{}\n' >"$scratch/result.json"
+  (cd "$scratch" && sha256sum final.ppm frames.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm frames.jsonl xcb-result.json result.json SHA256SUMS)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -464,7 +529,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -511,6 +576,7 @@ run_failure "$work_dir/scenario-m5-injection.out" "$gw_vm" scenario 'milestone5-
 assert_contains "$work_dir/scenario-m5-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m6-injection.out" "$gw_vm" scenario 'milestone6-runtime-test;touch'
+run_failure "$work_dir/scenario-m7-injection.out" "$gw_vm" scenario 'milestone7-runtime-test;touch'
 assert_contains "$work_dir/scenario-m6-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
@@ -971,5 +1037,88 @@ run_failure "$work_dir/milestone6-bad-restart.out" \
   env GW_VM_TEST_BAD_M6_FACTS=1 "$gw_vm" milestone6-runtime-test --yes
 assert_contains "$artifact_dir/milestone6-summary.json" \
   'restart_probe must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-gate.out" "$gw_vm" milestone7-runtime-test
+assert_contains "$work_dir/milestone7-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone7-runtime-test --yes
+assert_contains "$work_dir/milestone7-bad-base.out" \
+  'HEAD is not based on required Milestone 7 commit d05dcf2bb979fd82dd5a1dd0a07e34a915ec9746'
+
+run_failure "$work_dir/milestone7-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone7-runtime-test.sh"
+assert_contains "$work_dir/milestone7-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_success "$work_dir/milestone7.out" "$gw_vm" scenario milestone7-runtime-test --yes
+assert_contains "$artifact_dir/milestone7-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone7-summary.json" \
+  '"required_base_commit": "d05dcf2bb979fd82dd5a1dd0a07e34a915ec9746"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"final_frame_golden": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"connection_survival": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"replay_hash": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"post_restart_hash": "passed"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"compiler_c": "gcc test"'
+assert_contains "$artifact_dir/milestone7-summary.json" '"scene_manifest": "absent"'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-runtime'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-server-ipc'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-gwm'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-gwcomp'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m7-ipc-only'
+assert_contains "$command_log" '/run/glasswyrm-m7-gwm/gwm.sock'
+assert_contains "$command_log" '/run/glasswyrm-m7-gwcomp/gwcomp.sock'
+assert_contains "$command_log" '/var/tmp/glasswyrm-m7-dumps'
+assert_contains "$command_log" '/var/tmp/glasswyrm-m7-scenes'
+assert_contains "$command_log" '/var/tmp/glasswyrm-m7-control'
+assert_contains "$command_log" 'PrivateTmp=yes'
+assert_contains "$command_log" 'BindReadOnlyPaths="$runtime_build_dir"'
+assert_contains "$command_log" 'BindPaths="$dump_dir"'
+assert_contains "$command_log" 'BindPaths="$scene_dir"'
+assert_contains "$command_log" '--software-content'
+assert_contains "$command_log" 'x11_milestone6_probe'
+assert_contains "$command_log" 'gwcomp-golden'
+assert_contains "$command_log" 'wm-policy'
+assert_contains "$command_log" 'gwipc-malformed'
+assert_contains "$command_log" 'x11_milestone7_probe'
+assert_contains "$command_log" 'xcb_milestone7_probe'
+assert_contains "$command_log" 'm7_restart_hold_probe'
+assert_contains "$command_log" 'systemctl restart gwcomp-m7.service'
+assert_contains "$command_log" 'systemctl restart gwm-m7.service'
+assert_contains "$command_log" 'frame-hashes.json'
+assert_contains "$command_log" 'post_restart_frame=$((pre_continue_count + 1))'
+assert_contains "$command_log" 'frame_field_at "$post_restart_frame" file'
+assert_contains "$command_log" 'cmp "$final_ppm" "$source_dir/tests/fixtures/m7/final.ppm"'
+assert_contains "$command_log" 'cmp "$restart_result"'
+assert_contains "$command_log" 'journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service'
+assert_contains "$command_log" 'archive_files+=(scene.jsonl)'
+assert_contains "$command_log" 'scene_manifest=absent'
+assert_contains "$command_log" 'milestone7-rendering.tar'
+assert_file_glob "$artifact_dir/milestone7-rendering.tar"
+if tar -tf "$artifact_dir/milestone7-rendering.tar" | grep -Fx scene.jsonl >/dev/null; then
+  fail 'M7 fake rendering archive unexpectedly contains optional scene.jsonl'
+fi
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-bad-golden.out" \
+  env GW_VM_TEST_BAD_M7_FACTS=1 "$gw_vm" milestone7-runtime-test --yes
+assert_contains "$artifact_dir/milestone7-summary.json" \
+  'final_frame_golden must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-bad-replay.out" \
+  env GW_VM_TEST_BAD_M7_REPLAY=1 "$gw_vm" milestone7-runtime-test --yes
+assert_contains "$artifact_dir/milestone7-summary.json" \
+  'replay_hash must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone7-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='--software-content' "$gw_vm" milestone7-runtime-test --yes
+assert_contains "$work_dir/milestone7-error.out" 'failed during: guest-runtime'
+assert_contains "$command_log" 'milestone7-glasswyrmd-journal.log'
 
 printf 'gw-vm CLI tests passed\n'

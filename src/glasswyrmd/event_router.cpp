@@ -1,6 +1,7 @@
 #include "glasswyrmd/event_router.hpp"
 
 #include "protocol/x11/event.hpp"
+#include "protocol/x11/exposure_event.hpp"
 
 #include <algorithm>
 
@@ -8,6 +9,7 @@ namespace glasswyrm::server {
 namespace {
 constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
 constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+constexpr std::uint32_t kExposureMask = 1U << 15U;
 
 ClientConnection *find_client(std::span<ClientConnection *const> clients,
                               const ClientId id) {
@@ -196,6 +198,32 @@ std::size_t EventRouter::route_configure(
                      event,  target,       above_sibling,    x, y, width,
                      height, border_width, override_redirect};
                });
+}
+
+std::size_t EventRouter::route_expose(
+    const std::uint32_t window_id,
+    const std::span<const glasswyrm::geometry::Rectangle> rectangles,
+    const std::span<ClientConnection *const> clients) const {
+  const auto* window = resources_.find_window(window_id);
+  if (!window) return 0;
+  std::size_t delivered = 0;
+  for (const auto& [client_id, mask] : window->event_selections) {
+    if ((mask & kExposureMask) == 0) continue;
+    auto* client = find_client(clients, client_id);
+    if (!client) continue;
+    for (std::size_t index = 0; index < rectangles.size(); ++index) {
+      const auto& rectangle = rectangles[index];
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_expose(
+          client->byte_order(), client->last_request_sequence(),
+          {window_id, static_cast<std::uint16_t>(rectangle.x),
+           static_cast<std::uint16_t>(rectangle.y),
+           static_cast<std::uint16_t>(rectangle.width),
+           static_cast<std::uint16_t>(rectangle.height),
+           static_cast<std::uint16_t>(rectangles.size() - index - 1)})))
+        ++delivered;
+    }
+  }
+  return delivered;
 }
 
 } // namespace glasswyrm::server

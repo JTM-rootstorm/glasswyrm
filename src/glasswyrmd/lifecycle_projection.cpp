@@ -62,15 +62,16 @@ std::optional<LifecycleSnapshot> apply_policy_result(
 
 CompositorSnapshotSubmission project_compositor(const LifecycleSnapshot& snapshot,
                                                 std::uint64_t commit,
-                                                std::uint64_t generation) {
-  CompositorSnapshotSubmission output{commit,generation,{},{}};
+                                                std::uint64_t generation,
+                                                const bool software_content) {
+  CompositorSnapshotSubmission output{commit,generation,{},{},{},{}};
   for(const auto& [id,value]:snapshot.windows){
     gwipc_surface_upsert surface{};surface.struct_size=sizeof(surface);surface.surface_id=(UINT64_C(1)<<32)|id;
     surface.x11_window_id=id;surface.output_id=snapshot.output_id;surface.logical_x=value.applied_x;surface.logical_y=value.applied_y;
     surface.logical_width=value.applied_width;surface.logical_height=value.applied_height;surface.stacking=value.stacking;
     surface.visible=value.policy_visible;surface.transform=GWIPC_TRANSFORM_NORMAL;surface.opacity=GWIPC_OPACITY_ONE;
     surface.scale_numerator=surface.scale_denominator=1;surface.color={GWIPC_SDR_COLOR_SPACE_SRGB,GWIPC_TRANSFER_FUNCTION_SRGB,GWIPC_COLOR_PRIMARIES_SRGB,0,0,0,0};
-    surface.presentation_flags=GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;output.surfaces.push_back(surface);
+    surface.presentation_flags=software_content ? 0U : GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;output.surfaces.push_back(surface);
     gwipc_surface_policy_upsert policy{};policy.struct_size=sizeof(policy);policy.surface_id=surface.surface_id;
     policy.x11_window_id=id;policy.workspace_id=snapshot.workspace_id;policy.window_type=static_cast<gwipc_policy_window_type>(value.window_type);
     policy.applied_state=static_cast<gwipc_policy_applied_state>(value.applied_state);policy.focused=value.focused;policy.managed=value.managed;

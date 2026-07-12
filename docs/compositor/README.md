@@ -11,6 +11,8 @@ The documents here define its implemented contract:
   update procedure.
 - [M6 metadata-only surfaces](M6_METADATA_SURFACES.md): ProtocolServer scene
   metadata, policy pairing, manifest behavior, and the no-raster boundary.
+- [M7 buffered protocol surfaces](M7_BUFFERED_PROTOCOL_SURFACES.md): explicit
+  peer profiles, preserved snapshot attachments, raster output, and release.
 
 Milestone 4 is complete. The repository proves the scene, read-only buffer
 mapping, renderer, output, dump, producer lifecycle, release, rejection, and
