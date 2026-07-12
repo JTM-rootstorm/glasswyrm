@@ -177,19 +177,29 @@ if get_option('glasswyrmd')
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),
   )
+  gw_server_core_sources = files(
+    'glasswyrmd/options.cpp',
+    'glasswyrmd/client_connection.cpp',
+    'glasswyrmd/server.cpp',
+  )
+  gw_server_core_dependencies = [gw_server_state_dep]
+  if get_option('libgwipc')
+    gw_server_core_sources += files(
+      'glasswyrmd/peer_transport.cpp',
+      'glasswyrmd/policy_peer.cpp',
+      'glasswyrmd/compositor_peer.cpp',
+    )
+    gw_server_core_dependencies += gwipc_dep
+  endif
   gw_server_core_lib = static_library(
     'gw-server-core',
-    files(
-      'glasswyrmd/options.cpp',
-      'glasswyrmd/client_connection.cpp',
-      'glasswyrmd/server.cpp',
-    ),
-    dependencies: gw_server_state_dep,
+    gw_server_core_sources,
+    dependencies: gw_server_core_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   gw_server_core_dep = declare_dependency(
     link_with: gw_server_core_lib,
-    dependencies: gw_server_state_dep,
+    dependencies: gw_server_core_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   glasswyrmd_program = executable(

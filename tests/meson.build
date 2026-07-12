@@ -94,6 +94,21 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+  if get_option('libgwipc') and get_option('gwm') and get_option('gwcomp')
+    glasswyrmd_peer_bootstrap_test = executable(
+      'glasswyrmd_peer_bootstrap_test',
+      files('integration/glasswyrmd_peer_bootstrap_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-peer-bootstrap',
+      glasswyrmd_peer_bootstrap_test,
+      args: [gwm_program.full_path(), gwcomp_program.full_path()],
+      depends: [gwm_program, gwcomp_program],
+      timeout: 15,
+    )
+  endif
 endif
 
 if get_option('gwcomp')
