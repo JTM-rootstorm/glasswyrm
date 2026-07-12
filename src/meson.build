@@ -203,11 +203,15 @@ endif
 if get_option('gwcomp')
   gwcomp_options_lib = static_library(
     'gwcomp-options',
-    files('gwcomp/options.cpp'),
+    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp'),
     include_directories: [include_directories('.'), gw_generated_include_dir],
+    dependencies: [gwipc_dep, gw_compositor_geometry_dep,
+                   gw_render_software_dep, gw_headless_dep],
   )
   gwcomp_options_dep = declare_dependency(
     link_with: gwcomp_options_lib,
+    dependencies: [gwipc_dep, gw_compositor_geometry_dep,
+                   gw_render_software_dep, gw_headless_dep],
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   gwcomp_program = executable(
@@ -216,5 +220,11 @@ if get_option('gwcomp')
     dependencies: [gwcomp_options_dep, gwipc_dep, gw_compositor_geometry_dep,
                    gw_render_software_dep, gw_headless_dep],
     install: true,
+  )
+  gwcomp_m4_producer_program = executable(
+    'gwcomp_m4_producer',
+    files('../tests/integration/gwcomp_m4_producer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
   )
 endif
