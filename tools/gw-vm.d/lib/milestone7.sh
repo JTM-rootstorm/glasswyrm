@@ -116,8 +116,8 @@ gwm_socket=/run/glasswyrm-m7-gwm/gwm.sock
 comp_socket=/run/glasswyrm-m7-gwcomp/gwcomp.sock
 rm -rf /run/glasswyrm-m7-gwm /run/glasswyrm-m7-gwcomp /tmp/.X11-unix/X99; mkdir -p /tmp/.X11-unix
 unit_properties=(--property=Type=exec --property=Restart=no --property=NoNewPrivileges=yes --property=PrivateDevices=yes --property=RestrictAddressFamilies=AF_UNIX --property=CapabilityBoundingSet= --property=AmbientCapabilities=)
-systemd-run --unit=gwm-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwm --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwm" --ipc-socket "$gwm_socket"
-systemd-run --unit=gwcomp-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=RuntimeDirectory=glasswyrm-m7-gwcomp --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwcomp" --ipc-socket "$comp_socket" --dump-dir "$dump_dir" --scene-manifest "$scene_dir/scene.jsonl"
+systemd-run --unit=gwm-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=BindReadOnlyPaths="$runtime_build_dir" --property=RuntimeDirectory=glasswyrm-m7-gwm --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwm" --ipc-socket "$gwm_socket"
+systemd-run --unit=gwcomp-m7 "${unit_properties[@]}" --property=PrivateTmp=yes --property=BindReadOnlyPaths="$runtime_build_dir" --property=BindPaths="$dump_dir" --property=BindPaths="$scene_dir" --property=RuntimeDirectory=glasswyrm-m7-gwcomp --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_build_dir/src/gwcomp" --ipc-socket "$comp_socket" --dump-dir "$dump_dir" --scene-manifest "$scene_dir/scene.jsonl"
 for socket in "$gwm_socket" "$comp_socket"; do for _ in {1..200}; do [[ -S "$socket" ]] && break; sleep .05; done; [[ -S "$socket" ]]; done
 # First prove that the accepted M6 metadata-only launch still emits no pixels.
 systemd-run --unit=glasswyrmd-m7 "${unit_properties[@]}" --property=PrivateTmp=no --no-block -- "$runtime_build_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$gwm_socket" --compositor-socket "$comp_socket"
