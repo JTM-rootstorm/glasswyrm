@@ -11,17 +11,6 @@
 
 namespace glasswyrm::server {
 
-enum class StructuralTransitionKind { Map, Unmap, Configure, Destroy };
-
-struct StructuralEventState {
-  std::uint32_t target{}, parent{}, above_sibling{};
-  std::int16_t x{}, y{};
-  std::uint16_t width{}, height{}, border_width{};
-  bool override_redirect{}, viewable{};
-  std::vector<ClientId> structure_recipients;
-  std::vector<ClientId> substructure_recipients;
-};
-
 class EventRouter {
 public:
   explicit EventRouter(const ResourceTable &resources)

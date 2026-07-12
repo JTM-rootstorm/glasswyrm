@@ -1,7 +1,7 @@
 #include "glasswyrmd/server.hpp"
+#include "glasswyrmd/event_router.hpp"
 
 #ifdef GW_SERVER_HAS_IPC
-#include "glasswyrmd/event_router.hpp"
 #include "glasswyrmd/lifecycle_coordinator.hpp"
 #include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
@@ -60,6 +60,16 @@ bool make_address(const std::string &path, sockaddr_un &address,
 Server::Server(Options options) : options_(std::move(options)) {
   socket_path_ = options_.socket_dir + "/X" +
                  std::to_string(static_cast<unsigned int>(options_.display));
+  structural_transition_handler_ = [this](
+      const std::vector<StructuralTransition>& transitions) {
+    std::vector<ClientConnection*> recipients;
+    recipients.reserve(clients_.size());
+    for (const auto& client : clients_) recipients.push_back(client.get());
+    EventRouter router(state_.resources());
+    for (const auto& transition : transitions)
+      (void)router.route_transition(transition.kind, transition.before,
+                                    transition.committed, recipients);
+  };
 }
 
 Server::~Server() {
@@ -230,7 +240,8 @@ void Server::accept_clients() {
       }
       clients_.push_back(std::make_unique<ClientConnection>(
           descriptor, next_client_identifier_++, *resource_base, state_,
-          options_.integrated(), deferred_lifecycle_handler_));
+          options_.integrated(), deferred_lifecycle_handler_,
+          structural_transition_handler_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));

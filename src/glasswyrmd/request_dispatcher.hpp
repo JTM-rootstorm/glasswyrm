@@ -22,6 +22,23 @@ struct DispatchContext {
   bool integrated_lifecycle{false};
 };
 
+enum class StructuralTransitionKind { Map, Unmap, Configure, Destroy };
+
+struct StructuralEventState {
+  std::uint32_t target{}, parent{}, above_sibling{};
+  std::int16_t x{}, y{};
+  std::uint16_t width{}, height{}, border_width{};
+  bool override_redirect{}, mapped{}, viewable{};
+  std::vector<ClientId> structure_recipients;
+  std::vector<ClientId> substructure_recipients;
+};
+
+struct StructuralTransition {
+  StructuralTransitionKind kind{StructuralTransitionKind::Configure};
+  std::optional<StructuralEventState> before;
+  std::optional<StructuralEventState> committed;
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -31,6 +48,7 @@ struct DispatchResult {
   std::optional<WindowCreateSpec> deferred_create;
   bool deferred_destroy{false};
   bool deferred_map{false};
+  std::vector<StructuralTransition> structural_transitions;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

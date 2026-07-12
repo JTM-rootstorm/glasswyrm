@@ -44,6 +44,7 @@ class Server {
   ServerState state_;
   std::vector<std::unique_ptr<ClientConnection>> clients_;
   ClientConnection::DeferredHandler deferred_lifecycle_handler_;
+  ClientConnection::StructuralTransitionHandler structural_transition_handler_;
   std::function<void(std::uint64_t, std::uint32_t)> cancel_lifecycle_handler_;
   std::set<std::uint32_t> pending_resource_bases_;
 };
