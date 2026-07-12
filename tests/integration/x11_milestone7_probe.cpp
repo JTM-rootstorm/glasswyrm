@@ -169,12 +169,12 @@ std::vector<std::uint8_t> put_image(
 std::vector<std::uint8_t> copy_area(
     const gw::test::X11RequestBuilder &wire, std::uint32_t source,
     std::uint32_t destination, std::uint32_t gc, x11::ByteOrder order,
-    std::uint16_t width = 16) {
+    std::uint16_t width = 16, std::int16_t source_x = 0) {
   std::vector<std::uint8_t> body;
   put32(body, source, order);
   put32(body, destination, order);
   put32(body, gc, order);
-  put16(body, 0, order);
+  put16(body, static_cast<std::uint16_t>(source_x), order);
   put16(body, 0, order);
   put16(body, 24, order);
   put16(body, 32, order);
@@ -238,7 +238,11 @@ void run_exposure(Session &session) {
   session.send(clear_area(session.wire, window, session.order));
   event = session.packet();
   require((event[0] & 0x7fU) == 12, "ClearArea Expose event missing");
-  session.send(copy_area(session.wire, pixmap, window, gc, session.order, 0));
+  session.send(copy_area(session.wire, pixmap, window, gc, session.order, 16,
+                         8));
+  event = session.packet();
+  require((event[0] & 0x7fU) == 13, "GraphicsExpose event missing");
+  session.send(copy_area(session.wire, pixmap, window, gc, session.order));
   event = session.packet();
   require((event[0] & 0x7fU) == 14, "NoExpose event missing");
   session.sync();
