@@ -8,6 +8,106 @@ test('scaffold', scaffold_test)
 
 test_source_root_include = include_directories('..')
 
+if get_option('gwcomp')
+  gwcomp_options_test = executable(
+    'gwcomp_options_test',
+    files('unit/gwcomp_options_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-options', gwcomp_options_test, timeout: 10)
+
+  gwcomp_process_test = executable(
+    'gwcomp_process_test',
+    files('integration/gwcomp_process_test.cpp'),
+    dependencies: gwipc_dep,
+    include_directories: test_source_root_include,
+  )
+  test(
+    'gwcomp-process',
+    gwcomp_process_test,
+    args: [gwcomp_program.full_path()],
+    depends: gwcomp_program,
+    timeout: 15,
+  )
+
+  gwcomp_golden_test = executable(
+    'gwcomp_golden_test',
+    files('integration/gwcomp_golden_test.cpp'),
+  )
+  test(
+    'gwcomp-golden',
+    gwcomp_golden_test,
+    args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
+    depends: [gwcomp_program, gwcomp_m4_producer_program],
+    timeout: 15,
+  )
+
+  gwcomp_scenario_matrix_test = executable(
+    'gwcomp_scenario_matrix_test',
+    files('integration/gwcomp_scenario_matrix_test.cpp'),
+  )
+  test(
+    'gwcomp-scenario-matrix',
+    gwcomp_scenario_matrix_test,
+    args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
+    depends: [gwcomp_program, gwcomp_m4_producer_program],
+    timeout: 75,
+  )
+
+  test(
+    'gwcomp-m4-producer-help',
+    gwcomp_m4_producer_program,
+    args: ['--help'],
+    depends: gwcomp_m4_producer_program,
+    timeout: 10,
+  )
+endif
+
+if get_option('gwcomp')
+compositor_geometry_test = executable(
+  'compositor_geometry_test',
+  files('unit/compositor_geometry_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-geometry', compositor_geometry_test, timeout: 10)
+
+compositor_scene_test = executable(
+  'compositor_scene_test',
+  files('unit/compositor_scene_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-scene', compositor_scene_test, timeout: 10)
+
+compositor_buffer_test = executable(
+  'compositor_buffer_test',
+  files('unit/compositor_buffer_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-buffer', compositor_buffer_test, timeout: 10)
+
+software_renderer_test = executable(
+  'software_renderer_test',
+  files('pixel/software_renderer_test.cpp'),
+  dependencies: gw_render_software_dep,
+  include_directories: test_source_root_include,
+)
+test('software-renderer', software_renderer_test, timeout: 10)
+
+if get_option('headless_backend')
+  headless_output_test = executable(
+    'headless_output_test',
+    files('unit/headless_output_test.cpp'),
+    dependencies: gw_headless_dep,
+    include_directories: test_source_root_include,
+  )
+  test('headless-output', headless_output_test, timeout: 10)
+endif
+endif
+
 if get_option('libgwipc')
   gwipc_wire_codec_test = executable(
     'gwipc_wire_codec_test',
@@ -27,6 +127,13 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_public_contract_api_test = executable(
+    'gwipc_public_contract_api_test',
+    files('unit/ipc/public_contract_api_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test('gwipc-public-contract-api', gwipc_public_contract_api_test, timeout: 10)
 
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',

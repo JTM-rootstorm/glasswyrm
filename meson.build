@@ -1,7 +1,7 @@
 project(
   'glasswyrm',
   ['cpp', 'c'],
-  version: '0.1.0',
+  version: '0.2.0',
   license: 'MIT',
   default_options: [
     'cpp_std=c++20',
@@ -9,6 +9,28 @@ project(
     'warning_level=2',
   ],
 )
+
+if get_option('gwcomp')
+  if not get_option('libgwipc')
+    error('gwcomp requires -Dlibgwipc=true for the Milestone 4 contract')
+  endif
+  if not get_option('headless_backend')
+    error('gwcomp requires -Dheadless_backend=true in Milestone 4')
+  endif
+  if not get_option('render_software')
+    error('gwcomp requires -Drender_software=true in Milestone 4')
+  endif
+endif
+
+if get_option('drm_backend')
+  error('the DRM backend is not implemented before Milestone 10')
+endif
+if get_option('render_gl')
+  error('the OpenGL renderer is not implemented')
+endif
+if get_option('render_vulkan')
+  error('the Vulkan renderer is not implemented')
+endif
 
 gw_include_dir = include_directories('include')
 
