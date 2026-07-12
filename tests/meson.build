@@ -43,6 +43,18 @@ if get_option('gwcomp')
     timeout: 15,
   )
 
+  gwcomp_scenario_matrix_test = executable(
+    'gwcomp_scenario_matrix_test',
+    files('integration/gwcomp_scenario_matrix_test.cpp'),
+  )
+  test(
+    'gwcomp-scenario-matrix',
+    gwcomp_scenario_matrix_test,
+    args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
+    depends: [gwcomp_program, gwcomp_m4_producer_program],
+    timeout: 75,
+  )
+
   test(
     'gwcomp-m4-producer-help',
     gwcomp_m4_producer_program,
