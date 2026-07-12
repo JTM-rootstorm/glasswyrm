@@ -27,6 +27,7 @@ void RuntimeBridge::start(const Clock::time_point now) noexcept {
   deadline_ = now + deadline_duration_;
   retry_at_ = now;
   retry_index_ = 0;
+  transaction_stage_ = TransactionStage::None;
 }
 
 void RuntimeBridge::schedule_retry(const Clock::time_point now) noexcept {
@@ -46,6 +47,12 @@ bool RuntimeBridge::service(const short policy_revents,
     std::string peer_error;
     if (!policy_.process(policy_revents, peer_error) ||
         !compositor_.process(compositor_revents, peer_error)) {
+      if (transaction_stage_ != TransactionStage::None) {
+        stage_ = Stage::Failed;
+        error = peer_error.empty() ? "peer disconnected during lifecycle transaction"
+                                   : peer_error;
+        return false;
+      }
       policy_.disconnect();
       compositor_.disconnect();
       stage_ = Stage::Policy;
@@ -53,6 +60,12 @@ bool RuntimeBridge::service(const short policy_revents,
       retry_index_ = 0;
       schedule_retry(now);
     }
+    if (transaction_stage_ == TransactionStage::Policy &&
+        policy_.state() == PeerBootstrapState::Synchronized)
+      transaction_stage_ = TransactionStage::PolicyReady;
+    if (transaction_stage_ == TransactionStage::Compositor &&
+        compositor_.state() == PeerBootstrapState::Synchronized)
+      transaction_stage_ = TransactionStage::Complete;
     return true;
   }
   if (stage_ != Stage::Ready && now >= deadline_) {
@@ -98,6 +111,43 @@ bool RuntimeBridge::service(const short policy_revents,
       stage_ = Stage::Ready;
   }
   return true;
+}
+
+bool RuntimeBridge::submit_policy(const PolicySnapshotSubmission& submission,
+                                  std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::None) return false;
+  if (!policy_.submit(submission, error)) return false;
+  transaction_stage_ = TransactionStage::Policy;
+  return true;
+}
+
+bool RuntimeBridge::policy_result_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::PolicyReady;
+}
+
+bool RuntimeBridge::submit_compositor(
+    const CompositorSnapshotSubmission& submission, std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::PolicyReady) return false;
+  if (!compositor_.submit(submission, error)) return false;
+  transaction_stage_ = TransactionStage::Compositor;
+  return true;
+}
+
+bool RuntimeBridge::compositor_result_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::Complete;
+}
+
+bool RuntimeBridge::prepare_rollback() noexcept {
+  if (!ready() ||
+      (transaction_stage_ != TransactionStage::PolicyReady &&
+       transaction_stage_ != TransactionStage::Complete))
+    return false;
+  transaction_stage_ = TransactionStage::None;
+  return true;
+}
+
+void RuntimeBridge::clear_transaction_result() noexcept {
+  transaction_stage_ = TransactionStage::None;
 }
 
 bool RuntimeBridge::ready() const noexcept { return stage_ == Stage::Ready; }

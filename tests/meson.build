@@ -123,6 +123,19 @@ if get_option('glasswyrmd')
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
     )
+    runtime_bridge_transaction_test = executable(
+      'runtime_bridge_transaction_test',
+      files('integration/runtime_bridge_transaction_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'runtime-bridge-transaction',
+      runtime_bridge_transaction_test,
+      args: [gwm_program.full_path(), gwcomp_program.full_path()],
+      depends: [gwm_program, gwcomp_program],
+      timeout: 15,
+    )
     glasswyrmd_integrated_startup_test = executable(
       'glasswyrmd_integrated_startup_test',
       files('integration/glasswyrmd_integrated_startup_test.cpp'),

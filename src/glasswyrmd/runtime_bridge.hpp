@@ -29,6 +29,17 @@ public:
   }
   [[nodiscard]] bool ready() const noexcept;
   [[nodiscard]] int poll_timeout_ms(Clock::time_point now) const noexcept;
+  [[nodiscard]] bool submit_policy(const PolicySnapshotSubmission& submission,
+                                   std::string& error);
+  [[nodiscard]] bool policy_result_ready() const noexcept;
+  [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
+    return policy_.result();
+  }
+  [[nodiscard]] bool submit_compositor(
+      const CompositorSnapshotSubmission& submission, std::string& error);
+  [[nodiscard]] bool compositor_result_ready() const noexcept;
+  [[nodiscard]] bool prepare_rollback() noexcept;
+  void clear_transaction_result() noexcept;
 
 private:
   enum class Stage { Policy, Compositor, Ready, Failed };
@@ -41,6 +52,9 @@ private:
   Clock::time_point retry_at_{};
   std::chrono::milliseconds deadline_duration_;
   unsigned retry_index_{};
+  enum class TransactionStage { None, Policy, PolicyReady, Compositor,
+                                Complete };
+  TransactionStage transaction_stage_{TransactionStage::None};
 };
 
 } // namespace glasswyrm::server
