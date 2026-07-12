@@ -44,8 +44,8 @@ without consuming its next request twice.
 The X11 listener stays absent before initial synchronization. After startup it
 remains owned during dependency loss, while new accepts are paused until replay
 completes. The current tree has unit coverage for coordinator replay and
-rollback state transitions. End-to-end same-client survival across real peer
-restarts is an outstanding acceptance gate.
+rollback state transitions. The fixed M6 restart-hold probe also proves
+end-to-end same-client survival across real peer restarts.
 
 ## Failure policy
 
@@ -54,4 +54,3 @@ boundary. A compositor rejection after accepted policy initiates a committed
 policy and compositor rollback. Failure to prove rollback or expiry of the
 transaction deadline is fatal; the server does not continue with divergent
 authority.
-
