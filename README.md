@@ -7,12 +7,12 @@ and per-output scaling.
 The project is currently implementing Milestone 4. `glasswyrmd` retains its
 tested Milestone 2 local X11 setup and bounded headless core request behavior,
 and `libgwipc` provides the tested Milestone 3 versioned local IPC foundation.
-Milestone 4 has added tested scene/damage, read-only buffer-import,
-software-rendering, bounded headless output, and PPM-dump primitives. `gwcomp`
-is now a real foreground GWIPC listener for one synthetic producer, but its
-reactor does not yet connect received buffers and scene state to rendering and
-dumps. It currently rejects frame commits as incomplete. `gwm` and the runtime
-tools remain placeholders; there is still no mapping, event delivery, input,
+Milestone 4 has added tested scene/damage, read-only buffer import,
+software rendering, bounded headless output, and deterministic PPM dumps.
+`gwcomp` now accepts and presents the repository producer's basic synthetic
+scene with a correlated acknowledgement and exact-pixel golden coverage. The
+remaining producer scenarios and their release/reconnect proofs are not yet
+complete. `gwm` and the runtime tools remain placeholders; there is still no mapping, event delivery, input,
 WM policy,
 DRM/KMS output, or end-to-end compositor frame path.
 
@@ -140,7 +140,7 @@ core error. It never maps or displays the window.
   headless request profile.
 - `gwm`: future owner of window-management policy truth.
 - `gwcomp`: owns the emerging headless composition and final display authority;
-  its listener is live, while accepted-frame presentation remains incomplete.
+  its basic synthetic accepted-frame path is live and golden-tested.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -154,9 +154,9 @@ output/surface/buffer/damage/frame contract vocabulary. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
 `gwm` and every runtime tool still print their Milestone 0 placeholder status
-and exit. `gwcomp` runs a GWIPC listener and can negotiate a `TestProducer`, but
-does not communicate with `glasswyrmd` or `gwm`, render producer buffers, or
-access display hardware. See [`docs/compositor/`](docs/compositor/) for its
+and exit. `gwcomp` runs a GWIPC listener, negotiates a `TestProducer`, and
+renders its validated shared-memory buffers headlessly, but does not communicate
+with `glasswyrmd` or `gwm` or access display hardware. See [`docs/compositor/`](docs/compositor/) for its
 implemented boundary and M4 formats.
 
 ## Project Layout
