@@ -681,6 +681,17 @@ if get_option('glasswyrmd')
       files('xcb/xcb_milestone7_probe.c'),
       dependencies: xcb_test_dependency,
     )
+    if get_option('libgwipc')
+      xcb_milestone8_probe = executable(
+        'xcb_milestone8_probe',
+        files(
+          'xcb/xcb_milestone8_probe.cpp',
+          'helpers/synthetic_input_client.cpp',
+        ),
+        dependencies: [xcb_test_dependency, gwipc_dep],
+        include_directories: test_source_root_include,
+      )
+    endif
     m7_restart_hold_probe = executable(
       'm7_restart_hold_probe',
       files('xcb/m7_restart_hold_probe.c'),
