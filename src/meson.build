@@ -30,6 +30,7 @@ gw_compositor_geometry_lib = static_library(
   files(
     'compositor/rectangle.cpp',
     'compositor/damage_region.cpp',
+    'compositor/scene.cpp',
   ),
   include_directories: include_directories('.'),
 )
@@ -211,7 +212,8 @@ if get_option('gwcomp')
   executable(
     'gwcomp',
     files('gwcomp/main.cpp'),
-    dependencies: gw_scaffold_dep,
+    dependencies: [gwcomp_options_dep, gwipc_dep, gw_compositor_geometry_dep,
+                   gw_render_software_dep, gw_headless_dep],
     install: true,
   )
 endif

@@ -27,6 +27,14 @@ compositor_geometry_test = executable(
 )
 test('compositor-geometry', compositor_geometry_test, timeout: 10)
 
+compositor_scene_test = executable(
+  'compositor_scene_test',
+  files('unit/compositor_scene_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-scene', compositor_scene_test, timeout: 10)
+
 software_renderer_test = executable(
   'software_renderer_test',
   files('pixel/software_renderer_test.cpp'),
