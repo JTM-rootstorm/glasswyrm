@@ -641,6 +641,17 @@ if get_option('glasswyrmd')
     dependencies: x11_fake_client_dep,
     include_directories: test_source_root_include,
   )
+  if get_option('libgwipc')
+    x11_milestone8_probe = executable(
+      'x11_milestone8_probe',
+      files(
+        'integration/x11_milestone8_probe.cpp',
+        'helpers/synthetic_input_client.cpp',
+      ),
+      dependencies: [x11_fake_client_dep, gwipc_dep],
+      include_directories: test_source_root_include,
+    )
+  endif
 
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
