@@ -48,7 +48,8 @@ x11_resources=not-run raster_requests=not-run plane_mask=not-run damage_coalesci
 m4_pixel_regression=not-run m5_policy_regression=not-run malformed_gwipc=not-run
 xcb_drawing=not-run final_frame_golden=not-run buffer_release=not-run
 compositor_restart=not-run gwm_restart=not-run connection_survival=not-run
-post_restart_drawing=not-run rendering_archive=not-run
+replay_hash=not-run post_restart_hash=not-run post_restart_drawing=not-run
+rendering_archive=not-run
 mkdir -p "$artifact_dir" "$scene_dir" "$dump_dir" "$control_dir"
 rm -f "$artifact_dir"/milestone7-* "$facts"; rm -rf "$scene_dir"/* "$dump_dir"/* "$control_dir"/*
 touch "$runtime_log" "$meson_log" "$raw_log" "$xcb_log" "$exposure_log" "$release_log" "$restart_log" "$malformed_log"
@@ -69,13 +70,16 @@ record_facts() {
   {
     printf 'failure_stage=%s\nscenario_exit=%s\n' "$failure_stage" "$status"
     printf 'api_version=%s\nsoversion=0\nwire_version=%s\n' "$api_version" "$wire_version"
+    printf 'compiler_c=%s\ncompiler_cxx=%s\n' "$(cc --version 2>/dev/null | head -n1 || printf unknown)" "$(c++ --version 2>/dev/null | head -n1 || printf unknown)"
+    printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' "$(meson --version 2>/dev/null || printf unknown)" "$(ninja --version 2>/dev/null || printf unknown)" "$(systemctl --version 2>/dev/null | head -n1 || printf unknown)"
+    printf 'xcb_proto=%s\n' "$(portageq match / x11-base/xcb-proto 2>/dev/null || printf unknown)"
     if [[ -n "$(portageq match / x11-base/xorg-server 2>/dev/null)" ||
           -n "$(portageq match / x11-base/xwayland 2>/dev/null)" ]]; then
       echo x_servers_absent=false
     else
       echo x_servers_absent=true
     fi
-    for key in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive; do printf '%s=%s\n' "$key" "${!key}"; done
+    for key in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival replay_hash post_restart_hash post_restart_drawing rendering_archive; do printf '%s=%s\n' "$key" "${!key}"; done
   } >"$facts"
   exit "$status"
 }
@@ -103,6 +107,8 @@ api04_consumers=passed
 meson test -C "$runtime_build_dir" --print-errorlogs gwcomp-golden; m4_pixel_regression=passed
 meson test -C "$runtime_build_dir" --print-errorlogs wm-policy; m5_policy_regression=passed
 meson test -C "$runtime_build_dir" --print-errorlogs gwipc-malformed 2>&1 | tee -a "$malformed_log"; malformed_gwipc=passed
+meson test -C "$runtime_build_dir" --print-errorlogs published-buffer content-presenter gwcomp-metadata-scene 2>&1 | tee -a "$release_log"
+meson test -C "$runtime_build_dir" --print-errorlogs drawable-core 2>&1 | tee -a "$meson_log"; damage_coalescing=passed
 failure_stage=integrated-three-process-probe
 meson test -C "$runtime_build_dir" --print-errorlogs glasswyrmd-integrated-lifecycle 2>&1 | tee -a "$raw_log"
 gwm_socket=/run/glasswyrm-m7-gwm/gwm.sock
@@ -124,25 +130,60 @@ for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .05; done; [[ 
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order big --scenario draw >>"$raw_log" 2>&1; raw_big=passed image_byte_order=passed
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order little --scenario exposure >>"$exposure_log" 2>&1; exposure_events=passed
 "$runtime_build_dir/tests/x11_milestone7_probe" --display :99 --byte-order little --scenario errors >>"$malformed_log" 2>&1; malformed_x11=passed
-DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone7_probe" >"$control_dir/xcb-result.json" 2>>"$xcb_log"; cat "$control_dir/xcb-result.json" >>"$xcb_log"; xcb_drawing=passed x11_resources=passed raster_requests=passed plane_mask=passed damage_coalescing=passed
-for _ in {1..200}; do [[ -s "$dump_dir/frames.jsonl" ]] && break; sleep .05; done; [[ -s "$dump_dir/frames.jsonl" ]]
-final_ppm="$(find "$dump_dir" -maxdepth 1 -name '*.ppm' -type f | sort | tail -n1)"; [[ -n "$final_ppm" && -s "$final_ppm" ]]
-sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"; final_frame_golden=passed
-grep -E 'BufferRelease|buffer_release|release' "$artifact_dir/milestone7-gwcomp-journal.log" "$runtime_log" >"$release_log" 2>/dev/null || true
+DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone7_probe" >"$control_dir/xcb-result.json" 2>>"$xcb_log"
+cmp "$control_dir/xcb-result.json" "$source_dir/tests/fixtures/m7/xcb-result.json"
+cat "$control_dir/xcb-result.json" >>"$xcb_log"
+xcb_drawing=passed x11_resources=passed raster_requests=passed
+frame_count() { [[ -f "$dump_dir/frames.jsonl" ]] && wc -l <"$dump_dir/frames.jsonl" || printf '0\n'; }
+last_frame_field() { tail -n1 "$dump_dir/frames.jsonl" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
+wait_for_frame_after() { previous=$1; for _ in {1..200}; do current=$(frame_count); (( current > previous )) && return 0; sleep .05; done; return 1; }
+expected_pre="$(sed -n 's/.*"pre_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m7/frame-hashes.json")"
+expected_post="$(sed -n 's/.*"post_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m7/frame-hashes.json")"
+[[ ${#expected_pre} -eq 16 && ${#expected_post} -eq 16 ]]
+for _ in {1..200}; do
+  release_snapshot="$(journalctl -u glasswyrmd-m7.service --no-pager 2>/dev/null || true)"
+  [[ "$release_snapshot" =~ published\ buffer\ released\ buffer=[0-9]+\ reason=1 ]] &&
+    [[ "$release_snapshot" =~ published\ buffer\ released\ buffer=[0-9]+\ reason=2 ]] && break
+  sleep .05
+done
+[[ "$release_snapshot" =~ published\ buffer\ released\ buffer=[0-9]+\ reason=1 ]]
+[[ "$release_snapshot" =~ published\ buffer\ released\ buffer=[0-9]+\ reason=2 ]]
 buffer_release=passed
+before_hold=$(frame_count)
 "$runtime_build_dir/tests/m7_restart_hold_probe" --display :99 --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
 for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
 [[ -f "$control_dir/ready" ]] || { wait "$hold_pid"; exit 1; }
+wait_for_frame_after "$before_hold"
+pre_restart_hash="$(last_frame_field fnv1a64)"; [[ "$pre_restart_hash" == "$expected_pre" ]]
+pre_restart_count=$(frame_count)
 systemctl restart gwcomp-m7.service
 for _ in {1..200}; do systemctl is-active --quiet gwcomp-m7.service && [[ -S "$comp_socket" ]] && break; sleep .05; done
-systemctl is-active --quiet gwcomp-m7.service; [[ -S "$comp_socket" ]]; sleep .25; compositor_restart=passed
+systemctl is-active --quiet gwcomp-m7.service; [[ -S "$comp_socket" ]]
+wait_for_frame_after "$pre_restart_count"
+[[ "$(last_frame_field fnv1a64)" == "$pre_restart_hash" ]]
+replay_hash=passed compositor_restart=passed
+pre_gwm_count=$(frame_count)
 systemctl restart gwm-m7.service
 for _ in {1..200}; do systemctl is-active --quiet gwm-m7.service && [[ -S "$gwm_socket" ]] && break; sleep .05; done
-systemctl is-active --quiet gwm-m7.service; [[ -S "$gwm_socket" ]]; sleep .25; gwm_restart=passed
+systemctl is-active --quiet gwm-m7.service; [[ -S "$gwm_socket" ]]
+wait_for_frame_after "$pre_gwm_count"
+[[ "$(last_frame_field fnv1a64)" == "$pre_restart_hash" ]]
+gwm_restart=passed
+pre_continue_count=$(frame_count)
 touch "$control_dir/continue"; wait "$hold_pid"
-grep -F '"connection_preserved":true' "$restart_result"; connection_survival=passed
-grep -F '"post_restart_drawing":true' "$restart_result"; post_restart_drawing=passed
+cmp "$restart_result" "$source_dir/tests/fixtures/m7/restart-result.json"
+connection_survival=passed plane_mask=passed post_restart_drawing=passed
+wait_for_frame_after "$pre_continue_count"
+post_restart_hash_value="$(last_frame_field fnv1a64)"; [[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
+post_restart_hash=passed final_frame_golden=passed
 cp "$restart_result" "$artifact_dir/milestone7-restart-result.json"
+final_name="$(last_frame_field file)"; final_ppm="$dump_dir/$final_name"; [[ -n "$final_name" && -s "$final_ppm" ]]
+sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"
+journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service --no-pager >"$release_log"
+! grep -Fq 'invalid compositor buffer release' "$release_log"
+grep -Fq 'gwcomp: frame accepted' "$release_log"
+grep -Eq 'glasswyrmd: published buffer released buffer=[0-9]+ reason=1' "$release_log"
+grep -Eq 'glasswyrmd: published buffer released buffer=[0-9]+ reason=2' "$release_log"
 cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"; cp "$scene_dir/scene.jsonl" "$control_dir/scene.jsonl"
 cp "$final_ppm" "$control_dir/final.ppm"
 (cd "$control_dir" && sha256sum final.ppm frames.jsonl scene.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$artifact_dir/milestone7-rendering.tar" final.ppm frames.jsonl scene.jsonl xcb-result.json result.json final-frame.sha256 SHA256SUMS)
@@ -188,14 +229,16 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     k,s,v=line.partition('=')
     if s: facts[k]=v
-required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival post_restart_drawing rendering_archive'.split()
+required='full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api04_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression raw_little raw_big image_byte_order exposure_events malformed_x11 malformed_gwipc x11_resources raster_requests plane_mask damage_coalescing xcb_drawing final_frame_golden buffer_release compositor_restart gwm_restart connection_survival replay_hash post_restart_hash post_restart_drawing rendering_archive'.split()
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
 if facts.get('scenario_exit')!='0': errors.append('scenario_exit must be 0')
 if facts.get('api_version')!='0.4.0': errors.append('api_version must be 0.4.0')
 if facts.get('wire_version')!='1.0' or facts.get('soversion')!='0': errors.append('ABI or wire evidence mismatch')
 if facts.get('x_servers_absent')!='true': errors.append('Xorg and Xwayland must be absent')
 if facts.get('sanitizer') not in {'passed','unavailable'}: errors.append('sanitizer must be passed or unavailable')
-payload={'required_base_commit':base,'tested_commit':tested,'api_version':facts.get('api_version','unknown'),'soversion':facts.get('soversion','unknown'),'wire_version':facts.get('wire_version','unknown'),'x_servers_absent':facts.get('x_servers_absent','unknown'),'results':{k:facts.get(k,'unknown') for k in required},'sanitizer':facts.get('sanitizer','unknown'),'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
+versions={k:facts.get(k,'unknown') for k in ('compiler_c','compiler_cxx','meson_version','ninja_version','systemd_version','xcb_proto')}
+errors += [f'{k} must be recorded' for k,v in versions.items() if v in {'','unknown'}]
+payload={'required_base_commit':base,'tested_commit':tested,'api_version':facts.get('api_version','unknown'),'soversion':facts.get('soversion','unknown'),'wire_version':facts.get('wire_version','unknown'),'x_servers_absent':facts.get('x_servers_absent','unknown'),'versions':versions,'results':{k:facts.get(k,'unknown') for k in required},'sanitizer':facts.get('sanitizer','unknown'),'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
 pathlib.Path(out).write_text(json.dumps(payload,indent=2)+'\n')
 if requested=='true' and errors: raise SystemExit(2)
 PY

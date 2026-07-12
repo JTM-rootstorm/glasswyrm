@@ -145,6 +145,12 @@ int main(int argc, char **argv) {
     fail("focus was not preserved");
   free(focus);
 
+  const uint32_t masked_values[] = {0x00ff0000U, 0x00123456U};
+  check(connection,
+        xcb_change_gc_checked(connection, gc,
+                              XCB_GC_PLANE_MASK | XCB_GC_FOREGROUND,
+                              masked_values),
+        "post-restart plane-mask update failed");
   const xcb_rectangle_t post_restart = {248, 112, 48, 64};
   check(connection,
         xcb_poly_fill_rectangle_checked(connection, window, gc, 1,
@@ -161,7 +167,8 @@ int main(int argc, char **argv) {
          "{\"completed\":true,\"connection_preserved\":true,"
          "\"focus_preserved\":true,\"geometry_preserved\":true,"
          "\"resources_preserved\":true,\"tree_preserved\":true,"
-         "\"window_preserved\":true,\"post_restart_drawing\":true}\n");
+         "\"window_preserved\":true,\"plane_mask\":true,"
+         "\"post_restart_drawing\":true}\n");
   xcb_disconnect(connection);
   close(control);
   return 0;
