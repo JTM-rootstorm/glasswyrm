@@ -39,6 +39,32 @@ std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
 
 } // namespace
 
+std::optional<PeerProfile>
+select_peer_profile(const gwipc_role role,
+                    const std::uint64_t capabilities) noexcept {
+  constexpr std::uint64_t common =
+      GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
+      GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
+  constexpr std::uint64_t buffered =
+      GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
+      GWIPC_CAP_DAMAGE_REGIONS;
+  if (role == GWIPC_ROLE_TEST_PRODUCER) {
+    return (capabilities & (common | buffered)) == (common | buffered)
+               ? std::optional{PeerProfile::M4TestProducer}
+               : std::nullopt;
+  }
+  if (role != GWIPC_ROLE_PROTOCOL_SERVER ||
+      (capabilities & (common | GWIPC_CAP_WINDOW_LIFECYCLE)) !=
+          (common | GWIPC_CAP_WINDOW_LIFECYCLE))
+    return std::nullopt;
+  const auto negotiated_buffered = capabilities & buffered;
+  if (negotiated_buffered == 0)
+    return PeerProfile::M6MetadataProtocolServer;
+  if (negotiated_buffered == buffered)
+    return PeerProfile::M7BufferedProtocolServer;
+  return std::nullopt;
+}
+
 Compositor::Compositor(
     std::filesystem::path dump_directory,
     std::optional<std::filesystem::path> scene_manifest)
@@ -49,7 +75,10 @@ Compositor::Compositor(
 bool Compositor::begin_snapshot() {
   if (snapshot_active_ || !scene_.begin_complete_snapshot()) return false;
   pre_snapshot_attachments_ = pending_attachments_;
-  pending_attachments_.clear();
+  if (profile_ == PeerProfile::M7BufferedProtocolServer)
+    pending_attachments_ = committed_attachments_;
+  else
+    pending_attachments_.clear();
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
   snapshot_invalid_ = false;
@@ -59,6 +88,15 @@ bool Compositor::begin_snapshot() {
 
 bool Compositor::end_snapshot() {
   if (!snapshot_active_ || !scene_.end_complete_snapshot()) return false;
+  if (profile_ == PeerProfile::M7BufferedProtocolServer) {
+    for (auto attachment = pending_attachments_.begin();
+         attachment != pending_attachments_.end();) {
+      if (!scene_.pending().surfaces.contains(attachment->first))
+        attachment = pending_attachments_.erase(attachment);
+      else
+        ++attachment;
+    }
+  }
   pre_snapshot_attachments_.clear();
   snapshot_active_ = false;
   snapshot_surface_ids_.clear();
@@ -100,9 +138,17 @@ bool Compositor::apply(const gwipc_surface_remove& value) {
   return true;
 }
 
-bool Compositor::apply(const gwipc_surface_damage& value) { return scene_.apply(value); }
+bool Compositor::apply(const gwipc_surface_damage& value) {
+  if (profile_ == PeerProfile::M6MetadataProtocolServer) return false;
+  return scene_.apply(value);
+}
 
 bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& error) {
+  if (profile_ == PeerProfile::M6MetadataProtocolServer) {
+    if (fd >= 0) (void)::close(fd);
+    error = "metadata-only ProtocolServer peers cannot attach buffers";
+    return false;
+  }
   if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) {
     if (fd >= 0) (void)::close(fd);
     error = "buffer mutation is gated until a complete snapshot begins";
@@ -140,8 +186,7 @@ bool Compositor::detach(const gwipc_buffer_detach& value) {
 }
 
 PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
-                                  std::string& error,
-                                  const bool metadata_only_peer) {
+                                  std::string& error) {
   PresentedFrame presented;
   if (snapshot_invalid_) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
@@ -161,6 +206,9 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
   if (!result.accepted()) return presented;
 
   const auto& staged = candidate.committed();
+  const bool metadata_only_peer =
+      profile_ == PeerProfile::M6MetadataProtocolServer;
+  const bool protocol_server = profile_ != PeerProfile::M4TestProducer;
   if (!staged.output || !staged.output->enabled) {
     scene_ = std::move(candidate);
     committed_attachments_ = pending_attachments_;
@@ -177,11 +225,29 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
                                  : "TestProducer supplied a metadata-only surface";
       return presented;
     }
+    const auto policy = staged.surface_policies.find(surface_id);
+    if (protocol_server &&
+        (policy == staged.surface_policies.end() ||
+         policy->second.x11_window_id != surface.x11_window_id)) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      error = "ProtocolServer surface is missing matching policy metadata";
+      return presented;
+    }
+    if (!protocol_server && policy != staged.surface_policies.end()) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      error = "TestProducer surfaces cannot carry policy metadata";
+      return presented;
+    }
     const auto attachment = pending_attachments_.find(surface_id);
-    if (!metadata_only && surface.visible &&
+    const bool new_buffered_protocol_surface =
+        profile_ == PeerProfile::M7BufferedProtocolServer &&
+        !scene_.committed().surfaces.contains(surface_id);
+    if (!metadata_only && (surface.visible || new_buffered_protocol_surface) &&
         attachment == pending_attachments_.end()) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "visible surface has no attached buffer";
+      error = new_buffered_protocol_surface
+                  ? "new buffered ProtocolServer surface has no attached buffer"
+                  : "visible surface has no attached buffer";
       return presented;
     }
     if (metadata_only && attachment != pending_attachments_.end()) {
@@ -197,6 +263,18 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
       error = "surface and buffer dimensions do not match";
       return presented;
     }
+    if (profile_ == PeerProfile::M7BufferedProtocolServer &&
+        mapping->second->pixel_format() != GWIPC_PIXEL_FORMAT_XRGB8888) {
+      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
+      error = "buffered ProtocolServer surfaces require XRGB8888";
+      return presented;
+    }
+  }
+  if (protocol_server &&
+      staged.surface_policies.size() != staged.surfaces.size()) {
+    presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
+    error = "surface policy references an unknown surface";
+    return presented;
   }
 
   if (metadata_only_peer) {
