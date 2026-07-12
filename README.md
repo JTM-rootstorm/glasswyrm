@@ -4,17 +4,16 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently implementing Milestone 4. `glasswyrmd` retains its
+The project has completed Milestone 4. `glasswyrmd` retains its
 tested Milestone 2 local X11 setup and bounded headless core request behavior,
 and `libgwipc` provides the tested Milestone 3 versioned local IPC foundation.
 Milestone 4 has added tested scene/damage, read-only buffer import,
 software rendering, bounded headless output, and deterministic PPM dumps.
-`gwcomp` now accepts and presents the repository producer's basic synthetic
-scene with a correlated acknowledgement and exact-pixel golden coverage. The
-remaining producer scenarios and their release/reconnect proofs are not yet
-complete. `gwm` and the runtime tools remain placeholders; there is still no mapping, event delivery, input,
-WM policy,
-DRM/KMS output, or end-to-end compositor frame path.
+`gwcomp` accepts and presents every repository-owned synthetic producer
+scenario with correlated acknowledgements, buffer releases, reconnect proofs,
+and exact-pixel golden coverage. `gwm` and the runtime tools remain
+placeholders; there is still no X11 mapping, event delivery, input, WM policy,
+three-process lifecycle, or DRM/KMS output.
 
 ## Build
 
