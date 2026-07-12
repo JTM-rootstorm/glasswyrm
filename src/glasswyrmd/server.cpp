@@ -333,6 +333,8 @@ int Server::run() {
   // Runtime bootstrap owns commit/generation 1.
   std::uint64_t next_commit = 2;
   std::uint64_t next_generation = 2;
+  std::uint64_t submission_commit = 0;
+  std::uint64_t submission_generation = 0;
   std::optional<StructuralEventState> transition_before;
   struct PendingMutation {
     std::optional<WindowCreateSpec> create;
@@ -384,8 +386,11 @@ int Server::run() {
     LifecycleCallbacks callbacks;
     callbacks.send_policy = [&](const LifecycleSnapshot& snapshot) {
       std::string error;
+      submission_commit = next_commit++;
+      submission_generation = next_generation++;
       const bool sent = bridge->submit_policy(
-          project_policy(snapshot, next_commit, next_generation), error);
+          project_policy(snapshot, submission_commit, submission_generation),
+          error);
       if (!sent)
         std::fprintf(stderr, "glasswyrmd: policy submission failed: %s\n",
                      error.c_str());
@@ -394,7 +399,9 @@ int Server::run() {
     callbacks.send_compositor = [&](const LifecycleSnapshot& snapshot) {
       std::string error;
       return bridge->submit_compositor(
-          project_compositor(snapshot, next_commit, next_generation), error);
+          project_compositor(snapshot, submission_commit,
+                             submission_generation),
+          error);
     };
     callbacks.commit = [&](const LifecycleSnapshot& snapshot) {
       transition_before.reset();
@@ -426,8 +433,6 @@ int Server::run() {
         committed = state_.commit_lifecycle(snapshot);
       }
       if (!committed) return false;
-      ++next_commit;
-      ++next_generation;
       return true;
     };
     callbacks.complete = [&](const std::uint64_t token, const bool success) {
