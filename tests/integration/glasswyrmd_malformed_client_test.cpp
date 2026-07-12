@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     gw::test::X11FakeClient recoverable(server.socket_path());
     auto request = gw::test::make_setup_request(ByteOrder::LittleEndian);
     const gw::test::X11RequestBuilder builder(ByteOrder::LittleEndian);
-    const auto unsupported = builder.raw(2, 0);
+    const auto unsupported = builder.raw(5, 0);
     const auto focus = builder.get_input_focus();
     request.insert(request.end(), unsupported.begin(), unsupported.end());
     request.insert(request.end(), focus.begin(), focus.end());
