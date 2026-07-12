@@ -214,12 +214,20 @@ first ebuilds:
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
+./tools/gw-vm milestone4-runtime-test --yes
 ```
 
 The fixed M3 scenario additionally runs an IPC-only build, staged install and
 C/C++ consumers, then supervises the process probes through a transient
 hardened systemd service. Reports are written under `artifacts/vm/latest/`.
 The separate `full-packaging-test` remains unavailable until real ebuilds land.
+
+The fixed M4 scenario runs strict, sanitizer, compositor-only, and IPC-only
+builds before supervising `gwcomp` as `gwcomp-m4.service`. It drives only the
+repository-owned synthetic producer, validates deterministic frame hashes, and
+collects the PPMs, frame manifest, and SHA-256 manifest in the binary-safe
+`milestone4-frames.tar` artifact. The terminal-only guest must still have Xorg
+and Xwayland absent; M4 does not require DRM, Mesa, libinput, or image libraries.
 
 ## Compatibility
 

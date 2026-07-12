@@ -83,6 +83,7 @@ actions:
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
+./tools/gw-vm milestone4-runtime-test --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -162,6 +163,21 @@ contract round trips, memfd transfer, snapshots, structured rejections, and
 malformed-client isolation over a private `SOCK_SEQPACKET` endpoint. The guest
 must remain terminal-only with Xorg and Xwayland absent.
 
+Milestone 4 has a fixed headless compositor acceptance command:
+
+```sh
+./tools/gw-vm milestone4-runtime-test --yes
+```
+
+It requires a commit descending from
+`6080e094c35929d0fb2deb4b31ff4040e392a75e`. The guest performs full strict,
+sanitizer, compositor-only, and IPC-only builds, then starts `gwcomp` as the
+hardened transient `gwcomp-m4.service`. Repository-owned producer scenarios
+exercise basic and damage frames, stacking, visibility, clipping, opacity,
+buffer release, invalid metadata and buffers, malformed-peer isolation, and a
+reconnecting snapshot. Exact hashes are checked against repository fixtures.
+No arbitrary scenario names are accepted.
+
 ## Safety
 
 Snapshot reset, emerge, unmerge, and the complete packaging test change guest
@@ -207,3 +223,12 @@ Milestone 3 acceptance writes `milestone3-runtime-test.log`,
 toolchain and version domains, build and staged-install gates, every fixed
 process probe, service shutdown, socket cleanup, and the current invocation
 journal.
+
+Milestone 4 acceptance writes `milestone4-runtime-test.log`,
+`milestone4-meson-test.log`, `milestone4-producer.log`,
+`milestone4-golden-test.log`, `milestone4-buffer-release.log`,
+`milestone4-malformed.log`, `milestone4-journal.log`,
+`milestone4-facts.env`, `milestone4-summary.json`, and the binary-safe
+`milestone4-frames.tar`. A passing summary requires exact source identity,
+build and runtime evidence, at least one golden hash, socket cleanup, a valid
+frame archive, and the current systemd invocation journal.
