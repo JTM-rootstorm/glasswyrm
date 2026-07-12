@@ -11,7 +11,7 @@ namespace {
 
 void print_usage(std::ostream& output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
-            "[--version]\n";
+            "[--version] [--wm-socket PATH --compositor-socket PATH]\n";
 }
 
 bool parse_display(std::string_view text, std::uint16_t& display) {
@@ -58,8 +58,28 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
       options.socket_dir = argv[index];
       continue;
     }
+    if (argument == "--wm-socket" || argument == "--compositor-socket") {
+      if (++index >= argc || argv[index][0] == '\0') {
+        error << "glasswyrmd: " << argument
+              << " requires a non-empty path\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      auto& destination = argument == "--wm-socket" ? options.wm_socket
+                                                     : options.compositor_socket;
+      if (destination.has_value()) {
+        error << "glasswyrmd: duplicate option: " << argument << '\n';
+        return ParseOptionsResult::ExitFailure;
+      }
+      destination = argv[index];
+      continue;
+    }
     error << "glasswyrmd: unknown option: " << argument << '\n';
     print_usage(error);
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.wm_socket.has_value() != options.compositor_socket.has_value()) {
+    error << "glasswyrmd: --wm-socket and --compositor-socket must be supplied "
+             "together\n";
     return ParseOptionsResult::ExitFailure;
   }
   return ParseOptionsResult::Run;
