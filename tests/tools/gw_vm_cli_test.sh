@@ -524,8 +524,9 @@ fi
 if [[ "$*" == *milestone8-input-rendering.tar* ]]; then
   destination=${!#}; scratch=$(mktemp -d)
   printf 'P6\n1 1\n255\n000' >"$scratch/final.ppm"
+  cp "$scratch/final.ppm" "$scratch/selected-runtime.ppm"
   for name in frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json; do printf '{}\n' >"$scratch/$name"; done
-  (cd "$scratch" && sha256sum final.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS)
+  (cd "$scratch" && sha256sum final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS)
   rm -rf "$scratch"
 fi
 EOF
@@ -1182,7 +1183,7 @@ for expected in /var/tmp/glasswyrm-build-m8-runtime /var/tmp/glasswyrm-build-m8-
 done
 assert_contains "$command_log" 'milestone8-glasswyrmd-journal.log'
 assert_file_glob "$artifact_dir/milestone8-input-rendering.tar"
-for archived in final.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS; do
+for archived in final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS; do
   tar -tf "$artifact_dir/milestone8-input-rendering.tar" | grep -Fx "$archived" >/dev/null || fail "M8 archive lacks $archived"
 done
 

@@ -145,11 +145,12 @@ for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]] && break
 [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]]
 [[ "$(stat -c %a "$input_socket")" == 600 ]]
 [[ "$(stat -c %u "$input_socket")" == "$(id -u)" ]]; input_socket_security=passed no_device_access=passed
-"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario routing >>"$raw_log" 2>&1; raw_little=passed
-"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order big --scenario routing >>"$raw_log" 2>&1; raw_big=passed image_byte_order=passed
+"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario routing 2>>"$raw_log" | tee "$event_dir/raw-little-events.json" >>"$raw_log"; raw_little=passed
+"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order big --scenario routing 2>>"$raw_log" | tee "$event_dir/raw-big-events.json" >>"$raw_log"; raw_big=passed image_byte_order=passed
 motion=passed crossing=passed buttons=passed button_motion=passed keyboard=passed modifiers=passed two_client_routing=passed
 "$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario propagation >>"$events_log" 2>&1; exposure_events=passed propagation=passed do_not_propagate=passed
-"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario errors >>"$malformed_log" 2>&1; malformed_x11=passed malformed_provider_isolation=passed input_reconnect=passed
+"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario state >>"$events_log" 2>&1
+"$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario errors 2>>"$malformed_log" | tee "$event_dir/input-acknowledgements.json" >>"$malformed_log"; malformed_x11=passed malformed_provider_isolation=passed input_reconnect=passed
 DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone8_probe" --input-socket "$input_socket" --output "$control_dir/xcb-result.json" 2>>"$xcb_log"
 cmp "$control_dir/xcb-result.json" "$source_dir/tests/fixtures/m8/xcb-result.json"
 cat "$control_dir/xcb-result.json" >>"$xcb_log"
@@ -206,7 +207,11 @@ sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"
 journalctl -u glasswyrmd-m8.service -u gwcomp-m8.service --no-pager >>"$events_log"
 cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"
 cp "$final_ppm" "$control_dir/final.ppm"
-archive_files=(final.ppm frames.jsonl xcb-result.json result.json final-frame.sha256)
+cp "$final_ppm" "$control_dir/selected-runtime.ppm"
+cp "$event_dir/raw-little-events.json" "$control_dir/raw-little-events.json"
+cp "$event_dir/raw-big-events.json" "$control_dir/raw-big-events.json"
+cp "$event_dir/input-acknowledgements.json" "$control_dir/input-acknowledgements.json"
+archive_files=(final.ppm selected-runtime.ppm frames.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json final-frame.sha256)
 if [[ -s "$scene_dir/scene.jsonl" ]]; then
   cp "$scene_dir/scene.jsonl" "$control_dir/scene.jsonl"
   archive_files+=(scene.jsonl)
