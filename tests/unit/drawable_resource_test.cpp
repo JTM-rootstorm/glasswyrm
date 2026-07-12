@@ -20,10 +20,29 @@ int main() {
       table.screen().root_window, 24, 1, 1) == CreatePixmapStatus::BadIdChoice,
       "shared xid namespace");
   gw::test::require(table.invariants_hold(), "resource invariants");
+  gw::test::require(table.canonical_drawable_bytes() == 128, "pixmap accounting");
   const auto cleanup = table.cleanup_client(owner);
   gw::test::require(cleanup.resources_destroyed == 2, "cleanup typed resources");
   gw::test::require(table.resource_count(ResourceType::Pixmap) == 0, "pixmap cleanup");
   gw::test::require(table.resource_count(ResourceType::GraphicsContext) == 0,
                     "gc cleanup");
+  gw::test::require(table.canonical_drawable_bytes() == 0, "cleanup accounting");
+
+  ResourceLimits limits;
+  limits.maximum_canonical_drawable_bytes = 16;
+  limits.maximum_pixmaps = 1;
+  limits.maximum_graphics_contexts = 1;
+  ResourceTable bounded(kScreenModel, limits);
+  gw::test::require(bounded.create_pixmap(owner, base, mask, base|10,
+      bounded.screen().root_window, 24, 2, 2) == CreatePixmapStatus::Success,
+      "bounded pixmap");
+  gw::test::require(bounded.create_pixmap(owner, base, mask, base|11,
+      bounded.screen().root_window, 24, 1, 1) == CreatePixmapStatus::BadAlloc,
+      "pixmap count limit");
+  gw::test::require(bounded.free_pixmap(base|10) == FreePixmapStatus::Success &&
+      bounded.canonical_drawable_bytes() == 0, "bounded release");
+  gw::test::require(bounded.create_pixmap(owner, base, mask, base|12,
+      bounded.screen().root_window, 24, 3, 2) == CreatePixmapStatus::BadAlloc,
+      "pixmap byte limit is atomic");
   return 0;
 }

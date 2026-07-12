@@ -94,6 +94,9 @@ struct ResourceLimits {
   std::size_t maximum_bytes_per_property{kMaximumBytesPerProperty};
   std::size_t maximum_total_property_bytes{kMaximumTotalPropertyBytes};
   std::size_t maximum_properties_per_window{kMaximumPropertiesPerWindow};
+  std::size_t maximum_canonical_drawable_bytes{256U * 1024U * 1024U};
+  std::size_t maximum_pixmaps{8192};
+  std::size_t maximum_graphics_contexts{8192};
 };
 
 class ResourceTable {
@@ -171,6 +174,9 @@ class ResourceTable {
   [[nodiscard]] std::size_t total_property_bytes() const noexcept {
     return total_property_bytes_;
   }
+  [[nodiscard]] std::size_t canonical_drawable_bytes() const noexcept {
+    return canonical_drawable_bytes_;
+  }
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
@@ -182,6 +188,7 @@ class ResourceTable {
   std::unordered_map<std::uint32_t, ResourceRecord> resources_;
   std::unordered_map<ClientId, std::vector<std::uint32_t>> resources_by_owner_;
   std::size_t total_property_bytes_{0};
+  std::size_t canonical_drawable_bytes_{0};
 };
 
 }  // namespace glasswyrm::server
