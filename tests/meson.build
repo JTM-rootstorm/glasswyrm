@@ -44,6 +44,19 @@ if get_option('gwm')
   test('gwm-m5-producer-help', gwm_m5_producer_program, args: ['--help'],
        depends: gwm_m5_producer_program, timeout: 10)
 
+  gwm_scenario_matrix_test = executable(
+    'gwm_scenario_matrix_test',
+    files('integration/gwm_scenario_matrix_test.cpp'),
+  )
+  test(
+    'gwm-scenario-matrix',
+    gwm_scenario_matrix_test,
+    args: [gwm_program.full_path(), gwm_m5_producer_program.full_path(),
+           meson.project_source_root() / 'tests/fixtures/m5'],
+    depends: [gwm_program, gwm_m5_producer_program],
+    timeout: 180,
+  )
+
   gwm_robustness_test = executable(
     'gwm_robustness_test',
     files('integration/gwm_robustness_test.cpp'),
