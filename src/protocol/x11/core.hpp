@@ -21,10 +21,22 @@ enum class CoreOpcode : std::uint8_t {
   GetProperty = 20,
   ListProperties = 21,
   GetInputFocus = 43,
+  CreatePixmap = 53,
+  FreePixmap = 54,
+  CreateGC = 55,
+  ChangeGC = 56,
+  FreeGC = 60,
+  ClearArea = 61,
+  CopyArea = 62,
+  PolyFillRectangle = 70,
+  PutImage = 72,
   NoOperation = 127,
 };
 
 enum class CoreEventType : std::uint8_t {
+  Expose = 12,
+  GraphicsExpose = 13,
+  NoExpose = 14,
   DestroyNotify = 17,
   UnmapNotify = 18,
   MapNotify = 19,

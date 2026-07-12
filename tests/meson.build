@@ -13,6 +13,14 @@ x11_event_test = executable(
 )
 test('x11-structural-events', x11_event_test, timeout: 10)
 
+x11_exposure_event_test = executable(
+  'x11_exposure_event_test',
+  files('protocol/x11_exposure_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: include_directories('..'),
+)
+test('x11-exposure-events', x11_exposure_event_test, timeout: 10)
+
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
   files('protocol/x11_lifecycle_request_test.cpp'),
@@ -87,6 +95,13 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  drawable_core_test = executable(
+    'drawable_core_test',
+    files('unit/drawable_core_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drawable-core', drawable_core_test, timeout: 10)
   glasswyrmd_options_test = executable(
     'glasswyrmd_options_test',
     files('unit/glasswyrmd_options_test.cpp'),
