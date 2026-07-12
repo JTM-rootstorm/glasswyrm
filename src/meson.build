@@ -24,6 +24,7 @@ gw_scaffold_dep = declare_dependency(
   include_directories: [gw_include_dir, gw_generated_include_dir],
 )
 
+if get_option('gwcomp')
 gw_compositor_geometry_lib = static_library(
   'gwcomp-geometry',
   files(
@@ -65,6 +66,7 @@ if get_option('headless_backend')
     link_with: gw_headless_lib,
     include_directories: include_directories('.'),
   )
+endif
 endif
 
 if get_option('libgwipc')
