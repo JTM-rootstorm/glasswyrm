@@ -180,6 +180,7 @@ post_restart_hash_value="$(frame_field_at "$post_restart_frame" fnv1a64)"; [[ "$
 post_restart_hash=passed final_frame_golden=passed
 cp "$restart_result" "$artifact_dir/milestone7-restart-result.json"
 final_name="$(frame_field_at "$post_restart_frame" file)"; final_ppm="$dump_dir/$final_name"; [[ -n "$final_name" && -s "$final_ppm" ]]
+cmp "$final_ppm" "$source_dir/tests/fixtures/m7/final.ppm"
 sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"
 journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service --no-pager >"$release_log"
 ! grep -Fq 'invalid compositor buffer release' "$release_log"
