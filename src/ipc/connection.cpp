@@ -4,6 +4,7 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/policy_contract.hpp"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -46,6 +47,13 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
       return GWIPC_CAP_DAMAGE_REGIONS;
     case GWIPC_MESSAGE_FRAME_ACKNOWLEDGED:
       return GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
+    case GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_UPSERT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE:
+    case GWIPC_MESSAGE_POLICY_COMMIT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
+    case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
+      return GWIPC_CAP_WINDOW_POLICY;
     default:
       return 0;
   }
@@ -74,6 +82,12 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_SURFACE_DAMAGE:
     case GWIPC_MESSAGE_FRAME_COMMIT:
     case GWIPC_MESSAGE_FRAME_ACKNOWLEDGED:
+    case GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_UPSERT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE:
+    case GWIPC_MESSAGE_POLICY_COMMIT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
+    case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
       return true;
     default:
       return false;
@@ -308,6 +322,12 @@ gwipc_status validate_application(gwipc_connection& connection,
       if (flags != GWIPC_FLAG_REPLY) return GWIPC_STATUS_PROTOCOL_ERROR;
       break;
     }
+    case GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT: { wire::PolicyContextUpsert value; codec=wire::decode(payload,value); if(flags!=0&&flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_WINDOW_UPSERT: { wire::PolicyWindowUpsert value; codec=wire::decode(payload,value); if(flags!=0&&flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE: { wire::PolicyWindowRemove value; codec=wire::decode(payload,value); if(flags!=0)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_COMMIT: { wire::PolicyCommit value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_ACK_REQUIRED||snapshot.active)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_WINDOW_STATE: { wire::PolicyWindowState value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED: { wire::PolicyAcknowledged value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_REPLY)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
     case GWIPC_MESSAGE_PONG: {
       wire::Pong value;
       codec = wire::decode(payload, value);
@@ -724,6 +744,12 @@ gwipc_status receive_one(gwipc_connection& connection) {
       }
       connection.pending_frame_commits.erase(expected);
     }
+    if (envelope.type == MessageType::PolicyAcknowledged) {
+      wire::PolicyAcknowledged acknowledged;
+      const auto expected=connection.pending_policy_commits.find(envelope.reply_to);
+      if(expected==connection.pending_policy_commits.end()||wire::decode(payload,acknowledged)!=wire::CodecStatus::Ok||acknowledged.commit_id!=expected->second){close_received();return protocol_failure(connection,wire::ProtocolErrorCode::UnexpectedReply,envelope,"policy acknowledgement does not match commit");}
+      connection.pending_policy_commits.erase(expected);
+    }
     const bool protocol_error = envelope.type == MessageType::ProtocolError;
     if (connection.pending_replies.erase(envelope.reply_to) == 0 &&
         !(protocol_error && envelope.reply_to > 0 &&
@@ -810,9 +836,12 @@ gwipc_status receive_one(gwipc_connection& connection) {
                                                commit.commit_id);
     tracked_frame_commit = true;
   }
+  bool tracked_policy_commit=false;
+  if(envelope.type==MessageType::PolicyCommit){wire::PolicyCommit commit;if(wire::decode(payload,commit)!=wire::CodecStatus::Ok||connection.incoming_policy_commits.size()>=connection.config.maximum_queued_messages){close_received();return protocol_failure(connection,wire::ProtocolErrorCode::LimitExceeded,envelope,"policy acknowledgement tracking limit exceeded",GWIPC_STATUS_LIMIT_EXCEEDED);}connection.incoming_policy_commits.emplace(envelope.sequence,commit.commit_id);tracked_policy_commit=true;}
   if (connection.incoming.size() >= connection.config.maximum_queued_messages) {
     if (tracked_frame_commit)
       connection.incoming_frame_commits.erase(envelope.sequence);
+    if (tracked_policy_commit) connection.incoming_policy_commits.erase(envelope.sequence);
     close_received();
     return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded,
                             envelope, "incoming queue limit exceeded",
@@ -823,6 +852,7 @@ gwipc_status receive_one(gwipc_connection& connection) {
   if (!received_message) {
     if (tracked_frame_commit)
       connection.incoming_frame_commits.erase(envelope.sequence);
+    if (tracked_policy_commit) connection.incoming_policy_commits.erase(envelope.sequence);
     close_received();
     return GWIPC_STATUS_OUT_OF_MEMORY;
   }
@@ -1047,6 +1077,8 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
   bool ping_inserted = false;
   bool frame_commit_inserted = false;
   bool frame_acknowledges_incoming = false;
+  bool policy_commit_inserted=false;
+  bool policy_acknowledges_incoming=false;
   const auto pending_sequence = connection->next_send_sequence;
   if (message->type == GWIPC_MESSAGE_PING) {
     gw::ipc::wire::Ping ping;
@@ -1079,6 +1111,8 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
       return GWIPC_STATUS_INVALID_STATE;
     frame_acknowledges_incoming = true;
   }
+  if(message->type==GWIPC_MESSAGE_POLICY_COMMIT){gw::ipc::wire::PolicyCommit commit;if(gw::ipc::wire::decode(payload,commit)!=gw::ipc::wire::CodecStatus::Ok)return GWIPC_STATUS_PROTOCOL_ERROR;if(connection->pending_policy_commits.size()>=connection->config.maximum_queued_messages)return GWIPC_STATUS_LIMIT_EXCEEDED;connection->pending_policy_commits.emplace(pending_sequence,commit.commit_id);policy_commit_inserted=true;}
+  if(message->type==GWIPC_MESSAGE_POLICY_ACKNOWLEDGED){gw::ipc::wire::PolicyAcknowledged acknowledged;const auto expected=connection->incoming_policy_commits.find(message->reply_to);if(gw::ipc::wire::decode(payload,acknowledged)!=gw::ipc::wire::CodecStatus::Ok||expected==connection->incoming_policy_commits.end()||expected->second!=acknowledged.commit_id)return GWIPC_STATUS_INVALID_STATE;policy_acknowledges_incoming=true;}
   gwipc_status status = GWIPC_STATUS_SYSTEM_ERROR;
   try {
     status = gw::ipc::queue_internal(*connection, message->type,
@@ -1089,17 +1123,20 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
       connection->pending_ping_nonces.erase(pending_sequence);
     if (frame_commit_inserted)
       connection->pending_frame_commits.erase(pending_sequence);
+    if(policy_commit_inserted)connection->pending_policy_commits.erase(pending_sequence);
     throw;
   }
   if (status == GWIPC_STATUS_OK) {
     connection->outgoing_snapshot = snapshot;
     if (frame_acknowledges_incoming)
       connection->incoming_frame_commits.erase(message->reply_to);
+    if(policy_acknowledges_incoming)connection->incoming_policy_commits.erase(message->reply_to);
   } else if (ping_inserted) {
     connection->pending_ping_nonces.erase(pending_sequence);
   }
   if (status != GWIPC_STATUS_OK && frame_commit_inserted)
     connection->pending_frame_commits.erase(pending_sequence);
+  if(status!=GWIPC_STATUS_OK&&policy_commit_inserted)connection->pending_policy_commits.erase(pending_sequence);
   return status;
   } catch (const std::bad_alloc&) {
     return GWIPC_STATUS_OUT_OF_MEMORY;

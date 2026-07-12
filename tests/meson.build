@@ -109,6 +109,12 @@ endif
 endif
 
 if get_option('libgwipc')
+  public_control_api_test = executable(
+    'public_control_api_test',
+    files('unit/ipc/public_control_api_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test('gwipc-public-control-api', public_control_api_test, timeout: 10)
   gwipc_wire_codec_test = executable(
     'gwipc_wire_codec_test',
     files('unit/ipc/wire_codec_test.cpp'),

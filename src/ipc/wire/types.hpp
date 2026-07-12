@@ -33,6 +33,12 @@ enum class MessageType : std::uint16_t {
   SurfaceDamage = 0x0130,
   FrameCommit = 0x0140,
   FrameAcknowledged = 0x0141,
+  PolicyContextUpsert = 0x0200,
+  PolicyWindowUpsert = 0x0201,
+  PolicyWindowRemove = 0x0202,
+  PolicyCommit = 0x0210,
+  PolicyWindowState = 0x0211,
+  PolicyAcknowledged = 0x0212,
 };
 
 enum class MessageFlag : std::uint32_t {
@@ -71,9 +77,10 @@ enum class Capability : std::uint64_t {
   SdrColorMetadata = 1ULL << 7U,
   FrameAcknowledgement = 1ULL << 8U,
   TraceMetadata = 1ULL << 9U,
+  WindowPolicy = 1ULL << 10U,
 };
 
-inline constexpr std::uint64_t kKnownCapabilities = 0x3ffULL;
+inline constexpr std::uint64_t kKnownCapabilities = 0x7ffULL;
 
 enum class RejectReason : std::uint16_t {
   IncompatibleVersion = 1,
