@@ -49,7 +49,7 @@ PublishedWindowBuffer* ContentPresenter::ensure_buffer(
   replaced = false;
   if (auto* current = buffers_.current(xid)) {
     if (current->width() == storage.width() &&
-        current->height() == storage.height())
+        current->height() == storage.height() && !force_replacement_)
       return current;
     replaced = true;
   }
@@ -117,6 +117,15 @@ bool ContentPresenter::prepare_lifecycle(
   }
   in_flight_ = true;
   return true;
+}
+
+bool ContentPresenter::prepare_replay(
+    const LifecycleSnapshot& snapshot, ResourceTable& resources,
+    CompositorSnapshotSubmission& submission) {
+  force_replacement_ = true;
+  const bool result = prepare_lifecycle(snapshot, resources, submission);
+  force_replacement_ = false;
+  return result;
 }
 
 void ContentPresenter::accept_lifecycle(const LifecycleSnapshot& snapshot,

@@ -43,10 +43,18 @@ int main() {
       presenter.buffers().current(spec.xid)->buffer_id() != original_buffer ||
       !presenter.has_pending_damage())
     return 7;
+  CompositorSnapshotSubmission replay{4, 4, {}, {}, {}, {}};
+  if (!presenter.prepare_replay(snapshot, state.resources(), replay) ||
+      replay.buffers.size() != 1 ||
+      replay.buffers.front().attach.buffer_id == original_buffer)
+    return 8;
+  presenter.accept_lifecycle(snapshot, state.resources());
+  if (!presenter.release(original_buffer, GWIPC_BUFFER_RELEASE_REPLACED))
+    return 9;
   window->storage->at(2, 3) = 0xff102030U;
   presenter.damage(spec.xid, {2, 3, 1, 1});
   CompositorContentSubmission content;
-  if (!presenter.prepare_content(snapshot, state.resources(), 4, 4, content) ||
+  if (!presenter.prepare_content(snapshot, state.resources(), 5, 5, content) ||
       content.damages.size() != 1)
     return 4;
   presenter.damage(spec.xid, {4, 5, 1, 1});
