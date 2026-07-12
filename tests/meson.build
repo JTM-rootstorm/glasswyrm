@@ -130,6 +130,16 @@ if get_option('glasswyrmd')
   endif
 endif
 
+if get_option('glasswyrmd') and get_option('libgwipc')
+  lifecycle_projection_test = executable(
+    'lifecycle_projection_test',
+    files('unit/lifecycle_projection_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('lifecycle-projection', lifecycle_projection_test, timeout: 10)
+endif
+
 if get_option('gwcomp')
   gwcomp_options_test = executable(
     'gwcomp_options_test',
