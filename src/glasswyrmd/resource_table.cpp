@@ -265,8 +265,59 @@ DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
   if (find_window(xid) == nullptr) {
     return DestroyWindowStatus::BadWindow;
   }
+  const auto plan = capture_destroy_plan(xid);
+  if (!plan) return DestroyWindowStatus::BadWindow;
+  return commit_destroy_plan(*plan, result);
+}
+
+std::optional<WindowDestroyPlan> ResourceTable::capture_destroy_plan(
+    const std::uint32_t xid) const {
+  constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
+  constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
+  if (xid == screen_.root_window || !find_window(xid)) return std::nullopt;
+  WindowDestroyPlan plan;
+  plan.root = xid;
+  std::vector<std::pair<std::uint32_t, bool>> stack{{xid, false}};
+  while (!stack.empty()) {
+    const auto [current, expanded] = stack.back();
+    stack.pop_back();
+    const auto* window = find_window(current);
+    if (!window) return std::nullopt;
+    if (!expanded) {
+      stack.emplace_back(current, true);
+      for (const auto child : window->children)
+        stack.emplace_back(child, false);
+      continue;
+    }
+    ClientCleanupWindow entry{current, window->parent, {}, {}, std::nullopt};
+    entry.owner = find(current)->owner;
+    for (const auto& [client, mask] : window->event_selections)
+      if ((mask & kStructureNotifyMask) != 0)
+        entry.structure_recipients.push_back(client);
+    if (const auto* parent = find_window(window->parent))
+      for (const auto& [client, mask] : parent->event_selections)
+        if ((mask & kSubstructureNotifyMask) != 0)
+          entry.substructure_recipients.push_back(client);
+    std::sort(entry.structure_recipients.begin(),
+              entry.structure_recipients.end());
+    std::sort(entry.substructure_recipients.begin(),
+              entry.substructure_recipients.end());
+    plan.postorder.push_back(std::move(entry));
+  }
+  return plan;
+}
+
+DestroyWindowStatus ResourceTable::commit_destroy_plan(
+    const WindowDestroyPlan& plan, CleanupResult* result) {
+  const auto current = capture_destroy_plan(plan.root);
+  if (!current || current->postorder.size() != plan.postorder.size())
+    return DestroyWindowStatus::BadWindow;
+  for (std::size_t index = 0; index < plan.postorder.size(); ++index)
+    if (current->postorder[index].xid != plan.postorder[index].xid ||
+        current->postorder[index].parent != plan.postorder[index].parent)
+      return DestroyWindowStatus::BadWindow;
   CleanupResult local;
-  destroy_window_tree(xid, local);
+  for (const auto& entry : plan.postorder) destroy_leaf(entry.xid, local);
   if (result != nullptr) {
     result->resources_destroyed += local.resources_destroyed;
     result->property_bytes_released += local.property_bytes_released;
@@ -307,28 +358,6 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
   total_property_bytes_ -= property_bytes;
   ++result.resources_destroyed;
   result.property_bytes_released += property_bytes;
-}
-
-void ResourceTable::destroy_window_tree(const std::uint32_t xid,
-                                        CleanupResult& result) {
-  std::uint32_t current = xid;
-  while (true) {
-    auto* window = find_window(current);
-    if (window == nullptr || current == screen_.root_window) {
-      return;
-    }
-    if (!window->children.empty()) {
-      current = window->children.back();
-      continue;
-    }
-    const std::uint32_t parent = window->parent;
-    const bool finished = current == xid;
-    destroy_leaf(current, result);
-    if (finished) {
-      return;
-    }
-    current = parent;
-  }
 }
 
 CleanupResult ResourceTable::cleanup_client(const ClientId owner) {
@@ -378,7 +407,9 @@ ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
         if (!captured.insert(xid).second) continue;
         window->cleanup_pending = true;
         plan.affects_policy = plan.affects_policy || is_policy_candidate(xid);
-        ClientCleanupWindow captured_window{xid, window->parent, {}, {}};
+        ClientCleanupWindow captured_window{xid, window->parent, {}, {},
+                                             std::nullopt};
+        captured_window.owner = find(xid)->owner;
         for (const auto& [client, mask] : window->event_selections)
           if ((mask & kStructureNotifyMask) != 0)
             captured_window.structure_recipients.push_back(client);
@@ -404,8 +435,10 @@ ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
 CleanupResult ResourceTable::commit_client_cleanup(
     const ClientCleanupPlan& plan) {
   CleanupResult result;
-  for (const auto root : plan.roots)
-    if (find_window(root)) (void)destroy_window(root, &result);
+  for (const auto root : plan.roots) {
+    const auto destroy = capture_destroy_plan(root);
+    if (destroy) (void)commit_destroy_plan(*destroy, &result);
+  }
   return result;
 }
 
