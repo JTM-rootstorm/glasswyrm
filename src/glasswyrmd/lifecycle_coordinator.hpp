@@ -33,6 +33,8 @@ struct LifecycleCallbacks {
   std::function<bool(const LifecycleSnapshot&)> commit;
   std::function<void(std::uint64_t, bool)> complete;
   std::function<void()> fatal;
+  std::function<std::optional<LifecycleSnapshot>(
+      const LifecycleSnapshot&, const LifecycleOperation&)> rebase;
 };
 
 class LifecycleCoordinator {
