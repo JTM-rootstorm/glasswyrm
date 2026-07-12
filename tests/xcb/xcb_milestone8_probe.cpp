@@ -132,51 +132,52 @@ int main(int argc, char** argv) try {
   const auto ga = geometry(a), gb = geometry(b);
   gw::test::SyntheticInputClient input(input_socket);
   std::uint64_t id = 1;
-  (void)input.barrier(id++);
-  (void)input.motion(id++, 2, ga.x + 8, ga.y + 8);
+  const auto initial = input.barrier(id++);
+  std::uint32_t time = initial.time_ms + 1;
+  (void)input.motion(id++, time++, ga.x + 8, ga.y + 8);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_MOTION_NOTIFY));
   }
-  const auto focus_a = input.button(id++, 3, 1, true);
+  const auto focus_a = input.button(id++, time++, 1, true);
   require(focus_a.focus_window == a.window, "click did not focus client A");
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_BUTTON_PRESS));
   }
   fill(a, 0x00d04040U, {12, 12, 80, 52});
-  (void)input.button(id++, 4, 1, false);
+  (void)input.button(id++, time++, 1, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_BUTTON_RELEASE));
   }
-  (void)input.key(id++, 5, 38, true);
+  (void)input.key(id++, time++, 38, true);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_KEY_PRESS));
   }
   fill(a, 0x00f0d040U, {16, 80, 160, 16});
-  (void)input.key(id++, 6, 38, false);
+  (void)input.key(id++, time++, 38, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_KEY_RELEASE));
   }
-  (void)input.key(id++, 7, 50, true);
+  (void)input.key(id++, time++, 50, true);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_KEY_PRESS));
   }
-  (void)input.key(id++, 8, 38, true);
+  (void)input.key(id++, time++, 38, true);
   {
     XPtr<xcb_key_press_event_t> event(
         reinterpret_cast<xcb_key_press_event_t*>(wait_for(a, XCB_KEY_PRESS)));
     require((event->state & XCB_MOD_MASK_SHIFT) != 0, "ShiftMask missing");
   }
-  (void)input.key(id++, 9, 38, false);
+  (void)input.key(id++, time++, 38, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_KEY_RELEASE));
   }
-  (void)input.key(id++, 10, 50, false);
+  (void)input.key(id++, time++, 50, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_KEY_RELEASE));
   }
   const auto overlap_x = std::max(ga.x, gb.x) + 24;
   const auto overlap_y = std::max(ga.y, gb.y) + 24;
-  (void)input.motion(id++, 11, overlap_x, overlap_y);
+  (void)input.motion(id++, time++, overlap_x, overlap_y);
   {
     XPtr<xcb_generic_event_t> event(wait_for(a, XCB_LEAVE_NOTIFY));
   }
@@ -186,13 +187,13 @@ int main(int argc, char** argv) try {
   {
     XPtr<xcb_generic_event_t> event(wait_for(b, XCB_MOTION_NOTIFY));
   }
-  const auto focus_b = input.button(id++, 12, 1, true);
+  const auto focus_b = input.button(id++, time++, 1, true);
   require(focus_b.focus_window == b.window, "click did not focus client B");
   {
     XPtr<xcb_generic_event_t> event(wait_for(b, XCB_BUTTON_PRESS));
   }
   fill(b, 0x00d040d0U, {20, 20, 96, 48});
-  (void)input.motion(id++, 13, overlap_x + 20, overlap_y + 16);
+  (void)input.motion(id++, time++, overlap_x + 20, overlap_y + 16);
   {
     XPtr<xcb_motion_notify_event_t> event(
         reinterpret_cast<xcb_motion_notify_event_t*>(
@@ -200,16 +201,16 @@ int main(int argc, char** argv) try {
     require((event->state & XCB_BUTTON_MASK_1) != 0,
             "Button1Motion state missing");
   }
-  (void)input.button(id++, 14, 1, false);
+  (void)input.button(id++, time++, 1, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(b, XCB_BUTTON_RELEASE));
   }
-  (void)input.key(id++, 15, 56, true);
+  (void)input.key(id++, time++, 56, true);
   {
     XPtr<xcb_generic_event_t> event(wait_for(b, XCB_KEY_PRESS));
   }
   fill(b, 0x00ffffffU, {24, 88, 180, 16});
-  (void)input.key(id++, 16, 56, false);
+  (void)input.key(id++, time++, 56, false);
   {
     XPtr<xcb_generic_event_t> event(wait_for(b, XCB_KEY_RELEASE));
   }

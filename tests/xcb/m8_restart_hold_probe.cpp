@@ -104,11 +104,13 @@ int main(int argc, char** argv) try {
   const auto gb = geometry(b);
   gw::test::SyntheticInputClient input(input_socket);
   std::uint64_t id = 1;
-  (void)input.motion(id++, 2, gb.x + 20, gb.y + 20);
-  const auto click = input.button(id++, 3, 1, true);
-  (void)input.button(id++, 4, 1, false);
-  (void)input.key(id++, 5, 56, true);
-  (void)input.key(id++, 6, 56, false);
+  const auto initial = input.barrier(id++);
+  std::uint32_t time = initial.time_ms + 1;
+  (void)input.motion(id++, time++, gb.x + 20, gb.y + 20);
+  const auto click = input.button(id++, time++, 1, true);
+  (void)input.button(id++, time++, 1, false);
+  (void)input.key(id++, time++, 56, true);
+  (void)input.key(id++, time++, 56, false);
   (void)input.barrier(id++);
   require(click.focus_window == b.window, "pre-restart focus mismatch");
   paint(a, 0x00d04040U, 12); paint(b, 0x00d040d0U, 20);
@@ -125,8 +127,8 @@ int main(int argc, char** argv) try {
       b.connection, xcb_get_input_focus(b.connection), nullptr));
   require(focus != nullptr && focus->focus == b.window,
           "X11 focus did not survive restart");
-  (void)input.key(id++, 7, 56, true);
-  (void)input.key(id++, 8, 56, false);
+  (void)input.key(id++, time++, 56, true);
+  (void)input.key(id++, time++, 56, false);
   paint(b, 0x00ffffffU, 132);
   const auto final = input.barrier(id++);
   std::ofstream result(control_dir + "/result.json");
