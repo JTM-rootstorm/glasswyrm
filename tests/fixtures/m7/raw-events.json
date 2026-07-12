@@ -1,0 +1,7 @@
+{
+  "events": ["Expose", "GraphicsExpose", "NoExpose"],
+  "recoverable_errors": true,
+  "request_byte_orders": ["little", "big"],
+  "image_byte_order": "lsb-first"
+}
+
