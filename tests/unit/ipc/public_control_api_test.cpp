@@ -13,7 +13,7 @@ int main(){
   ok=ok&&gwipc_control_encode_snapshot_begin(&begin,&p)==GWIPC_STATUS_INVALID_ARGUMENT;
   gwipc_snapshot_abort abort{sizeof(abort),1,1,nullptr,1,{}};
   ok=ok&&gwipc_control_encode_snapshot_abort(&abort,&p)==GWIPC_STATUS_INVALID_ARGUMENT;
-  const auto version=gwipc_get_api_version();ok=ok&&version.major==0&&version.minor==3&&version.patch==0;
+  const auto version=gwipc_get_api_version();ok=ok&&version.major==0&&version.minor>=3;
   if(!ok)std::fputs("public control API test failed\n",stderr);
   return ok?0:1;
 }

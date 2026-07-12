@@ -15,3 +15,11 @@ GWIPC_0.3 {
   global:
     gwipc_control_*;
 } GWIPC_0.2;
+
+GWIPC_0.4 {
+  global:
+    gwipc_contract_encode_policy_lifecycle_window_upsert;
+    gwipc_contract_encode_surface_policy_upsert;
+    gwipc_decoded_policy_lifecycle_window_upsert;
+    gwipc_decoded_surface_policy_upsert;
+} GWIPC_0.3;
