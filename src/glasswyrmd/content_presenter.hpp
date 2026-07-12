@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <set>
 #include <span>
 #include <vector>
 
@@ -41,6 +42,7 @@ class ContentPresenter {
  private:
   struct WindowContent {
     std::shared_ptr<PixelStorage> staged_storage;
+    std::unique_ptr<PublishedWindowBuffer> staged_buffer;
     std::vector<geometry::Rectangle> pending;
     std::vector<geometry::Rectangle> inflight;
   };
@@ -51,14 +53,14 @@ class ContentPresenter {
   [[nodiscard]] std::shared_ptr<PixelStorage> stage_storage(
       std::uint32_t xid, std::uint32_t width, std::uint32_t height,
       ResourceTable& resources);
-  [[nodiscard]] bool ensure_buffer(std::uint32_t xid,
-                                   const PixelStorage& storage,
-                                   bool& replaced);
+  [[nodiscard]] PublishedWindowBuffer* ensure_buffer(
+      std::uint32_t xid, const PixelStorage& storage, bool& replaced);
   static CompositorSnapshotSubmission::Damage make_damage(
       std::uint32_t xid, std::span<const geometry::Rectangle> rectangles);
 
   PublishedBufferStore buffers_;
   std::map<std::uint32_t, WindowContent> windows_;
+  std::set<std::uint64_t> discarded_buffers_;
   bool in_flight_{};
 };
 

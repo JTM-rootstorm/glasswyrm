@@ -44,21 +44,23 @@ std::shared_ptr<PixelStorage> ContentPresenter::stage_storage(
   return content.staged_storage;
 }
 
-bool ContentPresenter::ensure_buffer(const std::uint32_t xid,
-                                     const PixelStorage& storage,
-                                     bool& replaced) {
+PublishedWindowBuffer* ContentPresenter::ensure_buffer(
+    const std::uint32_t xid, const PixelStorage& storage, bool& replaced) {
   replaced = false;
   if (auto* current = buffers_.current(xid)) {
     if (current->width() == storage.width() &&
         current->height() == storage.height())
-      return true;
-    if (!buffers_.retire(xid, PublishedBufferRetirement::Replaced))
-      return false;
+      return current;
     replaced = true;
   }
+  auto& content = windows_[xid];
+  if (content.staged_buffer &&
+      content.staged_buffer->width() == storage.width() &&
+      content.staged_buffer->height() == storage.height())
+    return content.staged_buffer.get();
   const auto id = buffers_.next_buffer_id();
-  auto buffer = PublishedWindowBuffer::create(id, xid, storage);
-  return buffer && buffers_.install(xid, std::move(buffer));
+  content.staged_buffer = PublishedWindowBuffer::create(id, xid, storage);
+  return content.staged_buffer.get();
 }
 
 CompositorSnapshotSubmission::Damage ContentPresenter::make_damage(
@@ -82,8 +84,7 @@ bool ContentPresenter::prepare_lifecycle(
                                  projected.applied_height, resources);
     if (!storage) return false;
     bool replaced = false;
-    if (!ensure_buffer(xid, *storage, replaced)) return false;
-    auto* buffer = buffers_.current(xid);
+    auto* buffer = ensure_buffer(xid, *storage, replaced);
     if (!buffer) return false;
     auto& content = windows_[xid];
     auto dirty = normalize(content.pending,
@@ -128,6 +129,14 @@ void ContentPresenter::accept_lifecycle(const LifecycleSnapshot& snapshot,
     found->second.pending.clear();
     found->second.inflight.clear();
     found->second.staged_storage.reset();
+    if (found->second.staged_buffer) {
+      if (buffers_.current(xid) &&
+          !buffers_.retire(xid, PublishedBufferRetirement::Replaced))
+        continue;
+      auto replacement = std::move(found->second.staged_buffer);
+      replacement->set_announced(true);
+      (void)buffers_.install(xid, std::move(replacement));
+    }
     if (auto* buffer = buffers_.current(xid)) buffer->set_announced(true);
   }
   for (auto iterator = windows_.begin(); iterator != windows_.end();) {
@@ -150,6 +159,10 @@ void ContentPresenter::reject_lifecycle() noexcept {
                            content.inflight.end());
     content.inflight.clear();
     content.staged_storage.reset();
+    if (content.staged_buffer) {
+      discarded_buffers_.insert(content.staged_buffer->buffer_id());
+      content.staged_buffer.reset();
+    }
   }
   in_flight_ = false;
 }
@@ -202,6 +215,9 @@ void ContentPresenter::reject_content() noexcept {
 
 bool ContentPresenter::release(const std::uint64_t buffer_id,
                                const gwipc_buffer_release_reason reason) {
+  if (reason == GWIPC_BUFFER_RELEASE_CONSUMER_DONE &&
+      discarded_buffers_.erase(buffer_id) == 1)
+    return true;
   const auto translated =
       reason == GWIPC_BUFFER_RELEASE_REPLACED
           ? std::optional(PublishedBufferRetirement::Replaced)
@@ -216,6 +232,7 @@ bool ContentPresenter::release(const std::uint64_t buffer_id,
 void ContentPresenter::peer_disconnected() noexcept {
   reject_content();
   buffers_.peer_disconnected();
+  discarded_buffers_.clear();
 }
 
 bool ContentPresenter::has_pending_damage() const noexcept {
