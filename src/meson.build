@@ -190,6 +190,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/peer_transport.cpp',
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_peer.cpp',
+      'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
     )
     gw_server_core_dependencies += gwipc_dep

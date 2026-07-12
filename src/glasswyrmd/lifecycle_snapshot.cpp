@@ -10,6 +10,7 @@ LifecycleSnapshot build_lifecycle_snapshot(const ResourceTable& resources,
                                            const std::uint32_t focused_window) {
   LifecycleSnapshot snapshot;
   snapshot.focused_window = focused_window;
+  snapshot.root_window = resources.screen().root_window;
   const auto* root = resources.find_window(resources.screen().root_window);
   if (!root) return snapshot;
   snapshot.root_order = root->children;
@@ -23,7 +24,9 @@ LifecycleSnapshot build_lifecycle_snapshot(const ResourceTable& resources,
         window->map_requested, window->policy_visible, window->focused,
         window->creation_serial, window->map_serial, window->focus_serial,
         window->geometry_serial, window->stack_serial, window->stack_sibling,
-        window->stack_mode});
+        window->stack_mode, window->x, window->y, -1, window->width,
+        window->height, 1, 1, !window->attributes.override_redirect,
+        !window->attributes.override_redirect, false, 1, 0});
   }
   return snapshot;
 }

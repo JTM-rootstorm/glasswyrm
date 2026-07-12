@@ -18,12 +18,20 @@ struct LifecycleWindow {
   std::uint64_t stack_serial{};
   std::uint32_t stack_sibling{};
   LifecycleStackMode stack_mode{LifecycleStackMode::None};
+  std::int32_t applied_x{}, applied_y{}, stacking{-1};
+  std::uint32_t applied_width{}, applied_height{};
+  std::uint8_t window_type{}, applied_state{};
+  bool managed{}, decoration_eligible{}, attention_requested{};
+  std::uint8_t fullscreen_eligible{}, direct_scanout_eligible{};
 };
 
 struct LifecycleSnapshot {
   std::map<std::uint32_t, LifecycleWindow> windows;
   std::vector<std::uint32_t> root_order;
   std::uint32_t focused_window{};
+  std::uint32_t root_window{1};
+  std::uint32_t workspace_id{1};
+  std::uint64_t output_id{1};
 };
 
 struct AppliedPolicyWindow {
