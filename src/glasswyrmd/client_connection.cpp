@@ -16,11 +16,15 @@ namespace x11 = gw::protocol::x11;
 ClientConnection::ClientConnection(const int descriptor,
                                    const std::uint64_t identifier,
                                    const std::uint32_t resource_id_base,
-                                   ServerState& server_state)
+                                   ServerState& server_state,
+                                   const bool integrated_lifecycle,
+                                   DeferredHandler deferred_handler)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
-      server_state_(server_state) {}
+      server_state_(server_state),
+      integrated_lifecycle_(integrated_lifecycle),
+      deferred_handler_(std::move(deferred_handler)) {}
 
 ClientConnection::~ClientConnection() {
   if (descriptor_ >= 0) {
@@ -196,11 +200,21 @@ void ClientConnection::process_input(
         budget.record(request_framer_->request().bytes.size());
         const DispatchContext context{identifier_, resource_id_base_,
                                       server_state_.screen().resource_id_mask,
-                                      request_sequence_, byte_order_};
+                                      request_sequence_, byte_order_,
+                                      integrated_lifecycle_};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
         if (!result_packet.output.empty() &&
             !enqueue(std::move(result_packet.output))) {
+          return;
+        }
+        if (result_packet.kind == DispatchKind::DeferredLifecycle &&
+            (!deferred_handler_ || !deferred_handler_(*this, result_packet))) {
+          close_with_log("deferred lifecycle handoff failed");
+          return;
+        }
+        if (result_packet.kind == DispatchKind::CloseClient) {
+          close_with_log("dispatcher requested client close");
           return;
         }
         request_framer_->reset();
@@ -218,6 +232,10 @@ void ClientConnection::process_input(
         close_with_log("connection closed during core request");
         return;
     }
+  }
+  if (dispatch_blocked() && consumed < input.size()) {
+    pending_input_.insert(pending_input_.end(), input.begin() + consumed,
+                          input.end());
   }
 }
 
