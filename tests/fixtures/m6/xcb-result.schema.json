@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Glasswyrm M6 XCB lifecycle result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["completed", "events_verified", "geometry_verified", "tree_verified", "focus_verified", "no_ppm"],
+  "properties": {
+    "completed": {"const": true},
+    "events_verified": {"const": true},
+    "geometry_verified": {"const": true},
+    "tree_verified": {"const": true},
+    "focus_verified": {"const": true},
+    "no_ppm": {"const": true}
+  }
+}

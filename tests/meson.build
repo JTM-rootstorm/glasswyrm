@@ -180,6 +180,26 @@ if get_option('glasswyrmd') and get_option('libgwipc')
 endif
 
 if get_option('gwcomp')
+  m6_fixture_test = executable(
+    'm6_fixture_test',
+    files('unit/m6_fixture_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep, gw_x11_setup_dep],
+    include_directories: test_source_root_include,
+  )
+  test(
+    'm6-fixtures',
+    m6_fixture_test,
+    args: [meson.project_source_root() / 'tests/fixtures/m6'],
+    timeout: 10,
+  )
+  m6_fixture_validate = find_program('tools/m6_fixture_validate.sh')
+  test(
+    'm6-fixture-checksums',
+    m6_fixture_validate,
+    args: [meson.project_source_root() / 'tests/fixtures/m6'],
+    timeout: 10,
+  )
+
   gwcomp_options_test = executable(
     'gwcomp_options_test',
     files('unit/gwcomp_options_test.cpp'),
