@@ -72,25 +72,6 @@ std::optional<StructuralEventState> capture_structural_state(
   return state;
 }
 
-std::vector<std::uint32_t> subtree_postorder(const ResourceTable& resources,
-                                             const std::uint32_t root) {
-  std::vector<std::uint32_t> result;
-  std::vector<std::pair<std::uint32_t, bool>> stack{{root, false}};
-  while (!stack.empty()) {
-    const auto [xid, expanded] = stack.back();
-    stack.pop_back();
-    const auto* window = resources.find_window(xid);
-    if (!window) continue;
-    if (expanded) {
-      result.push_back(xid);
-      continue;
-    }
-    stack.emplace_back(xid, true);
-    for (const auto child : window->children) stack.emplace_back(child, false);
-  }
-  return result;
-}
-
 constexpr std::uint32_t kWindowAttributeMask = 0x00007fffU;
 constexpr std::uint32_t kCoreEventMask = 0x01ffffffU;
 constexpr std::uint32_t kDoNotPropagateMask = 0x0000204fU;
@@ -294,14 +275,21 @@ DispatchResult destroy_window(ServerState& state,
       state.resources().is_policy_candidate(window)) {
     return DispatchResult::deferred_destroy_window(window);
   }
-  const auto destroyed = subtree_postorder(state.resources(), window);
+  const auto destroyed = state.resources().capture_destroy_plan(window);
+  if (!destroyed)
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   DispatchResult result;
-  result.structural_transitions.reserve(destroyed.size());
-  for (const auto xid : destroyed)
+  result.structural_transitions.reserve(destroyed->postorder.size());
+  for (const auto& item : destroyed->postorder) {
+    StructuralEventState before{};
+    before.target = item.xid;
+    before.parent = item.parent;
+    before.structure_recipients = item.structure_recipients;
+    before.substructure_recipients = item.substructure_recipients;
     result.structural_transitions.push_back(
-        {StructuralTransitionKind::Destroy,
-         capture_structural_state(state.resources(), xid), std::nullopt});
-  const auto status = state.resources().destroy_window(window);
+        {StructuralTransitionKind::Destroy, std::move(before), std::nullopt});
+  }
+  const auto status = state.resources().commit_destroy_plan(*destroyed);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
