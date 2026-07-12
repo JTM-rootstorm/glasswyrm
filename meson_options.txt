@@ -1,5 +1,5 @@
 option('glasswyrmd', type: 'boolean', value: true, description: 'Build the X11 protocol server.')
-option('gwm', type: 'boolean', value: true, description: 'Build the window manager placeholder.')
+option('gwm', type: 'boolean', value: true, description: 'Build the window-management policy process.')
 option('gwcomp', type: 'boolean', value: true, description: 'Build the headless compositor process.')
 option('tools', type: 'boolean', value: true, description: 'Build the developer tool placeholders.')
 option('libgwipc', type: 'boolean', value: true, description: 'Build and install the versioned local IPC library.')
