@@ -30,6 +30,26 @@ if get_option('gwcomp')
     depends: gwcomp_program,
     timeout: 15,
   )
+
+  gwcomp_golden_test = executable(
+    'gwcomp_golden_test',
+    files('integration/gwcomp_golden_test.cpp'),
+  )
+  test(
+    'gwcomp-golden',
+    gwcomp_golden_test,
+    args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
+    depends: [gwcomp_program, gwcomp_m4_producer_program],
+    timeout: 15,
+  )
+
+  test(
+    'gwcomp-m4-producer-help',
+    gwcomp_m4_producer_program,
+    args: ['--help'],
+    depends: gwcomp_m4_producer_program,
+    timeout: 10,
+  )
 endif
 
 if get_option('gwcomp')
