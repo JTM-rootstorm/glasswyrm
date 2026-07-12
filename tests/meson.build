@@ -8,6 +8,16 @@ test('scaffold', scaffold_test)
 
 test_source_root_include = include_directories('..')
 
+if get_option('gwm')
+  wm_policy_test = executable(
+    'wm_policy_test',
+    files('wm/policy_engine_test.cpp'),
+    dependencies: gw_wm_policy_dep,
+    include_directories: test_source_root_include,
+  )
+  test('wm-policy', wm_policy_test, timeout: 10)
+endif
+
 if get_option('gwcomp')
   gwcomp_options_test = executable(
     'gwcomp_options_test',

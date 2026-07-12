@@ -196,6 +196,15 @@ if get_option('glasswyrmd')
 endif
 
 if get_option('gwm')
+  gw_wm_policy_lib = static_library(
+    'gw-wm-policy',
+    files('wm/policy_engine.cpp', 'wm/transaction.cpp'),
+    include_directories: include_directories('.'),
+  )
+  gw_wm_policy_dep = declare_dependency(
+    link_with: gw_wm_policy_lib,
+    include_directories: include_directories('.'),
+  )
   executable(
     'gwm',
     files('gwm/main.cpp'),
