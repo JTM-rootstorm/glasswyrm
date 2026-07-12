@@ -5,8 +5,19 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace glasswyrm::server {
+
+struct PolicySnapshotSubmission {
+  std::uint64_t commit_id{}, generation{};
+  std::vector<gwipc_policy_lifecycle_window_upsert> windows;
+};
+
+struct PolicySnapshotResult {
+  std::uint64_t generation{}, hash{};
+  std::vector<gwipc_policy_window_state> windows;
+};
 
 class PolicyPeer {
 public:
@@ -21,6 +32,14 @@ public:
   [[nodiscard]] std::uint64_t policy_hash() const noexcept {
     return policy_hash_;
   }
+  [[nodiscard]] bool submit(const PolicySnapshotSubmission &submission,
+                            std::string &error);
+  [[nodiscard]] const PolicySnapshotResult &result() const noexcept {
+    return result_;
+  }
+  [[nodiscard]] const PolicySnapshotSubmission &replay_input() const noexcept {
+    return replay_input_;
+  }
   void disconnect() noexcept;
 
 private:
@@ -34,6 +53,9 @@ private:
   std::uint64_t policy_hash_{};
   bool reply_snapshot_active_{};
   bool reply_snapshot_complete_{};
+  PolicySnapshotSubmission pending_;
+  PolicySnapshotSubmission replay_input_;
+  PolicySnapshotResult result_;
 };
 
 } // namespace glasswyrm::server
