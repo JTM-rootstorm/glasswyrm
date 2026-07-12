@@ -86,6 +86,16 @@ if get_option('gwm')
 
 endif
 
+if get_option('glasswyrmd')
+  glasswyrmd_options_test = executable(
+    'glasswyrmd_options_test',
+    files('unit/glasswyrmd_options_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+endif
+
 if get_option('gwcomp')
   gwcomp_options_test = executable(
     'gwcomp_options_test',
