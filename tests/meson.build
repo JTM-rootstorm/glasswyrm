@@ -18,6 +18,7 @@ if get_option('gwcomp')
   test('gwcomp-options', gwcomp_options_test, timeout: 10)
 endif
 
+if get_option('gwcomp')
 compositor_geometry_test = executable(
   'compositor_geometry_test',
   files('unit/compositor_geometry_test.cpp'),
@@ -42,6 +43,7 @@ if get_option('headless_backend')
     include_directories: test_source_root_include,
   )
   test('headless-output', headless_output_test, timeout: 10)
+endif
 endif
 
 if get_option('libgwipc')
