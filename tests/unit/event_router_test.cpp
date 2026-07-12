@@ -1,5 +1,6 @@
 #include "glasswyrmd/event_router.hpp"
 #include "glasswyrmd/server_state.hpp"
+#include "protocol/x11/event_mask.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <array>
@@ -116,9 +117,14 @@ int main() {
               1, 0x00200000U, state.screen().resource_id_mask, spec) ==
               glasswyrm::server::CreateWindowStatus::Success,
           "create routed window");
-  require(state.resources().set_event_selection(spec.xid, 1, 1U << 17U) &&
+  require(state.resources().set_event_selection(
+              spec.xid, 1,
+              (1U << 17U) | gw::protocol::x11::event_mask::FocusChange |
+                  gw::protocol::x11::event_mask::LeaveWindow) &&
               state.resources().set_event_selection(state.screen().root_window,
-                                                    2, 1U << 19U),
+                  2, (1U << 19U) |
+                         gw::protocol::x11::event_mask::FocusChange |
+                         gw::protocol::x11::event_mask::EnterWindow),
           "install per-client structural selections");
 
   std::array<ClientConnection *, 2> clients{&target_client.connection,
@@ -187,6 +193,22 @@ int main() {
           parent_event[2] == 0 && parent_event[3] == 2 &&
           parent_event[4] == 0 && parent_event[7] == 1,
       "events use recipient sequence, byte order, and selected event field");
+
+  glasswyrm::input::InputState input;
+  input.set_pointer(52, 33, spec.xid);
+  const auto input_before = router.capture_input_transition(spec.xid, spec.xid);
+  input.set_pointer(52, 33, state.screen().root_window);
+  require(router.route_lifecycle_input_transition(
+              input_before, state.screen().root_window,
+              state.screen().root_window, input, clients) == 4,
+          "lifecycle input transition routes captured departures and committed arrivals");
+  const auto focus_out = receive_event(target_client);
+  const auto leave = receive_event(target_client);
+  const auto focus_in = receive_event(parent_client);
+  const auto enter = receive_event(parent_client);
+  require(focus_out[0] == 10 && leave[0] == 8 &&
+              focus_in[0] == 9 && enter[0] == 7,
+          "lifecycle input transition preserves focus-before-crossing order");
 
   require(!target_client.connection.enqueue_server_packet(
               std::vector<std::uint8_t>(1024U * 1024U + 1U)),
