@@ -43,6 +43,8 @@ class ClientConnection {
       std::function<bool(ClientConnection&, const DispatchResult&)>;
   using StructuralTransitionHandler =
       std::function<void(const std::vector<StructuralTransition>&)>;
+  using DrawableDamageHandler =
+      std::function<void(const std::vector<DrawableDamage>&)>;
   using DispatchBlockToken = std::uint64_t;
   enum class State {
     AwaitingSetup,
@@ -55,7 +57,8 @@ class ClientConnection {
                    std::uint32_t resource_id_base, ServerState& server_state,
                    bool integrated_lifecycle = false,
                    DeferredHandler deferred_handler = {},
-                   StructuralTransitionHandler transition_handler = {});
+                   StructuralTransitionHandler transition_handler = {},
+                   DrawableDamageHandler damage_handler = {});
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -128,6 +131,7 @@ class ClientConnection {
   bool integrated_lifecycle_{false};
   DeferredHandler deferred_handler_;
   StructuralTransitionHandler transition_handler_;
+  DrawableDamageHandler damage_handler_;
 };
 
 }  // namespace glasswyrm::server
