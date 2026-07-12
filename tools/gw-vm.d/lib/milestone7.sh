@@ -49,7 +49,7 @@ m4_pixel_regression=not-run m5_policy_regression=not-run malformed_gwipc=not-run
 xcb_drawing=not-run final_frame_golden=not-run buffer_release=not-run
 compositor_restart=not-run gwm_restart=not-run connection_survival=not-run
 replay_hash=not-run post_restart_hash=not-run post_restart_drawing=not-run
-rendering_archive=not-run
+rendering_archive=not-run scene_manifest=not-run
 mkdir -p "$artifact_dir" "$scene_dir" "$dump_dir" "$control_dir"
 rm -f "$artifact_dir"/milestone7-* "$facts"; rm -rf "$scene_dir"/* "$dump_dir"/* "$control_dir"/*
 touch "$runtime_log" "$meson_log" "$raw_log" "$xcb_log" "$exposure_log" "$release_log" "$restart_log" "$malformed_log"
@@ -73,6 +73,7 @@ record_facts() {
     printf 'compiler_c=%s\ncompiler_cxx=%s\n' "$(cc --version 2>/dev/null | head -n1 || printf unknown)" "$(c++ --version 2>/dev/null | head -n1 || printf unknown)"
     printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' "$(meson --version 2>/dev/null || printf unknown)" "$(ninja --version 2>/dev/null || printf unknown)" "$(systemctl --version 2>/dev/null | head -n1 || printf unknown)"
     printf 'xcb_proto=%s\n' "$(portageq match / x11-base/xcb-proto 2>/dev/null || printf unknown)"
+    printf 'scene_manifest=%s\n' "$scene_manifest"
     if [[ -n "$(portageq match / x11-base/xorg-server 2>/dev/null)" ||
           -n "$(portageq match / x11-base/xwayland 2>/dev/null)" ]]; then
       echo x_servers_absent=false
@@ -187,9 +188,17 @@ journalctl -u glasswyrmd-m7.service -u gwcomp-m7.service --no-pager >"$release_l
 grep -Fq 'gwcomp: frame accepted' "$release_log"
 grep -Eq 'glasswyrmd: published buffer released buffer=[0-9]+ reason=1' "$release_log"
 grep -Eq 'glasswyrmd: published buffer released buffer=[0-9]+ reason=2' "$release_log"
-cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"; cp "$scene_dir/scene.jsonl" "$control_dir/scene.jsonl"
+cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"
 cp "$final_ppm" "$control_dir/final.ppm"
-(cd "$control_dir" && sha256sum final.ppm frames.jsonl scene.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$artifact_dir/milestone7-rendering.tar" final.ppm frames.jsonl scene.jsonl xcb-result.json result.json final-frame.sha256 SHA256SUMS)
+archive_files=(final.ppm frames.jsonl xcb-result.json result.json final-frame.sha256)
+if [[ -s "$scene_dir/scene.jsonl" ]]; then
+  cp "$scene_dir/scene.jsonl" "$control_dir/scene.jsonl"
+  archive_files+=(scene.jsonl)
+  scene_manifest=present
+else
+  scene_manifest=absent
+fi
+(cd "$control_dir" && sha256sum "${archive_files[@]}" >SHA256SUMS && tar -cf "$artifact_dir/milestone7-rendering.tar" "${archive_files[@]}" SHA256SUMS)
 tar -tf "$artifact_dir/milestone7-rendering.tar" | tee -a "$runtime_log" | grep -Fx final.ppm
 rendering_archive=passed
 failure_stage=
@@ -239,9 +248,10 @@ if facts.get('api_version')!='0.4.0': errors.append('api_version must be 0.4.0')
 if facts.get('wire_version')!='1.0' or facts.get('soversion')!='0': errors.append('ABI or wire evidence mismatch')
 if facts.get('x_servers_absent')!='true': errors.append('Xorg and Xwayland must be absent')
 if facts.get('sanitizer') not in {'passed','unavailable'}: errors.append('sanitizer must be passed or unavailable')
+if facts.get('scene_manifest') not in {'present','absent'}: errors.append('scene_manifest must record present or absent')
 versions={k:facts.get(k,'unknown') for k in ('compiler_c','compiler_cxx','meson_version','ninja_version','systemd_version','xcb_proto')}
 errors += [f'{k} must be recorded' for k,v in versions.items() if v in {'','unknown'}]
-payload={'required_base_commit':base,'tested_commit':tested,'api_version':facts.get('api_version','unknown'),'soversion':facts.get('soversion','unknown'),'wire_version':facts.get('wire_version','unknown'),'x_servers_absent':facts.get('x_servers_absent','unknown'),'versions':versions,'results':{k:facts.get(k,'unknown') for k in required},'sanitizer':facts.get('sanitizer','unknown'),'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
+payload={'required_base_commit':base,'tested_commit':tested,'api_version':facts.get('api_version','unknown'),'soversion':facts.get('soversion','unknown'),'wire_version':facts.get('wire_version','unknown'),'x_servers_absent':facts.get('x_servers_absent','unknown'),'versions':versions,'results':{k:facts.get(k,'unknown') for k in required},'sanitizer':facts.get('sanitizer','unknown'),'scene_manifest':facts.get('scene_manifest','unknown'),'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
 pathlib.Path(out).write_text(json.dumps(payload,indent=2)+'\n')
 if requested=='true' and errors: raise SystemExit(2)
 PY
