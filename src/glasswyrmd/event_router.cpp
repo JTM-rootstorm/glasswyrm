@@ -2,6 +2,10 @@
 
 #include "protocol/x11/event.hpp"
 #include "protocol/x11/exposure_event.hpp"
+#include "input/input_router.hpp"
+#include "protocol/x11/crossing_event.hpp"
+#include "protocol/x11/focus_event.hpp"
+#include "protocol/x11/input_event.hpp"
 #include "protocol/x11/event_mask.hpp"
 
 #include <algorithm>
@@ -49,6 +53,28 @@ std::size_t route(const ResourceTable &resources, const std::uint32_t target,
   return delivered;
 }
 } // namespace
+
+namespace {
+std::vector<glasswyrm::input::RouteWindow> route_windows(
+    const ResourceTable& resources, std::uint32_t source) {
+  std::vector<glasswyrm::input::RouteWindow> result;
+  while (source != 0) {
+    const auto* window = resources.find_window(source);
+    if (!window) break;
+    glasswyrm::input::RouteWindow route{};
+    route.xid = source;
+    route.parent = window->parent;
+    route.do_not_propagate = window->attributes.do_not_propagate_mask;
+    route.selections.reserve(window->event_selections.size());
+    for (const auto& [client, mask] : window->event_selections)
+      route.selections.push_back({client, mask, true});
+    result.push_back(std::move(route));
+    if (window->parent == source) break;
+    source = window->parent;
+  }
+  return result;
+}
+}  // namespace
 
 std::optional<StructuralEventState>
 EventRouter::capture(const std::uint32_t target) const {
@@ -224,6 +250,117 @@ std::size_t EventRouter::route_expose(
         ++delivered;
     }
   }
+  return delivered;
+}
+
+std::size_t EventRouter::route_input(
+    const gw::protocol::x11::CoreEventType type, const std::uint8_t detail,
+    const std::uint32_t time, const std::uint32_t source,
+    const std::uint16_t state, const std::uint32_t delivery_mask,
+    const std::int32_t root_x, const std::int32_t root_y,
+    const std::uint32_t pointer_target,
+    const std::span<ClientConnection *const> clients) const {
+  const auto windows = route_windows(resources_, source);
+  const auto target = glasswyrm::input::propagate_event(
+      windows, source, delivery_mask);
+  if (target.event_window == 0) return 0;
+  const auto coordinates = glasswyrm::input::event_coordinates(
+      resources_, target.event_window, pointer_target, root_x, root_y);
+  std::size_t delivered = 0;
+  for (const auto client_id : target.clients) {
+    auto* client = find_client(clients, client_id);
+    if (!client) continue;
+    gw::protocol::x11::InputEvent event{};
+    event.type = type;
+    event.detail = detail;
+    event.time = time;
+    event.root = resources_.screen().root_window;
+    event.event = target.event_window;
+    event.child = coordinates.child;
+    event.root_x = coordinates.root_x;
+    event.root_y = coordinates.root_y;
+    event.event_x = coordinates.event_x;
+    event.event_y = coordinates.event_y;
+    event.state = state;
+    if (client->enqueue_server_packet(gw::protocol::x11::encode_input_event(
+            client->byte_order(), client->last_request_sequence(), event)))
+      ++delivered;
+  }
+  return delivered;
+}
+
+std::size_t EventRouter::route_crossing(
+    const std::uint32_t old_target, const std::uint32_t new_target,
+    const std::uint32_t focus, const glasswyrm::input::InputState& input,
+    const std::span<ClientConnection *const> clients) const {
+  if (old_target == new_target) return 0;
+  const auto root = resources_.screen().root_window;
+  const auto details = glasswyrm::input::crossing_details(
+      root, old_target, new_target);
+  std::size_t delivered = 0;
+  const auto deliver = [&](const std::uint32_t window,
+                           const std::uint32_t mask,
+                           const gw::protocol::x11::CoreEventType type,
+                           const gw::protocol::x11::NotifyDetail detail) {
+    const auto routes = route_windows(resources_, window);
+    const auto target = glasswyrm::input::select_direct(routes, window, mask);
+    const auto coordinates = glasswyrm::input::event_coordinates(
+        resources_, window, input.pointer_target(), input.pointer_x(),
+        input.pointer_y());
+    for (const auto client_id : target.clients) {
+      auto* client = find_client(clients, client_id);
+      if (!client) continue;
+      gw::protocol::x11::CrossingEvent event{};
+      event.type = type;
+      event.detail = detail;
+      event.time = input.time();
+      event.root = root;
+      event.event = window;
+      event.child = coordinates.child;
+      event.root_x = coordinates.root_x;
+      event.root_y = coordinates.root_y;
+      event.event_x = coordinates.event_x;
+      event.event_y = coordinates.event_y;
+      event.state = input.mask();
+      event.focus = glasswyrm::input::crossing_focus(root, window, focus);
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_crossing_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+  };
+  deliver(old_target, gw::protocol::x11::event_mask::LeaveWindow,
+          gw::protocol::x11::CoreEventType::LeaveNotify, details.first);
+  deliver(new_target, gw::protocol::x11::event_mask::EnterWindow,
+          gw::protocol::x11::CoreEventType::EnterNotify, details.second);
+  return delivered;
+}
+
+std::size_t EventRouter::route_focus(
+    const std::uint32_t old_focus, const std::uint32_t new_focus,
+    const std::span<ClientConnection *const> clients) const {
+  if (old_focus == new_focus) return 0;
+  const auto root = resources_.screen().root_window;
+  const auto details = glasswyrm::input::crossing_details(root, old_focus,
+                                                           new_focus);
+  std::size_t delivered = 0;
+  const auto deliver = [&](const std::uint32_t window,
+                           const gw::protocol::x11::CoreEventType type,
+                           const gw::protocol::x11::NotifyDetail detail) {
+    const auto routes = route_windows(resources_, window);
+    const auto target = glasswyrm::input::select_direct(
+        routes, window, gw::protocol::x11::event_mask::FocusChange);
+    for (const auto client_id : target.clients) {
+      auto* client = find_client(clients, client_id);
+      if (!client) continue;
+      const gw::protocol::x11::FocusEvent event{type, detail, window,
+                                                gw::protocol::x11::NotifyMode::Normal};
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_focus_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+  };
+  deliver(old_focus, gw::protocol::x11::CoreEventType::FocusOut, details.first);
+  deliver(new_focus, gw::protocol::x11::CoreEventType::FocusIn, details.second);
   return delivered;
 }
 
