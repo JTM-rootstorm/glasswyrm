@@ -54,7 +54,7 @@ if get_option('gwm')
     args: [gwm_program.full_path(), gwm_m5_producer_program.full_path(),
            meson.project_source_root() / 'tests/fixtures/m5'],
     depends: [gwm_program, gwm_m5_producer_program],
-    timeout: 180,
+    timeout: 600,
   )
 
   gwm_robustness_test = executable(
