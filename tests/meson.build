@@ -44,6 +44,19 @@ if get_option('gwm')
   test('gwm-m5-producer-help', gwm_m5_producer_program, args: ['--help'],
        depends: gwm_m5_producer_program, timeout: 10)
 
+  gwm_robustness_test = executable(
+    'gwm_robustness_test',
+    files('integration/gwm_robustness_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwm-robustness',
+    gwm_robustness_test,
+    args: [gwm_program.full_path()],
+    depends: gwm_program,
+    timeout: 30,
+  )
+
 endif
 
 if get_option('gwcomp')
