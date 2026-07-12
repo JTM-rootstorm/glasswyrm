@@ -932,7 +932,7 @@ M1  X11 setup service                           complete
 M2  Core protocol and resources                 complete
 M3  Versioned IPC foundation                    complete
 M4  Headless compositor and synthetic surfaces   complete
-M5  Window-manager policy scaffold              host-tested; VM pending
+M5  Window-manager policy scaffold              complete
 M6  Three-process mapped-window lifecycle
 M7  Drawable and software-rendering bridge
 M8  Synthetic input and event routing
@@ -953,12 +953,12 @@ deferred to the later milestones listed above.
 
 Milestone 5 implements a separate `gwm` policy service and an additive GWIPC
 API 0.3 WindowPolicy vocabulary while retaining SOVERSION 0 and wire 1.0. Host
-tests prove deterministic policy evaluation, transactional state, public
-snapshot controls, codec goldens, process behavior, malformed-peer isolation,
-and the fixed VM harness. The mandatory real Gentoo VM acceptance result is
-still pending, so M5 is not yet marked complete. `glasswyrmd`, `gwm`, and
-`gwcomp` remain disconnected; X11 mapping and three-process lifecycle begin in
-M6.
+and Gentoo VM tests prove deterministic policy evaluation, transactional
+state, public snapshot controls, codec goldens, process behavior,
+malformed-peer isolation,
+and the fixed VM harness. The terminal-only acceptance gate passes with Xorg
+and Xwayland absent. `glasswyrmd`, `gwm`, and `gwcomp` remain disconnected;
+X11 mapping and three-process lifecycle begin in M6.
 
 ## 26. Definition of done
 
