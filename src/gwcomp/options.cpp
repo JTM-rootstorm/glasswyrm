@@ -11,7 +11,7 @@ namespace {
 
 void print_usage(std::ostream& output) {
   output << "Usage: gwcomp --ipc-socket PATH --dump-dir PATH [--once] "
-            "[--max-frames N] [--help] [--version]\n";
+            "[--scene-manifest PATH] [--max-frames N] [--help] [--version]\n";
 }
 
 bool parse_positive(std::string_view text, std::uint64_t& value) {
@@ -53,6 +53,13 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
     if (argument == "--dump-dir") {
       if (!take_path(argc, argv, index, options.dump_dir, argument, error))
         return ParseOptionsResult::ExitFailure;
+      continue;
+    }
+    if (argument == "--scene-manifest") {
+      std::string path;
+      if (!take_path(argc, argv, index, path, argument, error))
+        return ParseOptionsResult::ExitFailure;
+      options.scene_manifest = path;
       continue;
     }
     if (argument == "--once") {
