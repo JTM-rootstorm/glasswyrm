@@ -127,7 +127,7 @@ gwipc_status validate_config(const Config& config) noexcept {
 
 extern "C" {
 
-gwipc_api_version gwipc_get_api_version(void) { return {0, 4, 0}; }
+gwipc_api_version gwipc_get_api_version(void) { return {0, 5, 0}; }
 gwipc_wire_version gwipc_get_max_wire_version(void) { return {1, 0}; }
 
 const char* gwipc_status_string(gwipc_status status) {
