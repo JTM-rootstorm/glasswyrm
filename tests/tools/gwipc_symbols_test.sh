@@ -21,7 +21,8 @@ done
 for symbol in gwipc_contract_encode_policy_lifecycle_window_upsert \
   gwipc_contract_encode_surface_policy_upsert \
   gwipc_decoded_policy_lifecycle_window_upsert \
-  gwipc_decoded_surface_policy_upsert; do
+  gwipc_decoded_surface_policy_upsert \
+  gwipc_connection_enqueue_with_sequence; do
   printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.4$" || {
     printf 'missing API 0.4 symbol version: %s\n' "$symbol" >&2
     exit 1

@@ -29,7 +29,8 @@ struct DecodedControlDelete {
 
 template <class T, class Encoder>
 bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
-                      std::uint32_t flags, const T &value, Encoder encoder) {
+                      std::uint32_t flags, const T &value, Encoder encoder,
+                      std::uint64_t *out_sequence = nullptr) {
   gwipc_contract_payload *raw = nullptr;
   if (encoder(&value, &raw) != GWIPC_STATUS_OK)
     return false;
@@ -42,6 +43,10 @@ bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
   message.flags = flags;
   message.payload = data;
   message.payload_size = size;
+  if (out_sequence)
+    return gwipc_connection_enqueue_with_sequence(connection, &message,
+                                                  out_sequence) ==
+           GWIPC_STATUS_OK;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
 template <class T, class Encoder>
@@ -101,7 +106,8 @@ bool PolicyPeer::send_bootstrap(std::string &error) {
                        gwipc_control_encode_snapshot_end) ||
       !enqueue_contract(connection, GWIPC_MESSAGE_POLICY_COMMIT,
                         GWIPC_FLAG_ACK_REQUIRED, commit,
-                        gwipc_contract_encode_policy_commit)) {
+                        gwipc_contract_encode_policy_commit,
+                        &commit_sequence_)) {
     error = "could not queue policy bootstrap";
     return false;
   }
@@ -160,7 +166,7 @@ bool PolicyPeer::drain(std::string &error) {
         ack->producer_generation != 1 || ack->window_count != 0 ||
         ack->result != GWIPC_POLICY_ACCEPTED ||
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||
-        gwipc_message_reply_to(message.get()) == 0) {
+        gwipc_message_reply_to(message.get()) != commit_sequence_) {
       error = "invalid policy bootstrap acknowledgement";
       return false;
     }
@@ -190,6 +196,7 @@ void PolicyPeer::disconnect() noexcept {
   transport_.disconnect();
   state_ = PeerBootstrapState::Disconnected;
   policy_hash_ = 0;
+  commit_sequence_ = 0;
   reply_snapshot_active_ = false;
   reply_snapshot_complete_ = false;
 }

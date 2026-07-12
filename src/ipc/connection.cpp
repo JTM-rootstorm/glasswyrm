@@ -1133,8 +1133,11 @@ gwipc_status gwipc_connection_process_poll_events(gwipc_connection* connection,
   }
 }
 
-gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
-                                      const gwipc_outgoing_message* message) {
+gwipc_status gwipc_connection_enqueue_with_sequence(
+    gwipc_connection* connection, const gwipc_outgoing_message* message,
+    std::uint64_t* out_sequence) {
+  if (!out_sequence) return GWIPC_STATUS_INVALID_ARGUMENT;
+  *out_sequence = 0;
   try {
   if (!connection || !message ||
       message->struct_size < sizeof(*message) ||
@@ -1238,6 +1241,7 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
       connection->incoming_frame_commits.erase(message->reply_to);
     if (policy_acknowledges_incoming)
       connection->incoming_policy_commits.erase(message->reply_to);
+    *out_sequence = pending_sequence;
   } else if (ping_inserted) {
     connection->pending_ping_nonces.erase(pending_sequence);
   }
@@ -1251,6 +1255,13 @@ gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
   } catch (...) {
     return GWIPC_STATUS_SYSTEM_ERROR;
   }
+}
+
+gwipc_status gwipc_connection_enqueue(gwipc_connection* connection,
+                                      const gwipc_outgoing_message* message) {
+  std::uint64_t ignored_sequence = 0;
+  return gwipc_connection_enqueue_with_sequence(connection, message,
+                                                &ignored_sequence);
 }
 
 gwipc_status gwipc_connection_receive(gwipc_connection* connection,
