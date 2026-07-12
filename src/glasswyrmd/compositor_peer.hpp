@@ -59,6 +59,7 @@ public:
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
   [[nodiscard]] PeerProcessOutcome drain(std::string &error);
+  void promote_replay_snapshot();
 
   PeerTransport transport_;
   gw::protocol::x11::ScreenModel screen_;

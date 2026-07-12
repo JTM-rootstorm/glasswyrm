@@ -1,4 +1,6 @@
 #include "glasswyrmd/compositor_peer.hpp"
+#include "glasswyrmd/pixel_storage.hpp"
+#include "glasswyrmd/published_buffer.hpp"
 #include "glasswyrmd/policy_peer.hpp"
 
 #include <chrono>
@@ -124,6 +126,57 @@ project(std::uint64_t id,
   }
   return submission;
 }
+glasswyrm::server::CompositorSnapshotSubmission buffered_project(
+    std::uint64_t id,
+    const glasswyrm::server::PublishedWindowBuffer* buffer) {
+  glasswyrm::server::CompositorSnapshotSubmission submission{
+      id, id, {}, {}, {}, {}};
+  gwipc_surface_upsert surface{};
+  surface.struct_size = sizeof(surface);
+  surface.surface_id = (UINT64_C(1) << 32U) | 100U;
+  surface.x11_window_id = 100;
+  surface.output_id = 1;
+  surface.logical_width = 32;
+  surface.logical_height = 24;
+  surface.visible = 1;
+  surface.transform = GWIPC_TRANSFORM_NORMAL;
+  surface.opacity = GWIPC_OPACITY_ONE;
+  surface.scale_numerator = surface.scale_denominator = 1;
+  surface.color = {GWIPC_SDR_COLOR_SPACE_SRGB,
+                   GWIPC_TRANSFER_FUNCTION_SRGB,
+                   GWIPC_COLOR_PRIMARIES_SRGB,
+                   0, 0, 0, 0};
+  submission.surfaces.push_back(surface);
+  gwipc_surface_policy_upsert policy{};
+  policy.struct_size = sizeof(policy);
+  policy.surface_id = surface.surface_id;
+  policy.x11_window_id = 100;
+  policy.workspace_id = 1;
+  policy.window_type = GWIPC_POLICY_WINDOW_NORMAL;
+  policy.applied_state = GWIPC_POLICY_APPLIED_NORMAL;
+  policy.managed = 1;
+  policy.decoration_eligible = 1;
+  policy.fullscreen_eligible = GWIPC_TRI_STATE_FALSE;
+  policy.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  submission.policies.push_back(policy);
+  if (buffer) {
+    glasswyrm::server::CompositorSnapshotSubmission::Buffer attachment;
+    attachment.attach.struct_size = sizeof(attachment.attach);
+    attachment.attach.buffer_id = buffer->buffer_id();
+    attachment.attach.surface_id = surface.surface_id;
+    attachment.attach.width = buffer->width();
+    attachment.attach.height = buffer->height();
+    attachment.attach.stride = buffer->stride();
+    attachment.attach.storage_size = buffer->size();
+    attachment.attach.pixel_format = GWIPC_PIXEL_FORMAT_XRGB8888;
+    attachment.attach.alpha_semantics = GWIPC_ALPHA_OPAQUE;
+    attachment.attach.color = surface.color;
+    attachment.attach.synchronization = GWIPC_SYNCHRONIZATION_NONE;
+    attachment.fd = buffer->fd();
+    submission.buffers.push_back(attachment);
+  }
+  return submission;
+}
 void stop(pid_t child) {
   (void)::kill(child, SIGTERM);
   int status = 0;
@@ -170,5 +223,34 @@ int main(int argc, char **argv) {
   for (const auto &entry : std::filesystem::recursive_directory_iterator(root))
     require(entry.path().extension() != ".ppm",
             "metadata sequence creates no PPM");
+
+  const std::string buffered_socket = root + "/gwcomp-buffered.sock";
+  auto pixels = glasswyrm::server::PixelStorage::create(32, 24);
+  require(pixels.has_value(), "create restart pixels");
+  pixels->fill({0, 0, 32, 24}, 0x0000aa44U);
+  auto buffer = glasswyrm::server::PublishedWindowBuffer::create(
+      1, 100, *pixels);
+  require(buffer != nullptr, "create restart publication buffer");
+  auto first_compositor =
+      launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-1");
+  glasswyrm::server::CompositorPeer buffered(
+      buffered_socket, gw::protocol::x11::kScreenModel, true);
+  synchronize(buffered);
+  require(buffered.submit(buffered_project(2, buffer.get()), error),
+          error.c_str());
+  drive(buffered);
+  require(buffered.submit(buffered_project(3, nullptr), error), error.c_str());
+  drive(buffered);
+  require(buffered.replay_input().buffers.size() == 1 &&
+              buffered.replay_input().buffers.front().attach.buffer_id == 1,
+          "accepted attachment omission retains complete replay state");
+  stop(first_compositor);
+  auto second_compositor =
+      launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-2");
+  synchronize(buffered);
+  require(buffered.state() ==
+              glasswyrm::server::PeerBootstrapState::Synchronized,
+          "buffered peer reconnect replays retained attachment");
+  stop(second_compositor);
   return 0;
 }
