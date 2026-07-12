@@ -42,9 +42,11 @@ struct PayloadDeleter {
     gwipc_contract_payload_destroy(value);
   }
 };
+struct ControlPayloadDeleter { void operator()(gwipc_control_payload* value) const { gwipc_control_payload_destroy(value); } };
 using Connection = std::unique_ptr<gwipc_connection, ConnectionDeleter>;
 using Message = std::unique_ptr<gwipc_message, MessageDeleter>;
 using Payload = std::unique_ptr<gwipc_contract_payload, PayloadDeleter>;
+using ControlPayload = std::unique_ptr<gwipc_control_payload, ControlPayloadDeleter>;
 
 void usage(FILE* stream) {
   std::fprintf(stream,
@@ -53,19 +55,6 @@ void usage(FILE* stream) {
                "clipping, opacity, buffer-replace, detach-remove, "
                "invalid-metadata, invalid-buffer, snapshot-reconnect, "
                "unknown-reference\n");
-}
-
-void put_u16(std::vector<std::uint8_t>& bytes, std::uint16_t value) {
-  bytes.push_back(static_cast<std::uint8_t>(value));
-  bytes.push_back(static_cast<std::uint8_t>(value >> 8U));
-}
-void put_u32(std::vector<std::uint8_t>& bytes, std::uint32_t value) {
-  for (unsigned shift = 0; shift < 32; shift += 8)
-    bytes.push_back(static_cast<std::uint8_t>(value >> shift));
-}
-void put_u64(std::vector<std::uint8_t>& bytes, std::uint64_t value) {
-  for (unsigned shift = 0; shift < 64; shift += 8)
-    bytes.push_back(static_cast<std::uint8_t>(value >> shift));
 }
 
 bool enqueue(gwipc_connection* connection, std::uint16_t type,
@@ -92,6 +81,17 @@ bool enqueue_contract(gwipc_connection* connection, std::uint16_t type,
   std::size_t size = 0;
   const auto* bytes = gwipc_contract_payload_data(payload.get(), &size);
   return enqueue(connection, type, flags, bytes, size, fds, fd_count);
+}
+
+template <class Value, class Encoder>
+bool enqueue_control(gwipc_connection* connection, std::uint16_t type,
+                     const Value& value, Encoder encoder) {
+  gwipc_control_payload* raw = nullptr;
+  if (encoder(&value, &raw) != GWIPC_STATUS_OK) return false;
+  const ControlPayload payload(raw);
+  std::size_t size = 0;
+  const auto* bytes = gwipc_control_payload_data(payload.get(), &size);
+  return enqueue(connection, type, 0, bytes, size);
 }
 
 bool pump(gwipc_connection* connection, int timeout_ms) {
@@ -155,10 +155,10 @@ bool send_commit(gwipc_connection* connection, std::uint64_t commit_id) {
 }
 
 bool send_basic(gwipc_connection* connection, int* writable_background_fd) {
-  std::vector<std::uint8_t> begin;
-  put_u64(begin, 1); put_u16(begin, 4); put_u16(begin, 0);
-  put_u64(begin, 1); put_u32(begin, 5); put_u32(begin, 0);
-  if (!enqueue(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0, begin.data(), begin.size()))
+  gwipc_snapshot_begin begin{sizeof(begin), 1, GWIPC_SNAPSHOT_COMPLETE_SESSION,
+                             0, 1, 5, {}};
+  if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
+                       gwipc_control_encode_snapshot_begin))
     return false;
 
   gwipc_output_upsert output{};
@@ -212,9 +212,9 @@ bool send_basic(gwipc_connection* connection, int* writable_background_fd) {
   (void)::close(overlay_fd);
   if (!first || !second) return false;
 
-  std::vector<std::uint8_t> end;
-  put_u64(end, 1); put_u64(end, 1); put_u32(end, 5); put_u32(end, 0);
-  if (!enqueue(connection, GWIPC_MESSAGE_SNAPSHOT_END, 0, end.data(), end.size()))
+  gwipc_snapshot_end end{sizeof(end), 1, 1, 5, {}};
+  if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
+                       gwipc_control_encode_snapshot_end))
     return false;
   return send_commit(connection, 100);
 }
