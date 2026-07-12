@@ -720,8 +720,11 @@ int Server::run() {
       mutation.resource_base = resource_base;
       mutation.cleanup = std::move(plan);
       pending_mutations.emplace(token, std::move(mutation));
-      if (lifecycle->enqueue_priority(std::move(operation)) !=
-          EnqueueStatus::Queued) {
+      const auto cleanup_status =
+          content_presenter && content_presenter->frame_in_flight()
+              ? lifecycle->enqueue_priority_paused(std::move(operation))
+              : lifecycle->enqueue_priority(std::move(operation));
+      if (cleanup_status != EnqueueStatus::Queued) {
         std::fprintf(stderr,
                      "glasswyrmd: could not queue coordinated client cleanup\n");
         stop_requested = 1;

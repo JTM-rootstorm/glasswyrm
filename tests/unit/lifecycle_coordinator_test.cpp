@@ -211,16 +211,22 @@ void test_queued_operation_rebases_on_latest_commit() {
 
 void test_paused_enqueue_waits_for_explicit_resume() {
   Recorder recorder;
-  LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
+  LifecycleCoordinator coordinator(snapshot(1), 3, recorder.callbacks());
   require(coordinator.enqueue_paused(operation(10, 1, 10)) ==
               EnqueueStatus::Queued &&
+              coordinator.enqueue_priority_paused(operation(20, 2, 20)) ==
+                  EnqueueStatus::Queued &&
               coordinator.phase() == CoordinatorPhase::Idle &&
               recorder.policy.empty(),
-          "paused lifecycle enqueue does not race an active content frame");
+          "paused lifecycle and cleanup do not race an active content frame");
   require(coordinator.resume() && coordinator.active() &&
-              coordinator.active()->token == 10 &&
-              recorder.policy == std::vector<std::uint32_t>({10}),
-          "explicit resume starts paused lifecycle work");
+              coordinator.active()->token == 20 &&
+              recorder.policy == std::vector<std::uint32_t>({20}),
+          "explicit resume preserves paused cleanup priority");
+  require(coordinator.policy_accepted(snapshot(20)) &&
+              coordinator.compositor_accepted() && coordinator.active() &&
+              coordinator.active()->token == 10,
+          "normal paused lifecycle work follows priority cleanup");
 }
 
 void test_operation_rebase_preserves_unrelated_intent() {
