@@ -58,6 +58,9 @@ Server::Server(Options options) : options_(std::move(options)) {
 }
 
 Server::~Server() {
+  for (const auto &client : clients_) {
+    (void)state_.cleanup_client(client->identifier());
+  }
   clients_.clear();
   close_listener();
   unlink_owned_socket();
@@ -239,8 +242,19 @@ void Server::accept_clients() {
 }
 
 void Server::remove_closed_clients() {
-  std::erase_if(clients_, [](const auto &client) {
-    return client->state() == ClientConnection::State::Closing;
+  std::erase_if(clients_, [this](const auto &client) {
+    if (client->state() != ClientConnection::State::Closing) return false;
+    const auto cleanup = state_.cleanup_client(client->identifier());
+    if (cleanup.resources_destroyed != 0 ||
+        cleanup.property_bytes_released != 0) {
+      std::fprintf(stderr,
+                   "glasswyrmd: client %llu: cleanup resources=%zu "
+                   "property_bytes=%zu\n",
+                   static_cast<unsigned long long>(client->identifier()),
+                   cleanup.resources_destroyed,
+                   cleanup.property_bytes_released);
+    }
+    return true;
   });
 }
 
