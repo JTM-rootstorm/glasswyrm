@@ -14,6 +14,21 @@
 
 namespace glasswyrm::server {
 
+struct DirectInputEventState {
+  std::uint32_t window{};
+  std::int16_t x{};
+  std::int16_t y{};
+  std::vector<ClientId> focus_recipients;
+  std::vector<ClientId> leave_recipients;
+};
+
+struct InputTransitionState {
+  std::uint32_t focus{};
+  std::uint32_t pointer_target{};
+  DirectInputEventState focus_window;
+  DirectInputEventState pointer_window;
+};
+
 class EventRouter {
 public:
   explicit EventRouter(const ResourceTable &resources)
@@ -57,6 +72,13 @@ public:
       std::span<ClientConnection *const> clients) const;
   [[nodiscard]] std::size_t route_focus(
       std::uint32_t old_focus, std::uint32_t new_focus,
+      std::span<ClientConnection *const> clients) const;
+  [[nodiscard]] InputTransitionState capture_input_transition(
+      std::uint32_t focus, std::uint32_t pointer_target) const;
+  [[nodiscard]] std::size_t route_lifecycle_input_transition(
+      const InputTransitionState& before, std::uint32_t new_focus,
+      std::uint32_t new_pointer_target,
+      const glasswyrm::input::InputState& input,
       std::span<ClientConnection *const> clients) const;
 
 private:

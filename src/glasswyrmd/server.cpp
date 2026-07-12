@@ -386,6 +386,7 @@ int Server::run() {
     SyntheticInputRecord record;
     std::uint32_t old_focus{};
     std::size_t delivered{};
+    bool provider_connected{true};
   };
   std::optional<PendingFocusInput> pending_focus_input;
   std::uint64_t next_lifecycle_token = 1;
@@ -397,6 +398,7 @@ int Server::run() {
   std::uint64_t policy_commit = 0;
   std::uint64_t policy_generation = 0;
   std::optional<StructuralEventState> transition_before;
+  std::optional<InputTransitionState> input_transition_before;
   bool content_replay_attempted = false;
   struct PendingMutation {
     std::optional<WindowCreateSpec> create;
@@ -480,10 +482,14 @@ int Server::run() {
     };
     callbacks.commit = [&](const LifecycleSnapshot& snapshot) {
       transition_before.reset();
+      input_transition_before.reset();
       const auto* active = lifecycle ? lifecycle->active() : nullptr;
       if (active) {
         EventRouter router(state_.resources());
         transition_before = router.capture(active->window);
+        if (input_peer)
+          input_transition_before = router.capture_input_transition(
+              state_.focused_window(), input_state.pointer_target());
       }
       const auto mutation = active ? pending_mutations.find(active->token)
                                    : pending_mutations.end();
@@ -599,6 +605,17 @@ int Server::run() {
         }
         }
         }
+        if (input_peer && input_transition_before &&
+            operation->kind != LifecycleOperationKind::Focus) {
+          const auto new_target = glasswyrm::input::hit_test_top_level(
+              state_.resources(), input_state.pointer_x(),
+              input_state.pointer_y());
+          input_state.set_pointer(input_state.pointer_x(),
+                                  input_state.pointer_y(), new_target);
+          (void)router.route_lifecycle_input_transition(
+              *input_transition_before, state_.focused_window(), new_target,
+              input_state, recipients);
+        }
       }
       if (operation && operation->kind == LifecycleOperationKind::Focus &&
           pending_focus_input) {
@@ -611,7 +628,8 @@ int Server::run() {
           pending_focus_input->delivered += router.route_focus(
               pending_focus_input->old_focus, new_focus, recipients);
         }
-        if (input_peer && input_peer->connected()) {
+        if (input_peer && input_peer->connected() &&
+            pending_focus_input->provider_connected) {
           gwipc_synthetic_input_acknowledged acknowledgement{};
           acknowledgement.struct_size = sizeof(acknowledgement);
           acknowledgement.input_id = pending_focus_input->record.input_id;
@@ -634,6 +652,7 @@ int Server::run() {
       }
       (void)requester;
       transition_before.reset();
+      input_transition_before.reset();
       pending_mutations.erase(token);
       if (cleanup_base) pending_resource_bases_.erase(*cleanup_base);
       bridge->clear_transaction_result();
@@ -823,7 +842,11 @@ int Server::run() {
     if (input_peer) {
       input_listener_index = descriptors.size();
       descriptors.push_back(pollfd{input_peer->listener_fd(),
-                                   input_peer->listener_events(), 0});
+                                   static_cast<short>(
+                                       (!bridge || bridge->ready())
+                                           ? input_peer->listener_events()
+                                           : 0),
+                                   0});
       input_connection_index = descriptors.size();
       descriptors.push_back(pollfd{input_peer->connection_fd(),
                                    input_peer->connection_events(), 0});
@@ -834,9 +857,14 @@ int Server::run() {
       descriptors.push_back(
           pollfd{client->descriptor(), client->poll_events(), 0});
     }
-    const bool pending_work =
+    bool pending_work =
         std::any_of(clients_.begin(), clients_.end(),
                     [](const auto &client) { return client->needs_service(); });
+#ifdef GW_SERVER_HAS_IPC
+    pending_work = pending_work ||
+                   (input_peer && input_peer->has_records() &&
+                    !pending_focus_input);
+#endif
     int poll_timeout = pending_work ? 0 : -1;
 #ifdef GW_SERVER_HAS_IPC
     if (bridge && !bridge->ready())
@@ -1020,6 +1048,8 @@ int Server::run() {
       if (input_connection_index)
         input_peer->service(descriptors[*input_connection_index].revents);
       if (input_peer->consume_disconnect()) {
+        if (pending_focus_input)
+          pending_focus_input->provider_connected = false;
         input_state.reset_provider_state();
         expected_input_id = 1;
         std::fprintf(stderr,
@@ -1132,9 +1162,12 @@ int Server::run() {
             operation.window = target;
             operation.proposed = std::move(proposed);
             pending_focus_input = PendingFocusInput{
-                record, state_.focused_window(), delivered};
-            if (lifecycle->enqueue(std::move(operation)) !=
-                EnqueueStatus::Queued) {
+                record, state_.focused_window(), delivered, true};
+            const auto focus_status =
+                content_presenter && !bridge->transaction_idle()
+                    ? lifecycle->enqueue_paused(std::move(operation))
+                    : lifecycle->enqueue(std::move(operation));
+            if (focus_status != EnqueueStatus::Queued) {
               pending_focus_input.reset();
               acknowledge(record, GWIPC_SYNTHETIC_INPUT_FOCUS_REJECTED,
                           delivered);

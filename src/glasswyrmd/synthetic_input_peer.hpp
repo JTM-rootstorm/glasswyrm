@@ -41,6 +41,7 @@ class SyntheticInputPeer {
       const SyntheticInputRecord& record,
       const gwipc_synthetic_input_acknowledged& acknowledgement);
   [[nodiscard]] bool connected() const noexcept;
+  [[nodiscard]] bool has_records() const noexcept { return !records_.empty(); }
   [[nodiscard]] bool consume_disconnect() noexcept;
   void disconnect() noexcept;
 
