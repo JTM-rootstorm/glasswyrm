@@ -4,6 +4,8 @@
 #include "protocol/x11/core.hpp"
 #include "protocol/x11/reply.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
+#include "glasswyrmd/raster_ops.hpp"
+#include "protocol/x11/exposure_event.hpp"
 
 #include <bit>
 #include <algorithm>
@@ -78,6 +80,57 @@ constexpr std::uint32_t kDoNotPropagateMask = 0x0000204fU;
 constexpr std::uint32_t kButtonPressMask = 1U << 2U;
 constexpr std::uint32_t kResizeRedirectMask = 1U << 18U;
 constexpr std::uint32_t kSubstructureRedirectMask = 1U << 20U;
+
+bool supported_window_drawable(const ResourceTable& resources,
+                               const std::uint32_t xid) {
+  const auto* window = resources.find_window(xid);
+  return window && xid != resources.screen().root_window &&
+         window->parent == resources.screen().root_window &&
+         window->window_class == WindowClass::InputOutput && window->depth == 24;
+}
+
+PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid) {
+  if (auto* pixmap = resources.find_pixmap(xid)) return pixmap->storage.get();
+  if (!supported_window_drawable(resources, xid)) return nullptr;
+  auto* window = resources.find_window(xid);
+  if (!window->storage) {
+    auto storage = PixelStorage::create(window->width, window->height);
+    if (!storage) return nullptr;
+    window->storage = std::make_shared<PixelStorage>(std::move(*storage));
+    if (window->attributes.background_source == BackgroundSource::Pixel)
+      window->storage->fill({0, 0, window->width, window->height},
+                            window->attributes.background_pixel);
+  }
+  return window->storage.get();
+}
+
+struct GcDecodeResult { bool success{}; x11::CoreErrorCode error{x11::CoreErrorCode::BadImplementation}; std::uint32_t bad{}; GraphicsContextResource gc; };
+GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
+                                GraphicsContextResource gc) {
+  constexpr std::uint32_t supported = (1U << 0U) | (1U << 1U) | (1U << 2U) |
+      (1U << 3U) | (1U << 8U) | (1U << 15U) | (1U << 16U) | (1U << 17U) |
+      (1U << 18U) | (1U << 19U);
+  GcDecodeResult result{}; result.gc = gc;
+  if ((mask & ~supported) != 0) return result;
+  for (std::uint32_t bit = 0; bit < 23; ++bit) {
+    if ((mask & (1U << bit)) == 0) continue;
+    std::uint32_t value{}; if (!reader.read_u32(value)) return result; result.bad = value;
+    switch (bit) {
+      case 0: if (value != 3) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.function=3; break;
+      case 1: result.gc.plane_mask=value; break;
+      case 2: result.gc.foreground=value & 0x00ffffffU; break;
+      case 3: result.gc.background=value & 0x00ffffffU; break;
+      case 8: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.fill_style=0; break;
+      case 15: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.subwindow_mode=0; break;
+      case 16: if (value > 1) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.graphics_exposures=value != 0; break;
+      case 17: result.gc.clip_x_origin=static_cast<std::int16_t>(value); break;
+      case 18: result.gc.clip_y_origin=static_cast<std::int16_t>(value); break;
+      case 19: if (value != 0) { result.error=x11::CoreErrorCode::BadPixmap; return result; } result.gc.clip_mask=0; break;
+      default: break;
+    }
+  }
+  result.success = true; return result;
+}
 
 struct DecodedWindowAttributes {
   WindowAttributes attributes;
@@ -419,18 +472,201 @@ DispatchResult get_geometry(ServerState& state,
   std::uint32_t drawable = 0;
   (void)reader.read_u32(drawable);
   const auto* window = state.resources().find_window(drawable);
-  if (window == nullptr) {
+  const auto* pixmap = state.resources().find_pixmap(drawable);
+  if (window == nullptr && pixmap == nullptr) {
     return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
   }
-  x11::ReplyBuilder reply(context.byte_order, context.sequence, window->depth);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                          window ? window->depth : pixmap->depth);
   reply.write_u32(state.screen().root_window);
-  reply.write_u16(static_cast<std::uint16_t>(window->x));
-  reply.write_u16(static_cast<std::uint16_t>(window->y));
-  reply.write_u16(window->width);
-  reply.write_u16(window->height);
-  reply.write_u16(window->border_width);
+  reply.write_u16(window ? static_cast<std::uint16_t>(window->x) : 0);
+  reply.write_u16(window ? static_cast<std::uint16_t>(window->y) : 0);
+  reply.write_u16(window ? window->width : pixmap->width);
+  reply.write_u16(window ? window->height : pixmap->height);
+  reply.write_u16(window ? window->border_width : 0);
   reply.write_padding(2);
   return {std::move(reply).finish()};
+}
+
+DispatchResult create_pixmap(ServerState& state, const DispatchContext& context,
+                             const x11::FramedRequest& request) {
+  if (!exact_size(request, 16)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}, drawable{}; std::uint16_t width{}, height{};
+  (void)reader.read_u32(xid); (void)reader.read_u32(drawable);
+  (void)reader.read_u16(width); (void)reader.read_u16(height);
+  switch (state.resources().create_pixmap(context.client_id, context.resource_base,
+      context.resource_mask, xid, drawable, request.data, width, height)) {
+    case CreatePixmapStatus::Success: return {};
+    case CreatePixmapStatus::BadIdChoice: return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);
+    case CreatePixmapStatus::BadDrawable: return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+    case CreatePixmapStatus::BadValue: return error(context, request, x11::CoreErrorCode::BadValue, request.data == 24 && width && height ? 0 : request.data);
+    case CreatePixmapStatus::BadAlloc: return error(context, request, x11::CoreErrorCode::BadAlloc);
+  }
+  return {};
+}
+
+DispatchResult free_pixmap(ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{}; (void)reader.read_u32(xid);
+  return state.resources().free_pixmap(xid) == FreePixmapStatus::Success
+      ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadPixmap, xid);
+}
+
+DispatchResult create_gc(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 16) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{}, drawable{}, mask{};
+  (void)reader.read_u32(xid); (void)reader.read_u32(drawable); (void)reader.read_u32(mask);
+  if (!exact_size(request, 16 + static_cast<std::size_t>(std::popcount(mask)) * 4U))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto decoded = decode_gc_values(reader, mask, {});
+  if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
+  switch (state.resources().create_gc(context.client_id, context.resource_base,
+      context.resource_mask, xid, drawable, decoded.gc)) {
+    case CreateGcStatus::Success: return {};
+    case CreateGcStatus::BadIdChoice: return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);
+    case CreateGcStatus::BadDrawable: return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+    case CreateGcStatus::BadMatch: return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
+    case CreateGcStatus::BadAlloc: return error(context, request, x11::CoreErrorCode::BadAlloc);
+  }
+  return {};
+}
+
+DispatchResult change_gc(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{}, mask{};
+  (void)reader.read_u32(xid); (void)reader.read_u32(mask);
+  if (!exact_size(request, 12 + static_cast<std::size_t>(std::popcount(mask)) * 4U))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  auto* gc = state.resources().find_gc(xid);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, xid);
+  const auto decoded = decode_gc_values(reader, mask, *gc);
+  if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
+  *gc = decoded.gc; return {};
+}
+
+DispatchResult free_gc(ServerState& state, const DispatchContext& context,
+                       const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{}; (void)reader.read_u32(xid);
+  return state.resources().free_gc(xid) == FreeGcStatus::Success
+      ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadGContext, xid);
+}
+
+DispatchResult put_image(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 24) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data != 2) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint16_t width{}, height{}, raw_x{}, raw_y{}; std::uint8_t left_pad{}, depth{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id); (void)reader.read_u16(width);
+  (void)reader.read_u16(height); (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+  (void)reader.read_u8(left_pad); (void)reader.read_u8(depth); (void)reader.skip(2);
+  const auto payload_size = static_cast<std::uint64_t>(width) * height * 4U;
+  if (payload_size > std::numeric_limits<std::size_t>::max() ||
+      request.bytes.size() != 24U + payload_size)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (depth != 24 || left_pad != 0) return error(context, request, x11::CoreErrorCode::BadValue, depth != 24 ? depth : left_pad);
+  auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
+  if (!valid) return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  const auto payload = std::span<const std::uint8_t>(request.bytes).subspan(24);
+  const auto raster = put_zpixmap(*storage, static_cast<std::int16_t>(raw_x),
+      static_cast<std::int16_t>(raw_y), width, height, payload, gc->plane_mask);
+  if (!raster.success) return error(context, request, x11::CoreErrorCode::BadLength);
+  DispatchResult result;
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
+    result.drawable_damage.push_back({drawable, raster.damage});
+  return result;
+}
+
+DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& context,
+                                   const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 8U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t drawable{}, gc_id{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
+  if (!valid) return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+  struct Fill { geometry::Rectangle rectangle; }; std::vector<Fill> fills;
+  while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  DispatchResult result;
+  for (const auto& fill : fills) {
+    const auto clipped = geometry::intersect(fill.rectangle, {0, 0, storage->width(), storage->height()});
+    if (!clipped) continue;
+    storage->fill(*clipped, gc->foreground, gc->plane_mask);
+    if (supported_window_drawable(state.resources(), drawable)) result.drawable_damage.push_back({drawable, *clipped});
+  }
+  return result;
+}
+
+DispatchResult copy_area_request(ServerState& state, const DispatchContext& context,
+                                 const x11::FramedRequest& request) {
+  if (!exact_size(request, 28)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t source{}, destination{}, gc_id{};
+  std::uint16_t sx{}, sy{}, dx{}, dy{}, width{}, height{};
+  (void)reader.read_u32(source); (void)reader.read_u32(destination); (void)reader.read_u32(gc_id);
+  (void)reader.read_u16(sx); (void)reader.read_u16(sy); (void)reader.read_u16(dx); (void)reader.read_u16(dy); (void)reader.read_u16(width); (void)reader.read_u16(height);
+  auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  const bool valid_source = state.resources().find_pixmap(source) || supported_window_drawable(state.resources(), source);
+  const bool valid_destination = state.resources().find_pixmap(destination) || supported_window_drawable(state.resources(), destination);
+  if (!valid_source || !valid_destination) return error(context, request, x11::CoreErrorCode::BadDrawable, !valid_source ? source : destination);
+  auto* source_storage = mutable_storage(state.resources(), source); auto* destination_storage = mutable_storage(state.resources(), destination);
+  if (!source_storage || !destination_storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  RasterResult raster;
+  try { raster = copy_area(*source_storage, *destination_storage, static_cast<std::int16_t>(sx), static_cast<std::int16_t>(sy), width, height, static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), gc->plane_mask); }
+  catch (const std::bad_alloc&) { return error(context, request, x11::CoreErrorCode::BadAlloc); }
+  DispatchResult result;
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination)) result.drawable_damage.push_back({destination, raster.damage});
+  if (gc->graphics_exposures) {
+    const auto requested = geometry::intersect({static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), width, height}, {0, 0, destination_storage->width(), destination_storage->height()});
+    if (requested && raster.damage == *requested)
+      result.output = x11::encode_no_expose(context.byte_order, context.sequence, {destination, 0, request.opcode});
+    else {
+      const auto rectangle = requested.value_or(geometry::Rectangle{});
+      result.output = x11::encode_graphics_expose(context.byte_order, context.sequence,
+          {destination, static_cast<std::uint16_t>(rectangle.x), static_cast<std::uint16_t>(rectangle.y),
+           static_cast<std::uint16_t>(rectangle.width), static_cast<std::uint16_t>(rectangle.height), 0, 0, request.opcode});
+    }
+  }
+  return result;
+}
+
+DispatchResult clear_area(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (!exact_size(request, 16)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 1) return error(context, request, x11::CoreErrorCode::BadValue, request.data);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t window_id{}; std::uint16_t x{}, y{}, width{}, height{};
+  (void)reader.read_u32(window_id); (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(width); (void)reader.read_u16(height);
+  auto* window = state.resources().find_window(window_id);
+  if (!window) return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
+  if (!supported_window_drawable(state.resources(), window_id)) return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
+  auto* storage = mutable_storage(state.resources(), window_id); if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  const auto signed_x = static_cast<std::int16_t>(x), signed_y = static_cast<std::int16_t>(y);
+  const auto effective_width = width ? width : (signed_x < static_cast<std::int32_t>(window->width) ? window->width - signed_x : 0U);
+  const auto effective_height = height ? height : (signed_y < static_cast<std::int32_t>(window->height) ? window->height - signed_y : 0U);
+  const auto clipped = geometry::intersect({signed_x, signed_y, effective_width, effective_height}, {0, 0, window->width, window->height});
+  DispatchResult result; if (!clipped) return result;
+  if (window->attributes.background_source != BackgroundSource::None) {
+    storage->fill(*clipped, window->attributes.background_source == BackgroundSource::Pixel ? window->attributes.background_pixel : 0);
+    result.drawable_damage.push_back({window_id, *clipped});
+  }
+  if (request.data == 1 && (state.resources().event_selection(window_id, context.client_id) & (1U << 15U)) != 0)
+    result.output = x11::encode_expose(context.byte_order, context.sequence,
+        {window_id, static_cast<std::uint16_t>(clipped->x), static_cast<std::uint16_t>(clipped->y),
+         static_cast<std::uint16_t>(clipped->width), static_cast<std::uint16_t>(clipped->height), 0});
+  return result;
 }
 
 DispatchResult query_tree(ServerState& state, const DispatchContext& context,
@@ -864,15 +1100,23 @@ DispatchResult dispatch_request(ServerState& state,
       case x11::CoreOpcode::GetInputFocus:
         return get_input_focus(state, context, request);
       case x11::CoreOpcode::CreatePixmap:
+        return create_pixmap(state, context, request);
       case x11::CoreOpcode::FreePixmap:
+        return free_pixmap(state, context, request);
       case x11::CoreOpcode::CreateGC:
+        return create_gc(state, context, request);
       case x11::CoreOpcode::ChangeGC:
+        return change_gc(state, context, request);
       case x11::CoreOpcode::FreeGC:
+        return free_gc(state, context, request);
       case x11::CoreOpcode::ClearArea:
+        return clear_area(state, context, request);
       case x11::CoreOpcode::CopyArea:
+        return copy_area_request(state, context, request);
       case x11::CoreOpcode::PolyFillRectangle:
+        return poly_fill_rectangle(state, context, request);
       case x11::CoreOpcode::PutImage:
-        return error(context, request, x11::CoreErrorCode::BadRequest);
+        return put_image(state, context, request);
       case x11::CoreOpcode::NoOperation:
         return {};
     }
