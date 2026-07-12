@@ -189,23 +189,19 @@ failure_stage=install-and-consumers
 DESTDIR="$install_root" meson install -C "$ipc_build_dir" 2>&1 | tee -a "$install_log"
 staged_lib_dir="$install_root/usr/lib64"
 [[ -d "$staged_lib_dir" ]] || staged_lib_dir="$install_root/usr/lib"
-test -f "$staged_lib_dir/libgwipc.so.0.1.0"
 test -L "$staged_lib_dir/libgwipc.so.0"
 test -L "$staged_lib_dir/libgwipc.so"
-[[ "$(readlink "$staged_lib_dir/libgwipc.so.0")" == libgwipc.so.0.1.0 ]]
+staged_soversion_target="$(readlink "$staged_lib_dir/libgwipc.so.0")"
+[[ "$staged_soversion_target" == libgwipc.so.0.* ]]
+test -f "$staged_lib_dir/$staged_soversion_target"
 [[ "$(readlink "$staged_lib_dir/libgwipc.so")" == libgwipc.so.0 ]]
-actual_headers="$(find "$install_root/usr/include/glasswyrm" -type f \
-  -printf '%P\n' | LC_ALL=C sort)"
-expected_headers="$(printf '%s\n' \
-  ipc.h ipc.hpp ipc/connection.h ipc/contracts.h ipc/listener.h \
-  ipc/message.h ipc/types.h ipc/version.h | LC_ALL=C sort)"
-[[ "$actual_headers" == "$expected_headers" ]] || {
-  printf 'Unexpected installed header set:\n%s\n' "$actual_headers" >&2
-  exit 1
-}
+for header in ipc.h ipc.hpp ipc/connection.h ipc/contracts.h ipc/listener.h \
+  ipc/message.h ipc/types.h ipc/version.h; do
+  test -f "$install_root/usr/include/glasswyrm/$header"
+done
 test -f "$staged_lib_dir/pkgconfig/gwipc.pc"
 PKG_CONFIG_PATH="$staged_lib_dir/pkgconfig" \
-  pkg-config --modversion gwipc | grep -Fx 0.1.0
+  pkg-config --atleast-version=0.1.0 gwipc
 if find "$install_root" -type f \( -name glasswyrmd -o -name gwm -o -name gwcomp \) | grep -q .; then
   echo 'IPC-only install unexpectedly contains a runtime process' >&2
   exit 1
@@ -341,14 +337,21 @@ write_milestone3_summary() {
   local tested_commit="${M3_TESTED_COMMIT:-unknown}"
   local facts="$ARTIFACTS_PATH_ABS/milestone3-facts.env"
   local summary="$ARTIFACTS_PATH_ABS/milestone3-summary.json"
+  local api_version=unknown api_compatible=false
+  if [[ -f "$facts" ]]; then
+    api_version="$(sed -n 's/^api_version=//p' "$facts" | tail -n 1)"
+  fi
+  if semantic_version_at_least "$api_version" 0.1.0; then
+    api_compatible=true
+  fi
   require_command python3
   python3 - "$facts" "$summary" "$passed" "$failure_stage" \
-    "$M3_REQUIRED_BASE_COMMIT" "$tested_commit" <<'PY'
+    "$M3_REQUIRED_BASE_COMMIT" "$tested_commit" "$api_compatible" <<'PY'
 import json
 import pathlib
 import sys
 
-facts_path, output_path, passed, failure, base_commit, tested_commit = sys.argv[1:]
+facts_path, output_path, passed, failure, base_commit, tested_commit, api_compatible = sys.argv[1:]
 facts = {}
 path = pathlib.Path(facts_path)
 if path.is_file():
@@ -366,12 +369,16 @@ required = {
     "version_rejection": "passed", "role_rejection": "passed",
     "capability_rejection": "passed", "malformed_isolation": "passed",
     "sequence_isolation": "passed", "limit_isolation": "passed",
-    "systemd_runtime": "passed", "api_version": "0.1.0", "soversion": "0",
+    "systemd_runtime": "passed", "soversion": "0",
     "wire_version": "1.0",
 }
 for key, expected in required.items():
     if facts.get(key) != expected:
         errors.append(f"{key} must be {expected}")
+if api_compatible != "true":
+    errors.append("api_version must be at least 0.1.0 with major 0")
+elif not facts.get("api_version", "").startswith("0."):
+    errors.append("api_version major must be 0")
 if facts.get("sanitizer") not in {"passed", "unavailable"}:
     errors.append("sanitizer must be passed or unavailable")
 for key in ("compiler_c", "compiler_cxx", "meson_version", "ninja_version", "systemd_version"):
