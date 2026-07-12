@@ -7,6 +7,17 @@ using gw::test::require;
 namespace em = gw::protocol::x11::event_mask;
 namespace sm = gw::protocol::x11::state_mask;
 
+static server::WindowCreateSpec window(const std::uint32_t xid,
+                                       const std::uint32_t parent,
+                                       const server::WindowClass cls = server::WindowClass::InputOutput) {
+  server::WindowCreateSpec spec;
+  spec.xid = xid; spec.parent = parent; spec.x = 10; spec.y = 10;
+  spec.width = 50; spec.height = 40;
+  spec.border_width = cls == server::WindowClass::InputOnly ? 0 : 8;
+  spec.window_class = cls;
+  return spec;
+}
+
 int main() {
   input::InputState state;
   require(state.pointer_x() == 0 && state.pointer_y() == 0 && state.pointer_target() == 1 &&
@@ -55,4 +66,43 @@ int main() {
           "one-level crossing detail matrix");
   require(input::crossing_focus(1, 1, 2) && input::crossing_focus(1, 2, 2) &&
           !input::crossing_focus(1, 3, 2), "crossing focus bit");
+
+  server::ResourceTable resources;
+  const auto root = resources.screen().root_window;
+  constexpr std::uint32_t base = 0x00400000U, mask = 0x001fffffU;
+  require(resources.create_window(1, base, mask, window(base + 1, root)) ==
+              server::CreateWindowStatus::Success &&
+          resources.create_window(1, base, mask, window(base + 2, root)) ==
+              server::CreateWindowStatus::Success &&
+          resources.create_window(1, base, mask,
+              window(base + 3, root, server::WindowClass::InputOnly)) ==
+              server::CreateWindowStatus::Success &&
+          resources.create_window(1, base, mask, window(base + 4, base + 1)) ==
+              server::CreateWindowStatus::Success,
+          "hit-test window fixture");
+  auto* first = resources.find_window(base + 1);
+  auto* second = resources.find_window(base + 2);
+  auto* input_only = resources.find_window(base + 3);
+  first->map_state = second->map_state = input_only->map_state = server::MapState::Viewable;
+  first->policy_visible = second->policy_visible = input_only->policy_visible = true;
+  second->x = 20; second->y = 20;
+  require(input::hit_test_top_level(resources, 25, 25) == base + 2,
+          "topmost overlapping direct-root InputOutput wins");
+  second->policy_visible = false;
+  require(input::hit_test_top_level(resources, 25, 25) == base + 1,
+          "hidden top window ignored");
+  first->cleanup_pending = true;
+  require(input::hit_test_top_level(resources, 25, 25) == root,
+          "cleanup pending, InputOnly, and child windows ignored");
+  first->cleanup_pending = false; first->attributes.override_redirect = true;
+  require(input::hit_test_top_level(resources, 10, 10) == base + 1 &&
+          input::hit_test_top_level(resources, 9, 10) == root &&
+          input::hit_test_top_level(resources, 60, 10) == root,
+          "override redirect included and borders excluded");
+  auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
+  require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
+          "top-level signed event coordinates");
+  coordinates = input::event_coordinates(resources, root, base + 1, 5, 7);
+  require(coordinates.event_x == 5 && coordinates.event_y == 7 && coordinates.child == base + 1,
+          "root coordinates name immediate pointer child");
 }
