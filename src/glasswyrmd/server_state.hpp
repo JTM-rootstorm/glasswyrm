@@ -88,6 +88,55 @@ class ServerState {
     *this = std::move(staged);
     return true;
   }
+  [[nodiscard]] std::optional<LifecycleSnapshot> propose_create_lifecycle(
+      const ClientId owner, const std::uint32_t resource_base,
+      const std::uint32_t resource_mask, const WindowCreateSpec& spec,
+      const std::uint64_t creation_serial) const {
+    auto staged = *this;
+    if (staged.resources_.create_window(owner, resource_base, resource_mask,
+                                        spec) != CreateWindowStatus::Success)
+      return std::nullopt;
+    auto* window = staged.resources_.find_window(spec.xid);
+    if (!window || !staged.resources_.is_policy_candidate(spec.xid))
+      return std::nullopt;
+    window->creation_serial = creation_serial;
+    return staged.lifecycle_snapshot();
+  }
+  [[nodiscard]] std::optional<LifecycleSnapshot> propose_destroy_lifecycle(
+      const std::uint32_t xid) const {
+    if (!resources_.is_policy_candidate(xid)) return std::nullopt;
+    auto proposed = lifecycle_snapshot();
+    proposed.windows.erase(xid);
+    std::erase(proposed.root_order, xid);
+    if (proposed.focused_window == xid)
+      proposed.focused_window = proposed.root_window;
+    return proposed;
+  }
+  [[nodiscard]] bool commit_create_lifecycle(
+      const ClientId owner, const std::uint32_t resource_base,
+      const std::uint32_t resource_mask, const WindowCreateSpec& spec,
+      const std::uint64_t creation_serial,
+      const LifecycleSnapshot& evaluated) {
+    ServerState staged = *this;
+    if (staged.resources_.create_window(owner, resource_base, resource_mask,
+                                        spec) != CreateWindowStatus::Success)
+      return false;
+    auto* window = staged.resources_.find_window(spec.xid);
+    if (!window) return false;
+    window->creation_serial = creation_serial;
+    if (!staged.commit_lifecycle(evaluated)) return false;
+    *this = std::move(staged);
+    return true;
+  }
+  [[nodiscard]] bool commit_destroy_lifecycle(
+      const std::uint32_t xid, const LifecycleSnapshot& evaluated) {
+    ServerState staged = *this;
+    if (staged.resources_.destroy_window(xid) != DestroyWindowStatus::Success)
+      return false;
+    if (!staged.commit_lifecycle(evaluated)) return false;
+    *this = std::move(staged);
+    return true;
+  }
 
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner) {
     return resources_.cleanup_client(owner);

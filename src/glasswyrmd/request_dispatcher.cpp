@@ -176,8 +176,27 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
       (spec.window_class == WindowClass::InputOutput ||
        (spec.window_class == WindowClass::CopyFromParent &&
         parent->window_class == WindowClass::InputOutput));
-  if (context.integrated_lifecycle && policy_candidate)
-    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  if (context.integrated_lifecycle && policy_candidate) {
+    auto staged = state;
+    const auto status = staged.resources().create_window(
+        context.client_id, context.resource_base, context.resource_mask, spec);
+    switch (status) {
+      case CreateWindowStatus::Success:
+        return DispatchResult::deferred_create_window(std::move(spec));
+      case CreateWindowStatus::BadIdChoice:
+        return error(context, request, x11::CoreErrorCode::BadIDChoice,
+                     spec.xid);
+      case CreateWindowStatus::BadWindow:
+        return error(context, request, x11::CoreErrorCode::BadWindow,
+                     spec.parent);
+      case CreateWindowStatus::BadValue:
+        return error(context, request, x11::CoreErrorCode::BadValue);
+      case CreateWindowStatus::BadMatch:
+        return error(context, request, x11::CoreErrorCode::BadMatch);
+      case CreateWindowStatus::BadAlloc:
+        return error(context, request, x11::CoreErrorCode::BadAlloc);
+    }
+  }
 
   switch (state.resources().create_window(
       context.client_id, context.resource_base, context.resource_mask, spec)) {
@@ -209,7 +228,7 @@ DispatchResult destroy_window(ServerState& state,
   }
   if (context.integrated_lifecycle &&
       state.resources().is_policy_candidate(window)) {
-    return error(context, request, x11::CoreErrorCode::BadImplementation);
+    return DispatchResult::deferred_destroy_window(window);
   }
   const auto status = state.resources().destroy_window(window);
   if (status == DestroyWindowStatus::BadWindow) {
