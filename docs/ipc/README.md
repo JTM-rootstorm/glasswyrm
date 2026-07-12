@@ -8,6 +8,8 @@ window-policy contract used by `gwm`.
 - [GWIPC API 0](GWIPC_API_0.md) documents the installed C ABI and C++ wrappers.
 - [GWIPC Wire Version 1](GWIPC_WIRE_V1.md) documents record encoding and the
   additive message registry.
+- [M6 Lifecycle Contract](M6_LIFECYCLE_CONTRACT.md) documents API 0.4 lifecycle
+  and metadata-only records.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records

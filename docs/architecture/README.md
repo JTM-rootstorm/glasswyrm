@@ -3,6 +3,8 @@
 This directory is for architecture notes that expand on
 `docs/GLASSWYRM_SPEC.md`.
 
+- [Milestone 6 runtime topology](M6_RUNTIME_TOPOLOGY.md)
+
 Milestone 0 establishes three distinct executable targets without implementing
 their runtime responsibilities:
 
