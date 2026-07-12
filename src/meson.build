@@ -214,10 +214,10 @@ if get_option('gwm')
     link_with: gwm_options_lib,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
-  executable(
+  gwm_program = executable(
     'gwm',
     files('gwm/main.cpp'),
-    dependencies: gw_scaffold_dep,
+    dependencies: [gwm_options_dep, gw_wm_policy_dep, gwipc_dep],
     install: true,
   )
 endif
