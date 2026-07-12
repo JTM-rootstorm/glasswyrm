@@ -48,6 +48,7 @@ struct DispatchResult {
   std::optional<WindowCreateSpec> deferred_create;
   bool deferred_destroy{false};
   bool deferred_map{false};
+  std::optional<bool> deferred_override_redirect;
   std::vector<StructuralTransition> structural_transitions;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
@@ -72,6 +73,14 @@ struct DispatchResult {
     result.kind = DispatchKind::DeferredLifecycle;
     result.deferred_window = window;
     result.deferred_destroy = true;
+    return result;
+  }
+  static DispatchResult deferred_override_change(const std::uint32_t window,
+                                                 const bool value) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = window;
+    result.deferred_override_redirect = value;
     return result;
   }
 };

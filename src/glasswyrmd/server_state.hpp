@@ -79,6 +79,7 @@ class ServerState {
       window->stack_serial = intent.stack_serial;
       window->stack_sibling = intent.stack_sibling;
       window->stack_mode = intent.stack_mode;
+      window->attributes.override_redirect = intent.override_redirect;
       policy.push_back({xid, intent.applied_x, intent.applied_y,
                         intent.applied_width, intent.applied_height,
                         intent.stacking, intent.policy_visible,

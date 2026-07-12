@@ -21,6 +21,9 @@ int main(){
  require(state.resources().configure_local(base+2,config)==LocalLifecycleStatus::Success&&state.resources().find_window(base+2)->x==-5&&state.resources().find_window(base+2)->requested_width==80,"local configure");
  const auto before=top->x;const AppliedPolicyWindow invalid{base+1,99,0,0,10,0,true,false};
  require(!state.apply_policy(std::span<const AppliedPolicyWindow>(&invalid,1))&&top->x==before,"invalid atomic");
+ auto override_transaction=state.lifecycle_snapshot();override_transaction.windows.at(base+1).override_redirect=true;override_transaction.windows.at(base+1).stacking=0;
+ require(state.commit_lifecycle(override_transaction)&&state.resources().find_window(base+1)->attributes.override_redirect,"accepted lifecycle commit applies override-redirect atomically");
+ top=state.resources().find_window(base+1);
  auto transaction=state.lifecycle_snapshot();auto& intent=transaction.windows.at(base+1);
  const auto before_map=top->map_requested;const auto before_serial=top->map_serial;
  intent.map_requested=!before_map;intent.map_serial=before_serial+100;intent.applied_width=0;

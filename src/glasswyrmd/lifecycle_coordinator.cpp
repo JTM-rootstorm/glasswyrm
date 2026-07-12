@@ -56,6 +56,9 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
       target->second.stack_sibling = source->second.stack_sibling;
       target->second.stack_mode = source->second.stack_mode;
       break;
+    case LifecycleOperationKind::OverrideChange:
+      target->second.override_redirect = source->second.override_redirect;
+      break;
     default: return std::nullopt;
   }
   return rebased;

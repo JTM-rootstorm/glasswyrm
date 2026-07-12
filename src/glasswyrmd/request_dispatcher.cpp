@@ -331,6 +331,9 @@ DispatchResult change_window_attributes(
   if (window == nullptr) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
   }
+  if (context.integrated_lifecycle &&
+      state.resources().cleanup_pending(window_id))
+    return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
   auto decoded = decode_window_attributes(reader, value_mask,
                                           window->attributes,
                                           state.screen().default_colormap);
@@ -341,6 +344,13 @@ DispatchResult change_window_attributes(
       window_id == state.screen().root_window) {
     return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
   }
+  const bool defer_override =
+      context.integrated_lifecycle && (value_mask & (1U << 9U)) != 0 &&
+      state.resources().is_policy_candidate(window_id) &&
+      window->map_requested &&
+      decoded.attributes.override_redirect !=
+          window->attributes.override_redirect;
+  const bool proposed_override = decoded.attributes.override_redirect;
   if (decoded.event_mask.has_value()) {
     const auto selected = *decoded.event_mask;
     if ((selected & (kResizeRedirectMask | kSubstructureRedirectMask)) != 0) {
@@ -360,7 +370,12 @@ DispatchResult change_window_attributes(
       return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
     }
   }
+  if (defer_override)
+    decoded.attributes.override_redirect = window->attributes.override_redirect;
   window->attributes = decoded.attributes;
+  if (defer_override)
+    return DispatchResult::deferred_override_change(window_id,
+                                                    proposed_override);
   return {};
 }
 
