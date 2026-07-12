@@ -44,6 +44,10 @@ struct DrawableDamage {
   std::uint32_t window{};
   glasswyrm::geometry::Rectangle rectangle{};
 };
+struct ExposeIntent {
+  std::uint32_t window{};
+  glasswyrm::geometry::Rectangle rectangle{};
+};
 
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
@@ -57,6 +61,7 @@ struct DispatchResult {
   std::optional<bool> deferred_override_redirect;
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
+  std::vector<ExposeIntent> expose_intents;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

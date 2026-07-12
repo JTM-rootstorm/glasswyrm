@@ -5,6 +5,7 @@
 #include "protocol/x11/reply.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
 #include "glasswyrmd/raster_ops.hpp"
+#include "core/geometry/region.hpp"
 #include "protocol/x11/exposure_event.hpp"
 
 #include <bit>
@@ -17,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <tuple>
 #include <utility>
 
 namespace glasswyrm::server {
@@ -87,6 +89,30 @@ bool supported_window_drawable(const ResourceTable& resources,
   return window && xid != resources.screen().root_window &&
          window->parent == resources.screen().root_window &&
          window->window_class == WindowClass::InputOutput && window->depth == 24;
+}
+
+bool known_drawable(const ResourceTable& resources, const std::uint32_t xid) {
+  return resources.find_window(xid) || resources.find_pixmap(xid);
+}
+
+std::vector<geometry::Rectangle> rectangle_difference(
+    const geometry::Rectangle rectangle, const geometry::Rectangle cutter) {
+  const auto overlap = geometry::intersect(rectangle, cutter);
+  if (!overlap) return {rectangle};
+  std::vector<geometry::Rectangle> result;
+  const auto right = rectangle.x + static_cast<std::int64_t>(rectangle.width);
+  const auto bottom = rectangle.y + static_cast<std::int64_t>(rectangle.height);
+  const auto cut_right = overlap->x + static_cast<std::int64_t>(overlap->width);
+  const auto cut_bottom = overlap->y + static_cast<std::int64_t>(overlap->height);
+  if (overlap->y > rectangle.y) result.push_back({rectangle.x, rectangle.y, rectangle.width, static_cast<std::uint32_t>(overlap->y-rectangle.y)});
+  if (overlap->x > rectangle.x) result.push_back({rectangle.x, overlap->y, static_cast<std::uint32_t>(overlap->x-rectangle.x), overlap->height});
+  if (cut_right < right) result.push_back({static_cast<std::int32_t>(cut_right), overlap->y, static_cast<std::uint32_t>(right-cut_right), overlap->height});
+  if (cut_bottom < bottom) result.push_back({rectangle.x, static_cast<std::int32_t>(cut_bottom), rectangle.width, static_cast<std::uint32_t>(bottom-cut_bottom)});
+  std::sort(result.begin(), result.end(), [](const auto& left, const auto& right_value) {
+    return std::tie(left.y,left.x,left.height,left.width) <
+           std::tie(right_value.y,right_value.x,right_value.height,right_value.width);
+  });
+  return result;
 }
 
 PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid) {
@@ -559,6 +585,7 @@ DispatchResult free_gc(ServerState& state, const DispatchContext& context,
 DispatchResult put_image(ServerState& state, const DispatchContext& context,
                          const x11::FramedRequest& request) {
   if (request.bytes.size() < 24) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 2) return error(context, request, x11::CoreErrorCode::BadValue, request.data);
   if (request.data != 2) return error(context, request, x11::CoreErrorCode::BadImplementation);
   x11::ByteReader reader(request.body(), context.byte_order);
   std::uint32_t drawable{}, gc_id{}; std::uint16_t width{}, height{}, raw_x{}, raw_y{}; std::uint8_t left_pad{}, depth{};
@@ -573,7 +600,8 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
   auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
   const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
-  if (!valid) return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
+  if (!valid) return error(context, request, known_drawable(state.resources(), drawable)
+      ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
   const auto payload = std::span<const std::uint8_t>(request.bytes).subspan(24);
@@ -597,15 +625,19 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
   if (!valid) return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
   struct Fill { geometry::Rectangle rectangle; }; std::vector<Fill> fills;
+  fills.reserve((request.bytes.size() - 12U) / 8U);
   while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
   DispatchResult result;
-  for (const auto& fill : fills) {
-    const auto clipped = geometry::intersect(fill.rectangle, {0, 0, storage->width(), storage->height()});
-    if (!clipped) continue;
-    storage->fill(*clipped, gc->foreground, gc->plane_mask);
-    if (supported_window_drawable(state.resources(), drawable)) result.drawable_damage.push_back({drawable, *clipped});
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto& fill : fills) damage.add(fill.rectangle);
+  if (supported_window_drawable(state.resources(), drawable))
+    result.drawable_damage.reserve(damage.rectangles().size());
+  for (const auto& rectangle : damage.rectangles()) {
+    storage->fill(rectangle, gc->foreground, gc->plane_mask);
+    if (supported_window_drawable(state.resources(), drawable))
+      result.drawable_damage.push_back({drawable, rectangle});
   }
   return result;
 }
@@ -621,7 +653,11 @@ DispatchResult copy_area_request(ServerState& state, const DispatchContext& cont
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
   const bool valid_source = state.resources().find_pixmap(source) || supported_window_drawable(state.resources(), source);
   const bool valid_destination = state.resources().find_pixmap(destination) || supported_window_drawable(state.resources(), destination);
-  if (!valid_source || !valid_destination) return error(context, request, x11::CoreErrorCode::BadDrawable, !valid_source ? source : destination);
+  if (!valid_source || !valid_destination) {
+    const auto bad = !valid_source ? source : destination;
+    return error(context, request, known_drawable(state.resources(), bad)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, bad);
+  }
   auto* source_storage = mutable_storage(state.resources(), source); auto* destination_storage = mutable_storage(state.resources(), destination);
   if (!source_storage || !destination_storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
   RasterResult raster;
@@ -633,11 +669,18 @@ DispatchResult copy_area_request(ServerState& state, const DispatchContext& cont
     const auto requested = geometry::intersect({static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), width, height}, {0, 0, destination_storage->width(), destination_storage->height()});
     if (requested && raster.damage == *requested)
       result.output = x11::encode_no_expose(context.byte_order, context.sequence, {destination, 0, request.opcode});
-    else {
-      const auto rectangle = requested.value_or(geometry::Rectangle{});
-      result.output = x11::encode_graphics_expose(context.byte_order, context.sequence,
-          {destination, static_cast<std::uint16_t>(rectangle.x), static_cast<std::uint16_t>(rectangle.y),
-           static_cast<std::uint16_t>(rectangle.width), static_cast<std::uint16_t>(rectangle.height), 0, 0, request.opcode});
+    else if (requested) {
+      auto missing = raster.damage.empty() ? std::vector<geometry::Rectangle>{*requested}
+                                           : rectangle_difference(*requested, raster.damage);
+      result.output.reserve(missing.size() * 32U);
+      for (std::size_t index = 0; index < missing.size(); ++index) {
+        const auto& rectangle = missing[index];
+        auto event = x11::encode_graphics_expose(context.byte_order, context.sequence,
+            {destination, static_cast<std::uint16_t>(rectangle.x), static_cast<std::uint16_t>(rectangle.y),
+             static_cast<std::uint16_t>(rectangle.width), static_cast<std::uint16_t>(rectangle.height), 0,
+             static_cast<std::uint16_t>(missing.size()-index-1), request.opcode});
+        result.output.insert(result.output.end(), event.begin(), event.end());
+      }
     }
   }
   return result;
@@ -662,10 +705,7 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
     storage->fill(*clipped, window->attributes.background_source == BackgroundSource::Pixel ? window->attributes.background_pixel : 0);
     result.drawable_damage.push_back({window_id, *clipped});
   }
-  if (request.data == 1 && (state.resources().event_selection(window_id, context.client_id) & (1U << 15U)) != 0)
-    result.output = x11::encode_expose(context.byte_order, context.sequence,
-        {window_id, static_cast<std::uint16_t>(clipped->x), static_cast<std::uint16_t>(clipped->y),
-         static_cast<std::uint16_t>(clipped->width), static_cast<std::uint16_t>(clipped->height), 0});
+  if (request.data == 1) result.expose_intents.push_back({window_id, *clipped});
   return result;
 }
 
