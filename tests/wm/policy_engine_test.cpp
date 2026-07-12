@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 using namespace glasswyrm::wm;
@@ -53,6 +54,19 @@ void validation() {
   raw = state(); raw.windows.at(10).requested_width = maximum_window_extent + 1U;
   require(evaluate(raw, 1).error == EvaluationError::InvalidWindow,
           "global requested dimension cap is enforced");
+  raw = state(); raw.context.work_x = std::numeric_limits<std::int32_t>::max();
+  raw.context.work_width = 2;
+  require(evaluate(raw, 1).error == EvaluationError::InvalidContext,
+          "overflowing signed work extent is rejected");
+  raw = state(); raw.windows.at(10).parent_window_id = 20;
+  require(evaluate(raw, 1).error == EvaluationError::InvalidWindow,
+          "non-root parent is rejected");
+  raw = state(); raw.windows.at(10).workspace_id = 2;
+  require(evaluate(raw, 1).error == EvaluationError::UnsupportedMetadata,
+          "a second workspace is rejected");
+  raw = state(); raw.windows.at(10).window_type = static_cast<WindowType>(99);
+  require(evaluate(raw, 1).error == EvaluationError::InvalidWindow,
+          "unknown internal enum values are rejected");
 }
 
 void cascade_and_determinism() {
@@ -70,6 +84,14 @@ void cascade_and_determinism() {
           "map order determines contiguous stack and focus fallback");
   require(evaluated.policy.hash == UINT64_C(0x79ddf2e26c5784d8),
           "canonical policy payload hash matches known vector");
+  const auto payload = encode_policy_window_state(evaluated.policy.windows.at(10));
+  require(payload.size() == 64 && payload[0] == 10 && payload[12] == 0 &&
+              payload[16] == 7 && payload[24] == 100 && payload[28] == 50 &&
+              payload[32] == 200 && payload[36] == 100 && payload[44] == 1 &&
+              payload[46] == 1 && payload[48] == 1 && payload[49] == 0 &&
+              payload[50] == 1 && payload[51] == 1 && payload[54] == 1 &&
+              payload[55] == 0 && payload[63] == 0,
+          "canonical state bytes match the exact policy wire payload layout");
 
   RawState reversed;
   reversed.complete = true; reversed.has_context = true; reversed.context = context();
@@ -79,6 +101,17 @@ void cascade_and_determinism() {
   require(again && evaluated.policy.hash == again.policy.hash &&
               evaluated.policy.output_order == again.policy.output_order,
           "input insertion order does not affect policy or hash");
+
+  raw.windows.at(10).requested_width = 640;
+  raw.windows.at(10).requested_height = 480;
+  raw.windows.at(20).requested_width = 638;
+  raw.windows.at(20).requested_height = 478;
+  const auto wrapped = evaluate(raw, 4);
+  require(wrapped && wrapped.policy.windows.at(10).final_x == 100 &&
+              wrapped.policy.windows.at(10).final_y == 50 &&
+              wrapped.policy.windows.at(20).final_x == 102 &&
+              wrapped.policy.windows.at(20).final_y == 52,
+          "full-size and narrow spans wrap cascade offsets deterministically");
 }
 
 void transients_override_and_states() {
@@ -92,8 +125,12 @@ void transients_override_and_states() {
   override.override_redirect = true; override.requested_x = -20;
   override.requested_y = 700; override.requested_width = 900;
   override.requested_height = 20; override.fullscreen_requested = true;
-  override.focus_serial = 99;
+  override.focus_serial = 99; override.transient_for = 10;
   raw.windows.emplace(40, override);
+  auto nested = window(50, 5);
+  nested.window_type = WindowType::Dialog; nested.transient_for = 30;
+  nested.requested_width = 40; nested.requested_height = 20;
+  raw.windows.emplace(50, nested);
   const auto evaluated = evaluate(raw, 1);
   require(evaluated && evaluated.policy.windows.at(30).final_x == 150 &&
               evaluated.policy.windows.at(30).final_y == 70,
@@ -104,8 +141,12 @@ void transients_override_and_states() {
   const auto& bypass = evaluated.policy.windows.at(40);
   require(!bypass.managed && bypass.final_x == -20 && bypass.final_y == 700 &&
               bypass.final_width == 900 && !bypass.focused &&
-              bypass.stacking == 3 && !bypass.decoration_eligible,
+              bypass.stacking == 4 && !bypass.decoration_eligible,
           "override-redirect preserves geometry and occupies top band without focus");
+  require(evaluated.policy.windows.at(50).stacking == 2 &&
+              evaluated.policy.windows.at(50).final_x == 180 &&
+              evaluated.policy.windows.at(50).final_y == 90,
+          "nested transients resolve geometry and depth-first stacking");
 
   raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 0;
   raw.windows.at(20).fullscreen_requested = true;
@@ -116,8 +157,19 @@ void transients_override_and_states() {
               hidden.policy.windows.at(30).stacking == -1,
           "hidden transient parent hides descendants");
   require(hidden.policy.windows.at(20).applied_state == AppliedState::Minimized &&
-              !hidden.policy.windows.at(20).visible,
+              !hidden.policy.windows.at(20).visible &&
+              hidden.policy.windows.at(20).fullscreen_eligible == TriState::False,
           "minimized takes precedence over fullscreen and maximize");
+
+  raw.windows.at(20).minimized_requested = false;
+  const auto fullscreen = evaluate(raw, 3);
+  require(fullscreen && fullscreen.policy.windows.at(20).applied_state ==
+                            AppliedState::Fullscreen &&
+              fullscreen.policy.windows.at(20).final_x == 100 &&
+              fullscreen.policy.windows.at(20).final_width == 640 &&
+              !fullscreen.policy.windows.at(20).decoration_eligible &&
+              fullscreen.policy.windows.at(20).fullscreen_eligible == TriState::True,
+          "fullscreen beats maximize and fills the work area");
 }
 
 void decoration_and_focus() {
@@ -136,6 +188,13 @@ void decoration_and_focus() {
   require(evaluated && evaluated.policy.windows.at(20).decoration_eligible &&
               evaluated.policy.windows.at(20).focused,
           "utility explicit decoration and minimized focus fallback work");
+  raw.windows.at(10).wants_map = false; raw.windows.at(10).map_serial = 0;
+  raw.windows.at(20).wants_map = false; raw.windows.at(20).map_serial = 0;
+  evaluated = evaluate(raw, 3);
+  require(evaluated && !evaluated.policy.windows.at(10).focused &&
+              !evaluated.policy.windows.at(20).focused &&
+              evaluated.policy.output_order == std::vector<std::uint32_t>({10, 20}),
+          "no visible candidate leaves focus empty and hidden output ID-sorted");
 }
 
 void transactions() {
@@ -171,11 +230,18 @@ void transactions() {
               !transaction.pending().windows.contains(30),
           "aborted replacement is invisible");
 
+  require(transaction.begin_snapshot() && transaction.upsert(context()) &&
+              transaction.upsert(window(30, 3)) && transaction.end_snapshot(),
+          "replacement snapshot can finish after bootstrap");
+  require(transaction.commit(3) && transaction.committed_raw().windows.size() == 1 &&
+              transaction.committed_raw().windows.contains(30),
+          "accepted replacement atomically replaces prior raw state");
+
   const auto before_preflight = transaction.committed_policy().hash;
-  auto changed = transaction.pending().windows.at(20);
+  auto changed = transaction.pending().windows.at(30);
   changed.focus_serial = 9;
   require(transaction.upsert(changed), "preflight update is staged");
-  rejected = transaction.commit(3, [](const PolicyState&) { return false; });
+  rejected = transaction.commit(4, [](const PolicyState&) { return false; });
   require(rejected.error == EvaluationError::OutputFailure &&
               transaction.committed_policy().hash == before_preflight,
           "output preflight failure prevents promotion");
