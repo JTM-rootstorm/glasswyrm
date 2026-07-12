@@ -185,6 +185,31 @@ bool Compositor::detach(const gwipc_buffer_detach& value) {
   return true;
 }
 
+void Compositor::release_retired_buffers(const Scene& staged) {
+  for (const auto& [surface_id, old_buffer] : committed_attachments_) {
+    const auto now = pending_attachments_.find(surface_id);
+    if (now == pending_attachments_.end()) {
+      releases_[old_buffer] = staged.surfaces.contains(surface_id)
+                                  ? GWIPC_BUFFER_RELEASE_CONSUMER_DONE
+                                  : GWIPC_BUFFER_RELEASE_SURFACE_REMOVED;
+    } else if (now->second != old_buffer) {
+      releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
+    }
+  }
+  for (const auto& [buffer_id, mapping] : mappings_) {
+    (void)mapping;
+    const bool remains_attached = std::any_of(
+        pending_attachments_.begin(), pending_attachments_.end(),
+        [buffer_id](const auto& item) { return item.second == buffer_id; });
+    if (!remains_attached && !releases_.contains(buffer_id))
+      releases_[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
+  }
+  for (const auto& [buffer_id, reason] : releases_) {
+    (void)reason;
+    mappings_.erase(buffer_id);
+  }
+}
+
 PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
                                   std::string& error) {
   PresentedFrame presented;
@@ -209,13 +234,6 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
   const bool metadata_only_peer =
       profile_ == PeerProfile::M6MetadataProtocolServer;
   const bool protocol_server = profile_ != PeerProfile::M4TestProducer;
-  if (!staged.output || !staged.output->enabled) {
-    scene_ = std::move(candidate);
-    committed_attachments_ = pending_attachments_;
-    last_generation_ = value.producer_generation;
-    return presented;
-  }
-
   for (const auto& [surface_id, surface] : staged.surfaces) {
     const bool metadata_only = surface.presentation_flags ==
                                GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
@@ -274,6 +292,15 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
       staged.surface_policies.size() != staged.surfaces.size()) {
     presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
     error = "surface policy references an unknown surface";
+    return presented;
+  }
+
+  if (!staged.output || !staged.output->enabled) {
+    if (!metadata_only_peer) release_retired_buffers(staged);
+    scene_ = std::move(candidate);
+    committed_attachments_ = pending_attachments_;
+    output_.disable();
+    last_generation_ = value.producer_generation;
     return presented;
   }
 
@@ -386,28 +413,7 @@ PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
     return presented;
   }
 
-  for (const auto& [surface_id, old_buffer] : committed_attachments_) {
-    const auto now = pending_attachments_.find(surface_id);
-    if (now == pending_attachments_.end()) {
-      releases_[old_buffer] = staged.surfaces.contains(surface_id)
-                                  ? GWIPC_BUFFER_RELEASE_CONSUMER_DONE
-                                  : GWIPC_BUFFER_RELEASE_SURFACE_REMOVED;
-    } else if (now->second != old_buffer) {
-      releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
-    }
-  }
-  for (const auto& [buffer_id, mapping] : mappings_) {
-    (void)mapping;
-    const bool remains_attached = std::any_of(
-        pending_attachments_.begin(), pending_attachments_.end(),
-        [buffer_id](const auto& item) { return item.second == buffer_id; });
-    if (!remains_attached && !releases_.contains(buffer_id))
-      releases_[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
-  }
-  for (const auto& [buffer_id, reason] : releases_) {
-    (void)reason;
-    mappings_.erase(buffer_id);
-  }
+  release_retired_buffers(staged);
   scene_ = std::move(candidate);
   committed_attachments_ = pending_attachments_;
   output_ = std::move(scratch);

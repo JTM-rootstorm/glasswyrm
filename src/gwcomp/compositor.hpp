@@ -68,6 +68,8 @@ private:
   using MappingMap = std::map<std::uint64_t, Mapping>;
   using AttachmentMap = std::map<std::uint64_t, std::uint64_t>;
 
+  void release_retired_buffers(const Scene& staged);
+
   SceneModel scene_;
   MappingMap mappings_;
   AttachmentMap pending_attachments_;
