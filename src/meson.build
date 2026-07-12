@@ -235,7 +235,8 @@ endif
 if get_option('gwcomp')
   gwcomp_options_lib = static_library(
     'gwcomp-options',
-    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp'),
+    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp',
+          'gwcomp/scene_manifest.cpp'),
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
                    gw_render_software_dep, gw_headless_dep],

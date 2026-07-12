@@ -20,6 +20,9 @@ constexpr std::uint64_t kRequiredCapabilities =
     GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_SDR_COLOR_METADATA |
     GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
+constexpr std::uint64_t kProtocolCommonCapabilities =
+    GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
+    GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
 
 [[noreturn]] void fail(const char* message) {
   std::fprintf(stderr, "gwcomp process test: %s\n", message);
@@ -109,6 +112,28 @@ void require_valid_connection(const std::string& socket) {
           "valid producer connects after rejected isolated peer");
 }
 
+void require_role_specific_rejected(const std::string& socket) {
+  gwipc_connection* connection = nullptr;
+  (void)connect_as(socket, GWIPC_ROLE_PROTOCOL_SERVER,
+                   kProtocolCommonCapabilities, &connection);
+  require(connection != nullptr,
+          "ProtocolServer common-capability connection is created");
+  for (int attempt = 0; attempt < 100 &&
+                        gwipc_connection_get_state(connection) !=
+                            GWIPC_CONNECTION_CLOSED;
+       ++attempt) {
+    pollfd descriptor{gwipc_connection_fd(connection),
+                      gwipc_connection_wanted_poll_events(connection), 0};
+    const int ready = ::poll(&descriptor, 1, 20);
+    if (ready > 0)
+      (void)gwipc_connection_process_poll_events(connection,
+                                                 descriptor.revents);
+  }
+  require(gwipc_connection_get_state(connection) == GWIPC_CONNECTION_CLOSED,
+          "ProtocolServer missing WindowLifecycle is disconnected");
+  gwipc_connection_destroy(connection);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -165,6 +190,8 @@ int main(int argc, char** argv) {
   require_rejected(socket, GWIPC_ROLE_DIAGNOSTIC_TOOL, kRequiredCapabilities,
                    GWIPC_STATUS_ROLE_REJECTED,
                    "wrong-role peer is rejected");
+  require_valid_connection(socket);
+  require_role_specific_rejected(socket);
   require_valid_connection(socket);
   require_rejected(socket, GWIPC_ROLE_TEST_PRODUCER,
                    kRequiredCapabilities & ~GWIPC_CAP_FRAME_ACKNOWLEDGEMENT,

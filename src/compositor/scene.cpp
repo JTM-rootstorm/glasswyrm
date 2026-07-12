@@ -46,11 +46,15 @@ bool checked_extent(std::int32_t origin, std::uint32_t extent) {
 }
 
 bool valid_surface(const SurfaceUpsert& surface) {
-  if (surface.surface_id == 0 || surface.x11_window_id != 0 ||
+  const bool metadata_only =
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  if (surface.surface_id == 0 ||
+      (metadata_only ? surface.x11_window_id == 0 : surface.x11_window_id != 0) ||
       surface.parent_surface_id != 0 || surface.output_id == 0 ||
       surface.transform != GWIPC_TRANSFORM_NORMAL ||
       surface.scale_numerator != 1 || surface.scale_denominator != 1 ||
-      !srgb(surface.color) || surface.presentation_flags != 0 ||
+      !srgb(surface.color) ||
+      (surface.presentation_flags != 0 && !metadata_only) ||
       surface.opacity > GWIPC_OPACITY_ONE ||
       !checked_extent(surface.logical_x, surface.logical_width) ||
       !checked_extent(surface.logical_y, surface.logical_height)) return false;
@@ -63,7 +67,9 @@ bool valid_surface(const SurfaceUpsert& surface) {
 
 std::optional<Rectangle> effective_bounds(const SurfaceUpsert& surface,
                                           const OutputUpsert& output) {
-  if (!surface.visible || !output.enabled || surface.opacity == 0) return std::nullopt;
+  if (!surface.visible || !output.enabled || surface.opacity == 0 ||
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
+    return std::nullopt;
   Rectangle local{0, 0, surface.logical_width, surface.logical_height};
   if (surface.clipping) {
     const auto clipped = intersection(
@@ -139,9 +145,18 @@ bool SceneModel::apply(const SurfaceUpsert& surface) {
   return true;
 }
 
+bool SceneModel::apply(const gwipc_surface_policy_upsert& policy) {
+  if (!mutations_allowed() || policy.surface_id == 0) return false;
+  pending_.surface_policies[policy.surface_id] = policy;
+  return true;
+}
+
 bool SceneModel::apply(const gwipc_surface_remove& surface) {
-  return mutations_allowed() && surface.surface_id != 0 &&
-         pending_.surfaces.erase(surface.surface_id) == 1;
+  if (!mutations_allowed() || surface.surface_id == 0 ||
+      pending_.surfaces.erase(surface.surface_id) != 1)
+    return false;
+  pending_.surface_policies.erase(surface.surface_id);
+  return true;
 }
 
 bool SceneModel::apply(const gwipc_surface_damage& damage) {
@@ -178,6 +193,28 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
   for (const auto& [id, surface] : pending_.surfaces) {
     (void)id;
     if (surface.output_id != pending_.output->output_id) {
+      result.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
+      return result;
+    }
+  }
+  for (const auto& [id, surface] : pending_.surfaces) {
+    const bool metadata_only =
+        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+    const auto policy = pending_.surface_policies.find(id);
+    if (metadata_only) {
+      if (policy == pending_.surface_policies.end() ||
+          policy->second.x11_window_id != surface.x11_window_id) {
+        result.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+        return result;
+      }
+    } else if (policy != pending_.surface_policies.end()) {
+      result.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return result;
+    }
+  }
+  for (const auto& [id, unused] : pending_.surface_policies) {
+    (void)unused;
+    if (!pending_.surfaces.contains(id)) {
       result.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
       return result;
     }
