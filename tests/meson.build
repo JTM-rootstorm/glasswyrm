@@ -101,6 +101,14 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('event-router', event_router_test, timeout: 10)
+  client_connection_deferred_test = executable(
+    'client_connection_deferred_test',
+    files('unit/client_connection_deferred_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('client-connection-deferred', client_connection_deferred_test,
+       timeout: 10)
   if get_option('libgwipc') and get_option('gwm') and get_option('gwcomp')
     glasswyrmd_peer_bootstrap_test = executable(
       'glasswyrmd_peer_bootstrap_test',

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <span>
 #include <vector>
@@ -38,6 +39,8 @@ class RequestWorkBudget {
 
 class ClientConnection {
  public:
+  using DeferredHandler =
+      std::function<bool(ClientConnection&, const DispatchResult&)>;
   using DispatchBlockToken = std::uint64_t;
   enum class State {
     AwaitingSetup,
@@ -47,7 +50,9 @@ class ClientConnection {
   };
 
   ClientConnection(int descriptor, std::uint64_t identifier,
-                   std::uint32_t resource_id_base, ServerState& server_state);
+                   std::uint32_t resource_id_base, ServerState& server_state,
+                   bool integrated_lifecycle = false,
+                   DeferredHandler deferred_handler = {});
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -117,6 +122,8 @@ class ClientConnection {
   std::size_t queued_output_bytes_ = 0;
   std::vector<std::uint8_t> pending_input_;
   std::optional<DispatchBlockToken> dispatch_block_token_;
+  bool integrated_lifecycle_{false};
+  DeferredHandler deferred_handler_;
 };
 
 }  // namespace glasswyrm::server

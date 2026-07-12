@@ -170,6 +170,15 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   spec.attributes = decoded.attributes;
   spec.initial_event_mask = decoded.event_mask.value_or(0);
 
+  const auto* parent = state.resources().find_window(spec.parent);
+  const bool policy_candidate =
+      parent != nullptr && spec.parent == state.screen().root_window &&
+      (spec.window_class == WindowClass::InputOutput ||
+       (spec.window_class == WindowClass::CopyFromParent &&
+        parent->window_class == WindowClass::InputOutput));
+  if (context.integrated_lifecycle && policy_candidate)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+
   switch (state.resources().create_window(
       context.client_id, context.resource_base, context.resource_mask, spec)) {
     case CreateWindowStatus::Success: return {};
@@ -197,6 +206,10 @@ DispatchResult destroy_window(ServerState& state,
   std::uint32_t window = 0;
   if (!reader.read_u32(window)) {
     return error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  if (context.integrated_lifecycle &&
+      state.resources().is_policy_candidate(window)) {
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   }
   const auto status = state.resources().destroy_window(window);
   if (status == DestroyWindowStatus::BadWindow) {
@@ -637,7 +650,7 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
   if (decoded.window == state.screen().root_window) return {};
   if (state.resources().is_policy_candidate(decoded.window) &&
       context.integrated_lifecycle)
-    return DispatchResult::deferred(decoded.window);
+    return DispatchResult::deferred(decoded.window, {}, mapped);
   if (state.resources().is_policy_candidate(decoded.window))
     return error(context, request, x11::CoreErrorCode::BadImplementation);
   switch (state.resources().set_local_map_intent(decoded.window, mapped)) {
