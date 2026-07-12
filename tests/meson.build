@@ -691,6 +691,15 @@ if get_option('glasswyrmd')
         dependencies: [xcb_test_dependency, gwipc_dep],
         include_directories: test_source_root_include,
       )
+      m8_restart_hold_probe = executable(
+        'm8_restart_hold_probe',
+        files(
+          'xcb/m8_restart_hold_probe.cpp',
+          'helpers/synthetic_input_client.cpp',
+        ),
+        dependencies: [xcb_test_dependency, gwipc_dep],
+        include_directories: test_source_root_include,
+      )
     endif
     m7_restart_hold_probe = executable(
       'm7_restart_hold_probe',
