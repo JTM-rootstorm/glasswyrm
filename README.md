@@ -4,13 +4,16 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently at Milestone 3. `glasswyrmd` retains its tested
-Milestone 2 local X11 setup and bounded headless core request behavior.
-`libgwipc` now provides an independently tested and installable versioned local
-IPC foundation. `gwm`, `gwcomp`, and the runtime tools remain Milestone 0
-placeholders, and no production process uses IPC yet. There is no mapping,
-event delivery, input, window-management policy, compositor, renderer, or
-display backend.
+The project has completed Milestone 4. `glasswyrmd` retains its
+tested Milestone 2 local X11 setup and bounded headless core request behavior,
+and `libgwipc` provides the tested Milestone 3 versioned local IPC foundation.
+Milestone 4 has added tested scene/damage, read-only buffer import,
+software rendering, bounded headless output, and deterministic PPM dumps.
+`gwcomp` accepts and presents every repository-owned synthetic producer
+scenario with correlated acknowledgements, buffer releases, reconnect proofs,
+and exact-pixel golden coverage. `gwm` and the runtime tools remain
+placeholders; there is still no X11 mapping, event delivery, input, WM policy,
+three-process lifecycle, or DRM/KMS output.
 
 ## Build
 
@@ -135,7 +138,8 @@ core error. It never maps or displays the window.
 - `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
   headless request profile.
 - `gwm`: future owner of window-management policy truth.
-- `gwcomp`: future owner of composition and final display authority.
+- `gwcomp`: owns the emerging headless composition and final display authority;
+  its basic synthetic accepted-frame path is live and golden-tested.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -148,9 +152,11 @@ credentials, bounded queues, descriptor passing, snapshots, and the first
 output/surface/buffer/damage/frame contract vocabulary. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
-`gwm`, `gwcomp`, and every runtime tool currently print their Milestone 0
-placeholder status and exit. They do not communicate with `glasswyrmd`, create
-framebuffers, or access hardware.
+`gwm` and every runtime tool still print their Milestone 0 placeholder status
+and exit. `gwcomp` runs a GWIPC listener, negotiates a `TestProducer`, and
+renders its validated shared-memory buffers headlessly, but does not communicate
+with `glasswyrmd` or `gwm` or access display hardware. See [`docs/compositor/`](docs/compositor/) for its
+implemented boundary and M4 formats.
 
 ## Project Layout
 
@@ -161,10 +167,11 @@ framebuffers, or access hardware.
 - `src/gwcomp/`: compositor, renderer, and display authority process code.
 - `src/ipc/`: versioned wire codecs and local seqpacket transport.
 - `src/protocol/`: endian-safe, bounded X11 setup and core wire codecs.
-- `src/compositor/`: reserved for `gwcomp` scene and composition code.
-- `src/backends/`: reserved for headless, DRM/KMS, and possible nested backends.
+- `src/compositor/`: bounded staged scene, geometry, and damage primitives.
+- `src/backends/`: tested headless output/dump primitives plus reserved DRM/KMS
+  and possible nested backends.
 - `src/input/`: reserved for `glasswyrmd` input routing.
-- `src/render/`: reserved for renderer implementations owned by `gwcomp`.
+- `src/render/`: reference software renderer plus reserved accelerated paths.
 - `tools/`: developer and runtime command-line tools.
 - `tests/`: unit and headless integration tests.
 - `docs/`: specification, architecture notes, protocol notes, and decisions.
@@ -173,7 +180,7 @@ framebuffers, or access hardware.
 
 Gentoo packaging should keep the source tree coherent while allowing runtime
 components to be built, installed, and updated independently. Milestone 0
-provides narrow Meson switches for the three runtime placeholders and tools;
+provides narrow Meson switches for the three runtime processes and tools;
 the overlay and ebuilds remain future packaging work.
 
 The intended package shape is:
@@ -206,12 +213,20 @@ first ebuilds:
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
+./tools/gw-vm milestone4-runtime-test --yes
 ```
 
 The fixed M3 scenario additionally runs an IPC-only build, staged install and
 C/C++ consumers, then supervises the process probes through a transient
 hardened systemd service. Reports are written under `artifacts/vm/latest/`.
 The separate `full-packaging-test` remains unavailable until real ebuilds land.
+
+The fixed M4 scenario runs strict, sanitizer, compositor-only, and IPC-only
+builds before supervising `gwcomp` as `gwcomp-m4.service`. It drives only the
+repository-owned synthetic producer, validates deterministic frame hashes, and
+collects the PPMs, frame manifest, and SHA-256 manifest in the binary-safe
+`milestone4-frames.tar` artifact. The terminal-only guest must still have Xorg
+and Xwayland absent; M4 does not require DRM, Mesa, libinput, or image libraries.
 
 ## Compatibility
 
