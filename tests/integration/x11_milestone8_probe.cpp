@@ -172,7 +172,6 @@ int main(int argc, char** argv) try {
     const auto motion_ack = input.motion(1, 2, 80, 80);
     require(motion_ack.result == GWIPC_SYNTHETIC_INPUT_ACCEPTED,
             "motion was not accepted");
-    add(wait_for(x11_client, 7));
     add(wait_for(x11_client, 6));
     require(events.back().time == 2 && events.back().event == window,
             "motion target or time mismatch");
@@ -188,7 +187,7 @@ int main(int argc, char** argv) try {
     (void)input.barrier(4);
   } else if (options.scenario == "state") {
     (void)input.motion(1, 2, 80, 80);
-    add(wait_for(x11_client, 7)); add(wait_for(x11_client, 6));
+    add(wait_for(x11_client, 6));
     (void)input.key(2, 3, 50, true); add(wait_for(x11_client, 2));
     (void)input.key(3, 4, 38, true); add(wait_for(x11_client, 2));
     require(events.back().state == x11::state_mask::Shift,
