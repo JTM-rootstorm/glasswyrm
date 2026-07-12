@@ -6,12 +6,12 @@ Milestone 4 is the compositor-facing proof of Glasswyrm's three-process
 architecture. It does not implement mapped X11 windows, WM policy, input,
 DRM/KMS, scaling, HDR, VRR, or accelerated rendering.
 
-Implemented today are bounded geometry/damage, staged scene, and read-only
-memfd mapping primitives, a software renderer, a bounded headless framebuffer,
-atomic PPM writing, CLI parsing, and a foreground `gwcomp` GWIPC listener. The
-listener accepts one negotiated producer and survives disconnects, but it does not yet dispatch
-scene or buffer messages. Frame commits currently receive
-`RejectedIncompleteMetadata`.
+Implemented today are bounded geometry and damage, staged scene state,
+read-only sealed-memfd imports, a software renderer, a bounded headless
+framebuffer, atomic PPM writing, CLI parsing, and a foreground `gwcomp` GWIPC
+listener. The listener accepts one negotiated producer, dispatches the public
+typed compositor contract, presents accepted frames atomically, and survives
+producer disconnects.
 
 ## Command line
 
@@ -21,18 +21,16 @@ gwcomp --ipc-socket PATH --dump-dir PATH [--once] [--max-frames N]
 ```
 
 Both paths are required. The dump directory must not be a symbolic link.
-`--max-frames` requires a positive integer. The parser accepts `--once` and
-`--max-frames`; their successful-frame exit behavior is not wired into the
-reactor yet.
+`--max-frames` requires a positive integer. `--once` exits after one accepted
+frame and `--max-frames` exits after the requested number of accepted frames.
 
 ## Topology and lifecycle
 
 `gwcomp` listens on a local `AF_UNIX` `SOCK_SEQPACKET` endpoint as role
 `Compositor` and accepts at most one role `TestProducer`. A self-pipe wakes its
 poll loop for `SIGINT` and `SIGTERM`. A disconnected producer is discarded and
-the listener remains available for a new connection. Scene cleanup on
-disconnect is implemented in the scene model but not yet connected to the
-reactor because the reactor does not own a scene instance yet.
+the compositor clears that producer's scene and mappings, while the listener
+remains available for a new connection and complete replacement snapshot.
 
 The required capability set is:
 
@@ -43,18 +41,17 @@ The required capability set is:
 - SDR color metadata;
 - frame acknowledgements.
 
-The intended bootstrap is one `CompleteSession` snapshot containing the full
+The bootstrap is one `CompleteSession` snapshot containing the full
 output, surface, and buffer state. Incremental mutations and commits before a
 complete snapshot are rejected by the scene model.
 
-## Intended supported contract subset
+## Supported contract subset
 
 The M4 scene path is limited to output upsert/removal, surface upsert/removal,
 surface damage, buffer attach/release, frame commit/acknowledgement, and
-complete-session snapshot boundaries. Output and surface metadata codecs
-already exist. A validated read-only memfd mapping primitive also exists;
-reactor dispatch, buffer attachment lifetime, and release handling remain to be
-completed.
+complete-session snapshot boundaries. Buffers are validated and mapped
+read-only. Accepted commits render and dump an atomic framebuffer; rejected
+commits leave the prior committed scene and framebuffer unchanged.
 
 ## Bounds
 
@@ -76,10 +73,10 @@ along with the last presented generation and computed output damage. Output
 shape changes damage the full output; surface visibility, geometry, stacking,
 clipping, and opacity changes damage old and new bounds.
 
-The current process path only decodes `FrameCommit` and sends a correlated
-`FrameAcknowledged` with `RejectedIncompleteMetadata` and generation zero.
-Therefore no accepted frame, framebuffer mutation, process-generated dump, or
-buffer release is currently claimed.
+The process sends one correlated `FrameAcknowledged` for every frame commit.
+An accepted acknowledgement reports the promoted generation after rendering
+and durable frame-dump creation succeed. Incomplete or unsupported transactions
+receive a specific rejection and do not change the visible framebuffer.
 
 ## Validation
 
@@ -96,6 +93,7 @@ Run the complete suite with:
 meson test -C build --print-errorlogs
 ```
 
-End-to-end producer, golden-frame, reconnect, and Milestone 4 VM acceptance
-commands remain completion work and are intentionally not documented here as
-passing tests.
+The process-level basic golden frame is covered by `gwcomp-golden`. The full
+scenario fixture set, release/reconnect coverage, malformed-peer isolation,
+sanitizer gate, and Gentoo VM acceptance are required before declaring the
+milestone complete.

@@ -1,8 +1,8 @@
 # Headless Frame Dumps
 
-The frame-dump primitive writes one binary Netpbm PPM (`P6`) file per accepted
-frame. Process integration with accepted frame commits is not implemented yet;
-the format below describes and tests the reusable dump component.
+The headless compositor writes one binary Netpbm PPM (`P6`) file per accepted
+frame and output. The format is shared by the reusable dump component, process
+integration tests, and Milestone 4 VM acceptance.
 
 ## Bytes and naming
 
@@ -51,13 +51,38 @@ Golden artifacts should be regenerated only after an intentional renderer or
 format change:
 
 1. Run the focused renderer and headless-output tests first.
-2. Generate frames with the repository-owned deterministic scenario once that
-   producer is implemented.
+2. Start one `gwcomp` instance with a clean dump directory and run the
+   repository-owned producer scenarios in this order: `basic`,
+   `damage-update`, `stacking`, `visibility`, `clipping`, `opacity`,
+   `buffer-replace`, `invalid-metadata`, `invalid-buffer`, and
+   `snapshot-reconnect`.
 3. Inspect PPM dimensions, manifest metadata, and a byte-level or pixel-level
    diff rather than accepting new hashes alone.
 4. Replace the expected PPM and hash together and record the semantic rendering
    change in the commit.
 5. Re-run the complete test suite under a clean build.
 
-At present, `headless-output` contains the authoritative small byte/hash test;
-there is no end-to-end producer golden-regeneration command yet.
+For example, after configuring `build-m4`:
+
+```sh
+rm -rf /tmp/glasswyrm-m4-frames /tmp/glasswyrm-m4.sock
+mkdir -p /tmp/glasswyrm-m4-frames
+build-m4/src/gwcomp --ipc-socket /tmp/glasswyrm-m4.sock \
+  --dump-dir /tmp/glasswyrm-m4-frames &
+compositor_pid=$!
+for scenario in basic damage-update stacking visibility clipping opacity \
+  buffer-replace invalid-metadata invalid-buffer snapshot-reconnect; do
+  build-m4/src/gwcomp_m4_producer --socket /tmp/glasswyrm-m4.sock \
+    --scenario "$scenario"
+done
+kill -TERM "$compositor_pid"
+wait "$compositor_pid"
+(cd /tmp/glasswyrm-m4-frames && sha256sum -- *.ppm frames.jsonl)
+```
+
+Copy only reviewed PPM files and the reviewed manifest into
+`tests/fixtures/m4/`, then write `SHA256SUMS` using names relative to the frame
+directory. The VM harness verifies that manifest against independently
+generated runtime output. `headless-output` remains the authoritative small
+byte/hash unit test, while `gwcomp-golden` proves an exact process-generated
+frame.
