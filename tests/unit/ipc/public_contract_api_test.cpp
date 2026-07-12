@@ -54,7 +54,7 @@ int main() {
                  GWIPC_STATUS_INVALID_ARGUMENT;
 
   const auto api = gwipc_get_api_version();
-  ok = ok && api.major == 0 && api.minor == 4 && api.patch == 0;
+  ok = ok && api.major == 0 && api.minor == 5 && api.patch == 0;
 
   remove.reserved[0] = 1;
   payload = reinterpret_cast<gwipc_contract_payload*>(1);
