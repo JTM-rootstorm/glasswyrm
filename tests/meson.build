@@ -13,6 +13,14 @@ x11_event_test = executable(
 )
 test('x11-structural-events', x11_event_test, timeout: 10)
 
+x11_input_event_test = executable(
+  'x11_input_event_test',
+  files('protocol/x11_input_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: include_directories('..'),
+)
+test('x11-input-events', x11_input_event_test, timeout: 10)
+
 x11_exposure_event_test = executable(
   'x11_exposure_event_test',
   files('protocol/x11_exposure_event_test.cpp'),
@@ -103,6 +111,13 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  input_foundation_test = executable(
+    'input_foundation_test',
+    files('unit/input_foundation_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('input-foundation', input_foundation_test, timeout: 10)
   drawable_core_test = executable(
     'drawable_core_test',
     files('unit/drawable_core_test.cpp'),
@@ -207,6 +222,14 @@ if get_option('glasswyrmd')
 endif
 
 if get_option('glasswyrmd') and get_option('libgwipc')
+  gwinput_m8_program = executable(
+    'gwinput_m8',
+    files('integration/gwinput_m8.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10)
+
   published_buffer_test = executable(
     'published_buffer_test',
     files('unit/published_buffer_test.cpp'),
@@ -412,6 +435,14 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10)
+
+  gwipc_input_contract_test = executable(
+    'gwipc_input_contract_test',
+    files('unit/ipc/input_contract_test.cpp'),
+    dependencies: [gwipc_wire_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-input-contract', gwipc_input_contract_test, timeout: 10)
 
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',
