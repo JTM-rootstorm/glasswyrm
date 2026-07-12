@@ -1,6 +1,7 @@
 #include "glasswyrmd/compositor_peer.hpp"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -311,6 +312,28 @@ std::vector<CompositorBufferRelease> CompositorPeer::take_releases() {
   return result;
 }
 
+void CompositorPeer::promote_replay_snapshot() {
+  CompositorSnapshotSubmission replay = pending_;
+  replay.buffers.clear();
+  std::map<std::uint64_t, CompositorSnapshotSubmission::Buffer> attachments;
+  const std::set<std::uint64_t> retained_surfaces = [&] {
+    std::set<std::uint64_t> ids;
+    for (const auto& surface : pending_.surfaces) ids.insert(surface.surface_id);
+    return ids;
+  }();
+  for (const auto& buffer : replay_input_.buffers)
+    if (retained_surfaces.contains(buffer.attach.surface_id))
+      attachments[buffer.attach.surface_id] = buffer;
+  for (const auto& buffer : pending_.buffers)
+    attachments[buffer.attach.surface_id] = buffer;
+  replay.buffers.reserve(attachments.size());
+  for (const auto& surface : pending_.surfaces) {
+    const auto found = attachments.find(surface.surface_id);
+    if (found != attachments.end()) replay.buffers.push_back(found->second);
+  }
+  replay_input_ = std::move(replay);
+}
+
 PeerProcessOutcome CompositorPeer::drain(std::string &error) {
   for (;;) {
     glasswyrm::ipc::Message message;
@@ -370,7 +393,7 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       error = "invalid compositor bootstrap acknowledgement";
       return PeerProcessOutcome::Fatal;
     }
-    if (!content_submission_) replay_input_ = pending_;
+    if (!content_submission_) promote_replay_snapshot();
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }
