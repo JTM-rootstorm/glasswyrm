@@ -4,13 +4,17 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project is currently at Milestone 3. `glasswyrmd` retains its tested
-Milestone 2 local X11 setup and bounded headless core request behavior.
-`libgwipc` now provides an independently tested and installable versioned local
-IPC foundation. `gwm`, `gwcomp`, and the runtime tools remain Milestone 0
-placeholders, and no production process uses IPC yet. There is no mapping,
-event delivery, input, window-management policy, compositor, renderer, or
-display backend.
+The project is currently implementing Milestone 4. `glasswyrmd` retains its
+tested Milestone 2 local X11 setup and bounded headless core request behavior,
+and `libgwipc` provides the tested Milestone 3 versioned local IPC foundation.
+Milestone 4 has added tested scene/damage, read-only buffer-import,
+software-rendering, bounded headless output, and PPM-dump primitives. `gwcomp`
+is now a real foreground GWIPC listener for one synthetic producer, but its
+reactor does not yet connect received buffers and scene state to rendering and
+dumps. It currently rejects frame commits as incomplete. `gwm` and the runtime
+tools remain placeholders; there is still no mapping, event delivery, input,
+WM policy,
+DRM/KMS output, or end-to-end compositor frame path.
 
 ## Build
 
@@ -135,7 +139,8 @@ core error. It never maps or displays the window.
 - `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
   headless request profile.
 - `gwm`: future owner of window-management policy truth.
-- `gwcomp`: future owner of composition and final display authority.
+- `gwcomp`: owns the emerging headless composition and final display authority;
+  its listener is live, while accepted-frame presentation remains incomplete.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -148,9 +153,11 @@ credentials, bounded queues, descriptor passing, snapshots, and the first
 output/surface/buffer/damage/frame contract vocabulary. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
-`gwm`, `gwcomp`, and every runtime tool currently print their Milestone 0
-placeholder status and exit. They do not communicate with `glasswyrmd`, create
-framebuffers, or access hardware.
+`gwm` and every runtime tool still print their Milestone 0 placeholder status
+and exit. `gwcomp` runs a GWIPC listener and can negotiate a `TestProducer`, but
+does not communicate with `glasswyrmd` or `gwm`, render producer buffers, or
+access display hardware. See [`docs/compositor/`](docs/compositor/) for its
+implemented boundary and M4 formats.
 
 ## Project Layout
 
@@ -161,10 +168,11 @@ framebuffers, or access hardware.
 - `src/gwcomp/`: compositor, renderer, and display authority process code.
 - `src/ipc/`: versioned wire codecs and local seqpacket transport.
 - `src/protocol/`: endian-safe, bounded X11 setup and core wire codecs.
-- `src/compositor/`: reserved for `gwcomp` scene and composition code.
-- `src/backends/`: reserved for headless, DRM/KMS, and possible nested backends.
+- `src/compositor/`: bounded staged scene, geometry, and damage primitives.
+- `src/backends/`: tested headless output/dump primitives plus reserved DRM/KMS
+  and possible nested backends.
 - `src/input/`: reserved for `glasswyrmd` input routing.
-- `src/render/`: reserved for renderer implementations owned by `gwcomp`.
+- `src/render/`: reference software renderer plus reserved accelerated paths.
 - `tools/`: developer and runtime command-line tools.
 - `tests/`: unit and headless integration tests.
 - `docs/`: specification, architecture notes, protocol notes, and decisions.
@@ -173,7 +181,7 @@ framebuffers, or access hardware.
 
 Gentoo packaging should keep the source tree coherent while allowing runtime
 components to be built, installed, and updated independently. Milestone 0
-provides narrow Meson switches for the three runtime placeholders and tools;
+provides narrow Meson switches for the three runtime processes and tools;
 the overlay and ebuilds remain future packaging work.
 
 The intended package shape is:
