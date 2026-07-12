@@ -167,6 +167,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/atom_table.cpp',
       'glasswyrmd/server_state.cpp',
       'glasswyrmd/lifecycle_snapshot.cpp',
+      'glasswyrmd/lifecycle_coordinator.cpp',
       'glasswyrmd/request_dispatcher.cpp',
     ),
     dependencies: gw_x11_setup_dep,
