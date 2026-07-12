@@ -25,4 +25,11 @@ int main(){
  const auto before_map=top->map_requested;const auto before_serial=top->map_serial;
  intent.map_requested=!before_map;intent.map_serial=before_serial+100;intent.applied_width=0;
  require(!state.commit_lifecycle(transaction)&&state.resources().find_window(base+1)->map_requested==before_map&&state.resources().find_window(base+1)->map_serial==before_serial,"invalid lifecycle commit preserves intent atomically");
+ ServerState staged_state;const auto create_spec=spec(base+10);
+ auto proposed=staged_state.propose_create_lifecycle(2,base,mask,create_spec,41);
+ require(proposed&&proposed->windows.contains(base+10)&&!staged_state.resources().find_window(base+10),"create proposal is visible to policy without early resource mutation");
+ require(staged_state.commit_create_lifecycle(2,base,mask,create_spec,41,*proposed)&&staged_state.resources().find_window(base+10)->creation_serial==41,"accepted create commits resource and serial atomically");
+ auto destroyed=staged_state.propose_destroy_lifecycle(base+10);
+ require(destroyed&&!destroyed->windows.contains(base+10)&&staged_state.resources().find_window(base+10),"destroy proposal removes policy window without early resource mutation");
+ require(staged_state.commit_destroy_lifecycle(base+10,*destroyed)&&!staged_state.resources().find_window(base+10),"accepted destroy commits resource removal atomically");
 }

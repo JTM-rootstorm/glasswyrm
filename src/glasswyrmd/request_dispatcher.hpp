@@ -28,6 +28,8 @@ struct DispatchResult {
   DispatchKind kind{DispatchKind::Immediate};
   std::uint32_t deferred_window{0};
   std::optional<gw::protocol::x11::ConfigureWindowRequest> deferred_configure;
+  std::optional<WindowCreateSpec> deferred_create;
+  bool deferred_destroy{false};
   bool deferred_map{false};
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
@@ -38,6 +40,20 @@ struct DispatchResult {
     DispatchResult result; result.kind = DispatchKind::DeferredLifecycle;
     result.deferred_window = window; result.deferred_configure = std::move(configure);
     result.deferred_map = map;
+    return result;
+  }
+  static DispatchResult deferred_create_window(WindowCreateSpec spec) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = spec.xid;
+    result.deferred_create = std::move(spec);
+    return result;
+  }
+  static DispatchResult deferred_destroy_window(const std::uint32_t window) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = window;
+    result.deferred_destroy = true;
     return result;
   }
 };
