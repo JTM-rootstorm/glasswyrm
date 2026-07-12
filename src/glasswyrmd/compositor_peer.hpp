@@ -4,8 +4,15 @@
 #include "protocol/x11/screen_model.hpp"
 
 #include <string>
+#include <vector>
 
 namespace glasswyrm::server {
+
+struct CompositorSnapshotSubmission {
+  std::uint64_t commit_id{}, generation{};
+  std::vector<gwipc_surface_upsert> surfaces;
+  std::vector<gwipc_surface_policy_upsert> policies;
+};
 
 class CompositorPeer {
 public:
@@ -17,6 +24,12 @@ public:
     return transport_.wanted_events();
   }
   [[nodiscard]] PeerBootstrapState state() const noexcept { return state_; }
+  [[nodiscard]] bool submit(const CompositorSnapshotSubmission &submission,
+                            std::string &error);
+  [[nodiscard]] const CompositorSnapshotSubmission &
+  replay_input() const noexcept {
+    return replay_input_;
+  }
   void disconnect() noexcept;
 
 private:
@@ -27,6 +40,8 @@ private:
   gw::protocol::x11::ScreenModel screen_;
   PeerBootstrapState state_{PeerBootstrapState::Disconnected};
   std::uint64_t commit_sequence_{};
+  CompositorSnapshotSubmission pending_;
+  CompositorSnapshotSubmission replay_input_;
 };
 
 } // namespace glasswyrm::server
