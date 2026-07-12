@@ -25,6 +25,19 @@ if get_option('gwm')
   )
   test('wm-policy', wm_policy_test, timeout: 10)
 
+  gwm_process_test = executable(
+    'gwm_process_test',
+    files('integration/gwm_process_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwm-process',
+    gwm_process_test,
+    args: [gwm_program.full_path()],
+    depends: gwm_program,
+    timeout: 15,
+  )
+
 endif
 
 if get_option('gwcomp')
