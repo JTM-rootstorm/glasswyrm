@@ -80,6 +80,7 @@ if get_option('libgwipc')
     'ipc/wire/envelope.cpp',
     'ipc/wire/control.cpp',
     'ipc/wire/compositor_contract.cpp',
+    'ipc/wire/policy_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
   gwipc_wire_lib = static_library(
@@ -101,6 +102,7 @@ if get_option('libgwipc')
     files(
       'ipc/public_api.cpp',
       'ipc/contract_api.cpp',
+      'ipc/control_api.cpp',
       'ipc/message.cpp',
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
@@ -116,7 +118,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.2.0',
+    version: '0.3.0',
     soversion: '0',
     install: true,
   )
@@ -137,6 +139,8 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/connection.h',
     '../include/glasswyrm/ipc/message.h',
     '../include/glasswyrm/ipc/contracts.h',
+    '../include/glasswyrm/ipc/control.h',
+    '../include/glasswyrm/ipc/policy.h',
     subdir: 'glasswyrm/ipc',
   )
 
@@ -146,7 +150,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.2.0',
+    version: '0.3.0',
   )
 endif
 
