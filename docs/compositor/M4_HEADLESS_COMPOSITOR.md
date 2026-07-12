@@ -44,6 +44,9 @@ The required capability set is:
 The bootstrap is one `CompleteSession` snapshot containing the full
 output, surface, and buffer state. Incremental mutations and commits before a
 complete snapshot are rejected by the scene model.
+`gwcomp` and the repository-owned M4 producer encode and decode the snapshot
+controls through the installed API 0.3 control helpers; their wire 1.0 bytes and
+M4 frame goldens remain unchanged.
 
 ## Supported contract subset
 
@@ -93,7 +96,7 @@ Run the complete suite with:
 meson test -C build --print-errorlogs
 ```
 
-The process-level basic golden frame is covered by `gwcomp-golden`. The full
-scenario fixture set, release/reconnect coverage, malformed-peer isolation,
-sanitizer gate, and Gentoo VM acceptance are required before declaring the
-milestone complete.
+The process-level basic golden frame is covered by `gwcomp-golden`; the scenario
+matrix covers releases, rejection isolation, and reconnect behavior. Milestone
+4's committed acceptance evidence is unchanged by the API 0.3 snapshot-helper
+migration.
