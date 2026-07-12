@@ -42,12 +42,24 @@ int main() {
       table.resource_count_by_owner(2) != 1 || !table.invariants_hold()) {
     return 3;
   }
+  if (!table.set_event_selection(1, 1, 0x00020000) ||
+      !table.set_event_selection(1, 2, 0x00080000) ||
+      table.event_selection(1, 1) != 0x00020000 ||
+      table.all_event_selections(1) != 0x000a0000) {
+    return 6;
+  }
 
   const auto cleanup = table.cleanup_client(1);
   if (cleanup.resources_destroyed != 2 || table.find(base_a + 1) != nullptr ||
       table.find(base_b + 1) != nullptr || table.find_window(1) == nullptr ||
       !table.invariants_hold()) {
     return 4;
+  }
+  if (table.event_selection(1, 1) != 0 ||
+      table.event_selection(1, 2) != 0x00080000 ||
+      !table.set_event_selection(1, 2, 0) ||
+      table.all_event_selections(1) != 0) {
+    return 7;
   }
   if (table.create_window(3, base_a, mask, window(base_a + 1)) !=
       CreateWindowStatus::Success) {

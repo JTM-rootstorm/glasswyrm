@@ -6,6 +6,13 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+x11_event_test = executable(
+  'x11_event_test',
+  files('protocol/x11_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+)
+test('x11-structural-events', x11_event_test, timeout: 10)
+
 test_source_root_include = include_directories('..')
 
 if get_option('gwm')
