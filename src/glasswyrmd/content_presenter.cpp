@@ -112,6 +112,7 @@ bool ContentPresenter::prepare_lifecycle(
     }
     if (projected.policy_visible && !dirty.empty())
       submission.damages.push_back(make_damage(xid, dirty));
+    content.pending.clear();
     content.inflight = std::move(dirty);
   }
   in_flight_ = true;
@@ -124,9 +125,18 @@ void ContentPresenter::accept_lifecycle(const LifecycleSnapshot& snapshot,
     (void)projected;
     auto found = windows_.find(xid);
     if (found == windows_.end()) continue;
-    if (auto* window = resources.find_window(xid); window != nullptr)
+    if (auto* window = resources.find_window(xid); window != nullptr) {
+      if (window->storage && found->second.staged_storage != window->storage &&
+          !found->second.pending.empty()) {
+        auto latest = window->storage->resize_preserving_overlap(
+            found->second.staged_storage->width(),
+            found->second.staged_storage->height());
+        if (latest)
+          found->second.staged_storage =
+              std::make_shared<PixelStorage>(std::move(*latest));
+      }
       window->storage = found->second.staged_storage;
-    found->second.pending.clear();
+    }
     found->second.inflight.clear();
     found->second.staged_storage.reset();
     if (found->second.staged_buffer) {

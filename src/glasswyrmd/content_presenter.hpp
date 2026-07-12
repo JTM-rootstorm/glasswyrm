@@ -35,6 +35,9 @@ class ContentPresenter {
   [[nodiscard]] bool release(std::uint64_t buffer_id,
                              gwipc_buffer_release_reason reason);
   void peer_disconnected() noexcept;
+  void forget_peer_attachments() noexcept {
+    buffers_.forget_peer_attachments();
+  }
   [[nodiscard]] bool frame_in_flight() const noexcept { return in_flight_; }
   [[nodiscard]] bool has_pending_damage() const noexcept;
   [[nodiscard]] PublishedBufferStore& buffers() noexcept { return buffers_; }

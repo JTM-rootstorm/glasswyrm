@@ -41,11 +41,23 @@ public:
       const CompositorSnapshotSubmission& submission, std::string& error);
   [[nodiscard]] bool submit_content(
       const CompositorContentSubmission& submission, std::string& error);
+  [[nodiscard]] bool submit_replay(
+      const CompositorSnapshotSubmission& submission, std::string& error);
   [[nodiscard]] std::vector<CompositorBufferRelease> take_buffer_releases() {
     return compositor_.take_releases();
   }
   [[nodiscard]] bool compositor_result_ready() const noexcept;
   [[nodiscard]] bool compositor_rejected_ready() const noexcept;
+  [[nodiscard]] bool content_result_ready() const noexcept;
+  [[nodiscard]] bool content_rejected_ready() const noexcept;
+  [[nodiscard]] bool replay_result_ready() const noexcept;
+  [[nodiscard]] bool replay_rejected_ready() const noexcept;
+  [[nodiscard]] bool transaction_idle() const noexcept;
+  [[nodiscard]] bool take_compositor_reset() noexcept {
+    const bool result = compositor_reset_;
+    compositor_reset_ = false;
+    return result;
+  }
   [[nodiscard]] bool prepare_rollback() noexcept;
   void clear_transaction_result() noexcept;
 
@@ -61,14 +73,16 @@ private:
   std::chrono::milliseconds deadline_duration_;
   unsigned retry_index_{};
   enum class TransactionStage { None, Policy, PolicyReady, PolicyRejected,
-                                Compositor, Content, Complete,
-                                CompositorRejected };
+                                Compositor, Content, Complete, ContentComplete,
+                                CompositorRejected, ContentRejected, Replay,
+                                ReplayComplete, ReplayRejected };
   TransactionStage transaction_stage_{TransactionStage::None};
   TransactionStage resume_transaction_stage_{TransactionStage::None};
   PolicySnapshotSubmission pending_policy_;
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
   bool recovering_{};
+  bool compositor_reset_{};
 };
 
 } // namespace glasswyrm::server

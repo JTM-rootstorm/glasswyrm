@@ -80,6 +80,7 @@ class PublishedBufferStore {
   [[nodiscard]] bool release(std::uint64_t buffer_id,
                              PublishedBufferRetirement reason);
   void peer_disconnected() noexcept;
+  void forget_peer_attachments() noexcept;
   [[nodiscard]] std::size_t accounted_bytes() const noexcept {
     return accounted_bytes_;
   }

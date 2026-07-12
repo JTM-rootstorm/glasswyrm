@@ -209,6 +209,20 @@ void test_queued_operation_rebases_on_latest_commit() {
           "queued intent rebases after the preceding commit");
 }
 
+void test_paused_enqueue_waits_for_explicit_resume() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
+  require(coordinator.enqueue_paused(operation(10, 1, 10)) ==
+              EnqueueStatus::Queued &&
+              coordinator.phase() == CoordinatorPhase::Idle &&
+              recorder.policy.empty(),
+          "paused lifecycle enqueue does not race an active content frame");
+  require(coordinator.resume() && coordinator.active() &&
+              coordinator.active()->token == 10 &&
+              recorder.policy == std::vector<std::uint32_t>({10}),
+          "explicit resume starts paused lifecycle work");
+}
+
 void test_operation_rebase_preserves_unrelated_intent() {
   LifecycleSnapshot committed;
   committed.windows[10] = LifecycleWindow{};
@@ -299,6 +313,7 @@ int main() {
   test_commit_failure_is_fatal();
   test_rollback_preparation_failure_is_fatal();
   test_queued_operation_rebases_on_latest_commit();
+  test_paused_enqueue_waits_for_explicit_resume();
   test_operation_rebase_preserves_unrelated_intent();
   test_create_destroy_rebase_latest_snapshot();
   return 0;
