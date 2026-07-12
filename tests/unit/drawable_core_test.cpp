@@ -36,11 +36,19 @@ int main() {
   region.add({-2, -2, 4, 4});
   gw::test::require(region.rectangles().size() == 1U, "region count");
   gw::test::require(region.rectangles()[0] == (Rectangle{0, 0, 2, 2}), "region clip");
+  glasswyrm::geometry::Region merged({0, 0, 20, 20});
+  merged.add({4, 4, 4, 4});
+  merged.add({8, 4, 4, 4});
+  merged.add({6, 6, 4, 4});
+  gw::test::require(merged.rectangles().size() == 1U,
+                    "adjacent and overlapping damage coalesces");
+  gw::test::require(merged.rectangles()[0] == (Rectangle{4, 4, 8, 6}),
+                    "coalesced damage bounds");
   region.add({2, 0, 3, 2});
   region.add({1, 1, 3, 3});
-  gw::test::require(region.rectangles().size() == 2, "region splits overlap");
-  gw::test::require(region.rectangles()[0] == (Rectangle{0, 0, 5, 2}),
-                    "region merges adjacent strips deterministically");
+  gw::test::require(region.rectangles().size() == 1, "region coalesces overlap");
+  gw::test::require(region.rectangles()[0] == (Rectangle{0, 0, 5, 4}),
+                    "region merges adjacent bounds deterministically");
   for (std::size_t index=0; index<region.rectangles().size(); ++index)
     for (std::size_t other=index+1; other<region.rectangles().size(); ++other)
       gw::test::require(!glasswyrm::geometry::intersect(region.rectangles()[index],region.rectangles()[other]),

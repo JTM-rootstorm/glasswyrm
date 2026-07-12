@@ -21,9 +21,12 @@ int main() {
     pixmap.write_u32(base+1); pixmap.write_u32(state.screen().root_window); pixmap.write_u16(2); pixmap.write_u16(2);
     auto result=dispatch_request(state,context,finish(std::move(pixmap),x11::CoreOpcode::CreatePixmap,24));
     gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1),"CreatePixmap");
-    x11::ByteWriter gc(order); gc.write_u8(55); gc.write_u8(0); gc.write_u16(5); gc.write_u32(base+2); gc.write_u32(base+1); gc.write_u32(1U<<2U); gc.write_u32(0x00112233U);
+    x11::ByteWriter gc(order); gc.write_u8(55); gc.write_u8(0); gc.write_u16(7); gc.write_u32(base+2); gc.write_u32(base+1); gc.write_u32((1U<<1U)|(1U<<2U)|(1U<<16U)); gc.write_u32(0x00ffffffU); gc.write_u32(0x00112233U); gc.write_u32(1);
     result=dispatch_request(state,context,finish(std::move(gc),x11::CoreOpcode::CreateGC,0));
-    gw::test::require(result.output.empty()&&state.resources().find_gc(base+2),"CreateGC");
+    gw::test::require(result.output.empty()&&state.resources().find_gc(base+2)&&
+        state.resources().find_gc(base+2)->plane_mask==0x00ffffffU&&
+        state.resources().find_gc(base+2)->foreground==0x00112233U&&
+        state.resources().find_gc(base+2)->graphics_exposures,"CreateGC ordered values");
     x11::ByteWriter fill(order); fill.write_u8(70); fill.write_u8(0); fill.write_u16(5); fill.write_u32(base+1); fill.write_u32(base+2); fill.write_u16(0); fill.write_u16(0); fill.write_u16(2); fill.write_u16(2);
     result=dispatch_request(state,context,finish(std::move(fill),x11::CoreOpcode::PolyFillRectangle,0));
     gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->storage->at(1,1)==0xff112233U,"PolyFillRectangle");
