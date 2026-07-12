@@ -2,7 +2,7 @@
 
 ## Version And ABI
 
-The installed C ABI is version 0.1.0 and the shared library has SOVERSION 0.
+The installed C API is version 0.3.0 and the shared library has SOVERSION 0.
 `gwipc_get_api_version()` reports the library API version;
 `gwipc_get_max_wire_version()` independently reports the highest supported wire
 version. ABI compatibility must not be inferred from wire compatibility.
@@ -13,6 +13,29 @@ message structures begin with `struct_size`; callers initialize unused and
 reserved fields to zero. Status-returning functions do not throw exceptions.
 System failures expose the saved `errno` through the owning listener or
 connection.
+
+API 0 remains additive. API 0.1 transport consumers and API 0.2 compositor
+contract consumers retain their symbols and wire encodings. API 0.3 adds public
+snapshot-control and window-policy structures without changing wire 1.0.
+
+## Typed Control And Contracts
+
+`<glasswyrm/ipc/control.h>` exposes owned encodings and decoded views for
+`SnapshotBegin`, `SnapshotEnd`, and `SnapshotAbort`. Callers destroy encoded
+payloads with `gwipc_control_payload_destroy()` and decoded controls with
+`gwipc_decoded_control_destroy()`. Decoded abort detail remains owned by the
+decoded-control object.
+
+`<glasswyrm/ipc/contracts.h>` contains the compositor vocabulary introduced in
+API 0.2. `<glasswyrm/ipc/policy.h>` adds API 0.3 structures and encode/decode
+accessors for policy context, raw-window updates and removal, policy commits,
+evaluated window state, and correlated acknowledgements. Contract payloads and
+decoded contracts use the existing API 0.2 ownership functions.
+
+All public input structures begin with `struct_size` and end with reserved-zero
+storage. Boolean, enum, identifier, dimension, flag, and serial constraints are
+validated before an encoding is returned. Public decoders reject truncated or
+trailing payload data.
 
 ## Object Lifetimes
 

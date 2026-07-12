@@ -4,16 +4,19 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 4. `glasswyrmd` retains its
-tested Milestone 2 local X11 setup and bounded headless core request behavior,
-and `libgwipc` provides the tested Milestone 3 versioned local IPC foundation.
+The project has completed Milestone 5. `glasswyrmd`
+retains its tested Milestone 2 local X11 setup and bounded headless core request
+behavior, and `libgwipc` provides the tested Milestone 3 versioned local IPC
+foundation.
 Milestone 4 has added tested scene/damage, read-only buffer import,
 software rendering, bounded headless output, and deterministic PPM dumps.
 `gwcomp` accepts and presents every repository-owned synthetic producer
 scenario with correlated acknowledgements, buffer releases, reconnect proofs,
-and exact-pixel golden coverage. `gwm` and the runtime tools remain
-placeholders; there is still no X11 mapping, event delivery, input, WM policy,
-three-process lifecycle, or DRM/KMS output.
+and exact-pixel golden coverage. `gwm` is now a separate synthetic policy
+service with deterministic placement, stacking, focus, visibility, state, and
+policy-snapshot behavior. It is not connected to `glasswyrmd` or `gwcomp`;
+there is still no X11 mapping, event delivery, input, three-process lifecycle,
+or DRM/KMS output. Runtime tools remain placeholders.
 
 ## Build
 
@@ -137,7 +140,8 @@ core error. It never maps or displays the window.
 
 - `glasswyrmd`: owns X11 protocol and resource truth; implements the tested M2
   headless request profile.
-- `gwm`: future owner of window-management policy truth.
+- `gwm`: owns the emerging window-management policy truth; its M5 synthetic
+  ProtocolServer boundary is host- and Gentoo-VM-tested.
 - `gwcomp`: owns the emerging headless composition and final display authority;
   its basic synthetic accepted-frame path is live and golden-tested.
 - `gwctl`: future runtime control utility.
@@ -146,14 +150,18 @@ core error. It never maps or displays the window.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.3 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and the first
-output/surface/buffer/damage/frame contract vocabulary. See
+output/surface/buffer/damage/frame and window-policy vocabularies. Wire 1.0 and
+SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
+control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
-`gwm` and every runtime tool still print their Milestone 0 placeholder status
-and exit. `gwcomp` runs a GWIPC listener, negotiates a `TestProducer`, and
+Runtime tools still print their Milestone 0 placeholder status and exit. `gwm`
+runs a GWIPC listener, negotiates one synthetic `ProtocolServer`, and emits
+deterministic complete policy snapshots. `gwcomp` runs a separate GWIPC
+listener, negotiates a `TestProducer`, and
 renders its validated shared-memory buffers headlessly, but does not communicate
 with `glasswyrmd` or `gwm` or access display hardware. See [`docs/compositor/`](docs/compositor/) for its
 implemented boundary and M4 formats.
@@ -214,6 +222,7 @@ first ebuilds:
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
 ./tools/gw-vm milestone4-runtime-test --yes
+./tools/gw-vm milestone5-runtime-test --yes
 ```
 
 The fixed M3 scenario additionally runs an IPC-only build, staged install and
@@ -227,6 +236,13 @@ repository-owned synthetic producer, validates deterministic frame hashes, and
 collects the PPMs, frame manifest, and SHA-256 manifest in the binary-safe
 `milestone4-frames.tar` artifact. The terminal-only guest must still have Xorg
 and Xwayland absent; M4 does not require DRM, Mesa, libinput, or image libraries.
+
+The fixed M5 harness runs strict, sanitizer, GWM-only, and IPC-only builds,
+staged legacy/API 0.3 consumers, every synthetic policy scenario, exact JSON
+hash validation, malformed-peer isolation, and a hardened transient
+`gwm-m5.service`. It collects `milestone5-policies.tar` and strict summary
+evidence. The terminal-only Gentoo acceptance run passes without Xorg,
+Xwayland, DRM, or input devices.
 
 ## Compatibility
 

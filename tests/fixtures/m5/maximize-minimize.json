@@ -1,0 +1,45 @@
+{
+  "scenario": "maximize-minimize",
+  "commit_id": 100,
+  "producer_generation": 1,
+  "applied_generation": 1,
+  "result": "Accepted",
+  "policy_hash": "e8a032780dcab9b4",
+  "window_count": 2,
+  "windows": [
+    {
+      "window_id": 1601,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 768,
+      "stacking": 0,
+      "visible": true,
+      "focused": true,
+      "managed": true,
+      "decoration_eligible": true,
+      "applied_state": "Maximized",
+      "fullscreen_eligible": "False",
+      "direct_scanout_eligible": "Unknown"
+    },
+    {
+      "window_id": 1602,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 160,
+      "stacking": -1,
+      "visible": false,
+      "focused": false,
+      "managed": true,
+      "decoration_eligible": true,
+      "applied_state": "Minimized",
+      "fullscreen_eligible": "False",
+      "direct_scanout_eligible": "Unknown"
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "scenario": "invalid-context",
+  "commit_id": 102,
+  "producer_generation": 2,
+  "applied_generation": 2,
+  "result": "Accepted",
+  "policy_hash": "8463fc6523e2682e",
+  "window_count": 3,
+  "windows": [
+    {
+      "window_id": 1001,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 0,
+      "y": 0,
+      "width": 240,
+      "height": 160,
+      "stacking": 0,
+      "visible": true,
+      "focused": false,
+      "managed": true,
+      "decoration_eligible": true,
+      "applied_state": "Normal",
+      "fullscreen_eligible": "False",
+      "direct_scanout_eligible": "Unknown"
+    },
+    {
+      "window_id": 1002,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 32,
+      "y": 32,
+      "width": 240,
+      "height": 160,
+      "stacking": 1,
+      "visible": true,
+      "focused": false,
+      "managed": true,
+      "decoration_eligible": true,
+      "applied_state": "Normal",
+      "fullscreen_eligible": "False",
+      "direct_scanout_eligible": "Unknown"
+    },
+    {
+      "window_id": 1003,
+      "workspace_id": 1,
+      "output_id": 1,
+      "x": 64,
+      "y": 64,
+      "width": 240,
+      "height": 160,
+      "stacking": 2,
+      "visible": true,
+      "focused": true,
+      "managed": true,
+      "decoration_eligible": true,
+      "applied_state": "Normal",
+      "fullscreen_eligible": "False",
+      "direct_scanout_eligible": "Unknown"
+    }
+  ]
+}

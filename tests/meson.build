@@ -8,6 +8,70 @@ test('scaffold', scaffold_test)
 
 test_source_root_include = include_directories('..')
 
+if get_option('gwm')
+  gwm_options_test = executable(
+    'gwm_options_test',
+    files('unit/gwm_options_test.cpp'),
+    dependencies: gwm_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwm-options', gwm_options_test, timeout: 10)
+
+  wm_policy_test = executable(
+    'wm_policy_test',
+    files('wm/policy_engine_test.cpp'),
+    dependencies: gw_wm_policy_dep,
+    include_directories: test_source_root_include,
+  )
+  test('wm-policy', wm_policy_test, timeout: 10)
+
+  gwm_process_test = executable(
+    'gwm_process_test',
+    files('integration/gwm_process_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwm-process',
+    gwm_process_test,
+    args: [gwm_program.full_path()],
+    depends: gwm_program,
+    timeout: 15,
+  )
+  test('gwm-help', gwm_program, args: ['--help'], depends: gwm_program,
+       timeout: 10)
+  test('gwm-version', gwm_program, args: ['--version'], depends: gwm_program,
+       timeout: 10)
+  test('gwm-m5-producer-help', gwm_m5_producer_program, args: ['--help'],
+       depends: gwm_m5_producer_program, timeout: 10)
+
+  gwm_scenario_matrix_test = executable(
+    'gwm_scenario_matrix_test',
+    files('integration/gwm_scenario_matrix_test.cpp'),
+  )
+  test(
+    'gwm-scenario-matrix',
+    gwm_scenario_matrix_test,
+    args: [gwm_program.full_path(), gwm_m5_producer_program.full_path(),
+           meson.project_source_root() / 'tests/fixtures/m5'],
+    depends: [gwm_program, gwm_m5_producer_program],
+    timeout: 180,
+  )
+
+  gwm_robustness_test = executable(
+    'gwm_robustness_test',
+    files('integration/gwm_robustness_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwm-robustness',
+    gwm_robustness_test,
+    args: [gwm_program.full_path()],
+    depends: gwm_program,
+    timeout: 30,
+  )
+
+endif
+
 if get_option('gwcomp')
   gwcomp_options_test = executable(
     'gwcomp_options_test',
@@ -109,6 +173,12 @@ endif
 endif
 
 if get_option('libgwipc')
+  public_control_api_test = executable(
+    'public_control_api_test',
+    files('unit/ipc/public_control_api_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test('gwipc-public-control-api', public_control_api_test, timeout: 10)
   gwipc_wire_codec_test = executable(
     'gwipc_wire_codec_test',
     files('unit/ipc/wire_codec_test.cpp'),
@@ -127,6 +197,14 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_policy_contract_test = executable(
+    'gwipc_policy_contract_test',
+    files('unit/ipc/policy_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10)
 
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',

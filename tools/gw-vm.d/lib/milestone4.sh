@@ -54,7 +54,7 @@ touch "$runtime_log" "$meson_log" "$producer_log" "$golden_log" \
 exec > >(tee -a "$runtime_log") 2>&1
 
 record_facts() {
-  local status=$? journal_status=0 api_version=unknown wire_version=unknown
+  local status=$? journal_status=0 api_version=unknown wire_version=unknown soversion=unknown
   set +e
   systemctl stop "$unit" >/dev/null 2>&1
   if [[ -n "$unit_invocation_id" ]]; then
@@ -70,12 +70,15 @@ record_facts() {
     api_version="$("$ipc_build_dir/tests/gwipc_wire_probe" --print-api-version 2>/dev/null || printf unknown)"
     wire_version="$("$ipc_build_dir/tests/gwipc_wire_probe" --print-wire-version 2>/dev/null || printf unknown)"
   fi
+  if [[ -e "$install_root/usr/lib64/libgwipc.so.0" || -e "$install_root/usr/lib/libgwipc.so.0" ]]; then
+    soversion=0
+  fi
   {
     printf 'failure_stage=%s\nscenario_exit=%s\n' "$failure_stage" "$status"
     printf 'compiler_c=%s\n' "$(cc --version 2>/dev/null | head -n1 || printf unavailable)"
     printf 'compiler_cxx=%s\n' "$(c++ --version 2>/dev/null | head -n1 || printf unavailable)"
     printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' "$(meson --version)" "$(ninja --version)" "$(systemctl --version | head -n1)"
-    printf 'api_version=%s\nwire_version=%s\n' "$api_version" "$wire_version"
+    printf 'api_version=%s\nsoversion=%s\nwire_version=%s\n' "$api_version" "$soversion" "$wire_version"
     if package_installed x11-base/xorg-server || package_installed x11-base/xwayland; then echo x_servers_absent=false; else echo x_servers_absent=true; fi
     for key in full_tests sanitizer compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release detach_remove unknown_reference invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot golden_hash_count frame_archive systemd_runtime socket_cleanup; do
       printf '%s=%s\n' "$key" "${!key}"
@@ -177,9 +180,12 @@ collect_milestone4_artifacts() {
 
 write_milestone4_summary() {
   local passed=$1 failure=${2:-} facts="$ARTIFACTS_PATH_ABS/milestone4-facts.env" summary="$ARTIFACTS_PATH_ABS/milestone4-summary.json"
-  python3 - "$facts" "$summary" "$passed" "$failure" "$M4_REQUIRED_BASE_COMMIT" "${M4_TESTED_COMMIT:-unknown}" <<'PY'
+  local api_version=unknown api_compatible=false
+  if [[ -f "$facts" ]]; then api_version="$(sed -n 's/^api_version=//p' "$facts" | tail -n 1)"; fi
+  if semantic_version_at_least "$api_version" 0.2.0; then api_compatible=true; fi
+  python3 - "$facts" "$summary" "$passed" "$failure" "$M4_REQUIRED_BASE_COMMIT" "${M4_TESTED_COMMIT:-unknown}" "$api_compatible" <<'PY'
 import json, pathlib, sys
-facts_path, out, requested, failure, base, tested = sys.argv[1:]
+facts_path, out, requested, failure, base, tested, api_compatible = sys.argv[1:]
 facts = {}
 p = pathlib.Path(facts_path)
 if p.is_file():
@@ -187,15 +193,17 @@ if p.is_file():
         key, sep, value = line.partition("=")
         if sep and key.replace("_", "").isalnum(): facts[key] = value
 required = {key: "passed" for key in ("full_tests compositor_only ipc_only typed_consumers basic_frame damage_frame stacking visibility clipping opacity buffer_release detach_remove unknown_reference invalid_metadata_isolation invalid_buffer_isolation malformed_peer_isolation reconnect_snapshot frame_archive systemd_runtime socket_cleanup".split())}
-required.update(scenario_exit="0", x_servers_absent="true", api_version="0.2.0", wire_version="1.0")
+required.update(scenario_exit="0", x_servers_absent="true", soversion="0", wire_version="1.0")
 errors = [f"{k} must be {v}" for k,v in required.items() if facts.get(k) != v]
+if api_compatible != "true": errors.append("api_version must be at least 0.2.0 with major 0")
+elif not facts.get("api_version", "").startswith("0."): errors.append("api_version major must be 0")
 if facts.get("sanitizer") not in {"passed", "unavailable"}: errors.append("sanitizer must be passed or unavailable")
 try:
     if int(facts.get("golden_hash_count", "0")) < 1: errors.append("golden_hash_count must be positive")
 except ValueError: errors.append("golden_hash_count must be numeric")
 journal = p.with_name("milestone4-journal.log")
 if not journal.is_file() or not journal.stat().st_size: errors.append("current invocation journal is missing or empty")
-payload={"required_base_commit":base,"tested_commit":tested,"api_version":facts.get("api_version","unknown"),"wire_version":facts.get("wire_version","unknown"),"xorg_xwayland_absent":facts.get("x_servers_absent")=="true","results":{k:facts.get(k,"unknown") for k in required if k not in {"scenario_exit","x_servers_absent","api_version","wire_version"}},"sanitizer":facts.get("sanitizer","unknown"),"golden_hash_count":facts.get("golden_hash_count","0"),"journal":"passed" if journal.is_file() and journal.stat().st_size else "failed","passed":requested=="true" and not errors,"failure_stage":failure or facts.get("failure_stage",""),"evidence_errors":errors}
+payload={"required_base_commit":base,"tested_commit":tested,"api_version":facts.get("api_version","unknown"),"soversion":facts.get("soversion","unknown"),"wire_version":facts.get("wire_version","unknown"),"xorg_xwayland_absent":facts.get("x_servers_absent")=="true","results":{k:facts.get(k,"unknown") for k in required if k not in {"scenario_exit","x_servers_absent","soversion","wire_version"}},"sanitizer":facts.get("sanitizer","unknown"),"golden_hash_count":facts.get("golden_hash_count","0"),"journal":"passed" if journal.is_file() and journal.stat().st_size else "failed","passed":requested=="true" and not errors,"failure_stage":failure or facts.get("failure_stage",""),"evidence_errors":errors}
 pathlib.Path(out).write_text(json.dumps(payload,indent=2)+"\n")
 if requested=="true" and errors: raise SystemExit(2)
 PY

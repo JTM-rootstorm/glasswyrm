@@ -77,6 +77,23 @@ assert_file_glob() {
   compgen -G "$pattern" >/dev/null || fail "no file matched: $pattern"
 }
 
+semver_helper=${repo_root}/tools/gw-vm.d/lib/common.sh
+for compatible in '0.1.0 0.1.0' '0.2.0 0.1.0' '0.10.0 0.3.0' \
+  '1.0.0 0.3.0' '0.3.1 0.3.0'; do
+  read -r actual minimum <<<"$compatible"
+  bash -c 'source "$1"; semantic_version_at_least "$2" "$3"' _ \
+    "$semver_helper" "$actual" "$minimum" ||
+    fail "semantic version helper rejected $actual >= $minimum"
+done
+for incompatible in '0.0.9 0.1.0' '0.2.9 0.3.0' '0.3 0.3.0' \
+  'unknown 0.1.0' '0.3.0 0.3'; do
+  read -r actual minimum <<<"$incompatible"
+  if bash -c 'source "$1"; semantic_version_at_least "$2" "$3"' _ \
+    "$semver_helper" "$actual" "$minimum"; then
+    fail "semantic version helper accepted $actual >= $minimum"
+  fi
+done
+
 cat >"$config_file" <<EOF
 [libvirt]
 uri = "test:///glasswyrm"
@@ -249,7 +266,9 @@ compiler_cxx=g++ test
 meson_version=1.7.0
 ninja_version=1.12.0
 systemd_version=systemd 257
-api_version=0.1.0
+FACTS
+      printf 'api_version=%s\n' "${GW_VM_TEST_M3_API_VERSION:-0.1.0}"
+      cat <<'FACTS'
 soversion=0
 wire_version=1.0
 x_servers_absent=true
@@ -282,6 +301,53 @@ FACTS
       fi
       ;;
     milestone3-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone5-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.11.1
+ninja_version=1.13.2
+systemd_version=systemd 257
+api_version=0.3.0
+soversion=0
+wire_version=1.0
+x_servers_absent=true
+full_tests=passed
+sanitizer=passed
+gwm_only=passed
+ipc_only=passed
+legacy_consumers=passed
+policy_consumers=passed
+basic=passed
+snapshot_order=passed
+transient=passed
+override_redirect=passed
+focus=passed
+stacking=passed
+fullscreen=passed
+maximize_minimize=passed
+incremental_update=passed
+invalid_context_isolation=passed
+invalid_window_isolation=passed
+unknown_reference_recovery=passed
+cycle_rejection=passed
+snapshot_abort=passed
+malformed_peer_isolation=passed
+reconnect_equality=passed
+golden_hash_count=10
+policy_archive=passed
+systemd_runtime=passed
+socket_cleanup=passed
+FACTS
+      if [[ ${GW_VM_TEST_BAD_M5_FACTS:-0} == 1 ]]; then printf 'snapshot_abort=failed\nscenario_exit=1\n'; fi
+      if [[ ${GW_VM_TEST_BAD_M5_API:-0} == 1 ]]; then printf 'api_version=0.2.0\n'; fi
+      ;;
+    milestone5-journal.log)
+      if [[ ${GW_VM_TEST_EMPTY_M5_JOURNAL:-0} != 1 ]]; then printf 'collected current M5 invocation journal\n'; fi
+      ;;
+    milestone5-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -320,6 +386,13 @@ set -euo pipefail
 printf 'scp' >>"$GW_VM_TEST_COMMAND_LOG"
 printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
 printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
+if [[ "$*" == *milestone5-policies.tar* ]]; then
+  destination=${!#}
+  scratch=$(mktemp -d)
+  printf '{}\n' >"$scratch/basic.json"
+  (cd "$scratch" && sha256sum basic.json >SHA256SUMS && tar -cf "$destination" basic.json SHA256SUMS)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -354,7 +427,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -396,6 +469,9 @@ assert_contains "$work_dir/scenario-m3-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m4-injection.out" "$gw_vm" scenario 'milestone4-runtime-test;touch'
 assert_contains "$work_dir/scenario-m4-injection.out" 'Scenario names are fixed'
+
+run_failure "$work_dir/scenario-m5-injection.out" "$gw_vm" scenario 'milestone5-runtime-test;touch'
+assert_contains "$work_dir/scenario-m5-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -721,6 +797,11 @@ assert_contains "$artifact_dir/milestone3-summary.json" '"wire_version": "1.0"'
 assert_contains "$artifact_dir/milestone3-summary.json" '"contract_roundtrip": "passed"'
 assert_contains "$artifact_dir/milestone3-summary.json" '"xorg_xwayland_absent": true'
 
+run_success "$work_dir/milestone3-newer-api.out" \
+  env GW_VM_TEST_M3_API_VERSION=0.3.0 "$gw_vm" milestone3-runtime-test --yes
+assert_contains "$artifact_dir/milestone3-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone3-summary.json" '"api_version": "0.3.0"'
+
 run_failure "$work_dir/milestone3-bad-facts.out" \
   env GW_VM_TEST_BAD_M3_FACTS=1 "$gw_vm" milestone3-runtime-test --yes
 assert_contains "$artifact_dir/milestone3-summary.json" '"passed": false'
@@ -761,5 +842,56 @@ assert_not_contains "$command_log" '.glasswyrm-vm-source'
 run_failure "$work_dir/milestone4-wrapper-gate.out" \
   "$repo_root/tools/gw-vm.d/scenarios/milestone4-runtime-test.sh"
 assert_contains "$work_dir/milestone4-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-gate.out" "$gw_vm" milestone5-runtime-test
+assert_contains "$work_dir/milestone5-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$work_dir/milestone5-bad-base.out" \
+  'HEAD is not based on required Milestone 5 commit b27a19a869de1d950566b1e3fb9a661e22d5642f'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" scenario milestone5-runtime-test --yes
+assert_contains "$work_dir/milestone5-dirty-source.out" 'requires committed source outside Plans/'
+
+run_failure "$work_dir/milestone5-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone5-runtime-test.sh"
+assert_contains "$work_dir/milestone5-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_success "$work_dir/milestone5.out" "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$artifact_dir/milestone5-summary.json" '"passed": true'
+assert_contains "$command_log" '/var/tmp/glasswyrm-build-m5-gwm'
+assert_contains "$command_log" 'RuntimeDirectory=glasswyrm-m5'
+assert_contains "$command_log" 'run_producer snapshot-reconnect'
+assert_contains "$command_log" 'gwipc_policy_c_consumer.c'
+assert_file_glob "$artifact_dir/milestone5-policies.tar"
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-bad-facts.out" \
+  env GW_VM_TEST_BAD_M5_FACTS=1 "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$artifact_dir/milestone5-summary.json" '"passed": false'
+assert_contains "$command_log" 'milestone5-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-empty-journal.out" \
+  env GW_VM_TEST_EMPTY_M5_JOURNAL=1 "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$artifact_dir/milestone5-summary.json" 'current invocation journal is missing or empty'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-old-api.out" \
+  env GW_VM_TEST_BAD_M5_API=1 "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$artifact_dir/milestone5-summary.json" 'api_version must be at least 0.3.0'
+
+: >"$command_log"
+run_failure "$work_dir/milestone5-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='unit=gwm-m5.service' "$gw_vm" milestone5-runtime-test --yes
+assert_contains "$work_dir/milestone5-error.out" 'failed during: guest-runtime'
+assert_contains "$command_log" 'milestone5-journal.log'
 
 printf 'gw-vm CLI tests passed\n'

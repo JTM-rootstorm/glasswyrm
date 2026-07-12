@@ -1,14 +1,19 @@
 # Glasswyrm IPC
 
-Milestone 3 introduces `libgwipc`, a local, versioned process-contract library.
-It is independently buildable and installable, but no production Glasswyrm
-process uses it yet.
+`libgwipc` is Glasswyrm's local, versioned process-contract library. Milestone 3
+established its transport, Milestone 4 added the compositor contract used by
+`gwcomp`, and Milestone 5 adds typed snapshot controls and the capability-gated
+window-policy contract used by `gwm`.
 
 - [GWIPC API 0](GWIPC_API_0.md) documents the installed C ABI and C++ wrappers.
 - [GWIPC Wire Version 1](GWIPC_WIRE_V1.md) documents record encoding and the
-  initial message registry.
+  additive message registry.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
+- [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records
+  the M5 listener and additive policy-contract boundary.
+- [Window-manager policy](../wm/README.md) documents the consumer-facing M5
+  policy service and deterministic algorithm.
 
 Run the IPC-only proof with:
 
@@ -23,4 +28,12 @@ The VM acceptance command is:
 
 ```sh
 ./tools/gw-vm milestone3-runtime-test --yes
+```
+
+The M4 and M5 process gates are separate fixed commands. The M5 harness exists,
+but a real Gentoo guest result is still required before M5 is declared complete:
+
+```sh
+./tools/gw-vm milestone4-runtime-test --yes
+./tools/gw-vm milestone5-runtime-test --yes
 ```

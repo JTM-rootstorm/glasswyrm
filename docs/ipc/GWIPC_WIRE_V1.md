@@ -52,12 +52,20 @@ The 64-bit capability bits are:
 | 7 | SdrColorMetadata |
 | 8 | FrameAcknowledgement |
 | 9 | TraceMetadata |
+| 10 | WindowPolicy |
 
 Unknown offered bits are ignored. Unknown required bits reject the handshake.
 Negotiated capabilities are the offered intersection and must contain the
 requirements of both peers. Buffer attachment requires FdPassing and
 MemfdBuffers; snapshots, damage, and frame acknowledgements require their
 corresponding capabilities.
+Every policy message requires WindowPolicy and carries no descriptors.
+
+Wire 1.0's registry is intentionally additive: a new message ID is usable only
+when protected by a negotiated capability. Peers that do not offer
+WindowPolicy continue using the unchanged M3/M4 registry; peers requiring an
+unknown or unavailable capability fail negotiation rather than interpreting a
+new payload.
 
 ## Limits
 
@@ -144,8 +152,7 @@ active incoming snapshot as aborted.
 
 ## Compositor Contract Registry
 
-These messages are encoded and validated in M3 but no runtime component acts on
-them.
+These messages are consumed by the M4 `gwcomp` process.
 
 `OutputUpsert` (`0x0100`) carries a nonzero 64-bit output ID, enabled state,
 signed logical position, logical and physical dimensions, refresh in
@@ -189,6 +196,46 @@ all), `u64 producer_generation`, `u32 flags`, and zero `u32 reserved`.
 `u32` reserved. Results are Accepted, RejectedIncompleteMetadata,
 RejectedInvalidBuffer, RejectedUnknownSurface, and Dropped.
 
+## Window Policy Contract Registry
+
+`PolicyContextUpsert` (`0x0200`) carries `u32 root_window_id`, `u32
+workspace_id`, `u64 output_id`, signed work-area x/y, unsigned width/height,
+`u32 flags`, and zero `u32 reserved`. IDs and dimensions are nonzero, extents
+fit signed coordinates, and flags are zero.
+
+`PolicyWindowUpsert` (`0x0201`) carries window, parent, transient, and workspace
+IDs; requested geometry and border width; window type and map intent; exact
+boolean and tri-state hints; creation, map, and focus serials; flags; and zero
+reserved fields. Width, height, window ID, and creation serial are nonzero.
+Mapped intent requires a nonzero map serial; unmapped intent requires zero.
+Cross-window references are validated at policy-commit time so snapshot item
+order cannot affect validity.
+
+`PolicyWindowRemove` (`0x0202`) carries a nonzero `u32 window_id` and zero
+reserved word. `PolicyCommit` (`0x0210`) carries nonzero `u64 commit_id` and
+producer generation, `u32 flags`, and zero reserved word. It carries exactly
+`AckRequired`, occurs outside an active snapshot, and is tracked for reply
+correlation.
+
+`PolicyWindowState` (`0x0211`) is an output `SnapshotItem`. It carries identity,
+workspace/output, final geometry, signed stacking, window and applied-state
+enums, exact visibility/focus/management/decoration/override/attention
+booleans, fullscreen and direct-scanout tri-states, and zero flags/reserved.
+
+`PolicyAcknowledged` (`0x0212`) is a `Reply` to one tracked PolicyCommit and
+carries matching commit and producer generation, applied generation, policy
+hash, window count, and a result from Accepted,
+RejectedIncompleteSnapshot, RejectedInvalidContext, RejectedInvalidWindow,
+RejectedUnknownReference, RejectedLimit, or RejectedUnsupportedMetadata. A
+reply-to mismatch or payload commit-ID mismatch is a protocol error. Policy
+messages never carry descriptors.
+
+PolicyContextUpsert and PolicyWindowUpsert use `SnapshotItem` while inside a
+snapshot and zero flags for incremental updates. PolicyWindowRemove uses zero
+flags. PolicyCommit uses exactly `AckRequired`; PolicyWindowState uses exactly
+`SnapshotItem`; PolicyAcknowledged uses exactly `Reply`. Other flag
+combinations are protocol errors.
+
 ## Descriptor Ownership
 
 The sender queue owns close-on-exec duplicates and closes them after send or
@@ -203,5 +250,6 @@ Golden and malformed codec coverage runs with the normal Meson suite:
 
 ```sh
 meson test -C build --print-errorlogs gwipc-envelope gwipc-control-codec \
-  gwipc-snapshot-codec gwipc-compositor-contract gwipc-malformed
+  gwipc-snapshot-codec gwipc-compositor-contract gwipc-malformed \
+  gwipc-policy-contract gwipc-public-control-api gwipc-protocol-edges
 ```
