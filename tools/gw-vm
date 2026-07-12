@@ -22,6 +22,8 @@ source "$GW_VM_DIR/lib/milestone3.sh"
 source "$GW_VM_DIR/lib/milestone4.sh"
 # shellcheck source=gw-vm.d/lib/milestone5.sh
 source "$GW_VM_DIR/lib/milestone5.sh"
+# shellcheck source=gw-vm.d/lib/milestone6.sh
+source "$GW_VM_DIR/lib/milestone6.sh"
 # shellcheck source=gw-vm.d/lib/report.sh
 source "$GW_VM_DIR/lib/report.sh"
 
@@ -53,6 +55,7 @@ Commands:
   milestone3-runtime-test --yes     Build and exercise M3 IPC in the Gentoo VM.
   milestone4-runtime-test --yes     Build and exercise M4 gwcomp in the Gentoo VM.
   milestone5-runtime-test --yes     Build and exercise M5 gwm in the Gentoo VM.
+  milestone6-runtime-test --yes     Build and exercise the M6 integrated runtime.
   scenario NAME [ARGS]              Run a fixed named scenario.
 
 Examples:
@@ -65,6 +68,7 @@ Examples:
   ./tools/gw-vm milestone3-runtime-test --yes
   ./tools/gw-vm milestone4-runtime-test --yes
   ./tools/gw-vm milestone5-runtime-test --yes
+  ./tools/gw-vm milestone6-runtime-test --yes
 
 Generated output is written beneath artifacts/vm/.
 EOF
@@ -264,6 +268,7 @@ run_named_scenario() {
     milestone3-runtime-test) action_milestone3 "$@" ;;
     milestone4-runtime-test) action_milestone4 "$@" ;;
     milestone5-runtime-test) action_milestone5 "$@" ;;
+    milestone6-runtime-test) action_milestone6 "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
 }
@@ -322,6 +327,12 @@ action_milestone5() {
   local approved
   approved="$(parse_yes_only "$@")"
   milestone5_runtime_test "$approved"
+}
+
+action_milestone6() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone6_runtime_test "$approved"
 }
 
 main() {
@@ -385,6 +396,7 @@ main() {
     milestone3-runtime-test) action_milestone3 "$@" ;;
     milestone4-runtime-test) action_milestone4 "$@" ;;
     milestone5-runtime-test) action_milestone5 "$@" ;;
+    milestone6-runtime-test) action_milestone6 "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
   esac
