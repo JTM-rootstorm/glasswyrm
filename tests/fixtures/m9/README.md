@@ -4,6 +4,8 @@ These reviewed 1024x768 headless frames were captured from the real
 three-process Glasswyrm stack with xeyes 1.3.1 and xclock 1.2.0. The xclock
 frames use `libgw_m9_fixed_time.so` and display 03:04 UTC. The combined frame
 contains xeyes and analog xclock before xclock is intentionally terminated.
+The xeyes final frame follows the fixed `m9-xeyes` four-position synthetic
+pointer scenario and records distinct frames after every reviewed position.
 
 The normalized traces were produced from the matching raw JSONL traces with:
 

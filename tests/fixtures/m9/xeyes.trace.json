@@ -26,15 +26,15 @@
     "16": 9,
     "18": 11,
     "20": 1,
-    "38": 10,
+    "38": 22,
     "43": 1,
     "53": 5,
     "54": 3,
     "55": 5,
     "60": 2,
     "61": 1,
-    "70": 2,
-    "71": 7,
+    "70": 9,
+    "71": 14,
     "72": 2,
     "8": 1,
     "85": 2,
@@ -71,7 +71,13 @@
     "QueryExtension",
     "QueryPointer"
   ],
-  "extension_queries": [],
+  "extension_queries": [
+    "OTHER",
+    "XInputExtension",
+    "XFIXES",
+    "DAMAGE",
+    "Present"
+  ],
   "unknown_opcodes": [],
   "application_connection_count": 1,
   "maximum_request_length": 280
