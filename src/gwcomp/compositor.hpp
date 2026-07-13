@@ -64,11 +64,11 @@ public:
   [[nodiscard]] std::uint64_t accepted_frames() const noexcept { return frame_ordinal_; }
 
 private:
+  friend class PresentationTransaction;
+
   using Mapping = std::shared_ptr<BufferMapping>;
   using MappingMap = std::map<std::uint64_t, Mapping>;
   using AttachmentMap = std::map<std::uint64_t, std::uint64_t>;
-
-  void release_retired_buffers(const Scene& staged);
 
   SceneModel scene_;
   MappingMap mappings_;
