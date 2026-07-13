@@ -21,8 +21,32 @@ int main() {
       "shared xid namespace");
   gw::test::require(table.invariants_hold(), "resource invariants");
   gw::test::require(table.canonical_drawable_bytes() == 128, "pixmap accounting");
+  gw::test::require(
+      table.create_pixmap(owner, base, mask, base | 3U,
+                          table.screen().root_window, 1, 9, 3) ==
+          CreatePixmapStatus::Success,
+      "create depth-one pixmap");
+  const auto* bitmap = table.find_pixmap(base | 3U);
+  gw::test::require(bitmap != nullptr && bitmap->depth == 1 &&
+                        bitmap->bitmap() != nullptr &&
+                        bitmap->pixels() == nullptr &&
+                        bitmap->byte_size() == 27U,
+                    "depth-one storage variant");
+  GraphicsContextResource bitmap_gc;
+  bitmap_gc.foreground = 3;
+  bitmap_gc.background = 2;
+  gw::test::require(table.create_gc(owner, base, mask, base | 4U, base | 3U,
+                                    bitmap_gc) == CreateGcStatus::Success,
+                    "create depth-one gc");
+  const auto* stored_bitmap_gc = table.find_gc(base | 4U);
+  gw::test::require(stored_bitmap_gc != nullptr &&
+                        stored_bitmap_gc->depth == 1 &&
+                        stored_bitmap_gc->foreground == 1 &&
+                        stored_bitmap_gc->background == 0 &&
+                        stored_bitmap_gc->plane_mask == 1,
+                    "depth-one gc values canonicalized");
   const auto cleanup = table.cleanup_client(owner);
-  gw::test::require(cleanup.resources_destroyed == 2, "cleanup typed resources");
+  gw::test::require(cleanup.resources_destroyed == 4, "cleanup typed resources");
   gw::test::require(table.resource_count(ResourceType::Pixmap) == 0, "pixmap cleanup");
   gw::test::require(table.resource_count(ResourceType::GraphicsContext) == 0,
                     "gc cleanup");

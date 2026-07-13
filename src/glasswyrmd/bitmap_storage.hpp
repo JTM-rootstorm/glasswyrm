@@ -42,4 +42,10 @@ class BitmapStorage {
   std::vector<std::uint8_t> bits_;
 };
 
+[[nodiscard]] bool put_xybitmap_lsb32(
+    BitmapStorage& destination, std::int32_t destination_x,
+    std::int32_t destination_y, std::uint32_t width, std::uint32_t height,
+    std::span<const std::uint8_t> payload, std::uint32_t foreground,
+    std::uint32_t background, std::uint32_t plane_mask) noexcept;
+
 }  // namespace glasswyrm::server

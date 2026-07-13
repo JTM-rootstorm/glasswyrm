@@ -296,19 +296,29 @@ CreatePixmapStatus ResourceTable::create_pixmap(
       (anchor_window->parent != screen_.root_window ||
        anchor_window->window_class != WindowClass::InputOutput || anchor_window->depth != 24))
     return CreatePixmapStatus::BadMatch;
-  if (depth != 24 || width == 0 || height == 0)
+  if ((depth != 1 && depth != 24) || width == 0 || height == 0)
     return CreatePixmapStatus::BadValue;
   if (resource_count(ResourceType::Pixmap) >= limits_.maximum_pixmaps)
     return CreatePixmapStatus::BadAlloc;
-  auto storage = PixelStorage::create(width, height);
-  if (!storage) return CreatePixmapStatus::BadAlloc;
-  if (storage->byte_size() > limits_.maximum_canonical_drawable_bytes -
-                                 canonical_drawable_bytes_)
+  std::variant<std::shared_ptr<BitmapStorage>, std::shared_ptr<PixelStorage>>
+      storage;
+  if (depth == 1) {
+    auto bitmap = BitmapStorage::create(width, height);
+    if (!bitmap) return CreatePixmapStatus::BadAlloc;
+    storage = std::make_shared<BitmapStorage>(std::move(*bitmap));
+  } else {
+    auto pixels = PixelStorage::create(width, height);
+    if (!pixels) return CreatePixmapStatus::BadAlloc;
+    storage = std::make_shared<PixelStorage>(std::move(*pixels));
+  }
+  const auto bytes = std::visit(
+      [](const auto& value) { return value->byte_size(); }, storage);
+  if (bytes > limits_.maximum_canonical_drawable_bytes -
+                  canonical_drawable_bytes_)
     return CreatePixmapStatus::BadAlloc;
-  const auto bytes = storage->byte_size();
   try {
     PixmapResource pixmap{screen_.root_window, depth, width, height,
-                          std::make_shared<PixelStorage>(std::move(*storage))};
+                          std::move(storage)};
     resources_.emplace(xid, ResourceRecord{ResourceType::Pixmap, owner,
                                            std::move(pixmap)});
     try { resources_by_owner_[owner].push_back(xid); }
@@ -322,7 +332,7 @@ FreePixmapStatus ResourceTable::free_pixmap(const std::uint32_t xid) {
   const auto* pixmap = find_pixmap(xid);
   if (!pixmap) return FreePixmapStatus::BadPixmap;
   const auto owner = find(xid)->owner;
-  const auto bytes = pixmap->storage ? pixmap->storage->byte_size() : 0;
+  const auto bytes = pixmap->byte_size();
   resources_.erase(xid);
   if (owner) {
     auto iterator = resources_by_owner_.find(*owner);
@@ -351,7 +361,12 @@ CreateGcStatus ResourceTable::create_gc(
   }
   else if (const auto* pixmap = find_pixmap(drawable)) depth = pixmap->depth;
   else return CreateGcStatus::BadDrawable;
-  if (depth != 24) return CreateGcStatus::BadMatch;
+  if (depth != 1 && depth != 24) return CreateGcStatus::BadMatch;
+  if (depth == 1) {
+    gc.foreground &= 1U;
+    gc.background &= 1U;
+    gc.plane_mask &= 1U;
+  }
   if (resource_count(ResourceType::GraphicsContext) >=
       limits_.maximum_graphics_contexts)
     return CreateGcStatus::BadAlloc;
@@ -595,6 +610,7 @@ CleanupResult ResourceTable::commit_client_cleanup(
     for (const auto xid : remaining) {
       if (find_pixmap(xid)) (void)free_pixmap(xid);
       else if (find_gc(xid)) (void)free_gc(xid);
+      else if (find_font(xid)) (void)close_font(xid);
       ++result.resources_destroyed;
     }
   }
@@ -814,7 +830,7 @@ bool ResourceTable::invariants_hold() const noexcept {
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(), xid) != 1)
         return false;
       if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload))
-        calculated_drawable_bytes += pixmap->storage ? pixmap->storage->byte_size() : 0;
+        calculated_drawable_bytes += pixmap->byte_size();
       continue;
     }
     calculated_property_bytes += window_property_bytes(*window);
