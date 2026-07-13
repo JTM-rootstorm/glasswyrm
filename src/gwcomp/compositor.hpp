@@ -10,7 +10,9 @@
 #include <glasswyrm/ipc.h>
 
 #include <cstdint>
+#include <chrono>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -29,11 +31,30 @@ enum class PeerProfile {
 select_peer_profile(gwipc_role role, std::uint64_t capabilities) noexcept;
 
 struct PresentedFrame {
+  enum class Disposition { Complete, Pending, Rejected, Fatal };
+
+  Disposition disposition{Disposition::Rejected};
   gwipc_frame_result result{GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA};
   std::uint64_t generation{};
   std::uint64_t ordinal{};
   std::uint64_t hash{};
 };
+
+struct PresentationTiming {
+  using Clock = std::chrono::steady_clock;
+  std::chrono::milliseconds timeout{2000};
+  std::function<Clock::time_point()> now{[] { return Clock::now(); }};
+};
+
+enum class PresentationCompletionKind { None, Complete, Fatal };
+
+struct PresentationCompletion {
+  PresentationCompletionKind kind{PresentationCompletionKind::None};
+  gwipc_frame_commit commit{};
+  PresentedFrame frame;
+};
+
+class PresentationTransaction;
 
 class Compositor final {
 public:
@@ -44,7 +65,9 @@ public:
 #endif
   explicit Compositor(
       std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
-      std::optional<std::filesystem::path> scene_manifest = std::nullopt);
+      std::optional<std::filesystem::path> scene_manifest = std::nullopt,
+      PresentationTiming timing = {});
+  ~Compositor();
 
   void set_peer_profile(PeerProfile profile) noexcept { profile_ = profile; }
   [[nodiscard]] PeerProfile peer_profile() const noexcept { return profile_; }
@@ -62,6 +85,12 @@ public:
   [[nodiscard]] bool detach(const gwipc_buffer_detach& value);
   [[nodiscard]] PresentedFrame commit(const gwipc_frame_commit& value,
                                       std::string& error);
+  [[nodiscard]] bool presentation_pending() const noexcept;
+  [[nodiscard]] int presentation_poll_fd() const noexcept;
+  [[nodiscard]] short presentation_poll_events() const noexcept;
+  [[nodiscard]] int presentation_timeout_ms() const;
+  [[nodiscard]] PresentationCompletion service_presentation(
+      short revents, std::string& error);
   void disconnect();
 
   [[nodiscard]] const std::map<std::uint64_t, gwipc_buffer_release_reason>&
@@ -83,6 +112,8 @@ private:
   AttachmentMap pre_snapshot_attachments_;
   glasswyrm::output::SoftwareFrame output_;
   std::unique_ptr<glasswyrm::output::PresentationBackend> presenter_;
+  std::unique_ptr<PresentationTransaction> pending_presentation_;
+  PresentationTiming timing_;
   std::optional<SceneManifest> scene_manifest_;
   std::map<std::uint64_t, gwipc_buffer_release_reason> releases_;
   std::uint64_t frame_ordinal_{};

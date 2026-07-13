@@ -47,13 +47,21 @@ Compositor::Compositor(
 
 Compositor::Compositor(
     std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
-    std::optional<std::filesystem::path> scene_manifest)
-    : presenter_(std::move(presenter)) {
+    std::optional<std::filesystem::path> scene_manifest,
+    PresentationTiming timing)
+    : presenter_(std::move(presenter)), timing_(std::move(timing)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
 
+Compositor::~Compositor() {
+  PresentationTransaction::abort(*this);
+  if (presenter_) presenter_->shutdown();
+}
+
 bool Compositor::begin_snapshot() {
-  if (snapshot_active_ || !scene_.begin_complete_snapshot()) return false;
+  if (pending_presentation_ || snapshot_active_ ||
+      !scene_.begin_complete_snapshot())
+    return false;
   pre_snapshot_attachments_ = pending_attachments_;
   if (profile_ == PeerProfile::M7BufferedProtocolServer)
     pending_attachments_ = committed_attachments_;
@@ -67,7 +75,9 @@ bool Compositor::begin_snapshot() {
 }
 
 bool Compositor::end_snapshot() {
-  if (!snapshot_active_ || !scene_.end_complete_snapshot()) return false;
+  if (pending_presentation_ || !snapshot_active_ ||
+      !scene_.end_complete_snapshot())
+    return false;
   if (profile_ == PeerProfile::M7BufferedProtocolServer) {
     for (auto attachment = pending_attachments_.begin();
          attachment != pending_attachments_.end();) {
@@ -85,6 +95,7 @@ bool Compositor::end_snapshot() {
 }
 
 void Compositor::abort_snapshot() {
+  if (pending_presentation_) return;
   scene_.abort_complete_snapshot();
   pending_attachments_ = pre_snapshot_attachments_;
   pre_snapshot_attachments_.clear();
@@ -94,9 +105,14 @@ void Compositor::abort_snapshot() {
   snapshot_invalid_ = false;
 }
 
-bool Compositor::apply(const gwipc_output_upsert& value) { return scene_.apply(value); }
-bool Compositor::apply(const gwipc_output_remove& value) { return scene_.apply(value); }
+bool Compositor::apply(const gwipc_output_upsert& value) {
+  return !pending_presentation_ && scene_.apply(value);
+}
+bool Compositor::apply(const gwipc_output_remove& value) {
+  return !pending_presentation_ && scene_.apply(value);
+}
 bool Compositor::apply(const gwipc_surface_upsert& value) {
+  if (pending_presentation_) return false;
   if (snapshot_active_ && !snapshot_surface_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
@@ -105,6 +121,7 @@ bool Compositor::apply(const gwipc_surface_upsert& value) {
 }
 
 bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
+  if (pending_presentation_) return false;
   if (snapshot_active_ && !snapshot_policy_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
@@ -113,17 +130,24 @@ bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
 }
 
 bool Compositor::apply(const gwipc_surface_remove& value) {
-  if (!scene_.apply(value)) return false;
+  if (pending_presentation_ || !scene_.apply(value)) return false;
   pending_attachments_.erase(value.surface_id);
   return true;
 }
 
 bool Compositor::apply(const gwipc_surface_damage& value) {
-  if (profile_ == PeerProfile::M6MetadataProtocolServer) return false;
+  if (pending_presentation_ ||
+      profile_ == PeerProfile::M6MetadataProtocolServer)
+    return false;
   return scene_.apply(value);
 }
 
 bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& error) {
+  if (pending_presentation_) {
+    if (fd >= 0) (void)::close(fd);
+    error = "buffer mutation cannot overtake a pending presentation";
+    return false;
+  }
   if (profile_ == PeerProfile::M6MetadataProtocolServer) {
     if (fd >= 0) (void)::close(fd);
     error = "metadata-only ProtocolServer peers cannot attach buffers";
@@ -158,7 +182,9 @@ bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& e
 }
 
 bool Compositor::detach(const gwipc_buffer_detach& value) {
-  if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) return false;
+  if (pending_presentation_ ||
+      (!scene_.snapshot_active() && !scene_.initial_snapshot_received()))
+    return false;
   const auto found = pending_attachments_.find(value.surface_id);
   if (found == pending_attachments_.end() || found->second != value.buffer_id) return false;
   pending_attachments_.erase(found);
@@ -167,10 +193,36 @@ bool Compositor::detach(const gwipc_buffer_detach& value) {
 
 PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
                                   std::string& error) {
+  if (pending_presentation_) {
+    error = "frame commit cannot overtake a pending presentation";
+    return {};
+  }
   return PresentationTransaction::commit(*this, value, error);
 }
 
+bool Compositor::presentation_pending() const noexcept {
+  return pending_presentation_ != nullptr;
+}
+
+int Compositor::presentation_poll_fd() const noexcept {
+  return presenter_->poll_fd();
+}
+
+short Compositor::presentation_poll_events() const noexcept {
+  return presenter_->poll_events();
+}
+
+int Compositor::presentation_timeout_ms() const {
+  return PresentationTransaction::timeout_ms(*this);
+}
+
+PresentationCompletion Compositor::service_presentation(
+    const short revents, std::string& error) {
+  return PresentationTransaction::service(*this, revents, error);
+}
+
 void Compositor::disconnect() {
+  PresentationTransaction::abort(*this);
   scene_.disconnect();
   mappings_.clear();
   pending_attachments_.clear();

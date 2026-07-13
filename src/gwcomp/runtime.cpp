@@ -157,8 +157,10 @@ int run(const Options& options) {
   bool accepted_any_frame = false;
   bool stop_after_flush = false;
   bool stopping = false;
+  int exit_status = 0;
+  std::optional<std::uint64_t> pending_reply_sequence;
   while (!stopping) {
-    pollfd descriptors[3] = {
+    pollfd descriptors[4] = {
         {gwipc_listener_fd(listener.get()),
          static_cast<short>(producer ? 0 : POLLIN), 0},
         {producer ? gwipc_connection_fd(producer.get()) : -1,
@@ -167,11 +169,15 @@ int run(const Options& options) {
                                       producer.get())
                                 : 0),
          0},
-        {signal_pipe[0], POLLIN, 0}};
-    const int count = ::poll(descriptors, 3, -1);
+        {signal_pipe[0], POLLIN, 0},
+        {compositor.presentation_poll_fd(),
+         compositor.presentation_poll_events(), 0}};
+    const int count =
+        ::poll(descriptors, 4, compositor.presentation_timeout_ms());
     if (count < 0) {
       if (errno == EINTR) continue;
       std::perror("gwcomp: poll");
+      exit_status = 1;
       break;
     }
     if ((descriptors[2].revents & POLLIN) != 0) {
@@ -179,6 +185,38 @@ int run(const Options& options) {
       while (::read(signal_pipe[0], bytes, sizeof(bytes)) > 0) {}
       stopping = true;
     }
+    if (stopping) continue;
+    if (compositor.presentation_pending() &&
+        (descriptors[3].revents != 0 ||
+         compositor.presentation_timeout_ms() == 0)) {
+      std::string presentation_error;
+      const auto completion = compositor.service_presentation(
+          descriptors[3].revents, presentation_error);
+      if (completion.kind ==
+          gw::compositor::PresentationCompletionKind::Fatal) {
+        std::fprintf(stderr, "gwcomp: presentation failed: %s\n",
+                     presentation_error.c_str());
+        stopping = true;
+        exit_status = 1;
+      } else if (completion.kind ==
+                 gw::compositor::PresentationCompletionKind::Complete) {
+        if (!producer || !pending_reply_sequence) {
+          std::fprintf(stderr,
+                       "gwcomp: presentation completed without a producer reply target\n");
+          stopping = true;
+          exit_status = 1;
+        } else {
+          const auto dispatch = complete_contract_presentation(
+              producer.get(), *pending_reply_sequence, completion,
+              options.max_frames, compositor);
+          pending_reply_sequence.reset();
+          accepted_any_frame =
+              accepted_any_frame || dispatch.accepted_frame;
+          stop_after_flush = stop_after_flush || dispatch.stop_after_flush;
+        }
+      }
+    }
+    if (stopping) continue;
     if (!producer && (descriptors[0].revents & POLLIN) != 0) {
       gwipc_connection* accepted = nullptr;
       if (gwipc_listener_accept(listener.get(), &accepted) == GWIPC_STATUS_OK) {
@@ -215,7 +253,8 @@ int run(const Options& options) {
     }
     std::size_t messages = 0;
     std::size_t payload_bytes = 0;
-    while (producer && peer_validated && messages < kMaximumMessagesPerTurn &&
+    while (producer && peer_validated && !compositor.presentation_pending() &&
+           messages < kMaximumMessagesPerTurn &&
            payload_bytes < kMaximumPayloadBytesPerTurn) {
       gwipc_message* raw_message = nullptr;
       if (gwipc_connection_receive(producer.get(), &raw_message) !=
@@ -231,9 +270,23 @@ int run(const Options& options) {
           options.max_frames, compositor);
       accepted_any_frame = accepted_any_frame || dispatch.accepted_frame;
       stop_after_flush = stop_after_flush || dispatch.stop_after_flush;
+      if (dispatch.pending_frame)
+        pending_reply_sequence = dispatch.reply_sequence;
+      if (dispatch.fatal) {
+        stopping = true;
+        exit_status = 1;
+        break;
+      }
     }
     if (producer && gwipc_connection_get_state(producer.get()) ==
                         GWIPC_CONNECTION_CLOSED) {
+      if (compositor.presentation_pending()) {
+        std::fprintf(stderr,
+                     "gwcomp: producer disconnected during a pending presentation\n");
+        stopping = true;
+        exit_status = 1;
+        continue;
+      }
       std::fprintf(stderr, "gwcomp: producer disconnected, cleared surfaces=0 buffers=0\n");
       compositor.disconnect();
       producer.reset();
@@ -252,7 +305,7 @@ int run(const Options& options) {
   (void)::close(signal_pipe[0]);
   (void)::close(signal_pipe[1]);
   std::fprintf(stderr, "gwcomp: stopped\n");
-  return 0;
+  return exit_status;
 }
 
 }  // namespace glasswyrm::compositor
