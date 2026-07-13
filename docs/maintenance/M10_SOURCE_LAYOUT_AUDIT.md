@@ -1,7 +1,7 @@
 # M10 source-layout audit
 
-Status: Phase 1 final snapshot  
-Required baseline: `fe0faab39f7a6d28157ee6b96a4f6292a0b7984e`  
+Status: Phase 1 final snapshot
+Required baseline: `fe0faab39f7a6d28157ee6b96a4f6292a0b7984e`
 Inventory date: 2026-07-13
 
 ## Method and exact counts
