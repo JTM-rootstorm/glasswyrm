@@ -133,6 +133,8 @@ int main(int argc, char** argv) try {
   xcb_get_input_focus_reply(b.connection, xcb_get_input_focus(b.connection),
                             nullptr);
   drain(a); drain(b);
+  a.events.clear();
+  b.events.clear();
   const auto ga = geometry(a), gb = geometry(b);
   gw::test::SyntheticInputClient input(input_socket);
   std::uint64_t id = 1;
