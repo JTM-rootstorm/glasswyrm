@@ -25,6 +25,9 @@ struct SoftwareFrameView {
   std::uint64_t ordinal{};
 };
 
+[[nodiscard]] std::uint64_t hash_visible_xrgb8888(
+    std::span<const std::uint32_t> pixels) noexcept;
+
 class SoftwareFrame {
  public:
   static constexpr std::uint32_t kMaximumWidth = 4096;
@@ -43,6 +46,9 @@ class SoftwareFrame {
   [[nodiscard]] bool enabled() const noexcept { return enabled_; }
   [[nodiscard]] OutputSpec spec(
       std::uint32_t refresh_millihz = 0) const noexcept;
+  [[nodiscard]] std::uint64_t visible_hash() const noexcept {
+    return hash_visible_xrgb8888(pixels_);
+  }
   [[nodiscard]] std::span<const std::uint32_t> pixels() const noexcept {
     return pixels_;
   }

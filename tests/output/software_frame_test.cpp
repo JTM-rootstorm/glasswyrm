@@ -35,6 +35,11 @@ int main() {
                     "software frame exports its output specification");
 
   frame.pixels()[0] = 0xff112233U;
+  frame.pixels()[1] = 0x00445566U;
+  frame.pixels()[2] = 0xff778899U;
+  frame.pixels()[3] = 0xffaabbccU;
+  gw::test::require(frame.visible_hash() == 0x4d1416c2755838b5ULL,
+                    "visible software-frame hash uses canonical RGB bytes");
   gw::test::require(!frame.configure(26, 0, 2, error),
                     "invalid reconfiguration is rejected");
   gw::test::require(frame.enabled() && frame.width() == 2 &&

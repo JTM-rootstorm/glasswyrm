@@ -4,6 +4,22 @@
 
 namespace glasswyrm::output {
 
+std::uint64_t hash_visible_xrgb8888(
+    const std::span<const std::uint32_t> pixels) noexcept {
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (const auto pixel : pixels) {
+    const std::uint8_t bytes[3] = {
+        static_cast<std::uint8_t>(pixel >> 16U),
+        static_cast<std::uint8_t>(pixel >> 8U),
+        static_cast<std::uint8_t>(pixel)};
+    for (const auto byte : bytes) {
+      hash ^= byte;
+      hash *= 1099511628211ULL;
+    }
+  }
+  return hash;
+}
+
 bool SoftwareFrame::configure(const std::uint64_t id,
                               const std::uint32_t width,
                               const std::uint32_t height,

@@ -40,6 +40,7 @@ class StagedFrameDump {
   [[nodiscard]] const std::filesystem::path& final_path() const noexcept {
     return final_path_;
   }
+  [[nodiscard]] std::uint64_t fnv1a64() const noexcept { return hash_; }
 
  private:
   friend class FrameDumper;

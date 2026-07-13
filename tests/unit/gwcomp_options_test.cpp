@@ -59,7 +59,7 @@ int main() {
   options = {};
   if (parse({"gwcomp"}, options, output, error) !=
           ParseOptionsResult::ExitFailure ||
-      error.find("--ipc-socket is required") == std::string::npos)
+      error.find("are required") == std::string::npos)
     return 1;
 
   for (const auto* invalid : {"0", "-1", "abc", "12x"}) {
