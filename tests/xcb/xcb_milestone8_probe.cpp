@@ -3,6 +3,7 @@
 #include <xcb/xcb.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -124,6 +126,8 @@ int main(int argc, char** argv) try {
   Client a, b; connect(a); connect(b);
   create_window(a, 0x002050d0U);
   create_window(b, 0x0020a050U);
+  fill(a, 0x002050d0U, {0, 0, 320, 200});
+  fill(b, 0x0020a050U, {0, 0, 320, 200});
   xcb_get_input_focus_reply(a.connection, xcb_get_input_focus(a.connection),
                             nullptr);
   xcb_get_input_focus_reply(b.connection, xcb_get_input_focus(b.connection),
@@ -221,6 +225,7 @@ int main(int argc, char** argv) try {
   XPtr<xcb_get_input_focus_reply_t> focus(raw_focus);
   require(focus != nullptr && focus->focus == b.window,
           "GetInputFocus mismatch");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
   drain(a); drain(b);
   std::ofstream stream(output);
   require(static_cast<bool>(stream), "cannot open output");
