@@ -399,6 +399,9 @@ OpenFontStatus ResourceTable::open_font(
     const std::uint32_t resource_mask, const std::uint32_t xid) {
   if (!valid_new_resource_id(xid, resource_base, resource_mask))
     return OpenFontStatus::BadIdChoice;
+  // The server-owned default font is not charged to the client font limit.
+  if (resource_count(ResourceType::Font) > limits_.maximum_fonts)
+    return OpenFontStatus::BadAlloc;
   try {
     resources_.emplace(xid, ResourceRecord{ResourceType::Font, owner,
                                            FontResource{}});
