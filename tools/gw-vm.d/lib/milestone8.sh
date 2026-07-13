@@ -290,8 +290,8 @@ if facts.get('api_version')!='0.5.0': errors.append('api_version must be 0.5.0')
 if facts.get('wire_version')!='1.0' or facts.get('soversion')!='0': errors.append('ABI or wire evidence mismatch')
 if facts.get('x_servers_absent')!='true': errors.append('Xorg and Xwayland must be absent')
 if facts.get('libinput_absent')!='true': errors.append('libinput must be absent')
-if facts.get('sanitizer') not in {'passed','unavailable'}: errors.append('sanitizer must be passed or unavailable')
-if facts.get('scene_manifest') not in {'present','absent'}: errors.append('scene_manifest must record present or absent')
+if facts.get('sanitizer')!='passed': errors.append('sanitizer must be passed')
+if facts.get('scene_manifest')!='present': errors.append('scene_manifest must be present')
 versions={k:facts.get(k,'unknown') for k in ('compiler_c','compiler_cxx','meson_version','ninja_version','systemd_version','xcb_proto')}
 errors += [f'{k} must be recorded' for k,v in versions.items() if v in {'','unknown'}]
 payload={'required_base_commit':base,'tested_commit':tested,'api_version':facts.get('api_version','unknown'),'soversion':facts.get('soversion','unknown'),'wire_version':facts.get('wire_version','unknown'),'x_servers_absent':facts.get('x_servers_absent','unknown'),'libinput_absent':facts.get('libinput_absent','unknown'),'versions':versions,'results':{k:facts.get(k,'unknown') for k in required},'sanitizer':facts.get('sanitizer','unknown'),'scene_manifest':facts.get('scene_manifest','unknown'),'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
