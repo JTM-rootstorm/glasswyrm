@@ -179,8 +179,8 @@ frame_count() { [[ -f "$dump_dir/frames.jsonl" ]] && wc -l <"$dump_dir/frames.js
 last_frame_field() { tail -n1 "$dump_dir/frames.jsonl" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
 frame_field_at() { sed -n "${1}p" "$dump_dir/frames.jsonl" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"; }
 wait_for_frame_after() { previous=$1; for _ in {1..200}; do current=$(frame_count); (( current > previous )) && return 0; sleep .05; done; return 1; }
-expected_pre="$(sed -n 's/.*"pre_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
-expected_post="$(sed -n 's/.*"post_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
+expected_pre="$(sed -n 's/.*"pre_restart":"\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
+expected_post="$(sed -n 's/.*"post_restart":"\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
 [[ ${#expected_pre} -eq 16 && ${#expected_post} -eq 16 ]]
 before_hold=$(frame_count)
 DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/m8_restart_hold_probe" --display :99 --input-socket "$input_socket" --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
