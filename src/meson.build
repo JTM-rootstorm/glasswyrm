@@ -79,6 +79,38 @@ if get_option('headless_backend')
     include_directories: include_directories('.'),
   )
 endif
+
+if get_option('drm_backend')
+  gw_drm_model_lib = static_library(
+    'gw-drm-model',
+    files(
+      'backends/drm/connector_name.cpp',
+      'backends/drm/connector_selector.cpp',
+      'backends/drm/mode_selector.cpp',
+      'backends/drm/pipeline_selector.cpp',
+      'backends/drm/property_cache.cpp',
+    ),
+    include_directories: include_directories('.'),
+  )
+  gw_drm_model_dep = declare_dependency(
+    link_with: gw_drm_model_lib,
+    include_directories: include_directories('.'),
+  )
+
+  gw_session_lib = static_library(
+    'gw-session',
+    files(
+      'backends/session/external_session.cpp',
+      'backends/session/vt_api.cpp',
+      'backends/session/vt_session.cpp',
+    ),
+    include_directories: include_directories('.'),
+  )
+  gw_session_dep = declare_dependency(
+    link_with: gw_session_lib,
+    include_directories: include_directories('.'),
+  )
+endif
 endif
 
 if get_option('libgwipc')
