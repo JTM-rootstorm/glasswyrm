@@ -48,6 +48,7 @@ class ClientConnection {
       std::function<void(const std::vector<DrawableDamage>&)>;
   using ExposeIntentHandler =
       std::function<void(const std::vector<ExposeIntent>&)>;
+  using InputSnapshotProvider = std::function<InputSnapshot()>;
   using DispatchBlockToken = std::uint64_t;
   enum class State {
     AwaitingSetup,
@@ -63,7 +64,8 @@ class ClientConnection {
                    StructuralTransitionHandler transition_handler = {},
                    DrawableDamageHandler damage_handler = {},
                    ExposeIntentHandler expose_handler = {},
-                   CompatibilityTrace* trace = nullptr);
+                   CompatibilityTrace* trace = nullptr,
+                   InputSnapshotProvider input_snapshot_provider = {});
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -139,6 +141,7 @@ class ClientConnection {
   DrawableDamageHandler damage_handler_;
   ExposeIntentHandler expose_handler_;
   CompatibilityTrace* trace_{nullptr};
+  InputSnapshotProvider input_snapshot_provider_;
 };
 
 }  // namespace glasswyrm::server

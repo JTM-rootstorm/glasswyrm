@@ -48,6 +48,7 @@ class Server {
   ClientConnection::StructuralTransitionHandler structural_transition_handler_;
   ClientConnection::DrawableDamageHandler drawable_damage_handler_;
   ClientConnection::ExposeIntentHandler expose_intent_handler_;
+  ClientConnection::InputSnapshotProvider input_snapshot_provider_;
   std::function<void(std::uint64_t, std::uint32_t)> cancel_lifecycle_handler_;
   std::set<std::uint32_t> pending_resource_bases_;
 };
