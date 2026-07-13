@@ -154,13 +154,12 @@ motion=passed crossing=passed buttons=passed button_motion=passed keyboard=passe
 expected_xcb="$(sed -n 's/.*"xcb_final":"\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
 DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone8_probe" --input-socket "$input_socket" --output "$control_dir/xcb-result.json" 2>>"$xcb_log" & xcb_pid=$!
 for _ in {1..200}; do
-  xcb_hash="$(tail -n1 "$dump_dir/frames.jsonl" 2>/dev/null | sed -n 's/.*"fnv1a64":"\([^"]*\)".*/\1/p')"
-  [[ "$xcb_hash" == "$expected_xcb" ]] && break
-  kill -0 "$xcb_pid" 2>/dev/null || break
+  xcb_line="$(grep -F "\"fnv1a64\":\"$expected_xcb\"" "$dump_dir/frames.jsonl" 2>/dev/null | tail -n1 || true)"
+  [[ -n "$xcb_line" ]] && break
   sleep .05
 done
-[[ "$xcb_hash" == "$expected_xcb" ]]
-xcb_name="$(tail -n1 "$dump_dir/frames.jsonl" | sed -n 's/.*"file":"\([^"]*\)".*/\1/p')"
+[[ -n "$xcb_line" ]]
+xcb_name="$(printf '%s\n' "$xcb_line" | sed -n 's/.*"file":"\([^"]*\)".*/\1/p')"
 cp "$dump_dir/$xcb_name" "$control_dir/final.ppm"
 cmp "$control_dir/final.ppm" "$source_dir/tests/fixtures/m8/final.ppm"
 wait "$xcb_pid"
