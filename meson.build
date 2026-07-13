@@ -108,6 +108,7 @@ endif
 config_data = configuration_data()
 config_data.set_quoted('GW_PROJECT_VERSION', meson.project_version())
 config_data.set10('GW_HAS_DRM_BACKEND', get_option('drm_backend'))
+config_data.set10('GW_HAS_HEADLESS_BACKEND', get_option('headless_backend'))
 
 configure_file(
   output: 'config.hpp',

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "backends/headless/presenter.hpp"
+#include "backends/output/presentation_backend.hpp"
 #include "backends/output/software_frame.hpp"
+#include "config.hpp"
 #include "compositor/buffer.hpp"
 #include "compositor/scene.hpp"
 #include "gwcomp/scene_manifest.hpp"
@@ -36,8 +37,13 @@ struct PresentedFrame {
 
 class Compositor final {
 public:
+#if GW_HAS_HEADLESS_BACKEND
   explicit Compositor(
       std::filesystem::path dump_directory,
+      std::optional<std::filesystem::path> scene_manifest = std::nullopt);
+#endif
+  explicit Compositor(
+      std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
       std::optional<std::filesystem::path> scene_manifest = std::nullopt);
 
   void set_peer_profile(PeerProfile profile) noexcept { profile_ = profile; }
@@ -76,7 +82,7 @@ private:
   AttachmentMap committed_attachments_;
   AttachmentMap pre_snapshot_attachments_;
   glasswyrm::output::SoftwareFrame output_;
-  glasswyrm::headless::Presenter presenter_;
+  std::unique_ptr<glasswyrm::output::PresentationBackend> presenter_;
   std::optional<SceneManifest> scene_manifest_;
   std::map<std::uint64_t, gwipc_buffer_release_reason> releases_;
   std::uint64_t frame_ordinal_{};
