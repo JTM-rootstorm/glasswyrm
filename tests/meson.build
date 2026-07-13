@@ -575,6 +575,17 @@ if get_option('drm_backend')
   )
   test('drm-dumb-buffer', drm_dumb_buffer_test, timeout: 10)
 
+  drm_presentation_transaction_test = executable(
+    'drm_presentation_transaction_test',
+    files('drm/presentation_transaction_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep,
+                   gw_compositor_geometry_dep, gw_render_software_dep,
+                   gw_output_dep] + gwcomp_backend_dependencies,
+    include_directories: test_source_root_include,
+  )
+  test('drm-presentation-transaction', drm_presentation_transaction_test,
+       timeout: 10)
+
   foreach drm_api_test : [
     ['drm-device-api', 'device_api_test.cpp'],
     ['drm-fake-events', 'fake_drm_event_test.cpp'],

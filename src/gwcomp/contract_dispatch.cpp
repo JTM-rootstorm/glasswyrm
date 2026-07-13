@@ -29,7 +29,7 @@ bool is_complete_session_snapshot(const gwipc_message* message) {
   return begin && begin->domain == GWIPC_SNAPSHOT_COMPLETE_SESSION;
 }
 
-bool enqueue_ack(gwipc_connection* connection, const gwipc_message* message,
+bool enqueue_ack(gwipc_connection* connection, const std::uint64_t reply_sequence,
                  const gwipc_frame_commit& commit,
                  const gw::compositor::PresentedFrame& frame) {
   gwipc_frame_acknowledged acknowledged{};
@@ -49,7 +49,7 @@ bool enqueue_ack(gwipc_connection* connection, const gwipc_message* message,
   outgoing.struct_size = sizeof(outgoing);
   outgoing.type = GWIPC_MESSAGE_FRAME_ACKNOWLEDGED;
   outgoing.flags = GWIPC_FLAG_REPLY;
-  outgoing.reply_to = gwipc_message_sequence(message);
+  outgoing.reply_to = reply_sequence;
   outgoing.payload = bytes;
   outgoing.payload_size = size;
   const auto status = gwipc_connection_enqueue(connection, &outgoing);
@@ -86,6 +86,28 @@ void enqueue_releases(gwipc_connection* connection,
   for (const auto& [buffer_id, reason] : compositor.releases())
     (void)enqueue_release(connection, buffer_id, reason);
   compositor.clear_releases();
+}
+
+ContractDispatchResult finish_frame(
+    gwipc_connection* connection, const std::uint64_t reply_sequence,
+    const gwipc_frame_commit& commit,
+    const gw::compositor::PresentedFrame& frame,
+    const std::optional<std::uint64_t> maximum_frames,
+    gw::compositor::Compositor& compositor) {
+  ContractDispatchResult result;
+  (void)enqueue_ack(connection, reply_sequence, commit, frame);
+  if (frame.result == GWIPC_FRAME_ACCEPTED) {
+    result.accepted_frame = true;
+    std::fprintf(stderr,
+                 "gwcomp: frame accepted commit=%llu frame=%llu hash=%016llx\n",
+                 static_cast<unsigned long long>(commit.commit_id),
+                 static_cast<unsigned long long>(frame.ordinal),
+                 static_cast<unsigned long long>(frame.hash));
+    if (maximum_frames && compositor.accepted_frames() == *maximum_frames)
+      result.stop_after_flush = true;
+  }
+  enqueue_releases(connection, compositor);
+  return result;
 }
 
 } // namespace
@@ -173,21 +195,28 @@ ContractDispatchResult dispatch_contract_message(
       auto frame = compositor.commit(commit, error);
       if ((gwipc_message_flags(message) & GWIPC_FLAG_ACK_REQUIRED) == 0)
         frame.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      (void)enqueue_ack(connection, message, commit, frame);
-      if (frame.result == GWIPC_FRAME_ACCEPTED) {
-        result.accepted_frame = true;
-        std::fprintf(
-            stderr,
-            "gwcomp: frame accepted commit=%llu frame=%llu hash=%016llx\n",
-            static_cast<unsigned long long>(commit.commit_id),
-            static_cast<unsigned long long>(frame.ordinal),
-            static_cast<unsigned long long>(frame.hash));
-        if (maximum_frames && compositor.accepted_frames() == *maximum_frames)
-          result.stop_after_flush = true;
+      if (frame.disposition ==
+          gw::compositor::PresentedFrame::Disposition::Pending) {
+        result.pending_frame = true;
+        result.reply_sequence = gwipc_message_sequence(message);
+        if ((gwipc_message_flags(message) & GWIPC_FLAG_ACK_REQUIRED) == 0)
+          result.fatal = true;
       } else {
+        result = finish_frame(connection, gwipc_message_sequence(message),
+                              commit, frame, maximum_frames, compositor);
+        result.fatal = frame.disposition ==
+                       gw::compositor::PresentedFrame::Disposition::Fatal;
+      }
+      if (frame.result != GWIPC_FRAME_ACCEPTED) {
         std::fprintf(stderr,
                      "gwcomp: frame rejected result=%u reason=%s\n",
                      static_cast<unsigned>(frame.result), error.c_str());
+      } else {
+        if (frame.disposition ==
+            gw::compositor::PresentedFrame::Disposition::Pending)
+          std::fprintf(stderr,
+                       "gwcomp: frame pending commit=%llu token deferred\n",
+                       static_cast<unsigned long long>(commit.commit_id));
       }
       break;
     }
@@ -197,8 +226,21 @@ ContractDispatchResult dispatch_contract_message(
   }
   if (!applied && type != GWIPC_MESSAGE_FRAME_COMMIT)
     std::fprintf(stderr, "gwcomp: rejected contract type=0x%04x\n", type);
-  enqueue_releases(connection, compositor);
+  if (!result.pending_frame && type != GWIPC_MESSAGE_FRAME_COMMIT)
+    enqueue_releases(connection, compositor);
   return result;
+}
+
+ContractDispatchResult complete_contract_presentation(
+    gwipc_connection* connection, const std::uint64_t reply_sequence,
+    const gw::compositor::PresentationCompletion& completion,
+    const std::optional<std::uint64_t> maximum_frames,
+    gw::compositor::Compositor& compositor) {
+  if (completion.kind !=
+      gw::compositor::PresentationCompletionKind::Complete)
+    return {};
+  return finish_frame(connection, reply_sequence, completion.commit,
+                      completion.frame, maximum_frames, compositor);
 }
 
 } // namespace glasswyrm::compositor

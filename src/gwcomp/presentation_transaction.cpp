@@ -4,7 +4,10 @@
 #include "render/software/renderer.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
+#include <limits>
+#include <poll.h>
 #include <span>
 
 namespace gw::compositor {
@@ -38,18 +41,29 @@ std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
 
 } // namespace
 
-void PresentationTransaction::release_retired_buffers(
-    Compositor& compositor, const Scene& staged) {
+PresentationTransaction::PresentationTransaction(
+    SceneModel candidate, AttachmentMap attachments, ReleaseMap releases,
+    glasswyrm::output::SoftwareFrame frame, gwipc_frame_commit commit,
+    PresentedFrame presented, const std::uint64_t token,
+    const std::chrono::steady_clock::time_point deadline)
+    : candidate_(std::move(candidate)), attachments_(std::move(attachments)),
+      releases_(std::move(releases)), frame_(std::move(frame)), commit_(commit),
+      presented_(presented), token_(token), deadline_(deadline) {}
+
+PresentationTransaction::ReleaseMap
+PresentationTransaction::calculate_retired_buffers(
+    const Compositor& compositor, const Scene& staged) {
+  ReleaseMap releases;
   for (const auto& [surface_id, old_buffer] :
        compositor.committed_attachments_) {
     const auto now = compositor.pending_attachments_.find(surface_id);
     if (now == compositor.pending_attachments_.end()) {
-      compositor.releases_[old_buffer] =
+      releases[old_buffer] =
           staged.surfaces.contains(surface_id)
               ? GWIPC_BUFFER_RELEASE_CONSUMER_DONE
               : GWIPC_BUFFER_RELEASE_SURFACE_REMOVED;
     } else if (now->second != old_buffer) {
-      compositor.releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
+      releases[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
     }
   }
   for (const auto& [buffer_id, mapping] : compositor.mappings_) {
@@ -58,13 +72,40 @@ void PresentationTransaction::release_retired_buffers(
         compositor.pending_attachments_.begin(),
         compositor.pending_attachments_.end(),
         [buffer_id](const auto& item) { return item.second == buffer_id; });
-    if (!remains_attached && !compositor.releases_.contains(buffer_id))
-      compositor.releases_[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
+    if (!remains_attached && !releases.contains(buffer_id))
+      releases[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
   }
+  return releases;
+}
+
+void PresentationTransaction::release_retired_buffers(
+    Compositor& compositor, const Scene& staged) {
+  const auto releases = calculate_retired_buffers(compositor, staged);
+  for (const auto& [buffer_id, reason] : releases)
+    compositor.releases_.insert_or_assign(buffer_id, reason);
   for (const auto& [buffer_id, reason] : compositor.releases_) {
     (void)reason;
     compositor.mappings_.erase(buffer_id);
   }
+}
+
+PresentedFrame PresentationTransaction::promote(
+    Compositor& compositor, const std::uint64_t visible_hash) {
+  for (const auto& [buffer_id, reason] : releases_)
+    compositor.releases_.insert_or_assign(buffer_id, reason);
+  for (const auto& [buffer_id, reason] : releases_) {
+    (void)reason;
+    compositor.mappings_.erase(buffer_id);
+  }
+  compositor.scene_ = std::move(candidate_);
+  compositor.committed_attachments_ = std::move(attachments_);
+  compositor.output_ = std::move(frame_);
+  ++compositor.frame_ordinal_;
+  compositor.last_generation_ = commit_.producer_generation;
+  presented_.disposition = PresentedFrame::Disposition::Complete;
+  presented_.ordinal = compositor.frame_ordinal_;
+  presented_.hash = visible_hash;
+  return presented_;
 }
 
 PresentedFrame PresentationTransaction::commit(
@@ -175,6 +216,7 @@ PresentedFrame PresentationTransaction::commit(
     committed_attachments_ = pending_attachments_;
     output_.disable();
     last_generation_ = value.producer_generation;
+    presented.disposition = PresentedFrame::Disposition::Complete;
     return presented;
   }
 
@@ -202,6 +244,7 @@ PresentedFrame PresentationTransaction::commit(
     last_generation_ = value.producer_generation;
     presented.ordinal = frame_ordinal_;
     presented.hash = manifest_result.hash;
+    presented.disposition = PresentedFrame::Disposition::Complete;
     return presented;
   }
   for (const auto& [surface_id, buffer_id] : pending_attachments_) {
@@ -293,23 +336,122 @@ PresentedFrame PresentationTransaction::commit(
       value.commit_id,
       value.producer_generation,
       frame_ordinal_ + 1U};
+  const auto canonical_hash = scratch.visible_hash();
+  const auto releases = calculate_retired_buffers(compositor, staged);
   const auto presentation = presenter_->present(frame);
-  if (presentation.disposition !=
-      glasswyrm::output::PresentDisposition::Complete) {
+  if (presentation.disposition ==
+      glasswyrm::output::PresentDisposition::Rejected) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     error = presentation.error;
     return presented;
   }
-
-  release_retired_buffers(compositor, staged);
-  scene_ = std::move(candidate);
-  committed_attachments_ = pending_attachments_;
-  output_ = std::move(scratch);
-  ++frame_ordinal_;
-  last_generation_ = value.producer_generation;
-  presented.ordinal = frame_ordinal_;
-  presented.hash = presentation.visible_hash;
+  if (presentation.disposition == glasswyrm::output::PresentDisposition::Fatal) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    presented.disposition = PresentedFrame::Disposition::Fatal;
+    error = presentation.error;
+    return presented;
+  }
+  if (presentation.disposition ==
+      glasswyrm::output::PresentDisposition::Complete) {
+    if (presentation.visible_hash != canonical_hash) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      presented.disposition = PresentedFrame::Disposition::Fatal;
+      error = "presentation hash differs from the canonical software frame";
+      return presented;
+    }
+    PresentationTransaction transaction(
+        std::move(candidate), pending_attachments_, releases,
+        std::move(scratch), value, presented, 0, compositor.timing_.now());
+    return transaction.promote(compositor, presentation.visible_hash);
+  }
+  if (presentation.token == 0) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    presented.disposition = PresentedFrame::Disposition::Fatal;
+    error = "pending presentation returned a zero completion token";
+    return presented;
+  }
+  presented.disposition = PresentedFrame::Disposition::Pending;
+  try {
+    compositor.pending_presentation_ =
+        std::unique_ptr<PresentationTransaction>(new PresentationTransaction(
+            std::move(candidate), pending_attachments_, releases,
+            std::move(scratch), value, presented, presentation.token,
+            compositor.timing_.now() + compositor.timing_.timeout));
+  } catch (...) {
+    compositor.presenter_->abort_pending(presentation.token);
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    presented.disposition = PresentedFrame::Disposition::Fatal;
+    error = "could not retain pending presentation state";
+  }
   return presented;
+}
+
+int PresentationTransaction::timeout_ms(const Compositor& compositor) {
+  if (!compositor.pending_presentation_) return -1;
+  const auto remaining = compositor.pending_presentation_->deadline_ -
+                         compositor.timing_.now();
+  if (remaining <= std::chrono::steady_clock::duration::zero()) return 0;
+  auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+      remaining);
+  if (milliseconds < remaining) ++milliseconds;
+  if (milliseconds.count() > std::numeric_limits<int>::max())
+    return std::numeric_limits<int>::max();
+  return static_cast<int>(milliseconds.count());
+}
+
+void PresentationTransaction::abort(Compositor& compositor) noexcept {
+  if (!compositor.pending_presentation_) return;
+  compositor.presenter_->abort_pending(
+      compositor.pending_presentation_->token_);
+  compositor.pending_presentation_.reset();
+}
+
+PresentationCompletion PresentationTransaction::service(
+    Compositor& compositor, const short revents, std::string& error) {
+  PresentationCompletion completion;
+  if (!compositor.pending_presentation_) return completion;
+  auto fatal = [&](std::string message) {
+    completion.kind = PresentationCompletionKind::Fatal;
+    completion.commit = compositor.pending_presentation_->commit_;
+    completion.frame = compositor.pending_presentation_->presented_;
+    completion.frame.disposition = PresentedFrame::Disposition::Fatal;
+    abort(compositor);
+    compositor.presenter_->shutdown();
+    error = std::move(message);
+    return completion;
+  };
+  if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+    return fatal("presentation backend became unusable during a pending frame");
+  if (revents != 0) {
+    const auto event = compositor.presenter_->service(revents);
+    if (event.kind == glasswyrm::output::BackendEventKind::Fatal)
+      return fatal(event.error);
+    if (event.kind == glasswyrm::output::BackendEventKind::Complete) {
+      if (event.token != compositor.pending_presentation_->token_)
+        return fatal("presentation completion token does not match pending frame");
+      const auto canonical_hash =
+          compositor.pending_presentation_->frame_.visible_hash();
+      if (event.visible_hash != canonical_hash)
+        return fatal(
+            "completed presentation hash differs from canonical software frame");
+      std::string finalize_error;
+      if (!compositor.presenter_->finalize_pending(event.token,
+                                                   finalize_error))
+        return fatal(finalize_error.empty()
+                         ? "could not finalize pending presentation diagnostics"
+                         : finalize_error);
+      auto pending = std::move(compositor.pending_presentation_);
+      completion.kind = PresentationCompletionKind::Complete;
+      completion.commit = pending->commit_;
+      completion.frame = pending->promote(compositor, event.visible_hash);
+      error.clear();
+      return completion;
+    }
+  }
+  if (compositor.timing_.now() >=
+      compositor.pending_presentation_->deadline_)
+    return fatal("pending presentation exceeded its completion timeout");
+  return completion;
 }
 
 } // namespace gw::compositor
