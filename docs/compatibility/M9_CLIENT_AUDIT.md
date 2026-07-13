@@ -7,10 +7,10 @@ Milestone 9 targets only `xeyes` 1.3.1 with Shape and Render disabled,
 digital with `-brief -twentyfour -norender -update 0` under the fixed realtime
 test shim and C locale. This is not a general compatibility claim.
 
-Exact upstream hashes, binary-version evidence, observed request order,
-normalized traces, and frame evidence must come from the Gentoo acceptance VM.
-The current `clients.toml` marks unverified source hashes `PENDING` rather than
-inventing evidence.
+Binary-version evidence, observed request order, normalized traces, and frame
+evidence must come from the Gentoo acceptance VM. The official X.Org release
+tarballs were downloaded from the URLs frozen in `clients.toml`; their
+SHA-256 values are recorded there.
 
 ## Source-derived request inventory
 
