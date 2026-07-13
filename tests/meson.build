@@ -56,17 +56,27 @@ test_source_root_include = include_directories('..')
 m9_fixed_time = shared_library(
   'gw_m9_fixed_time',
   files('apps/m9_fixed_time.c'),
-  dependencies: meson.get_compiler('c').find_library('dl'),
   install: false,
 )
 m9_fixed_time_test = executable(
   'm9_fixed_time_test',
   files('apps/m9_fixed_time_test.cpp'),
 )
+m9_fixed_time_preload = m9_fixed_time.full_path()
+m9_fixed_time_environment = []
+if get_option('asan')
+  m9_fixed_time_preload = run_command(
+    'cc', '-print-file-name=libasan.so', check: true,
+  ).stdout().strip() + ':' + m9_fixed_time_preload
+  # LeakSanitizer cannot inspect a process whose libc time entry points are
+  # intentionally interposed. AddressSanitizer and UBSan remain active.
+  m9_fixed_time_environment += ['ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:abort_on_error=1']
+endif
+m9_fixed_time_environment += ['LD_PRELOAD=' + m9_fixed_time_preload]
 test(
   'm9-fixed-time',
   m9_fixed_time_test,
-  env: ['LD_PRELOAD=' + m9_fixed_time.full_path()],
+  env: m9_fixed_time_environment,
   depends: m9_fixed_time,
   timeout: 10,
 )
