@@ -30,8 +30,12 @@ void test_simple() {
     x11::WindowLifecycleRequest request;
     auto bytes = simple(order, x11::CoreOpcode::MapWindow, 0x12345678);
     require(x11::decode_map_window(bytes, order, request) == x11::LifecycleDecodeStatus::Complete && request.window == 0x12345678, "MapWindow both byte orders");
+    bytes = simple(order, x11::CoreOpcode::MapSubwindows, 0x12345678);
+    require(x11::decode_map_subwindows(bytes, order, request) == x11::LifecycleDecodeStatus::Complete && request.window == 0x12345678, "MapSubwindows both byte orders");
     bytes = simple(order, x11::CoreOpcode::UnmapWindow, 9);
     require(x11::decode_unmap_window(bytes, order, request) == x11::LifecycleDecodeStatus::Complete && request.window == 9, "UnmapWindow both byte orders");
+    bytes = simple(order, x11::CoreOpcode::UnmapSubwindows, 9);
+    require(x11::decode_unmap_subwindows(bytes, order, request) == x11::LifecycleDecodeStatus::Complete && request.window == 9, "UnmapSubwindows both byte orders");
     bytes.pop_back(); require(x11::decode_unmap_window(bytes, order, request) == x11::LifecycleDecodeStatus::BadLength, "simple exact length");
   }
 }

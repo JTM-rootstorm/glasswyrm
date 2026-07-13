@@ -40,6 +40,18 @@ int main(){
   state.resources().find_window(base+1)->map_requested=true;
   result=dispatch_request(state,context,attributes(order,base+1,(1U<<1U)|(1U<<9U),{0x12345678U,1}));
   require(result.kind==DispatchKind::DeferredLifecycle&&result.deferred_override_redirect==true&&result.deferred_window==base+1&&!state.resources().find_window(base+1)->attributes.override_redirect&&state.resources().find_window(base+1)->attributes.background_pixel==0x00345678U&&state.resources().find_window(base+1)->attributes.background_source==BackgroundSource::Pixel,"mapped top-level override change defers while other validated attributes apply synchronously");
+  require(state.resources().create_window(1,base,mask,spec(base+30,base+1))==CreateWindowStatus::Success&&state.resources().create_window(1,base,mask,spec(base+31,base+30))==CreateWindowStatus::Success&&state.resources().create_window(1,base,mask,spec(base+32,base+30))==CreateWindowStatus::Success,"create bulk lifecycle hierarchy");
+  state.resources().find_window(base+30)->map_requested=true; state.resources().find_window(base+30)->map_state=MapState::Viewable;
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::MapSubwindows,base+30));
+  require(result.output.empty()&&result.structural_transitions.size()==2&&result.structural_transitions[0].committed->target==base+31&&result.structural_transitions[1].committed->target==base+32&&result.drawable_damage.size()==2&&state.resources().find_window(base+31)->map_state==MapState::Viewable&&state.resources().find_window(base+32)->map_state==MapState::Viewable,"MapSubwindows maps immediate children bottom-to-top with presentation damage");
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::UnmapSubwindows,base+30));
+  require(result.output.empty()&&result.structural_transitions.size()==2&&result.structural_transitions[0].before->target==base+31&&result.structural_transitions[1].before->target==base+32&&result.drawable_damage.size()==2&&result.expose_intents.size()==2&&result.expose_intents[0].window==base+30&&!state.resources().find_window(base+31)->map_requested&&!state.resources().find_window(base+32)->map_requested,"UnmapSubwindows preserves order and reveals parent");
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::MapWindow,base+31));
+  require(result.drawable_damage.size()==1,"individual child map damages top-level presentation");
+  result=dispatch_request(state,context,configure(order,base+31,x11::ConfigureWidth,{80}));
+  require(result.structural_transitions.size()==1&&result.drawable_damage.size()==2,"child configure damages old and new presentation bounds");
+  result=dispatch_request(state,context,request(order,x11::CoreOpcode::DestroyWindow,base+31));
+  require(result.structural_transitions.size()==1&&result.drawable_damage.size()==1&&result.expose_intents.size()==1&&result.expose_intents[0].window==base+30,"viewable child destroy damages presentation and exposes parent");
   result=dispatch_request(state,context,request(order,x11::CoreOpcode::DestroyWindow,base+1));
   require(result.kind==DispatchKind::DeferredLifecycle&&result.deferred_destroy&&state.resources().find_window(base+1),"integrated top-level DestroyWindow is staged without early mutation");
  }

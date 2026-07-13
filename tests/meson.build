@@ -43,6 +43,20 @@ test(
   args: [meson.project_source_root() / 'tests/fixtures/m8'],
   timeout: 10,
 )
+m9_fixture_validate = find_program('tools/m9_fixture_validate.sh')
+test(
+  'm9-fixture-checksums',
+  m9_fixture_validate,
+  args: [meson.project_source_root()],
+  timeout: 10,
+)
+m9_trace_summarize_test = find_program('compat/m9/m9_trace_summarize_test.py')
+test(
+  'm9-trace-summarize',
+  m9_trace_summarize_test,
+  args: [meson.current_source_dir() / 'compat/m9/m9_trace_summarize'],
+  timeout: 10,
+)
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
@@ -52,6 +66,53 @@ x11_lifecycle_request_test = executable(
 test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
 
 test_source_root_include = include_directories('..')
+
+m9_fixed_time = shared_library(
+  'gw_m9_fixed_time',
+  files('apps/m9_fixed_time.c'),
+  install: false,
+)
+m9_fixed_time_test = executable(
+  'm9_fixed_time_test',
+  files('apps/m9_fixed_time_test.cpp'),
+)
+m9_fixed_time_preload = m9_fixed_time.full_path()
+m9_fixed_time_environment = []
+if get_option('asan')
+  m9_fixed_time_preload = run_command(
+    'cc', '-print-file-name=libasan.so', check: true,
+  ).stdout().strip() + ':' + m9_fixed_time_preload
+  # LeakSanitizer cannot inspect a process whose libc time entry points are
+  # intentionally interposed. AddressSanitizer and UBSan remain active.
+  m9_fixed_time_environment += ['ASAN_OPTIONS=detect_leaks=0:halt_on_error=1:abort_on_error=1']
+endif
+m9_fixed_time_environment += ['LD_PRELOAD=' + m9_fixed_time_preload]
+test(
+  'm9-fixed-time',
+  m9_fixed_time_test,
+  env: m9_fixed_time_environment,
+  depends: m9_fixed_time,
+  timeout: 10,
+)
+
+m9_app_runner = executable(
+  'm9_app_runner',
+  files('apps/m9_app_runner.cpp'),
+  install: false,
+)
+m9_runner_fixture = find_program('apps/m9_runner_fixture.sh')
+test(
+  'm9-app-runner',
+  m9_app_runner,
+  args: [
+    '--expected-version', '1.2.3',
+    '--evidence', meson.current_build_dir() / 'm9-runner-evidence',
+    '--result', meson.current_build_dir() / 'm9-runner-result.json',
+    '--timeout-ms', '1000', '--', m9_runner_fixture,
+    meson.current_build_dir() / 'm9-runner-evidence',
+  ],
+  timeout: 10,
+)
 
 if get_option('gwm')
   gwm_options_test = executable(
@@ -132,6 +193,14 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('drawable-core', drawable_core_test, timeout: 10)
+
+  subtree_compositor_test = executable(
+    'subtree_compositor_test',
+    files('unit/subtree_compositor_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('subtree-compositor', subtree_compositor_test, timeout: 10)
   drawable_resource_test = executable(
     'drawable_resource_test',
     files('unit/drawable_resource_test.cpp'),
@@ -146,6 +215,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('drawable-dispatch', drawable_dispatch_test, timeout: 10)
+  font_dispatch_test = executable(
+    'font_dispatch_test',
+    files('unit/font_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('font-dispatch', font_dispatch_test, timeout: 10)
   glasswyrmd_options_test = executable(
     'glasswyrmd_options_test',
     files('unit/glasswyrmd_options_test.cpp'),
@@ -153,6 +229,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+  compatibility_trace_test = executable(
+    'compatibility_trace_test',
+    files('unit/compatibility_trace_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('compatibility-trace', compatibility_trace_test, timeout: 10)
   event_router_test = executable(
     'event_router_test',
     files('unit/event_router_test.cpp'),
@@ -253,6 +336,29 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     install: false,
   )
   test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10)
+
+  m9_xeyes_path = get_option('m9_xeyes')
+  m9_xclock_path = get_option('m9_xclock')
+  if (m9_xeyes_path != '' and m9_xclock_path != '' and
+      get_option('gwm') and get_option('gwcomp') and
+      get_option('render_software'))
+    m9_live_profile = find_program('apps/m9_live_profile.sh')
+    foreach profile : ['xeyes', 'xclock-analog', 'xclock-digital', 'combined']
+      test(
+        'm9-live-' + profile,
+        m9_live_profile,
+        args: [profile, glasswyrmd_program, gwm_program, gwcomp_program,
+               gwinput_m8_program, m9_fixed_time_preload,
+               meson.project_source_root() / 'tests/compat/m9/m9_trace_summarize',
+               meson.project_source_root() / 'tests/fixtures/m9',
+               m9_xeyes_path, m9_xclock_path],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program,
+                  gwinput_m8_program, m9_fixed_time],
+        is_parallel: false,
+        timeout: 30,
+      )
+    endforeach
+  endif
 
   published_buffer_test = executable(
     'published_buffer_test',
@@ -592,6 +698,7 @@ if get_option('glasswyrmd')
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
+    ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],

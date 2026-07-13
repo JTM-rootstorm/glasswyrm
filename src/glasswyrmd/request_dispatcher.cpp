@@ -5,12 +5,15 @@
 #include "protocol/x11/reply.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
 #include "glasswyrmd/raster_ops.hpp"
+#include "glasswyrmd/m9_raster_ops.hpp"
 #include "core/geometry/region.hpp"
 #include "protocol/x11/exposure_event.hpp"
 #include "protocol/x11/event_mask.hpp"
 
 #include <bit>
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -18,8 +21,10 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <string>
 #include <type_traits>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 namespace glasswyrm::server {
@@ -37,6 +42,64 @@ DispatchResult error(const DispatchContext& context,
 
 bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
   return request.bytes.size() == size;
+}
+
+std::size_t padded_size(const std::size_t size) { return (size + 3U) & ~std::size_t{3U}; }
+
+struct Color { std::uint16_t red{}, green{}, blue{}; };
+
+std::optional<Color> parse_color_name(std::span<const std::uint8_t> bytes) {
+  std::string name(bytes.begin(), bytes.end());
+  if (!name.empty() && name.front() == '#') {
+    const auto digits = name.size() - 1;
+    if (digits != 3 && digits != 6 && digits != 12) return std::nullopt;
+    auto nibble = [](const char value) -> std::optional<std::uint8_t> {
+      if (value >= '0' && value <= '9') return value - '0';
+      if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+      if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+      return std::nullopt;
+    };
+    std::array<std::uint16_t, 3> values{};
+    const auto width = digits / 3;
+    for (std::size_t component = 0; component < 3; ++component) {
+      std::uint16_t value = 0;
+      for (std::size_t offset = 0; offset < width; ++offset) {
+        const auto parsed = nibble(name[1 + component * width + offset]);
+        if (!parsed) return std::nullopt;
+        value = static_cast<std::uint16_t>((value << 4U) | *parsed);
+      }
+      values[component] = width == 1 ? static_cast<std::uint16_t>(value * 0x1111U)
+                        : width == 2 ? static_cast<std::uint16_t>(value * 0x0101U)
+                                     : value;
+    }
+    return Color{values[0], values[1], values[2]};
+  }
+  std::ranges::transform(name, name.begin(), [](const unsigned char value) {
+    return static_cast<char>(std::tolower(value));
+  });
+  if (name == "black") return Color{0, 0, 0};
+  if (name == "white") return Color{0xffff, 0xffff, 0xffff};
+  if (name == "red") return Color{0xffff, 0, 0};
+  if (name == "green") return Color{0, 0xffff, 0};
+  if (name == "blue") return Color{0, 0, 0xffff};
+  if (name == "yellow") return Color{0xffff, 0xffff, 0};
+  if (name == "cyan") return Color{0, 0xffff, 0xffff};
+  if (name == "magenta") return Color{0xffff, 0, 0xffff};
+  if (name == "gray" || name == "grey") return Color{0x8080, 0x8080, 0x8080};
+  if (name == "light gray" || name == "light grey") return Color{0xd3d3, 0xd3d3, 0xd3d3};
+  if (name == "dark gray" || name == "dark grey") return Color{0xa9a9, 0xa9a9, 0xa9a9};
+  return std::nullopt;
+}
+
+Color quantize_color(const Color color) {
+  return {static_cast<std::uint16_t>((color.red >> 8U) * 257U),
+          static_cast<std::uint16_t>((color.green >> 8U) * 257U),
+          static_cast<std::uint16_t>((color.blue >> 8U) * 257U)};
+}
+std::uint32_t color_pixel(const Color color) {
+  return (static_cast<std::uint32_t>(color.red >> 8U) << 16U) |
+         (static_cast<std::uint32_t>(color.green >> 8U) << 8U) |
+         (color.blue >> 8U);
 }
 
 std::optional<StructuralEventState> capture_structural_state(
@@ -86,8 +149,86 @@ bool supported_window_drawable(const ResourceTable& resources,
                                const std::uint32_t xid) {
   const auto* window = resources.find_window(xid);
   return window && xid != resources.screen().root_window &&
-         window->parent == resources.screen().root_window &&
          window->window_class == WindowClass::InputOutput && window->depth == 24;
+}
+
+std::optional<DrawableDamage> translate_window_damage(
+    const ResourceTable& resources, std::uint32_t xid,
+    geometry::Rectangle rectangle) {
+  for (;;) {
+    const auto* window = resources.find_window(xid);
+    if (!window || window->window_class != WindowClass::InputOutput)
+      return std::nullopt;
+    const auto clipped = geometry::intersect(
+        rectangle, {0, 0, window->width, window->height});
+    if (!clipped) return std::nullopt;
+    rectangle = *clipped;
+    if (window->parent == resources.screen().root_window)
+      return DrawableDamage{xid, rectangle};
+    rectangle.x += static_cast<std::int32_t>(window->x) + window->border_width;
+    rectangle.y += static_cast<std::int32_t>(window->y) + window->border_width;
+    xid = window->parent;
+  }
+}
+
+void add_window_damage(DispatchResult& result, const ResourceTable& resources,
+                       const std::uint32_t drawable,
+                       const geometry::Rectangle rectangle) {
+  if (const auto translated = translate_window_damage(resources, drawable, rectangle))
+    result.drawable_damage.push_back(*translated);
+}
+
+std::optional<geometry::Rectangle> child_outer_rectangle(
+    const StructuralEventState& state) {
+  const auto extent_width = static_cast<std::uint32_t>(state.width) +
+                            static_cast<std::uint32_t>(state.border_width) * 2U;
+  const auto extent_height = static_cast<std::uint32_t>(state.height) +
+                             static_cast<std::uint32_t>(state.border_width) * 2U;
+  return geometry::Rectangle{state.x, state.y, extent_width, extent_height};
+}
+
+void add_child_outer_damage(DispatchResult& result,
+                            const ResourceTable& resources,
+                            const StructuralEventState& state) {
+  const auto rectangle = child_outer_rectangle(state);
+  if (rectangle) add_window_damage(result, resources, state.parent, *rectangle);
+}
+
+void add_parent_reveal(DispatchResult& result, const ResourceTable& resources,
+                       const StructuralEventState& state) {
+  const auto* parent = resources.find_window(state.parent);
+  const auto rectangle = child_outer_rectangle(state);
+  if (!parent || !rectangle) return;
+  const auto clipped = geometry::intersect(
+      *rectangle, {0, 0, parent->width, parent->height});
+  if (clipped) result.expose_intents.push_back({state.parent, *clipped});
+}
+
+void add_local_lifecycle_effects(DispatchResult& result,
+                                 const ResourceTable& resources,
+                                 const StructuralTransition& transition) {
+  if (!transition.before) return;
+  const auto* target = resources.find_window(transition.before->target);
+  if (!target || target->window_class != WindowClass::InputOutput) return;
+  if (transition.kind == StructuralTransitionKind::Map && transition.committed &&
+      !transition.before->viewable && transition.committed->viewable) {
+    add_window_damage(result, resources, transition.committed->target,
+                      {0, 0, transition.committed->width,
+                       transition.committed->height});
+  } else if (transition.kind == StructuralTransitionKind::Unmap &&
+             transition.before->viewable && transition.committed &&
+             !transition.committed->viewable) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_parent_reveal(result, resources, *transition.before);
+  } else if (transition.kind == StructuralTransitionKind::Configure &&
+             transition.committed) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_child_outer_damage(result, resources, *transition.committed);
+  } else if (transition.kind == StructuralTransitionKind::Destroy &&
+             transition.before->viewable) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_parent_reveal(result, resources, *transition.before);
+  }
 }
 
 bool known_drawable(const ResourceTable& resources, const std::uint32_t xid) {
@@ -114,8 +255,71 @@ std::vector<geometry::Rectangle> rectangle_difference(
   return result;
 }
 
+class ClipByChildrenGuard {
+ public:
+  ClipByChildrenGuard(const ResourceTable& resources, const std::uint32_t drawable,
+                      const GraphicsContextResource& gc, PixelStorage& storage)
+      : storage_(storage) {
+    if (gc.subwindow_mode != 0) return;
+    const auto* window = resources.find_window(drawable);
+    if (!window) return;
+    for (const auto child_id : window->children) {
+      const auto* child = resources.find_window(child_id);
+      if (!child || child->window_class != WindowClass::InputOutput ||
+          child->map_state != MapState::Viewable)
+        continue;
+      const auto clipped = geometry::intersect(
+          {child->x, child->y,
+           static_cast<std::uint32_t>(child->width) + child->border_width * 2U,
+           static_cast<std::uint32_t>(child->height) + child->border_width * 2U},
+          {0, 0, storage.width(), storage.height()});
+      if (!clipped) continue;
+      Saved saved{*clipped, {}};
+      saved.pixels.reserve(static_cast<std::size_t>(clipped->width) * clipped->height);
+      for (std::uint32_t y = 0; y < clipped->height; ++y)
+        for (std::uint32_t x = 0; x < clipped->width; ++x)
+          saved.pixels.push_back(storage.at(static_cast<std::uint32_t>(clipped->x) + x,
+                                            static_cast<std::uint32_t>(clipped->y) + y));
+      saved_.push_back(std::move(saved));
+    }
+  }
+
+  void restore() {
+    if (restored_) return;
+    for (const auto& saved : saved_) {
+      std::size_t index = 0;
+      for (std::uint32_t y = 0; y < saved.rectangle.height; ++y)
+        for (std::uint32_t x = 0; x < saved.rectangle.width; ++x)
+          storage_.at(static_cast<std::uint32_t>(saved.rectangle.x) + x,
+                      static_cast<std::uint32_t>(saved.rectangle.y) + y) =
+              saved.pixels[index++];
+    }
+    restored_ = true;
+  }
+
+  [[nodiscard]] std::vector<geometry::Rectangle> visible(
+      const geometry::Rectangle rectangle) const {
+    std::vector<geometry::Rectangle> visible{rectangle};
+    for (const auto& saved : saved_) {
+      std::vector<geometry::Rectangle> next;
+      for (const auto candidate : visible) {
+        auto pieces = rectangle_difference(candidate, saved.rectangle);
+        next.insert(next.end(), pieces.begin(), pieces.end());
+      }
+      visible = std::move(next);
+    }
+    return visible;
+  }
+
+ private:
+  struct Saved { geometry::Rectangle rectangle; std::vector<std::uint32_t> pixels; };
+  PixelStorage& storage_;
+  std::vector<Saved> saved_;
+  bool restored_{false};
+};
+
 PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid) {
-  if (auto* pixmap = resources.find_pixmap(xid)) return pixmap->storage.get();
+  if (auto* pixmap = resources.find_pixmap(xid)) return pixmap->pixels();
   if (!supported_window_drawable(resources, xid)) return nullptr;
   auto* window = resources.find_window(xid);
   if (!window->storage) {
@@ -131,9 +335,12 @@ PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid)
 
 struct GcDecodeResult { bool success{}; x11::CoreErrorCode error{x11::CoreErrorCode::BadImplementation}; std::uint32_t bad{}; GraphicsContextResource gc; };
 GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
-                                GraphicsContextResource gc) {
+                                GraphicsContextResource gc,
+                                const ResourceTable& resources) {
   constexpr std::uint32_t supported = (1U << 0U) | (1U << 1U) | (1U << 2U) |
-      (1U << 3U) | (1U << 8U) | (1U << 15U) | (1U << 16U) | (1U << 17U) |
+      (1U << 3U) | (1U << 4U) | (1U << 5U) | (1U << 6U) |
+      (1U << 7U) | (1U << 8U) | (1U << 14U) | (1U << 15U) |
+      (1U << 16U) | (1U << 17U) |
       (1U << 18U) | (1U << 19U);
   GcDecodeResult result{}; result.gc = gc;
   if ((mask & ~supported) != 0) return result;
@@ -145,7 +352,32 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
       case 1: result.gc.plane_mask=value; break;
       case 2: result.gc.foreground=value & 0x00ffffffU; break;
       case 3: result.gc.background=value & 0x00ffffffU; break;
+      case 4:
+        if (value > std::numeric_limits<std::uint16_t>::max()) {
+          result.error=x11::CoreErrorCode::BadValue; return result;
+        }
+        if (value != 0) return result;
+        result.gc.line_width=0; break;
+      case 5:
+        if (value > 2) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 0) return result;
+        result.gc.line_style=0; break;
+      case 6:
+        if (value > 3) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 1) return result;
+        result.gc.cap_style=1; break;
+      case 7:
+        if (value > 2) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 0) return result;
+        result.gc.join_style=0; break;
       case 8: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.fill_style=0; break;
+      case 14:
+        if (!resources.find_font(value)) {
+          result.error = x11::CoreErrorCode::BadFont;
+          return result;
+        }
+        result.gc.font = kDefaultFontXid;
+        break;
       case 15: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.subwindow_mode=0; break;
       case 16: if (value > 1) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.graphics_exposures=value != 0; break;
       case 17: result.gc.clip_x_origin=static_cast<std::int16_t>(value); break;
@@ -364,14 +596,17 @@ DispatchResult destroy_window(ServerState& state,
   DispatchResult result;
   result.structural_transitions.reserve(destroyed->postorder.size());
   for (const auto& item : destroyed->postorder) {
-    StructuralEventState before{};
-    before.target = item.xid;
-    before.parent = item.parent;
+    auto before = capture_structural_state(state.resources(), item.xid)
+                      .value_or(StructuralEventState{});
+    before.target = item.xid; before.parent = item.parent;
     before.structure_recipients = item.structure_recipients;
     before.substructure_recipients = item.substructure_recipients;
     result.structural_transitions.push_back(
         {StructuralTransitionKind::Destroy, std::move(before), std::nullopt});
   }
+  if (!result.structural_transitions.empty())
+    add_local_lifecycle_effects(result, state.resources(),
+                                result.structural_transitions.back());
   const auto status = state.resources().commit_destroy_plan(*destroyed);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
@@ -497,7 +732,7 @@ DispatchResult get_geometry(ServerState& state,
   std::uint32_t drawable = 0;
   (void)reader.read_u32(drawable);
   const auto* window = state.resources().find_window(drawable);
-  const auto* pixmap = state.resources().find_pixmap(drawable);
+  auto* pixmap = state.resources().find_pixmap(drawable);
   if (window == nullptr && pixmap == nullptr) {
     return error(context, request, x11::CoreErrorCode::BadDrawable, drawable);
   }
@@ -547,7 +782,7 @@ DispatchResult create_gc(ServerState& state, const DispatchContext& context,
   (void)reader.read_u32(xid); (void)reader.read_u32(drawable); (void)reader.read_u32(mask);
   if (!exact_size(request, 16 + static_cast<std::size_t>(std::popcount(mask)) * 4U))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  const auto decoded = decode_gc_values(reader, mask, {});
+  const auto decoded = decode_gc_values(reader, mask, {}, state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
   switch (state.resources().create_gc(context.client_id, context.resource_base,
       context.resource_mask, xid, drawable, decoded.gc)) {
@@ -569,7 +804,7 @@ DispatchResult change_gc(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadLength);
   auto* gc = state.resources().find_gc(xid);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, xid);
-  const auto decoded = decode_gc_values(reader, mask, *gc);
+  const auto decoded = decode_gc_values(reader, mask, *gc, state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
   *gc = decoded.gc; return {};
 }
@@ -582,35 +817,403 @@ DispatchResult free_gc(ServerState& state, const DispatchContext& context,
       ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadGContext, xid);
 }
 
+std::optional<geometry::Rectangle> clipped_bounds(
+    const PixelStorage& storage, const std::span<const RasterPoint> points) {
+  if (points.empty()) return std::nullopt;
+  auto minimum_x = points.front().x, maximum_x = points.front().x;
+  auto minimum_y = points.front().y, maximum_y = points.front().y;
+  for (const auto point : points) {
+    minimum_x = std::min(minimum_x, point.x); maximum_x = std::max(maximum_x, point.x);
+    minimum_y = std::min(minimum_y, point.y); maximum_y = std::max(maximum_y, point.y);
+  }
+  return geometry::intersect(
+      {minimum_x, minimum_y,
+       static_cast<std::uint32_t>(static_cast<std::int64_t>(maximum_x) - minimum_x + 1),
+       static_cast<std::uint32_t>(static_cast<std::int64_t>(maximum_y) - minimum_y + 1)},
+      {0, 0, storage.width(), storage.height()});
+}
+
+DispatchResult poly_line(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 4U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 1)
+    return error(context, request, x11::CoreErrorCode::BadValue, request.data);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterPoint> points;
+  points.reserve((request.bytes.size() - 12U) / 4U);
+  while (reader.remaining() != 0) {
+    std::uint16_t raw_x{}, raw_y{}; (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+    RasterPoint point{static_cast<std::int16_t>(raw_x), static_cast<std::int16_t>(raw_y)};
+    if (request.data == 1 && !points.empty()) {
+      const auto x = static_cast<std::int64_t>(points.back().x) + point.x;
+      const auto y = static_cast<std::int64_t>(points.back().y) + point.y;
+      if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max() ||
+          y < std::numeric_limits<std::int32_t>::min() || y > std::numeric_limits<std::int32_t>::max())
+        return error(context, request, x11::CoreErrorCode::BadValue);
+      point = {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)};
+    }
+    points.push_back(point);
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  if (points.size() == 1) draw_line(*storage, points[0], points[0], gc->foreground, gc->plane_mask);
+  else for (std::size_t index = 1; index < points.size(); ++index)
+    draw_line(*storage, points[index - 1], points[index], gc->foreground, gc->plane_mask);
+  child_clip.restore(); DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
+  return result;
+}
+
+DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 8U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterSegment> segments;
+  std::vector<RasterPoint> damage_points;
+  while (reader.remaining() != 0) {
+    std::uint16_t x1{}, y1{}, x2{}, y2{};
+    (void)reader.read_u16(x1); (void)reader.read_u16(y1); (void)reader.read_u16(x2); (void)reader.read_u16(y2);
+    RasterSegment segment{{static_cast<std::int16_t>(x1), static_cast<std::int16_t>(y1)},
+                          {static_cast<std::int16_t>(x2), static_cast<std::int16_t>(y2)}};
+    segments.push_back(segment); damage_points.push_back(segment.first); damage_points.push_back(segment.second);
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  draw_segments(*storage, segments, gc->foreground, gc->plane_mask);
+  child_clip.restore(); DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, damage_points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
+  return result;
+}
+
+DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 16 || (request.bytes.size() - 16U) % 4U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint8_t shape{}, mode{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u8(shape); (void)reader.read_u8(mode); (void)reader.skip(2);
+  if (shape > 2) return error(context, request, x11::CoreErrorCode::BadValue, shape);
+  if (mode > 1) return error(context, request, x11::CoreErrorCode::BadValue, mode);
+  if (shape != 2 || mode != 0) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterPoint> points;
+  while (reader.remaining() != 0) {
+    std::uint16_t x{}, y{}; (void)reader.read_u16(x); (void)reader.read_u16(y);
+    points.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y)});
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  fill_convex_polygon(*storage, points, gc->foreground, gc->plane_mask);
+  child_clip.restore(); DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
+  return result;
+}
+
+DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
+                             const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 12U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterEllipse> ellipses;
+  while (reader.remaining() != 0) {
+    std::uint16_t x{}, y{}, width{}, height{}, angle1{}, angle2{};
+    (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(width); (void)reader.read_u16(height);
+    (void)reader.read_u16(angle1); (void)reader.read_u16(angle2);
+    static_cast<void>(angle1);
+    const auto extent = static_cast<std::int16_t>(angle2);
+    if (extent != 360 * 64 && extent != -360 * 64)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    ellipses.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), width, height});
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto ellipse : ellipses) {
+    fill_ellipse(*storage, ellipse, gc->foreground, gc->plane_mask);
+    damage.add({ellipse.x, ellipse.y, ellipse.width, ellipse.height});
+  }
+  child_clip.restore(); DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles())
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
+  return result;
+}
+
+bool valid_fontable(const ResourceTable& resources, const std::uint32_t xid) {
+  return resources.find_font(xid) || resources.find_gc(xid);
+}
+
+DispatchResult open_font(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; std::uint16_t name_length{};
+  (void)reader.read_u32(xid); (void)reader.read_u16(name_length); (void)reader.skip(2);
+  const auto padded = (static_cast<std::size_t>(name_length) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 12U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto name = std::string_view(
+      reinterpret_cast<const char*>(request.bytes.data() + 12), name_length);
+  if (!matches_fixed_font(name))
+    return error(context, request, x11::CoreErrorCode::BadName);
+  switch (state.resources().open_font(context.client_id, context.resource_base,
+                                      context.resource_mask, xid)) {
+    case OpenFontStatus::Success: return {};
+    case OpenFontStatus::BadIdChoice:
+      return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);
+    case OpenFontStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
+  }
+  return {};
+}
+
+DispatchResult close_font(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  return state.resources().close_font(xid) == CloseFontStatus::Success
+      ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadFont, xid);
+}
+
+void write_char_info(x11::ByteWriter& writer) {
+  writer.write_u16(0); writer.write_u16(kFixedFontAdvance);
+  writer.write_u16(kFixedFontAdvance); writer.write_u16(kFixedFontAscent);
+  writer.write_u16(kFixedFontDescent); writer.write_u16(0);
+}
+
+DispatchResult query_font(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  if (!valid_fontable(state.resources(), xid))
+    return error(context, request, x11::CoreErrorCode::BadFont, xid);
+  x11::ByteWriter reply(context.byte_order);
+  reply.write_u8(1); reply.write_u8(0); reply.write_u16(x11::wire_sequence(context.sequence));
+  constexpr std::uint32_t characters = kFixedFontLastCharacter - kFixedFontFirstCharacter + 1U;
+  constexpr std::uint32_t extra_bytes = 60U - 32U + characters * 12U;
+  reply.write_u32(extra_bytes / 4U);
+  write_char_info(reply); reply.write_padding(4); write_char_info(reply); reply.write_padding(4);
+  reply.write_u16(kFixedFontFirstCharacter); reply.write_u16(kFixedFontLastCharacter);
+  reply.write_u16(kFixedFontDefaultCharacter); reply.write_u16(0);
+  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(1);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  reply.write_u32(characters);
+  for (std::uint32_t index = 0; index < characters; ++index) write_char_info(reply);
+  return {std::move(reply).take()};
+}
+
+DispatchResult query_text_extents(ServerState& state,
+                                  const DispatchContext& context,
+                                  const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8 || (request.bytes.size() & 3U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  if (!valid_fontable(state.resources(), xid))
+    return error(context, request, x11::CoreErrorCode::BadFont, xid);
+  const auto bytes_after_font = request.bytes.size() - 8U;
+  if ((bytes_after_font & 1U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const std::size_t characters = bytes_after_font / 2U - (request.data ? 1U : 0U);
+  if (request.data > 1 || characters * 2U + (request.data ? 2U : 0U) != bytes_after_font)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  for (std::size_t index = 0; index < characters; ++index) {
+    std::uint8_t byte1{}, byte2{}; (void)reader.read_u8(byte1); (void)reader.read_u8(byte2);
+    if (byte1 != 0) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 0);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  const auto width = static_cast<std::uint32_t>(characters * kFixedFontAdvance);
+  reply.write_u32(width); reply.write_u32(0); reply.write_u32(width);
+  reply.write_padding(4);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult list_fonts(const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint16_t maximum{}, pattern_length{};
+  (void)reader.read_u16(maximum); (void)reader.read_u16(pattern_length);
+  const auto padded = (static_cast<std::size_t>(pattern_length) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 8U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto pattern = std::string_view(
+      reinterpret_cast<const char*>(request.bytes.data() + 8), pattern_length);
+  const bool match = maximum != 0 && matches_fixed_font(pattern);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u16(match ? 1 : 0); reply.write_padding(22);
+  if (match) {
+    constexpr std::array<std::uint8_t, 6> fixed_name{'\x05','f','i','x','e','d'};
+    reply.write_payload(fixed_name);
+  }
+  return {std::move(reply).finish()};
+}
+
+DispatchResult image_text8(ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  const auto padded = (static_cast<std::size_t>(request.data) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 16U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint16_t raw_x{}, raw_y{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  const auto text = std::span<const std::uint8_t>(request.bytes).subspan(16, request.data);
+  const auto raster = raster_text8(*storage, static_cast<std::int16_t>(raw_x),
+      static_cast<std::int16_t>(raw_y), text, gc->foreground, gc->background,
+      gc->plane_mask, true);
+  child_clip.restore(); DispatchResult result;
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), drawable, rectangle);
+  return result;
+}
+
+DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (request.bytes.size() < 16 || (request.bytes.size() & 3U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint16_t raw_x{}, raw_y{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  struct TextItem { std::int8_t delta{}; std::vector<std::uint8_t> text; };
+  std::vector<TextItem> items;
+  while (reader.remaining() != 0) {
+    std::uint8_t length{}; (void)reader.read_u8(length);
+    if (length == 0) continue;
+    if (length == 255) {
+      std::uint32_t font{}; if (!reader.read_u32(font)) return error(context, request, x11::CoreErrorCode::BadLength);
+      if (!state.resources().find_font(font)) return error(context, request, x11::CoreErrorCode::BadFont, font);
+      continue;
+    }
+    std::uint8_t delta{}; if (!reader.read_u8(delta) || reader.remaining() < length)
+      return error(context, request, x11::CoreErrorCode::BadLength);
+    TextItem item{static_cast<std::int8_t>(delta), {}}; item.text.reserve(length);
+    for (std::uint8_t index = 0; index < length; ++index) {
+      std::uint8_t value{}; (void)reader.read_u8(value); item.text.push_back(value);
+    }
+    items.push_back(std::move(item));
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
+  std::int32_t x = static_cast<std::int16_t>(raw_x);
+  const auto y = static_cast<std::int16_t>(raw_y);
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto& item : items) {
+    x += item.delta;
+    const auto raster = raster_text8(*storage, x, y, item.text, gc->foreground,
+                                    gc->background, gc->plane_mask, false);
+    if (!raster.damage.empty()) damage.add(raster.damage);
+    x += static_cast<std::int32_t>(item.text.size()) * kFixedFontAdvance;
+  }
+  child_clip.restore(); DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles())
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
+  return result;
+}
+
 DispatchResult put_image(ServerState& state, const DispatchContext& context,
                          const x11::FramedRequest& request) {
   if (request.bytes.size() < 24) return error(context, request, x11::CoreErrorCode::BadLength);
   if (request.data > 2) return error(context, request, x11::CoreErrorCode::BadValue, request.data);
-  if (request.data != 2) return error(context, request, x11::CoreErrorCode::BadImplementation);
   x11::ByteReader reader(request.body(), context.byte_order);
   std::uint32_t drawable{}, gc_id{}; std::uint16_t width{}, height{}, raw_x{}, raw_y{}; std::uint8_t left_pad{}, depth{};
   (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id); (void)reader.read_u16(width);
   (void)reader.read_u16(height); (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
   (void)reader.read_u8(left_pad); (void)reader.read_u8(depth); (void)reader.skip(2);
-  const auto payload_size = static_cast<std::uint64_t>(width) * height * 4U;
+  const auto payload_size = request.data <= 1
+      ? ((static_cast<std::uint64_t>(width) + 31U) / 32U * 4U) * height
+      : static_cast<std::uint64_t>(width) * height * 4U;
   if (payload_size > std::numeric_limits<std::size_t>::max() ||
       request.bytes.size() != 24U + payload_size)
     return error(context, request, x11::CoreErrorCode::BadLength);
-  if (depth != 24 || left_pad != 0) return error(context, request, x11::CoreErrorCode::BadValue, depth != 24 ? depth : left_pad);
+  const auto expected_depth = request.data <= 1 ? 1U : 24U;
+  if (depth != expected_depth || left_pad != 0)
+    return error(context, request, x11::CoreErrorCode::BadValue,
+                 depth != expected_depth ? depth : left_pad);
   auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
-  const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
+  auto* pixmap = state.resources().find_pixmap(drawable);
+  const bool valid = pixmap || supported_window_drawable(state.resources(), drawable);
   if (!valid) return error(context, request, known_drawable(state.resources(), drawable)
       ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  if (gc->depth != expected_depth || (pixmap && pixmap->depth != expected_depth) ||
+      (!pixmap && expected_depth != 24))
+    return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
+  const auto payload = std::span<const std::uint8_t>(request.bytes).subspan(24);
+  if (request.data <= 1) {
+    auto* bitmap = pixmap ? pixmap->bitmap() : nullptr;
+    if (!bitmap) return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
+    return put_xybitmap_lsb32(*bitmap, static_cast<std::int16_t>(raw_x),
+                             static_cast<std::int16_t>(raw_y), width, height,
+                             payload, gc->foreground, gc->background,
+                             gc->plane_mask)
+        ? DispatchResult{}
+        : error(context, request, x11::CoreErrorCode::BadLength);
+  }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
-  const auto payload = std::span<const std::uint8_t>(request.bytes).subspan(24);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   const auto raster = put_zpixmap(*storage, static_cast<std::int16_t>(raw_x),
       static_cast<std::int16_t>(raw_y), width, height, payload, gc->plane_mask);
   if (!raster.success) return error(context, request, x11::CoreErrorCode::BadLength);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    result.drawable_damage.push_back({drawable, raster.damage});
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -630,6 +1233,7 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   DispatchResult result;
   geometry::Region damage({0, 0, storage->width(), storage->height()});
   for (const auto& fill : fills) damage.add(fill.rectangle);
@@ -637,9 +1241,11 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
     result.drawable_damage.reserve(damage.rectangles().size());
   for (const auto& rectangle : damage.rectangles()) {
     storage->fill(rectangle, gc->foreground, gc->plane_mask);
-    if (supported_window_drawable(state.resources(), drawable))
-      result.drawable_damage.push_back({drawable, rectangle});
   }
+  child_clip.restore();
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles())
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
   return result;
 }
 
@@ -661,11 +1267,13 @@ DispatchResult copy_area_request(ServerState& state, const DispatchContext& cont
   }
   auto* source_storage = mutable_storage(state.resources(), source); auto* destination_storage = mutable_storage(state.resources(), destination);
   if (!source_storage || !destination_storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), destination, *gc, *destination_storage);
   RasterResult raster;
   try { raster = copy_area(*source_storage, *destination_storage, static_cast<std::int16_t>(sx), static_cast<std::int16_t>(sy), width, height, static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), gc->plane_mask); }
   catch (const std::bad_alloc&) { return error(context, request, x11::CoreErrorCode::BadAlloc); }
-  DispatchResult result;
-  if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination)) result.drawable_damage.push_back({destination, raster.damage});
+  child_clip.restore(); DispatchResult result;
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination))
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), destination, rectangle);
   if (gc->graphics_exposures) {
     const auto requested = geometry::intersect({static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), width, height}, {0, 0, destination_storage->width(), destination_storage->height()});
     if (requested && raster.damage == *requested)
@@ -697,6 +1305,8 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
   if (!window) return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
   if (!supported_window_drawable(state.resources(), window_id)) return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
   auto* storage = mutable_storage(state.resources(), window_id); if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  const GraphicsContextResource clear_gc{};
+  ClipByChildrenGuard child_clip(state.resources(), window_id, clear_gc, *storage);
   const auto signed_x = static_cast<std::int16_t>(x), signed_y = static_cast<std::int16_t>(y);
   const auto effective_width = width ? width : (signed_x < static_cast<std::int32_t>(window->width) ? window->width - signed_x : 0U);
   const auto effective_height = height ? height : (signed_y < static_cast<std::int32_t>(window->height) ? window->height - signed_y : 0U);
@@ -704,7 +1314,9 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
   DispatchResult result; if (!clipped) return result;
   if (window->attributes.background_source != BackgroundSource::None) {
     storage->fill(*clipped, window->attributes.background_source == BackgroundSource::Pixel ? window->attributes.background_pixel : 0);
-    result.drawable_damage.push_back({window_id, *clipped});
+    child_clip.restore();
+    for (const auto rectangle : child_clip.visible(*clipped))
+      add_window_damage(result, state.resources(), window_id, rectangle);
   }
   if (request.data == 1) result.expose_intents.push_back({window_id, *clipped});
   return result;
@@ -1002,6 +1614,216 @@ DispatchResult get_input_focus(const ServerState& state,
   return {std::move(reply).finish()};
 }
 
+std::optional<std::pair<std::int64_t, std::int64_t>> window_root_origin(
+    const ResourceTable& resources, std::uint32_t xid) {
+  std::int64_t x = 0, y = 0;
+  std::unordered_set<std::uint32_t> visited;
+  while (xid != resources.screen().root_window) {
+    if (!visited.insert(xid).second) return std::nullopt;
+    const auto* window = resources.find_window(xid);
+    if (!window) return std::nullopt;
+    x += static_cast<std::int64_t>(window->x) + window->border_width;
+    y += static_cast<std::int64_t>(window->y) + window->border_width;
+    xid = window->parent;
+  }
+  return std::pair{x, y};
+}
+
+std::uint32_t immediate_child_at(const ResourceTable& resources,
+                                 const WindowResource& parent,
+                                 const std::int64_t root_x,
+                                 const std::int64_t root_y) {
+  for (auto iterator = parent.children.rbegin(); iterator != parent.children.rend(); ++iterator) {
+    const auto* child = resources.find_window(*iterator);
+    if (!child || child->map_state != MapState::Viewable) continue;
+    const auto origin = window_root_origin(resources, *iterator);
+    if (!origin) continue;
+    const auto border = static_cast<std::int64_t>(child->border_width);
+    const auto left = origin->first - border, top = origin->second - border;
+    const auto right = left + child->width + border * 2;
+    const auto bottom = top + child->height + border * 2;
+    if (root_x >= left && root_x < right && root_y >= top && root_y < bottom)
+      return *iterator;
+  }
+  return 0;
+}
+
+bool fits_i16(const std::int64_t value) {
+  return value >= std::numeric_limits<std::int16_t>::min() &&
+         value <= std::numeric_limits<std::int16_t>::max();
+}
+
+DispatchResult query_pointer(const ServerState& state,
+                             const DispatchContext& context,
+                             const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{};
+  (void)reader.read_u32(xid);
+  const auto* window = state.resources().find_window(xid);
+  if (!window) return error(context, request, x11::CoreErrorCode::BadWindow, xid);
+  const auto origin = window_root_origin(state.resources(), xid);
+  if (!origin) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto win_x = static_cast<std::int64_t>(context.input.root_x) - origin->first;
+  const auto win_y = static_cast<std::int64_t>(context.input.root_y) - origin->second;
+  if (!fits_i16(context.input.root_x) || !fits_i16(context.input.root_y) ||
+      !fits_i16(win_x) || !fits_i16(win_y))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 1);
+  reply.write_u32(state.screen().root_window);
+  reply.write_u32(immediate_child_at(state.resources(), *window, context.input.root_x, context.input.root_y));
+  reply.write_u16(static_cast<std::uint16_t>(context.input.root_x));
+  reply.write_u16(static_cast<std::uint16_t>(context.input.root_y));
+  reply.write_u16(static_cast<std::uint16_t>(win_x));
+  reply.write_u16(static_cast<std::uint16_t>(win_y));
+  reply.write_u16(context.input.state_mask); reply.write_padding(2);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult translate_coordinates(const ServerState& state,
+                                     const DispatchContext& context,
+                                     const x11::FramedRequest& request) {
+  if (!exact_size(request, 16)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t source{}, destination{}; std::uint16_t source_x_wire{}, source_y_wire{};
+  if (!reader.read_u32(source) || !reader.read_u32(destination) ||
+      !reader.read_u16(source_x_wire) || !reader.read_u16(source_y_wire))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto* source_window = state.resources().find_window(source);
+  if (!source_window) return error(context, request, x11::CoreErrorCode::BadWindow, source);
+  const auto* destination_window = state.resources().find_window(destination);
+  if (!destination_window) return error(context, request, x11::CoreErrorCode::BadWindow, destination);
+  const auto source_origin = window_root_origin(state.resources(), source);
+  const auto destination_origin = window_root_origin(state.resources(), destination);
+  if (!source_origin || !destination_origin)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto root_x = source_origin->first + static_cast<std::int16_t>(source_x_wire);
+  const auto root_y = source_origin->second + static_cast<std::int16_t>(source_y_wire);
+  const auto destination_x = root_x - destination_origin->first;
+  const auto destination_y = root_y - destination_origin->second;
+  if (!fits_i16(destination_x) || !fits_i16(destination_y))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 1);
+  reply.write_u32(immediate_child_at(state.resources(), *destination_window, root_x, root_y));
+  reply.write_u16(static_cast<std::uint16_t>(destination_x));
+  reply.write_u16(static_cast<std::uint16_t>(destination_y));
+  return {std::move(reply).finish()};
+}
+
+DispatchResult query_extension(const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint16_t name_length{};
+  if (!reader.read_u16(name_length) || !reader.skip(2) ||
+      !exact_size(request, 8 + padded_size(name_length)))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  std::span<const std::uint8_t> name;
+  if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(0);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult list_extensions(const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  return {std::move(x11::ReplyBuilder(context.byte_order, context.sequence, 0)).finish()};
+}
+
+DispatchResult alloc_color(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  if (!exact_size(request, 16)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t colormap{}; Color color{};
+  if (!reader.read_u32(colormap) || !reader.read_u16(color.red) ||
+      !reader.read_u16(color.green) || !reader.read_u16(color.blue) || !reader.skip(2))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  color = quantize_color(color);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  reply.write_padding(2); reply.write_u32(color_pixel(color));
+  return {std::move(reply).finish()};
+}
+
+DispatchResult named_color(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request, const bool allocate) {
+  if (request.bytes.size() < 12) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t colormap{}; std::uint16_t name_length{};
+  if (!reader.read_u32(colormap) || !reader.read_u16(name_length) || !reader.skip(2) ||
+      !exact_size(request, 12 + padded_size(name_length)))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  std::span<const std::uint8_t> name;
+  if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto parsed = parse_color_name(name);
+  if (!parsed) return error(context, request, x11::CoreErrorCode::BadName);
+  const auto color = quantize_color(*parsed);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  if (allocate) reply.write_u32(color_pixel(color));
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult free_colors(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || request.bytes.size() % 4 != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
+  if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  return {};
+}
+
+DispatchResult query_colors(const ServerState& state, const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8 || request.bytes.size() % 4 != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
+  if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  const auto count = (request.bytes.size() - 8) / 4;
+  if (count > std::numeric_limits<std::uint16_t>::max()) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence); reply.write_u16(static_cast<std::uint16_t>(count)); reply.write_padding(22);
+  for (std::size_t i = 0; i < count; ++i) { std::uint32_t pixel{}; (void)reader.read_u32(pixel); reply.write_payload_u16(static_cast<std::uint16_t>(((pixel >> 16U) & 0xffU) * 257U)); reply.write_payload_u16(static_cast<std::uint16_t>(((pixel >> 8U) & 0xffU) * 257U)); reply.write_payload_u16(static_cast<std::uint16_t>((pixel & 0xffU) * 257U)); reply.write_payload_u16(0); }
+  return {std::move(reply).finish()};
+}
+
+std::uint32_t keysym_for(const std::uint8_t keycode, const bool shifted) {
+  constexpr std::array<std::pair<std::uint8_t, char>, 26> letters{{
+    {38,'a'},{56,'b'},{54,'c'},{40,'d'},{26,'e'},{41,'f'},{42,'g'},{43,'h'},{31,'i'},{44,'j'},{45,'k'},{46,'l'},{58,'m'},{57,'n'},{32,'o'},{33,'p'},{24,'q'},{27,'r'},{39,'s'},{28,'t'},{30,'u'},{55,'v'},{25,'w'},{53,'x'},{29,'y'},{52,'z'}}};
+  for (const auto [code, letter] : letters) if (keycode == code) return static_cast<std::uint32_t>(shifted ? letter - 32 : letter);
+  if (keycode >= 10 && keycode <= 18) return shifted ? std::array<std::uint32_t,9>{0x21,0x40,0x23,0x24,0x25,0x5e,0x26,0x2a,0x28}[keycode-10] : 0x31U + keycode-10;
+  if (keycode == 19) return shifted ? 0x29 : 0x30;
+  switch (keycode) { case 9:return 0xff1b; case 22:return 0xff08; case 23:return 0xff09; case 36:return 0xff0d; case 37:return 0xffe3; case 50:return 0xffe1; case 62:return 0xffe2; case 64:return 0xffe9; case 65:return 0x20; case 105:return 0xffe4; case 108:return 0xffea; default:return 0; }
+}
+
+DispatchResult get_keyboard_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto first = request.bytes[4], count = request.bytes[5];
+  if (first < 8 || count == 0 || static_cast<unsigned>(first) + count > 256)
+    return error(context, request, x11::CoreErrorCode::BadValue, first);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 2);
+  for (unsigned keycode = first; keycode < static_cast<unsigned>(first) + count; ++keycode) { reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), false)); reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), true)); }
+  return {std::move(reply).finish()};
+}
+
+DispatchResult get_pointer_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 5); constexpr std::array<std::uint8_t,5> map{1,2,3,4,5}; reply.write_payload(map); return {std::move(reply).finish()};
+}
+
+DispatchResult get_modifier_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 2); constexpr std::array<std::uint8_t,16> map{50,62, 0,0, 37,105, 64,108, 0,0, 0,0, 0,0, 0,0}; reply.write_payload(map); return {std::move(reply).finish()};
+}
+
 DispatchResult lifecycle_decode_error(const DispatchContext& context,
                                       const x11::FramedRequest& request,
                                       x11::LifecycleDecodeStatus status) {
@@ -1039,6 +1861,8 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
           {mapped ? StructuralTransitionKind::Map
                   : StructuralTransitionKind::Unmap,
            before, capture_structural_state(state.resources(), decoded.window)});
+      add_local_lifecycle_effects(result, state.resources(),
+                                  result.structural_transitions.back());
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -1089,6 +1913,8 @@ DispatchResult configure_window(ServerState& state,
       result.structural_transitions.push_back(
           {StructuralTransitionKind::Configure, before,
            capture_structural_state(state.resources(), decoded.window)});
+      add_local_lifecycle_effects(result, state.resources(),
+                                  result.structural_transitions.back());
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -1099,6 +1925,49 @@ DispatchResult configure_window(ServerState& state,
       return error(context, request, x11::CoreErrorCode::BadValue);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
+}
+
+DispatchResult map_subwindows(ServerState& state,
+                              const DispatchContext& context,
+                              const x11::FramedRequest& request,
+                              const bool mapped) {
+  x11::WindowLifecycleRequest decoded;
+  const auto status = mapped
+      ? x11::decode_map_subwindows(request.bytes, context.byte_order, decoded)
+      : x11::decode_unmap_subwindows(request.bytes, context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  const auto* parent = state.resources().find_window(decoded.window);
+  if (!parent)
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  const auto children = parent->children;
+  if (std::ranges::any_of(children, [&](const std::uint32_t child) {
+        return state.resources().is_policy_candidate(child);
+      }))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+
+  DispatchResult result;
+  result.structural_transitions.reserve(children.size());
+  for (const auto child : children) {
+    const auto before = capture_structural_state(state.resources(), child);
+    const auto transition_status =
+        state.resources().set_local_map_intent(child, mapped);
+    if (transition_status != LocalLifecycleStatus::Success) {
+      const auto code = transition_status == LocalLifecycleStatus::BadWindow
+                            ? x11::CoreErrorCode::BadWindow
+                        : transition_status == LocalLifecycleStatus::BadMatch
+                            ? x11::CoreErrorCode::BadMatch
+                            : x11::CoreErrorCode::BadValue;
+      return error(context, request, code, child);
+    }
+    result.structural_transitions.push_back(
+        {mapped ? StructuralTransitionKind::Map
+                : StructuralTransitionKind::Unmap,
+         before, capture_structural_state(state.resources(), child)});
+    add_local_lifecycle_effects(result, state.resources(),
+                                result.structural_transitions.back());
+  }
+  return result;
 }
 
 }  // namespace
@@ -1114,8 +1983,12 @@ DispatchResult dispatch_request(ServerState& state,
         return change_window_attributes(state, context, request);
       case x11::CoreOpcode::MapWindow:
         return map_window(state, context, request, true);
+      case x11::CoreOpcode::MapSubwindows:
+        return map_subwindows(state, context, request, true);
       case x11::CoreOpcode::UnmapWindow:
         return map_window(state, context, request, false);
+      case x11::CoreOpcode::UnmapSubwindows:
+        return map_subwindows(state, context, request, false);
       case x11::CoreOpcode::ConfigureWindow:
         return configure_window(state, context, request);
       case x11::CoreOpcode::GetWindowAttributes:
@@ -1138,8 +2011,42 @@ DispatchResult dispatch_request(ServerState& state,
         return get_property(state, context, request);
       case x11::CoreOpcode::ListProperties:
         return list_properties(state, context, request);
+      case x11::CoreOpcode::QueryPointer:
+        return query_pointer(state, context, request);
+      case x11::CoreOpcode::TranslateCoordinates:
+        return translate_coordinates(state, context, request);
       case x11::CoreOpcode::GetInputFocus:
         return get_input_focus(state, context, request);
+      case x11::CoreOpcode::OpenFont:
+        return open_font(state, context, request);
+      case x11::CoreOpcode::CloseFont:
+        return close_font(state, context, request);
+      case x11::CoreOpcode::QueryFont:
+        return query_font(state, context, request);
+      case x11::CoreOpcode::QueryTextExtents:
+        return query_text_extents(state, context, request);
+      case x11::CoreOpcode::ListFonts:
+        return list_fonts(context, request);
+      case x11::CoreOpcode::AllocColor:
+        return alloc_color(state, context, request);
+      case x11::CoreOpcode::AllocNamedColor:
+        return named_color(state, context, request, true);
+      case x11::CoreOpcode::FreeColors:
+        return free_colors(state, context, request);
+      case x11::CoreOpcode::QueryColors:
+        return query_colors(state, context, request);
+      case x11::CoreOpcode::LookupColor:
+        return named_color(state, context, request, false);
+      case x11::CoreOpcode::QueryExtension:
+        return query_extension(context, request);
+      case x11::CoreOpcode::ListExtensions:
+        return list_extensions(context, request);
+      case x11::CoreOpcode::GetKeyboardMapping:
+        return get_keyboard_mapping(context, request);
+      case x11::CoreOpcode::GetPointerMapping:
+        return get_pointer_mapping(context, request);
+      case x11::CoreOpcode::GetModifierMapping:
+        return get_modifier_mapping(context, request);
       case x11::CoreOpcode::CreatePixmap:
         return create_pixmap(state, context, request);
       case x11::CoreOpcode::FreePixmap:
@@ -1154,12 +2061,26 @@ DispatchResult dispatch_request(ServerState& state,
         return clear_area(state, context, request);
       case x11::CoreOpcode::CopyArea:
         return copy_area_request(state, context, request);
+      case x11::CoreOpcode::PolyLine:
+        return poly_line(state, context, request);
+      case x11::CoreOpcode::PolySegment:
+        return poly_segment(state, context, request);
+      case x11::CoreOpcode::FillPoly:
+        return fill_poly(state, context, request);
       case x11::CoreOpcode::PolyFillRectangle:
         return poly_fill_rectangle(state, context, request);
+      case x11::CoreOpcode::PolyFillArc:
+        return poly_fill_arc(state, context, request);
       case x11::CoreOpcode::PutImage:
         return put_image(state, context, request);
+      case x11::CoreOpcode::PolyText8:
+        return poly_text8(state, context, request);
+      case x11::CoreOpcode::ImageText8:
+        return image_text8(state, context, request);
       case x11::CoreOpcode::NoOperation:
         return {};
+      default:
+        break;
     }
   } catch (const std::bad_alloc&) {
     return error(context, request, x11::CoreErrorCode::BadAlloc);

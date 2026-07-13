@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "first_request_occurrence": [
+    "QueryExtension",
+    "CreateGC",
+    "GetProperty",
+    "InternAtom",
+    "AllocNamedColor",
+    "CreatePixmap",
+    "PutImage",
+    "FreeGC",
+    "OpenFont",
+    "QueryFont",
+    "ListFonts",
+    "LookupColor",
+    "FreePixmap",
+    "GetInputFocus",
+    "CreateWindow",
+    "ChangeProperty",
+    "MapSubwindows",
+    "MapWindow",
+    "ChangeWindowAttributes",
+    "PolySegment",
+    "FillPoly",
+    "PolyLine"
+  ],
+  "opcode_histogram": {
+    "1": 2,
+    "16": 10,
+    "18": 12,
+    "2": 1,
+    "20": 1,
+    "43": 1,
+    "45": 1,
+    "47": 1,
+    "49": 3,
+    "53": 5,
+    "54": 3,
+    "55": 7,
+    "60": 2,
+    "65": 2,
+    "66": 1,
+    "69": 2,
+    "72": 2,
+    "8": 1,
+    "85": 2,
+    "9": 1,
+    "92": 1,
+    "98": 3
+  },
+  "error_histogram": {
+    "BadPixmap": 3,
+    "BadValue": 3
+  },
+  "reply_requests": [
+    "QueryExtension",
+    "GetProperty",
+    "InternAtom",
+    "AllocNamedColor",
+    "QueryFont",
+    "ListFonts",
+    "LookupColor",
+    "GetInputFocus"
+  ],
+  "recurring_requests": [],
+  "extension_queries": [
+    "OTHER"
+  ],
+  "unknown_opcodes": [],
+  "application_connection_count": 1,
+  "maximum_request_length": 492
+}

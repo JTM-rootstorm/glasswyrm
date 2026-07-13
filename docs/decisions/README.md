@@ -16,3 +16,5 @@ Current decisions:
 - [0007: Run Window-Management Policy as a Separate Service](0007-window-manager-policy-scaffold.md)
 - [0008: Route Top-Level Lifecycle Through Three Processes](0008-three-process-window-lifecycle.md)
 - [0009: Bridge Server-Rendered Drawables to the Compositor](0009-server-rendered-drawable-bridge.md)
+- [0010: Route Synthetic Input Through the Protocol Server](0010-synthetic-input-routing.md)
+- [0011: Pin Simple Clients and Flatten Child Subtrees](0011-pinned-simple-client-compatibility.md)

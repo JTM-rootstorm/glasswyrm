@@ -1,6 +1,7 @@
 #include "glasswyrmd/content_presenter.hpp"
 
 #include "core/geometry/region.hpp"
+#include "glasswyrmd/subtree_compositor.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -83,6 +84,11 @@ bool ContentPresenter::prepare_lifecycle(
     auto storage = stage_storage(xid, projected.applied_width,
                                  projected.applied_height, resources);
     if (!storage) return false;
+    auto composed = compose_top_level_subtree(resources, xid);
+    const PixelStorage* presentation = storage.get();
+    if (composed && composed->width() == storage->width() &&
+        composed->height() == storage->height())
+      presentation = &*composed;
     bool replaced = false;
     auto* buffer = ensure_buffer(xid, *storage, replaced);
     if (!buffer) return false;
@@ -91,7 +97,7 @@ bool ContentPresenter::prepare_lifecycle(
                            {0, 0, storage->width(), storage->height()});
     if (!buffer->announced() || replaced)
       dirty = {{0, 0, storage->width(), storage->height()}};
-    if (!dirty.empty() && !buffer->copy_from(*storage, dirty)) return false;
+    if (!dirty.empty() && !buffer->copy_from(*presentation, dirty)) return false;
     if (!buffer->announced()) {
       CompositorSnapshotSubmission::Buffer attachment;
       attachment.attach.struct_size = sizeof(attachment.attach);
@@ -204,7 +210,9 @@ bool ContentPresenter::prepare_content(
                            {0, 0, window->storage->width(),
                             window->storage->height()});
     if (dirty.empty()) continue;
-    if (!buffer->copy_from(*window->storage, dirty)) return false;
+    auto composed = compose_top_level_subtree(resources, xid);
+    if (!composed) return false;
+    if (!buffer->copy_from(*composed, dirty)) return false;
     found->second.pending.clear();
     found->second.inflight = dirty;
     submission.damages.push_back(make_damage(xid, dirty));
