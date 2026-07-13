@@ -312,7 +312,7 @@ void exercise_pipeline(const std::string& socket) {
   gw::test::X11FakeClient client(socket);
   const gw::test::X11RequestBuilder builder(x11::ByteOrder::LittleEndian);
   auto bytes = gw::test::make_setup_request(x11::ByteOrder::LittleEndian);
-  const auto unsupported = builder.raw(99, 0);
+  const auto unsupported = builder.raw(126, 0);
   const auto focus = builder.get_input_focus();
   bytes.insert(bytes.end(), unsupported.begin(), unsupported.end());
   bytes.insert(bytes.end(), focus.begin(), focus.end());
