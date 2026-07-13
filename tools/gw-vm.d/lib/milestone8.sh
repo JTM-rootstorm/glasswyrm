@@ -183,7 +183,7 @@ expected_pre="$(sed -n 's/.*"pre_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/
 expected_post="$(sed -n 's/.*"post_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
 [[ ${#expected_pre} -eq 16 && ${#expected_post} -eq 16 ]]
 before_hold=$(frame_count)
-"$runtime_build_dir/tests/m8_restart_hold_probe" --display :99 --input-socket "$input_socket" --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
+DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/m8_restart_hold_probe" --display :99 --input-socket "$input_socket" --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
 for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
 [[ -f "$control_dir/ready" ]] || { wait "$hold_pid"; exit 1; }
 wait_for_frame_after "$before_hold"
