@@ -16,6 +16,7 @@ with tempfile.TemporaryDirectory() as directory:
 summary = json.loads(output)
 assert summary["first_request_occurrence"] == ["QueryExtension", "QueryPointer", "Unknown"]
 assert summary["recurring_requests"] == ["QueryPointer"]
+assert "38" not in summary["opcode_histogram"]
 assert summary["extension_queries"] == ["RENDER"]
 assert summary["unknown_opcodes"] == [250]
 assert summary["reply_requests"] == ["QueryExtension"]

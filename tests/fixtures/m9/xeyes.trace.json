@@ -26,7 +26,6 @@
     "16": 9,
     "18": 11,
     "20": 1,
-    "38": 22,
     "43": 1,
     "53": 5,
     "54": 3,
@@ -56,19 +55,6 @@
     "QueryPointer"
   ],
   "recurring_requests": [
-    "AllocNamedColor",
-    "ChangeProperty",
-    "CreateGC",
-    "CreatePixmap",
-    "CreateWindow",
-    "FreeGC",
-    "FreePixmap",
-    "InternAtom",
-    "PolyFillArc",
-    "PolyFillRectangle",
-    "PutImage",
-    "QueryColors",
-    "QueryExtension",
     "QueryPointer"
   ],
   "extension_queries": [
