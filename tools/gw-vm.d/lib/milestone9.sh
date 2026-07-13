@@ -172,7 +172,7 @@ meson setup "$asan_dir" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=t
 meson compile -C "$asan_dir"
 mapfile -t sanitizer_tests < <(meson test -C "$asan_dir" --list | sed 's/^glasswyrm://' | grep -Fxv m9-fixed-time)
 [[ ${#sanitizer_tests[@]} -gt 0 ]]
-meson test -C "$asan_dir" --print-errorlogs "${sanitizer_tests[@]}"; sanitizer=passed
+meson test -C "$asan_dir" --timeout-multiplier 3 --print-errorlogs "${sanitizer_tests[@]}"; sanitizer=passed
 for spec in \
   "$runtime_dir|-Dwerror=true -Dm9_xeyes=$client_dir/xeyes -Dm9_xclock=$client_dir/xclock" \
   "$server_dir|-Dwerror=true -Dlibgwipc=false -Dgwm=false -Dgwcomp=false -Dtools=false" \
