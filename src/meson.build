@@ -99,6 +99,7 @@ if get_option('drm_backend')
     files(
       'backends/drm/connector_name.cpp',
       'backends/drm/connector_selector.cpp',
+      'backends/drm/dumb_buffer.cpp',
       'backends/drm/mode_selector.cpp',
       'backends/drm/pipeline_selector.cpp',
       'backends/drm/property_cache.cpp',

@@ -565,6 +565,14 @@ if get_option('drm_backend')
     test(drm_model_test[0], drm_test_executable, timeout: 10)
   endforeach
 
+  drm_dumb_buffer_test = executable(
+    'drm_dumb_buffer_test',
+    files('drm/dumb_buffer_test.cpp'),
+    dependencies: [gw_drm_model_dep, gw_output_dep],
+    include_directories: test_source_root_include,
+  )
+  test('drm-dumb-buffer', drm_dumb_buffer_test, timeout: 10)
+
   vt_session_test = executable(
     'vt_session_test',
     files('session/vt_session_test.cpp'),
