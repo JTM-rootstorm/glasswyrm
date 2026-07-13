@@ -101,7 +101,8 @@ struct ResourceLimits {
   std::size_t maximum_canonical_drawable_bytes{256U * 1024U * 1024U};
   std::size_t maximum_pixmaps{8192};
   std::size_t maximum_graphics_contexts{8192};
-  std::size_t maximum_fonts{256};
+  std::size_t maximum_fonts_per_client{256};
+  std::size_t maximum_total_fonts{1024};
 };
 
 class ResourceTable {

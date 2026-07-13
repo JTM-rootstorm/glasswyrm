@@ -63,7 +63,8 @@ int main() {
   limits.maximum_canonical_drawable_bytes = 16;
   limits.maximum_pixmaps = 1;
   limits.maximum_graphics_contexts = 1;
-  limits.maximum_fonts = 1;
+  limits.maximum_fonts_per_client = 1;
+  limits.maximum_total_fonts = 1;
   ResourceTable bounded(kScreenModel, limits);
   gw::test::require(bounded.create_pixmap(owner, base, mask, base|10,
       bounded.screen().root_window, 24, 2, 2) == CreatePixmapStatus::Success,
@@ -88,5 +89,23 @@ int main() {
           bounded.open_font(owner, base, mask, base | 14U) ==
               OpenFontStatus::Success,
       "font capacity is released");
+
+  ResourceLimits font_limits;
+  font_limits.maximum_fonts_per_client = 1;
+  font_limits.maximum_total_fonts = 2;
+  ResourceTable font_bounded(kScreenModel, font_limits);
+  constexpr ClientId second_owner = 8;
+  constexpr std::uint32_t second_base = 0x02400000U;
+  gw::test::require(
+      font_bounded.open_font(owner, base, mask, base | 20U) ==
+              OpenFontStatus::Success &&
+          font_bounded.open_font(owner, base, mask, base | 21U) ==
+              OpenFontStatus::BadAlloc &&
+          font_bounded.open_font(second_owner, second_base, mask,
+                                 second_base | 1U) ==
+              OpenFontStatus::Success &&
+          font_bounded.open_font(9, 0x02800000U, mask, 0x02800001U) ==
+              OpenFontStatus::BadAlloc,
+      "font limits distinguish per-client and total ownership");
   return 0;
 }
