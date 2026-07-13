@@ -223,7 +223,11 @@ GUEST_SCRIPT
 verify_milestone9_source_identity() {
   local status unexpected='' line current
   status="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" || return
-  while IFS= read -r line; do [[ -z "$line" || "$line" == '?? Plans/'* ]] || unexpected+="${unexpected:+$'\n'}$line"; done <<<"$status"
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == '?? Plans/'* ||
+       "$line" == '?? .codex/'* ]] ||
+      unexpected+="${unexpected:+$'\n'}$line"
+  done <<<"$status"
   [[ -z "$unexpected" ]] || { printf 'Milestone 9 VM acceptance requires committed source outside Plans/.\n%s\n' "$unexpected" >&2; return 1; }
   current="$(git -C "$REPO_ROOT" rev-parse HEAD)" || return
   [[ -z "$M9_TESTED_COMMIT" || "$current" == "$M9_TESTED_COMMIT" ]]
