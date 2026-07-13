@@ -521,6 +521,30 @@ if get_option('headless_backend')
     include_directories: test_source_root_include,
   )
   test('headless-output', headless_output_test, timeout: 10)
+
+  software_frame_test = executable(
+    'software_frame_test',
+    files('output/software_frame_test.cpp'),
+    dependencies: gw_headless_dep,
+    include_directories: test_source_root_include,
+  )
+  test('software-frame', software_frame_test, timeout: 10)
+
+  frame_dump_staging_test = executable(
+    'frame_dump_staging_test',
+    files('output/frame_dump_staging_test.cpp'),
+    dependencies: gw_headless_dep,
+    include_directories: test_source_root_include,
+  )
+  test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
+
+  headless_presenter_test = executable(
+    'headless_presenter_test',
+    files('output/headless_presenter_test.cpp'),
+    dependencies: gw_headless_dep,
+    include_directories: test_source_root_include,
+  )
+  test('headless-presenter', headless_presenter_test, timeout: 10)
 endif
 endif
 

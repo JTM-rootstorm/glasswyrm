@@ -1,7 +1,7 @@
 #pragma once
 
-#include "backends/headless/frame_dump.hpp"
-#include "backends/headless/output.hpp"
+#include "backends/headless/presenter.hpp"
+#include "backends/output/software_frame.hpp"
 #include "compositor/buffer.hpp"
 #include "compositor/scene.hpp"
 #include "gwcomp/scene_manifest.hpp"
@@ -75,8 +75,8 @@ private:
   AttachmentMap pending_attachments_;
   AttachmentMap committed_attachments_;
   AttachmentMap pre_snapshot_attachments_;
-  glasswyrm::headless::Output output_;
-  glasswyrm::headless::FrameDumper dumper_;
+  glasswyrm::output::SoftwareFrame output_;
+  glasswyrm::headless::Presenter presenter_;
   std::optional<SceneManifest> scene_manifest_;
   std::map<std::uint64_t, gwipc_buffer_release_reason> releases_;
   std::uint64_t frame_ordinal_{};

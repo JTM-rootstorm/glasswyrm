@@ -35,7 +35,7 @@ select_peer_profile(const gwipc_role role,
 Compositor::Compositor(
     std::filesystem::path dump_directory,
     std::optional<std::filesystem::path> scene_manifest)
-    : dumper_(std::move(dump_directory)) {
+    : presenter_(std::move(dump_directory)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
 

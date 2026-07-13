@@ -75,7 +75,7 @@ PresentedFrame PresentationTransaction::commit(
   auto& pending_attachments_ = compositor.pending_attachments_;
   auto& committed_attachments_ = compositor.committed_attachments_;
   auto& output_ = compositor.output_;
-  auto& dumper_ = compositor.dumper_;
+  auto& presenter_ = compositor.presenter_;
   auto& scene_manifest_ = compositor.scene_manifest_;
   auto& frame_ordinal_ = compositor.frame_ordinal_;
   auto& last_commit_id_ = compositor.last_commit_id_;
@@ -231,7 +231,7 @@ PresentedFrame PresentationTransaction::commit(
   }
   result.damage = attachment_damage.rectangles();
 
-  glasswyrm::headless::Output scratch;
+  glasswyrm::output::SoftwareFrame scratch;
   if (!scratch.configure(staged.output->output_id,
                          staged.output->logical_width,
                          staged.output->logical_height, error)) {
@@ -286,17 +286,18 @@ PresentedFrame PresentationTransaction::commit(
     }
   }
 
-  glasswyrm::headless::FrameDumpMetadata metadata{
-      frame_ordinal_ + 1U,
+  const glasswyrm::output::SoftwareFrameView frame{
+      scratch.spec(staged.output->refresh_millihertz),
+      scratch.pixels(),
+      result.damage,
       value.commit_id,
       value.producer_generation,
-      staged.output->output_id,
-      staged.output->logical_width,
-      staged.output->logical_height,
-      static_cast<std::uint32_t>(result.damage.size())};
-  glasswyrm::headless::FrameDumpResult dump;
-  if (!dumper_.dump(metadata, scratch.pixels(), dump, error)) {
+      frame_ordinal_ + 1U};
+  const auto presentation = presenter_.present(frame);
+  if (presentation.disposition !=
+      glasswyrm::output::PresentDisposition::Complete) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = presentation.error;
     return presented;
   }
 
@@ -307,7 +308,7 @@ PresentedFrame PresentationTransaction::commit(
   ++frame_ordinal_;
   last_generation_ = value.producer_generation;
   presented.ordinal = frame_ordinal_;
-  presented.hash = dump.fnv1a64;
+  presented.hash = presentation.visible_hash;
   return presented;
 }
 

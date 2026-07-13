@@ -65,13 +65,17 @@ if get_option('headless_backend')
   gw_headless_lib = static_library(
     'gw-headless',
     files(
+      'backends/output/software_frame.cpp',
       'backends/headless/output.cpp',
       'backends/headless/frame_dump.cpp',
+      'backends/headless/presenter.cpp',
     ),
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
   gw_headless_dep = declare_dependency(
     link_with: gw_headless_lib,
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
 endif
