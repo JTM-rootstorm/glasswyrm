@@ -178,6 +178,59 @@ void add_window_damage(DispatchResult& result, const ResourceTable& resources,
     result.drawable_damage.push_back(*translated);
 }
 
+std::optional<geometry::Rectangle> child_outer_rectangle(
+    const StructuralEventState& state) {
+  const auto extent_width = static_cast<std::uint32_t>(state.width) +
+                            static_cast<std::uint32_t>(state.border_width) * 2U;
+  const auto extent_height = static_cast<std::uint32_t>(state.height) +
+                             static_cast<std::uint32_t>(state.border_width) * 2U;
+  return geometry::Rectangle{state.x, state.y, extent_width, extent_height};
+}
+
+void add_child_outer_damage(DispatchResult& result,
+                            const ResourceTable& resources,
+                            const StructuralEventState& state) {
+  const auto rectangle = child_outer_rectangle(state);
+  if (rectangle) add_window_damage(result, resources, state.parent, *rectangle);
+}
+
+void add_parent_reveal(DispatchResult& result, const ResourceTable& resources,
+                       const StructuralEventState& state) {
+  const auto* parent = resources.find_window(state.parent);
+  const auto rectangle = child_outer_rectangle(state);
+  if (!parent || !rectangle) return;
+  const auto clipped = geometry::intersect(
+      *rectangle, {0, 0, parent->width, parent->height});
+  if (clipped) result.expose_intents.push_back({state.parent, *clipped});
+}
+
+void add_local_lifecycle_effects(DispatchResult& result,
+                                 const ResourceTable& resources,
+                                 const StructuralTransition& transition) {
+  if (!transition.before) return;
+  const auto* target = resources.find_window(transition.before->target);
+  if (!target || target->window_class != WindowClass::InputOutput) return;
+  if (transition.kind == StructuralTransitionKind::Map && transition.committed &&
+      !transition.before->viewable && transition.committed->viewable) {
+    add_window_damage(result, resources, transition.committed->target,
+                      {0, 0, transition.committed->width,
+                       transition.committed->height});
+  } else if (transition.kind == StructuralTransitionKind::Unmap &&
+             transition.before->viewable && transition.committed &&
+             !transition.committed->viewable) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_parent_reveal(result, resources, *transition.before);
+  } else if (transition.kind == StructuralTransitionKind::Configure &&
+             transition.committed) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_child_outer_damage(result, resources, *transition.committed);
+  } else if (transition.kind == StructuralTransitionKind::Destroy &&
+             transition.before->viewable) {
+    add_child_outer_damage(result, resources, *transition.before);
+    add_parent_reveal(result, resources, *transition.before);
+  }
+}
+
 bool known_drawable(const ResourceTable& resources, const std::uint32_t xid) {
   return resources.find_window(xid) || resources.find_pixmap(xid);
 }
@@ -480,14 +533,17 @@ DispatchResult destroy_window(ServerState& state,
   DispatchResult result;
   result.structural_transitions.reserve(destroyed->postorder.size());
   for (const auto& item : destroyed->postorder) {
-    StructuralEventState before{};
-    before.target = item.xid;
-    before.parent = item.parent;
+    auto before = capture_structural_state(state.resources(), item.xid)
+                      .value_or(StructuralEventState{});
+    before.target = item.xid; before.parent = item.parent;
     before.structure_recipients = item.structure_recipients;
     before.substructure_recipients = item.substructure_recipients;
     result.structural_transitions.push_back(
         {StructuralTransitionKind::Destroy, std::move(before), std::nullopt});
   }
+  if (!result.structural_transitions.empty())
+    add_local_lifecycle_effects(result, state.resources(),
+                                result.structural_transitions.back());
   const auto status = state.resources().commit_destroy_plan(*destroyed);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
@@ -1724,6 +1780,8 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
           {mapped ? StructuralTransitionKind::Map
                   : StructuralTransitionKind::Unmap,
            before, capture_structural_state(state.resources(), decoded.window)});
+      add_local_lifecycle_effects(result, state.resources(),
+                                  result.structural_transitions.back());
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -1774,6 +1832,8 @@ DispatchResult configure_window(ServerState& state,
       result.structural_transitions.push_back(
           {StructuralTransitionKind::Configure, before,
            capture_structural_state(state.resources(), decoded.window)});
+      add_local_lifecycle_effects(result, state.resources(),
+                                  result.structural_transitions.back());
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -1784,6 +1844,49 @@ DispatchResult configure_window(ServerState& state,
       return error(context, request, x11::CoreErrorCode::BadValue);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
+}
+
+DispatchResult map_subwindows(ServerState& state,
+                              const DispatchContext& context,
+                              const x11::FramedRequest& request,
+                              const bool mapped) {
+  x11::WindowLifecycleRequest decoded;
+  const auto status = mapped
+      ? x11::decode_map_subwindows(request.bytes, context.byte_order, decoded)
+      : x11::decode_unmap_subwindows(request.bytes, context.byte_order, decoded);
+  if (status != x11::LifecycleDecodeStatus::Complete)
+    return lifecycle_decode_error(context, request, status);
+  const auto* parent = state.resources().find_window(decoded.window);
+  if (!parent)
+    return error(context, request, x11::CoreErrorCode::BadWindow, decoded.window);
+  const auto children = parent->children;
+  if (std::ranges::any_of(children, [&](const std::uint32_t child) {
+        return state.resources().is_policy_candidate(child);
+      }))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+
+  DispatchResult result;
+  result.structural_transitions.reserve(children.size());
+  for (const auto child : children) {
+    const auto before = capture_structural_state(state.resources(), child);
+    const auto transition_status =
+        state.resources().set_local_map_intent(child, mapped);
+    if (transition_status != LocalLifecycleStatus::Success) {
+      const auto code = transition_status == LocalLifecycleStatus::BadWindow
+                            ? x11::CoreErrorCode::BadWindow
+                        : transition_status == LocalLifecycleStatus::BadMatch
+                            ? x11::CoreErrorCode::BadMatch
+                            : x11::CoreErrorCode::BadValue;
+      return error(context, request, code, child);
+    }
+    result.structural_transitions.push_back(
+        {mapped ? StructuralTransitionKind::Map
+                : StructuralTransitionKind::Unmap,
+         before, capture_structural_state(state.resources(), child)});
+    add_local_lifecycle_effects(result, state.resources(),
+                                result.structural_transitions.back());
+  }
+  return result;
 }
 
 }  // namespace
@@ -1799,8 +1902,12 @@ DispatchResult dispatch_request(ServerState& state,
         return change_window_attributes(state, context, request);
       case x11::CoreOpcode::MapWindow:
         return map_window(state, context, request, true);
+      case x11::CoreOpcode::MapSubwindows:
+        return map_subwindows(state, context, request, true);
       case x11::CoreOpcode::UnmapWindow:
         return map_window(state, context, request, false);
+      case x11::CoreOpcode::UnmapSubwindows:
+        return map_subwindows(state, context, request, false);
       case x11::CoreOpcode::ConfigureWindow:
         return configure_window(state, context, request);
       case x11::CoreOpcode::GetWindowAttributes:
