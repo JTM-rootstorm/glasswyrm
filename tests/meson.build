@@ -330,6 +330,29 @@ if get_option('glasswyrmd') and get_option('libgwipc')
   )
   test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10)
 
+  m9_xeyes_path = get_option('m9_xeyes')
+  m9_xclock_path = get_option('m9_xclock')
+  if (m9_xeyes_path != '' and m9_xclock_path != '' and
+      get_option('gwm') and get_option('gwcomp') and
+      get_option('render_software'))
+    m9_live_profile = find_program('apps/m9_live_profile.sh')
+    foreach profile : ['xeyes', 'xclock-analog', 'xclock-digital', 'combined']
+      test(
+        'm9-live-' + profile,
+        m9_live_profile,
+        args: [profile, glasswyrmd_program, gwm_program, gwcomp_program,
+               gwinput_m8_program, m9_fixed_time_preload,
+               meson.project_source_root() / 'tests/compat/m9/m9_trace_summarize',
+               meson.project_source_root() / 'tests/fixtures/m9',
+               m9_xeyes_path, m9_xclock_path],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program,
+                  gwinput_m8_program, m9_fixed_time],
+        is_parallel: false,
+        timeout: 30,
+      )
+    endforeach
+  endif
+
   published_buffer_test = executable(
     'published_buffer_test',
     files('unit/published_buffer_test.cpp'),
