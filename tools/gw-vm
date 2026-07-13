@@ -26,6 +26,8 @@ source "$GW_VM_DIR/lib/milestone5.sh"
 source "$GW_VM_DIR/lib/milestone6.sh"
 # shellcheck source=gw-vm.d/lib/milestone7.sh
 source "$GW_VM_DIR/lib/milestone7.sh"
+# shellcheck source=gw-vm.d/lib/milestone8.sh
+source "$GW_VM_DIR/lib/milestone8.sh"
 # shellcheck source=gw-vm.d/lib/report.sh
 source "$GW_VM_DIR/lib/report.sh"
 
@@ -59,6 +61,7 @@ Commands:
   milestone5-runtime-test --yes     Build and exercise M5 gwm in the Gentoo VM.
   milestone6-runtime-test --yes     Build and exercise the M6 integrated runtime.
   milestone7-runtime-test --yes     Build and exercise M7 software content.
+  milestone8-runtime-test --yes     Build and exercise M8 synthetic input.
   scenario NAME [ARGS]              Run a fixed named scenario.
 
 Examples:
@@ -73,6 +76,7 @@ Examples:
   ./tools/gw-vm milestone5-runtime-test --yes
   ./tools/gw-vm milestone6-runtime-test --yes
   ./tools/gw-vm milestone7-runtime-test --yes
+  ./tools/gw-vm milestone8-runtime-test --yes
 
 Generated output is written beneath artifacts/vm/.
 EOF
@@ -274,6 +278,7 @@ run_named_scenario() {
     milestone5-runtime-test) action_milestone5 "$@" ;;
     milestone6-runtime-test) action_milestone6 "$@" ;;
     milestone7-runtime-test) action_milestone7 "$@" ;;
+    milestone8-runtime-test) action_milestone8 "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
 }
@@ -346,6 +351,12 @@ action_milestone7() {
   milestone7_runtime_test "$approved"
 }
 
+action_milestone8() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone8_runtime_test "$approved"
+}
+
 main() {
   if [[ "${1:-}" == "--config" ]]; then
     (($# >= 2)) || die "--config requires a path."
@@ -409,6 +420,7 @@ main() {
     milestone5-runtime-test) action_milestone5 "$@" ;;
     milestone6-runtime-test) action_milestone6 "$@" ;;
     milestone7-runtime-test) action_milestone7 "$@" ;;
+    milestone8-runtime-test) action_milestone8 "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
   esac

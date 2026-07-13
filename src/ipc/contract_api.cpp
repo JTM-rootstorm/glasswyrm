@@ -1,9 +1,11 @@
 #include <glasswyrm/ipc/contracts.h>
 #include <glasswyrm/ipc/lifecycle.h>
+#include <glasswyrm/ipc/input.h>
 #include <glasswyrm/ipc/policy.h>
 
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
+#include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 
 #include <algorithm>
@@ -19,7 +21,9 @@ using ContractValue = std::variant<w::OutputUpsert, w::OutputRemove,
     w::BufferRelease, w::SurfaceDamage, w::FrameCommit, w::FrameAcknowledged,
     w::PolicyContextUpsert, w::PolicyWindowUpsert, w::PolicyWindowRemove,
     w::PolicyCommit, w::PolicyWindowState, w::PolicyAcknowledged,
-    w::PolicyLifecycleWindowUpsert, w::SurfacePolicyUpsert>;
+    w::PolicyLifecycleWindowUpsert, w::SurfacePolicyUpsert,
+    w::SyntheticMotion, w::SyntheticButton, w::SyntheticKey,
+    w::SyntheticBarrier, w::SyntheticInputAcknowledged>;
 struct gwipc_decoded_contract {
   std::uint16_t type{};
   ContractValue value{w::OutputRemove{}};
@@ -35,6 +39,11 @@ struct gwipc_decoded_contract {
   gwipc_policy_window_state policy_window_state{}; gwipc_policy_acknowledged policy_acknowledged{};
   gwipc_policy_lifecycle_window_upsert policy_lifecycle_window_upsert{};
   gwipc_surface_policy_upsert surface_policy_upsert{};
+  gwipc_synthetic_motion synthetic_motion{};
+  gwipc_synthetic_button synthetic_button{};
+  gwipc_synthetic_key synthetic_key{};
+  gwipc_synthetic_barrier synthetic_barrier{};
+  gwipc_synthetic_input_acknowledged synthetic_input_acknowledged{};
 };
 
 namespace {
@@ -76,6 +85,11 @@ SIMPLE_ENCODE(gwipc_output_remove, output_remove, w::OutputRemove, {v->output_id
 SIMPLE_ENCODE(gwipc_surface_remove, surface_remove, w::SurfaceRemove, {v->surface_id})
 SIMPLE_ENCODE(gwipc_buffer_detach, buffer_detach, w::BufferDetach, {v->surface_id, v->buffer_id})
 SIMPLE_ENCODE(gwipc_buffer_release, buffer_release, w::BufferRelease, {v->buffer_id, static_cast<w::BufferReleaseReason>(v->reason)})
+SIMPLE_ENCODE(gwipc_synthetic_motion, synthetic_motion, w::SyntheticMotion, {v->input_id,v->time_ms,v->root_x,v->root_y,v->flags})
+SIMPLE_ENCODE(gwipc_synthetic_button, synthetic_button, w::SyntheticButton, {v->input_id,v->time_ms,v->button,v->pressed,v->reserved16,v->flags})
+SIMPLE_ENCODE(gwipc_synthetic_key, synthetic_key, w::SyntheticKey, {v->input_id,v->time_ms,v->keycode,v->pressed,v->reserved16,v->flags})
+SIMPLE_ENCODE(gwipc_synthetic_barrier, synthetic_barrier, w::SyntheticBarrier, {v->input_id,v->flags})
+SIMPLE_ENCODE(gwipc_synthetic_input_acknowledged, synthetic_input_acknowledged, w::SyntheticInputAcknowledged, {v->input_id,v->time_ms,static_cast<w::SyntheticInputResult>(v->result),v->root_x,v->root_y,v->pointer_window,v->focus_window,v->state,v->reserved16,v->delivered_event_count,v->flags})
 SIMPLE_ENCODE(gwipc_frame_commit, frame_commit, w::FrameCommit, {v->commit_id, v->output_id, v->producer_generation, v->flags})
 SIMPLE_ENCODE(gwipc_frame_acknowledged, frame_acknowledged, w::FrameAcknowledged, {v->commit_id, v->output_id, v->presented_generation, static_cast<w::FrameResult>(v->result)})
 SIMPLE_ENCODE(gwipc_policy_context_upsert, policy_context_upsert, w::PolicyContextUpsert, {v->root_window_id,v->workspace_id,v->output_id,v->work_x,v->work_y,v->work_width,v->work_height,v->flags})
@@ -141,6 +155,9 @@ gwipc_status gwipc_contract_decode_message(const gwipc_message* m, gwipc_decoded
       DECODE_CASE(GWIPC_MESSAGE_POLICY_WINDOW_REMOVE,w::PolicyWindowRemove) DECODE_CASE(GWIPC_MESSAGE_POLICY_COMMIT,w::PolicyCommit)
       DECODE_CASE(GWIPC_MESSAGE_POLICY_WINDOW_STATE,w::PolicyWindowState) DECODE_CASE(GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,w::PolicyAcknowledged)
       DECODE_CASE(GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT,w::PolicyLifecycleWindowUpsert) DECODE_CASE(GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,w::SurfacePolicyUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_MOTION,w::SyntheticMotion) DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_BUTTON,w::SyntheticButton)
+      DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_KEY,w::SyntheticKey) DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_BARRIER,w::SyntheticBarrier)
+      DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,w::SyntheticInputAcknowledged)
       default: delete d; return GWIPC_STATUS_INVALID_ARGUMENT; }
 #undef DECODE_CASE
     if(s!=w::CodecStatus::Ok){delete d;return codec_status(s);}
@@ -166,6 +183,11 @@ SIMPLE_ACCESS(policy_context_upsert,GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT,w::Polic
 SIMPLE_ACCESS(policy_window_remove,GWIPC_MESSAGE_POLICY_WINDOW_REMOVE,w::PolicyWindowRemove,{sizeof(o),v.window_id,{}})
 SIMPLE_ACCESS(policy_commit,GWIPC_MESSAGE_POLICY_COMMIT,w::PolicyCommit,{sizeof(o),v.commit_id,v.producer_generation,v.flags,{}})
 SIMPLE_ACCESS(policy_acknowledged,GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,w::PolicyAcknowledged,{sizeof(o),v.commit_id,v.producer_generation,v.applied_generation,v.policy_hash,v.window_count,static_cast<gwipc_policy_result>(v.result),{}})
+SIMPLE_ACCESS(synthetic_motion,GWIPC_MESSAGE_SYNTHETIC_MOTION,w::SyntheticMotion,{sizeof(o),v.input_id,v.time_ms,v.root_x,v.root_y,v.flags,{}})
+SIMPLE_ACCESS(synthetic_button,GWIPC_MESSAGE_SYNTHETIC_BUTTON,w::SyntheticButton,{sizeof(o),v.input_id,v.time_ms,v.button,v.pressed,v.reserved16,v.flags,{}})
+SIMPLE_ACCESS(synthetic_key,GWIPC_MESSAGE_SYNTHETIC_KEY,w::SyntheticKey,{sizeof(o),v.input_id,v.time_ms,v.keycode,v.pressed,v.reserved16,v.flags,{}})
+SIMPLE_ACCESS(synthetic_barrier,GWIPC_MESSAGE_SYNTHETIC_BARRIER,w::SyntheticBarrier,{sizeof(o),v.input_id,v.flags,{}})
+SIMPLE_ACCESS(synthetic_input_acknowledged,GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,w::SyntheticInputAcknowledged,{sizeof(o),v.input_id,v.time_ms,static_cast<gwipc_synthetic_input_result>(v.result),v.root_x,v.root_y,v.pointer_window,v.focus_window,v.state,v.reserved16,v.delivered_event_count,v.flags,{}})
 #undef SIMPLE_ACCESS
 
 const gwipc_output_upsert* gwipc_decoded_output_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_OUTPUT_UPSERT)return nullptr;const auto&v=std::get<w::OutputUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->output_upsert;o={sizeof(o),v.output_id,(uint8_t)v.enabled,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.physical_pixel_width,v.physical_pixel_height,v.refresh_millihertz,v.scale_numerator,v.scale_denominator,(gwipc_transform)v.transform,color(v.color),{}};return&o;}

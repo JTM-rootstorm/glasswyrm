@@ -13,6 +13,14 @@ x11_event_test = executable(
 )
 test('x11-structural-events', x11_event_test, timeout: 10)
 
+x11_input_event_test = executable(
+  'x11_input_event_test',
+  files('protocol/x11_input_event_test.cpp'),
+  dependencies: gw_x11_setup_dep,
+  include_directories: include_directories('..'),
+)
+test('x11-input-events', x11_input_event_test, timeout: 10)
+
 x11_exposure_event_test = executable(
   'x11_exposure_event_test',
   files('protocol/x11_exposure_event_test.cpp'),
@@ -26,6 +34,13 @@ test(
   'm7-fixture-checksums',
   m7_fixture_validate,
   args: [meson.project_source_root() / 'tests/fixtures/m7'],
+  timeout: 10,
+)
+m8_fixture_validate = find_program('tools/m8_fixture_validate.sh')
+test(
+  'm8-fixture-checksums',
+  m8_fixture_validate,
+  args: [meson.project_source_root() / 'tests/fixtures/m8'],
   timeout: 10,
 )
 
@@ -103,6 +118,13 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  input_foundation_test = executable(
+    'input_foundation_test',
+    files('unit/input_foundation_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('input-foundation', input_foundation_test, timeout: 10)
   drawable_core_test = executable(
     'drawable_core_test',
     files('unit/drawable_core_test.cpp'),
@@ -203,10 +225,35 @@ if get_option('glasswyrmd')
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 45,
     )
+    glasswyrmd_input_recovery_test = executable(
+      'glasswyrmd_input_recovery_test',
+      files(
+        'integration/glasswyrmd_input_recovery_test.cpp',
+        'helpers/synthetic_input_client.cpp',
+      ),
+      dependencies: [gwipc_dep, gw_x11_setup_dep],
+      include_directories: test_source_root_include,
+    )
+    test(
+      'glasswyrmd-input-recovery',
+      glasswyrmd_input_recovery_test,
+      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+             gwcomp_program.full_path()],
+      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+      timeout: 30,
+    )
   endif
 endif
 
 if get_option('glasswyrmd') and get_option('libgwipc')
+  gwinput_m8_program = executable(
+    'gwinput_m8',
+    files('integration/gwinput_m8.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10)
+
   published_buffer_test = executable(
     'published_buffer_test',
     files('unit/published_buffer_test.cpp'),
@@ -413,6 +460,14 @@ if get_option('libgwipc')
   )
   test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10)
 
+  gwipc_input_contract_test = executable(
+    'gwipc_input_contract_test',
+    files('unit/ipc/input_contract_test.cpp'),
+    dependencies: [gwipc_wire_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-input-contract', gwipc_input_contract_test, timeout: 10)
+
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',
     files('unit/ipc/public_contract_api_test.cpp'),
@@ -610,6 +665,17 @@ if get_option('glasswyrmd')
     dependencies: x11_fake_client_dep,
     include_directories: test_source_root_include,
   )
+  if get_option('libgwipc')
+    x11_milestone8_probe = executable(
+      'x11_milestone8_probe',
+      files(
+        'integration/x11_milestone8_probe.cpp',
+        'helpers/synthetic_input_client.cpp',
+      ),
+      dependencies: [x11_fake_client_dep, gwipc_dep],
+      include_directories: test_source_root_include,
+    )
+  endif
 
   xcb_test_dependency = dependency('xcb', required: false)
   if xcb_test_dependency.found()
@@ -639,6 +705,26 @@ if get_option('glasswyrmd')
       files('xcb/xcb_milestone7_probe.c'),
       dependencies: xcb_test_dependency,
     )
+    if get_option('libgwipc')
+      xcb_milestone8_probe = executable(
+        'xcb_milestone8_probe',
+        files(
+          'xcb/xcb_milestone8_probe.cpp',
+          'helpers/synthetic_input_client.cpp',
+        ),
+        dependencies: [xcb_test_dependency, gwipc_dep],
+        include_directories: test_source_root_include,
+      )
+      m8_restart_hold_probe = executable(
+        'm8_restart_hold_probe',
+        files(
+          'xcb/m8_restart_hold_probe.cpp',
+          'helpers/synthetic_input_client.cpp',
+        ),
+        dependencies: [xcb_test_dependency, gwipc_dep],
+        include_directories: test_source_root_include,
+      )
+    endif
     m7_restart_hold_probe = executable(
       'm7_restart_hold_probe',
       files('xcb/m7_restart_hold_probe.c'),

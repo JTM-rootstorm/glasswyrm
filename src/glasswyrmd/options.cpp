@@ -12,7 +12,7 @@ namespace {
 void print_usage(std::ostream& output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
-            "[--software-content]\n";
+            "[--software-content] [--synthetic-input-socket PATH]\n";
 }
 
 bool parse_display(std::string_view text, std::uint16_t& display) {
@@ -67,6 +67,18 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
       options.software_content = true;
       continue;
     }
+    if (argument == "--synthetic-input-socket") {
+      if (++index >= argc || argv[index][0] == '\0') {
+        error << "glasswyrmd: --synthetic-input-socket requires a non-empty path\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      if (options.synthetic_input_socket.has_value()) {
+        error << "glasswyrmd: duplicate option: --synthetic-input-socket\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.synthetic_input_socket = argv[index];
+      continue;
+    }
     if (argument == "--wm-socket" || argument == "--compositor-socket") {
       if (++index >= argc || argv[index][0] == '\0') {
         error << "glasswyrmd: " << argument
@@ -93,6 +105,11 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
   }
   if (options.software_content && !options.integrated()) {
     error << "glasswyrmd: --software-content requires --wm-socket and "
+             "--compositor-socket\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.synthetic_input_socket && !options.integrated()) {
+    error << "glasswyrmd: --synthetic-input-socket requires --wm-socket and "
              "--compositor-socket\n";
     return ParseOptionsResult::ExitFailure;
   }

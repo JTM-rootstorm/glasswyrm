@@ -5,6 +5,7 @@
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
+#include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 
 #include <fcntl.h>
@@ -59,6 +60,12 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
       return GWIPC_CAP_WINDOW_POLICY;
     case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT:
       return GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_WINDOW_LIFECYCLE;
+    case GWIPC_MESSAGE_SYNTHETIC_MOTION:
+    case GWIPC_MESSAGE_SYNTHETIC_BUTTON:
+    case GWIPC_MESSAGE_SYNTHETIC_KEY:
+    case GWIPC_MESSAGE_SYNTHETIC_BARRIER:
+    case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED:
+      return GWIPC_CAP_SYNTHETIC_INPUT;
     default:
       return 0;
   }
@@ -95,6 +102,11 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_POLICY_COMMIT:
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
+    case GWIPC_MESSAGE_SYNTHETIC_MOTION:
+    case GWIPC_MESSAGE_SYNTHETIC_BUTTON:
+    case GWIPC_MESSAGE_SYNTHETIC_KEY:
+    case GWIPC_MESSAGE_SYNTHETIC_BARRIER:
+    case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED:
       return true;
     default:
       return false;
@@ -388,6 +400,11 @@ gwipc_status validate_application(gwipc_connection& connection,
         return GWIPC_STATUS_PROTOCOL_ERROR;
       break;
     }
+    case GWIPC_MESSAGE_SYNTHETIC_MOTION: { wire::SyntheticMotion value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_ACK_REQUIRED)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_SYNTHETIC_BUTTON: { wire::SyntheticButton value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_ACK_REQUIRED)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_SYNTHETIC_KEY: { wire::SyntheticKey value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_ACK_REQUIRED)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_SYNTHETIC_BARRIER: { wire::SyntheticBarrier value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_ACK_REQUIRED)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED: { wire::SyntheticInputAcknowledged value; codec=wire::decode(payload,value); if(flags!=GWIPC_FLAG_REPLY)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
     case GWIPC_MESSAGE_PONG: {
       wire::Pong value;
       codec = wire::decode(payload, value);
@@ -818,6 +835,18 @@ gwipc_status receive_one(gwipc_connection& connection) {
       }
       connection.pending_policy_commits.erase(expected);
     }
+    if (envelope.type == MessageType::SyntheticInputAcknowledged) {
+      wire::SyntheticInputAcknowledged acknowledged;
+      const auto expected = connection.pending_synthetic_inputs.find(envelope.reply_to);
+      if (expected == connection.pending_synthetic_inputs.end() ||
+          wire::decode(payload, acknowledged) != wire::CodecStatus::Ok ||
+          acknowledged.input_id != expected->second) {
+        close_received();
+        return protocol_failure(connection, wire::ProtocolErrorCode::UnexpectedReply,
+                                envelope, "synthetic input acknowledgement does not match input");
+      }
+      connection.pending_synthetic_inputs.erase(expected);
+    }
     const bool protocol_error = envelope.type == MessageType::ProtocolError;
     if (connection.pending_replies.erase(envelope.reply_to) == 0 &&
         !(protocol_error && envelope.reply_to > 0 &&
@@ -920,11 +949,29 @@ gwipc_status receive_one(gwipc_connection& connection) {
                                                commit.commit_id);
     tracked_policy_commit = true;
   }
+  bool tracked_synthetic_input = false;
+  if (envelope.type == MessageType::SyntheticMotion || envelope.type == MessageType::SyntheticButton ||
+      envelope.type == MessageType::SyntheticKey || envelope.type == MessageType::SyntheticBarrier) {
+    std::uint64_t input_id{};
+    if (envelope.type == MessageType::SyntheticMotion) { wire::SyntheticMotion v; wire::decode(payload,v); input_id=v.input_id; }
+    else if (envelope.type == MessageType::SyntheticButton) { wire::SyntheticButton v; wire::decode(payload,v); input_id=v.input_id; }
+    else if (envelope.type == MessageType::SyntheticKey) { wire::SyntheticKey v; wire::decode(payload,v); input_id=v.input_id; }
+    else { wire::SyntheticBarrier v; wire::decode(payload,v); input_id=v.input_id; }
+    if (connection.incoming_synthetic_inputs.size() >= connection.config.maximum_queued_messages) {
+      close_received();
+      return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded, envelope,
+                              "synthetic input acknowledgement tracking limit exceeded", GWIPC_STATUS_LIMIT_EXCEEDED);
+    }
+    connection.incoming_synthetic_inputs.emplace(envelope.sequence,input_id);
+    tracked_synthetic_input=true;
+  }
   if (connection.incoming.size() >= connection.config.maximum_queued_messages) {
     if (tracked_frame_commit)
       connection.incoming_frame_commits.erase(envelope.sequence);
     if (tracked_policy_commit)
       connection.incoming_policy_commits.erase(envelope.sequence);
+    if (tracked_synthetic_input)
+      connection.incoming_synthetic_inputs.erase(envelope.sequence);
     close_received();
     return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded,
                             envelope, "incoming queue limit exceeded",
@@ -937,6 +984,8 @@ gwipc_status receive_one(gwipc_connection& connection) {
       connection.incoming_frame_commits.erase(envelope.sequence);
     if (tracked_policy_commit)
       connection.incoming_policy_commits.erase(envelope.sequence);
+    if (tracked_synthetic_input)
+      connection.incoming_synthetic_inputs.erase(envelope.sequence);
     close_received();
     return GWIPC_STATUS_OUT_OF_MEMORY;
   }
@@ -951,6 +1000,10 @@ gwipc_status receive_one(gwipc_connection& connection) {
   } catch (...) {
     if (tracked_frame_commit)
       connection.incoming_frame_commits.erase(envelope.sequence);
+    if (tracked_policy_commit)
+      connection.incoming_policy_commits.erase(envelope.sequence);
+    if (tracked_synthetic_input)
+      connection.incoming_synthetic_inputs.erase(envelope.sequence);
     close_received();
     return GWIPC_STATUS_OUT_OF_MEMORY;
   }
@@ -1166,6 +1219,8 @@ gwipc_status gwipc_connection_enqueue_with_sequence(
   bool frame_acknowledges_incoming = false;
   bool policy_commit_inserted = false;
   bool policy_acknowledges_incoming = false;
+  bool synthetic_input_inserted = false;
+  bool synthetic_input_acknowledges_incoming = false;
   const auto pending_sequence = connection->next_send_sequence;
   if (message->type == GWIPC_MESSAGE_PING) {
     gw::ipc::wire::Ping ping;
@@ -1221,6 +1276,26 @@ gwipc_status gwipc_connection_enqueue_with_sequence(
       return GWIPC_STATUS_INVALID_STATE;
     policy_acknowledges_incoming = true;
   }
+  if (message->type == GWIPC_MESSAGE_SYNTHETIC_MOTION || message->type == GWIPC_MESSAGE_SYNTHETIC_BUTTON ||
+      message->type == GWIPC_MESSAGE_SYNTHETIC_KEY || message->type == GWIPC_MESSAGE_SYNTHETIC_BARRIER) {
+    std::uint64_t input_id{};
+    if (message->type == GWIPC_MESSAGE_SYNTHETIC_MOTION) { gw::ipc::wire::SyntheticMotion v; gw::ipc::wire::decode(payload,v); input_id=v.input_id; }
+    else if (message->type == GWIPC_MESSAGE_SYNTHETIC_BUTTON) { gw::ipc::wire::SyntheticButton v; gw::ipc::wire::decode(payload,v); input_id=v.input_id; }
+    else if (message->type == GWIPC_MESSAGE_SYNTHETIC_KEY) { gw::ipc::wire::SyntheticKey v; gw::ipc::wire::decode(payload,v); input_id=v.input_id; }
+    else { gw::ipc::wire::SyntheticBarrier v; gw::ipc::wire::decode(payload,v); input_id=v.input_id; }
+    if (connection->pending_synthetic_inputs.size() >= connection->config.maximum_queued_messages)
+      return GWIPC_STATUS_LIMIT_EXCEEDED;
+    connection->pending_synthetic_inputs.emplace(pending_sequence,input_id);
+    synthetic_input_inserted=true;
+  }
+  if (message->type == GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED) {
+    gw::ipc::wire::SyntheticInputAcknowledged acknowledged;
+    const auto expected=connection->incoming_synthetic_inputs.find(message->reply_to);
+    if (gw::ipc::wire::decode(payload,acknowledged)!=gw::ipc::wire::CodecStatus::Ok ||
+        expected==connection->incoming_synthetic_inputs.end() || expected->second!=acknowledged.input_id)
+      return GWIPC_STATUS_INVALID_STATE;
+    synthetic_input_acknowledges_incoming=true;
+  }
   gwipc_status status = GWIPC_STATUS_SYSTEM_ERROR;
   try {
     status = gw::ipc::queue_internal(*connection, message->type,
@@ -1233,6 +1308,8 @@ gwipc_status gwipc_connection_enqueue_with_sequence(
       connection->pending_frame_commits.erase(pending_sequence);
     if (policy_commit_inserted)
       connection->pending_policy_commits.erase(pending_sequence);
+    if (synthetic_input_inserted)
+      connection->pending_synthetic_inputs.erase(pending_sequence);
     throw;
   }
   if (status == GWIPC_STATUS_OK) {
@@ -1241,6 +1318,8 @@ gwipc_status gwipc_connection_enqueue_with_sequence(
       connection->incoming_frame_commits.erase(message->reply_to);
     if (policy_acknowledges_incoming)
       connection->incoming_policy_commits.erase(message->reply_to);
+    if (synthetic_input_acknowledges_incoming)
+      connection->incoming_synthetic_inputs.erase(message->reply_to);
     *out_sequence = pending_sequence;
   } else if (ping_inserted) {
     connection->pending_ping_nonces.erase(pending_sequence);
@@ -1249,6 +1328,8 @@ gwipc_status gwipc_connection_enqueue_with_sequence(
     connection->pending_frame_commits.erase(pending_sequence);
   if (status != GWIPC_STATUS_OK && policy_commit_inserted)
     connection->pending_policy_commits.erase(pending_sequence);
+  if (status != GWIPC_STATUS_OK && synthetic_input_inserted)
+    connection->pending_synthetic_inputs.erase(pending_sequence);
   return status;
   } catch (const std::bad_alloc&) {
     return GWIPC_STATUS_OUT_OF_MEMORY;

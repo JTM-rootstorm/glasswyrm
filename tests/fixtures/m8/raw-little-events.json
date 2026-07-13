@@ -1,0 +1,1 @@
+{"byte_order":"little","scenario":"routing","events":[{"type":6,"detail":0,"time":2,"event":2097153,"state":0,"sequence":3},{"type":4,"detail":1,"time":3,"event":2097153,"state":0,"sequence":3},{"type":5,"detail":1,"time":4,"event":2097153,"state":256,"sequence":3}]}
