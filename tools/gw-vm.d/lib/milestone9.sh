@@ -112,7 +112,7 @@ exec > >(tee -a "$runtime_log") 2>&1
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja virtual/pkgconfig \
   net-misc/curl dev-build/make \
   x11-libs/libxcb x11-base/xcb-proto x11-libs/libX11 x11-libs/libXt \
-  x11-libs/libXaw x11-libs/libXmu x11-libs/libXpm x11-libs/libXi x11-libs/libXext x11-libs/libXrender \
+  x11-libs/libXaw x11-libs/libXmu x11-libs/libXpm x11-libs/libXi x11-libs/libXft x11-libs/libXext x11-libs/libXrender \
   x11-libs/libxkbfile
 for forbidden in x11-base/xorg-server gui-libs/wayland x11-base/xwayland media-libs/mesa \
   x11-libs/libdrm dev-libs/libinput; do
