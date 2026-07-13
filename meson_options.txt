@@ -7,7 +7,7 @@ option('builtin_wm_policy', type: 'boolean', value: false, description: 'Reserve
 option('single_process_debug', type: 'boolean', value: false, description: 'Reserve the single-process debug mode.')
 option('ipc_trace', type: 'boolean', value: false, description: 'Reserve internal IPC tracing support.')
 option('headless_backend', type: 'boolean', value: true, description: 'Build the bounded headless output backend.')
-option('drm_backend', type: 'boolean', value: false, description: 'Reserve the DRM/KMS backend build path.')
+option('drm_backend', type: 'boolean', value: false, description: 'Build the Linux DRM/KMS software-scanout backend.')
 option('render_software', type: 'boolean', value: true, description: 'Build the scalar reference software renderer.')
 option('render_gl', type: 'boolean', value: false, description: 'Reserve the OpenGL renderer build path.')
 option('render_vulkan', type: 'boolean', value: false, description: 'Reserve the Vulkan renderer build path.')
