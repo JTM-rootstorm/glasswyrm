@@ -60,19 +60,10 @@
     "ListFonts",
     "LookupColor"
   ],
-  "recurring_requests": [
-    "ChangeProperty",
-    "CreateGC",
-    "CreatePixmap",
-    "CreateWindow",
-    "FreeGC",
-    "FreePixmap",
-    "InternAtom",
-    "ListFonts",
-    "PutImage",
-    "QueryExtension"
+  "recurring_requests": [],
+  "extension_queries": [
+    "OTHER"
   ],
-  "extension_queries": [],
   "unknown_opcodes": [],
   "application_connection_count": 1,
   "maximum_request_length": 408
