@@ -4,12 +4,14 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 7. `glasswyrmd` retains its standalone
+The project has completed Milestone 8. `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
 default; the explicit M7 `--software-content` mode adds depth-24 pixmaps,
 graphics contexts, core software raster requests, exposure events, and
-buffered top-level window publication.
+buffered top-level window publication. The explicit M8 synthetic-input option
+adds deterministic pointer, button, raw-keycode, crossing, focus, and event
+routing through a public GWIPC DiagnosticTool connection.
 Milestone 4 has added tested scene/damage, read-only buffer import,
 software rendering, bounded headless output, and deterministic PPM dumps.
 `gwcomp` accepts and presents every repository-owned synthetic producer
@@ -20,7 +22,9 @@ policy-snapshot behavior. Integrated startup, full policy snapshots,
 metadata-only compositor scenes, deferred X11 lifecycle barriers, and
 structural event routing are implemented and remain covered by the M6
 regression path. Milestone 7 adds the first honestly painted client windows
-without moving X11 raster semantics into `gwcomp`. There is still no input,
+without moving X11 raster semantics into `gwcomp`. Milestone 8 keeps input
+state and X11 event semantics in `glasswyrmd` while click focus remains a GWM
+policy transaction. There is still no real-device input, grabs, XKB, cursors,
 text or font rendering, child-window composition, broad X11 application
 support, or DRM/KMS output. Runtime tools remain placeholders.
 
@@ -87,7 +91,7 @@ The complete command line is:
 ```text
 glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
-            [--software-content]
+            [--software-content] [--synthetic-input-socket PATH]
             [--help] [--version]
 ```
 
@@ -130,8 +134,21 @@ Add `--software-content` to enable the Milestone 7 buffered reference path:
 ```
 
 This opt-in profile supports the documented depth-24 drawable and GXcopy
-subset only. It is intended for repository-owned toy clients and does not
-claim input or normal application compatibility.
+subset only. Add the M8 listener to the same three-process launch with:
+
+```sh
+./build/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock \
+  --software-content \
+  --synthetic-input-socket /tmp/glasswyrm-input.sock
+./build/tests/gwinput_m8 --socket /tmp/glasswyrm-input.sock \
+  --scenario click-focus --output /tmp/glasswyrm-input.json
+```
+
+The provider supplies device-like records, never target XIDs. This remains a
+repository-owned toy-client path and does not claim real input or normal
+application compatibility.
 
 ## Setup probes
 
@@ -177,8 +194,8 @@ core error. It never maps or displays the window.
 
 ## Current binaries
 
-- `glasswyrmd`: owns X11 protocol and resource truth; implements standalone M2,
-  the accepted integrated M6 lifecycle, and the opt-in M7 drawable bridge.
+- `glasswyrmd`: owns X11 protocol, resource, and input-routing truth; implements
+  standalone M2, the integrated lifecycle, and opt-in M7/M8 content and input.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
 - `gwcomp`: owns headless composition and final display authority; it retains
@@ -190,7 +207,7 @@ core error. It never maps or displays the window.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.4 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.5 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and compositor,
 window-policy, and lifecycle vocabularies. Wire 1.0 and
@@ -303,6 +320,17 @@ It preserves the M6 metadata/no-PPM substage, then validates both client byte
 orders, drawable resources, exposure events, deterministic buffered frames,
 buffer replacement and release, and live compositor/GWM restart replay.
 
+The Milestone 8 synthetic-input acceptance command is:
+
+```sh
+./tools/gw-vm milestone8-runtime-test --yes
+```
+
+It preserves M1-M7 regressions, runs both raw client byte orders and the
+two-client XCB script, validates event and framebuffer goldens, isolates a
+malformed provider, and holds the same X11 and input connections across GWM
+and compositor restart. No Xorg, Xwayland, libinput, or device access is used.
+
 ## Compatibility
 
 Glasswyrm claims the standalone behavior documented in
@@ -310,5 +338,7 @@ Glasswyrm claims the standalone behavior documented in
 [Milestone 6 profile](docs/protocols/x11-milestone-6.md) records the narrower
 integrated behavior accepted for M6. The
 [Milestone 7 profile](docs/protocols/x11-milestone-7.md) records the exact
-opt-in drawable and raster subset. None is a compatibility claim for normal
-X11 applications.
+opt-in drawable and raster subset. The
+[Milestone 8 profile](docs/protocols/x11-milestone-8.md) records the exact
+synthetic event-routing subset. None is a compatibility claim for normal X11
+applications.
