@@ -75,9 +75,10 @@ while IFS='|' read -r raw_path raw_lines raw_responsibility raw_reason raw_revis
   allowed_lines["${path}"]=${lines}
 done < "${allowlist_file}"
 
+baseline_available=1
 if ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}^{commit}" 2>/dev/null; then
-  printf 'source-layout: required baseline commit is unavailable: %s\n' "${BASE_COMMIT}" >&2
-  exit 1
+  baseline_available=0
+  printf 'source-layout: note: baseline commit unavailable; enforcing the 600-line M10 budget on every non-allowlisted file\n' >&2
 fi
 
 is_materially_rewritten() {
@@ -165,7 +166,12 @@ while IFS= read -r -d '' absolute_path; do
   introduced=0
   material=0
 
-  if ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}:${path}" 2>/dev/null; then
+  if (( ! baseline_available )); then
+    # Release and VM source exports intentionally omit .git. Applying the M10
+    # budget to every file except the one reviewed hard-default exception is a
+    # conservative substitute for baseline-aware change classification.
+    if [[ -z ${allowed_lines[${path}]+set} ]]; then material=1; fi
+  elif ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}:${path}" 2>/dev/null; then
     introduced=1
   else
     baseline_lines=$(git -C "${repo_root}" show "${BASE_COMMIT}:${path}" | awk 'END { print NR }')
