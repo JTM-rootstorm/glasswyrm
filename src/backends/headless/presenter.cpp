@@ -26,6 +26,14 @@ output::PresentResult Presenter::present(
     return present;
   }
 
+  const auto canonical_hash = output::hash_visible_xrgb8888(frame.pixels);
+  if (staged.fnv1a64() != canonical_hash) {
+    dumper_.abort(staged);
+    present.disposition = output::PresentDisposition::Fatal;
+    present.error = "headless dump hash differs from the canonical software frame";
+    return present;
+  }
+
   FrameDumpResult dump;
   if (!dumper_.commit(staged, dump, present.error)) {
     dumper_.abort(staged);
@@ -33,7 +41,7 @@ output::PresentResult Presenter::present(
   }
 
   present.disposition = output::PresentDisposition::Complete;
-  present.visible_hash = dump.fnv1a64;
+  present.visible_hash = canonical_hash;
   return present;
 }
 

@@ -88,6 +88,11 @@ bool take_optional_path(int argc, char** argv, int& index,
 }
 
 bool validate_backend_options(const Options& options, std::ostream& error) {
+  if (options.backend == Backend::Headless && options.ipc_socket.empty() &&
+      options.dump_dir.empty()) {
+    error << "gwcomp: --ipc-socket and --dump-dir are required\n";
+    return false;
+  }
   if (options.ipc_socket.empty()) {
     error << "gwcomp: --ipc-socket is required\n";
     return false;
