@@ -481,6 +481,14 @@ if get_option('gwcomp') and get_option('headless_backend')
 endif
 
 if get_option('gwcomp')
+gwcomp_signal_runtime_test = executable(
+  'gwcomp_signal_runtime_test',
+  files('unit/gwcomp_signal_runtime_test.cpp'),
+  dependencies: gwcomp_options_dep,
+  include_directories: test_source_root_include,
+)
+test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
+
 compositor_geometry_test = executable(
   'compositor_geometry_test',
   files('unit/compositor_geometry_test.cpp'),
