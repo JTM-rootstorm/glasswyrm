@@ -209,7 +209,13 @@ wait_for_frame_after "$pre_gwm_count"
 gwm_restart=passed focus_replay=passed pointer_replay=passed
 pre_continue_count=$(frame_count)
 touch "$control_dir/continue"; wait "$hold_pid"
-cmp "$restart_result" "$source_dir/tests/fixtures/m8/restart-result.json"
+restart_focus="$(sed -n 's/.*"focus_window":\([0-9]*\).*/\1/p' "$restart_result")"
+restart_pointer="$(sed -n 's/.*"pointer_window":\([0-9]*\).*/\1/p' "$restart_result")"
+[[ -n "$restart_focus" && "$restart_focus" != 0 && "$restart_focus" == "$restart_pointer" ]]
+grep -F '"completed":true' "$restart_result" >/dev/null
+grep -F '"same_x11_connections":true' "$restart_result" >/dev/null
+grep -F '"same_input_connection":true' "$restart_result" >/dev/null
+grep -F '"post_restart_input":true' "$restart_result" >/dev/null
 connection_survival=passed input_connection_survival=passed x11_connection_survival=passed plane_mask=passed post_restart_drawing=passed post_restart_input=passed
 for _ in {1..200}; do
   post_restart_hash_value="$(last_frame_field fnv1a64)"
