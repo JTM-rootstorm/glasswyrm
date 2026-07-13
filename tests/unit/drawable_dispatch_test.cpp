@@ -29,7 +29,7 @@ int main() {
         state.resources().find_gc(base+2)->graphics_exposures,"CreateGC ordered values");
     x11::ByteWriter fill(order); fill.write_u8(70); fill.write_u8(0); fill.write_u16(5); fill.write_u32(base+1); fill.write_u32(base+2); fill.write_u16(0); fill.write_u16(0); fill.write_u16(2); fill.write_u16(2);
     result=dispatch_request(state,context,finish(std::move(fill),x11::CoreOpcode::PolyFillRectangle,0));
-    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->storage->at(1,1)==0xff112233U,"PolyFillRectangle");
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(1,1)==0xff112233U,"PolyFillRectangle");
     x11::ByteWriter geometry(order); geometry.write_u8(14); geometry.write_u8(0); geometry.write_u16(2); geometry.write_u32(base+1);
     result=dispatch_request(state,context,finish(std::move(geometry),x11::CoreOpcode::GetGeometry,0));
     gw::test::require(result.output.size()==32&&result.output[1]==24,"GetGeometry pixmap");
@@ -46,7 +46,7 @@ int main() {
     image.write_u16(0); image.write_u16(0); image.write_u8(0); image.write_u8(24); image.write_u16(0);
     image.write_u8(0x66); image.write_u8(0x55); image.write_u8(0x44); image.write_u8(0x00);
     result=dispatch_request(state,context,finish(std::move(image),x11::CoreOpcode::PutImage,2));
-    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->storage->at(0,0)==0xff115533U,
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(0,0)==0xff115533U,
                       "PutImage payload remains LSBFirst for either client order");
 
     x11::ByteWriter invalid_format(order); invalid_format.write_u8(72); invalid_format.write_u8(3); invalid_format.write_u16(6);

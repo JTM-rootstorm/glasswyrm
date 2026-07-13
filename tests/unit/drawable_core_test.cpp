@@ -16,6 +16,19 @@ int main() {
   gw::test::require(bitmap->at(8, 2) == 0U, "bitmap initializes clear");
   bitmap->set(8, 2, 3U);
   gw::test::require(bitmap->at(8, 2) == 1U, "bitmap canonicalizes bits");
+  const std::array<std::uint8_t, 8> bitmap_payload{
+      0x09, 0, 0, 0, 0x06, 0, 0, 0};
+  gw::test::require(put_xybitmap_lsb32(*bitmap, 1, 0, 4, 2,
+                                       bitmap_payload, 1, 0, 1),
+                    "upload padded XYBitmap");
+  gw::test::require(bitmap->at(1, 0) == 1 && bitmap->at(2, 0) == 0 &&
+                        bitmap->at(4, 0) == 1 && bitmap->at(2, 1) == 1 &&
+                        bitmap->at(3, 1) == 1,
+                    "XYBitmap uses LSB-first source bits");
+  gw::test::require(!put_xybitmap_lsb32(*bitmap, 0, 0, 4, 2,
+                                        std::span<const std::uint8_t>{}, 1, 0,
+                                        1),
+                    "XYBitmap validates padded payload");
   auto pixels = PixelStorage::create(4, 3);
   gw::test::require(pixels.has_value(), "create storage");
   gw::test::require(pixels->stride() == 16U, "stride");
