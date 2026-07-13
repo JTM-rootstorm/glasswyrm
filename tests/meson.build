@@ -174,7 +174,7 @@ if get_option('glasswyrmd')
     'subtree_compositor_test',
     files('unit/subtree_compositor_test.cpp'),
     dependencies: gw_server_state_dep,
-    include_directories: test_include_dirs,
+    include_directories: test_source_root_include,
   )
   test('subtree-compositor', subtree_compositor_test, timeout: 10)
   drawable_resource_test = executable(
