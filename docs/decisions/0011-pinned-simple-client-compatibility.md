@@ -1,6 +1,6 @@
 # 0011: Pin Simple Clients and Flatten Child Subtrees
 
-Status: Accepted; external application acceptance pending
+Status: Accepted and validated
 
 ## Context
 

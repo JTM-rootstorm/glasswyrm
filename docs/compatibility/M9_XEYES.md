@@ -1,6 +1,6 @@
 # Milestone 9 xeyes profile
 
-Status: protocol foundation implemented; external acceptance pending.
+Status: accepted for the pinned command below.
 
 Supported target:
 
@@ -17,7 +17,6 @@ Unsupported:
 - a default extension-enabled command claim;
 - another xeyes release without a new audit.
 
-The server-side requests, depth-1 icon storage, child composition, ellipse
-raster, pointer reply, trace recorder, and bounded process harness exist. A
-successful unmodified-client run, normalized trace, synthetic pointer frame,
-source hash, and cleanup proof have not yet been frozen as acceptance evidence.
+The Gentoo VM builds the verified source and proves the unmodified-client run,
+four-position synthetic pointer scenario, exact final frame, normalized trace,
+combined-client isolation, restart behavior, and clean process/socket teardown.

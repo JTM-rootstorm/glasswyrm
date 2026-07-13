@@ -1,6 +1,6 @@
 # Milestone 9 xclock profiles
 
-Status: protocol foundation implemented; external acceptance pending.
+Status: accepted for the pinned commands below.
 
 Supported targets:
 
@@ -17,7 +17,6 @@ Unsupported:
 - arbitrary fonts or another xclock release without a new audit.
 
 The fixed-time test preload changes `time`, `gettimeofday`, and realtime
-`clock_gettime` only; monotonic time passes through. The analog raster, core
-text, child composition, trace, and harness foundations exist. Exact analog,
-digital, combined, restart, source-hash, trace, and frame evidence remain
-pending in the Gentoo acceptance VM.
+`clock_gettime` only; monotonic time passes through. The Gentoo VM builds the
+verified source and proves exact analog and digital frames, normalized traces,
+combined-client isolation, restart behavior, and clean process/socket teardown.
