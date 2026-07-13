@@ -12,7 +12,8 @@ namespace {
 void print_usage(std::ostream& output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
-            "[--software-content] [--synthetic-input-socket PATH]\n";
+            "[--software-content] [--synthetic-input-socket PATH] "
+            "[--x11-trace PATH]\n";
 }
 
 bool parse_display(std::string_view text, std::uint16_t& display) {
@@ -77,6 +78,18 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
         return ParseOptionsResult::ExitFailure;
       }
       options.synthetic_input_socket = argv[index];
+      continue;
+    }
+    if (argument == "--x11-trace") {
+      if (++index >= argc || argv[index][0] == '\0') {
+        error << "glasswyrmd: --x11-trace requires a non-empty path\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      if (options.x11_trace.has_value()) {
+        error << "glasswyrmd: duplicate option: --x11-trace\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.x11_trace = argv[index];
       continue;
     }
     if (argument == "--wm-socket" || argument == "--compositor-socket") {

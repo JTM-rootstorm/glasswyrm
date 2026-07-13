@@ -279,7 +279,7 @@ void Server::accept_clients() {
           descriptor, next_client_identifier_++, *resource_base, state_,
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
-          expose_intent_handler_));
+          expose_intent_handler_, trace_.get()));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -346,6 +346,15 @@ void Server::unlink_owned_socket() {
 
 int Server::run() {
   stop_requested = 0;
+  if (options_.x11_trace) {
+    std::string error;
+    trace_ = CompatibilityTrace::create(*options_.x11_trace, error);
+    if (!trace_) {
+      std::fprintf(stderr, "glasswyrmd: cannot initialize X11 trace %s: %s\n",
+                   options_.x11_trace->c_str(), error.c_str());
+      return 1;
+    }
+  }
   int signal_pipe[2] = {-1, -1};
   if (::pipe2(signal_pipe, O_CLOEXEC | O_NONBLOCK) != 0) {
     std::fprintf(stderr, "glasswyrmd: cannot create signal wakeup pipe: %s\n",

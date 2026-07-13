@@ -153,6 +153,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+  compatibility_trace_test = executable(
+    'compatibility_trace_test',
+    files('unit/compatibility_trace_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('compatibility-trace', compatibility_trace_test, timeout: 10)
   event_router_test = executable(
     'event_router_test',
     files('unit/event_router_test.cpp'),
