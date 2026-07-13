@@ -47,6 +47,8 @@ libinput_absent=not-run
 mkdir -p "$artifact_dir" "$client_dir" "$dump_dir" "$scene_dir" "$trace_dir" "$control_dir"
 rm -f "$artifact_dir"/milestone9-* "$facts"
 touch "$runtime_log" "$meson_log" "$apps_log"
+systemctl stop glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service >/dev/null 2>&1 || true
+systemctl reset-failed glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service >/dev/null 2>&1 || true
 record_facts() {
   status=$?; set +e; scenario_exit=$status
   systemctl stop glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service >/dev/null 2>&1
@@ -55,6 +57,7 @@ record_facts() {
   journalctl -u gwcomp-m9.service --no-pager >"$artifact_dir/milestone9-gwcomp-journal.log" 2>&1
   [[ -s "$artifact_dir/milestone9-glasswyrmd-journal.log" && -s "$artifact_dir/milestone9-gwm-journal.log" && -s "$artifact_dir/milestone9-gwcomp-journal.log" ]] && journal_evidence=passed
   [[ ! -e /run/glasswyrm-m9-gwm/gwm.sock && ! -e /run/glasswyrm-m9-gwcomp/gwcomp.sock && ! -e /run/glasswyrm-m9-input/input.sock && ! -e /tmp/.X11-unix/X99 ]] && socket_cleanup=passed
+  systemctl reset-failed glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service >/dev/null 2>&1 || true
   cat >"$facts" <<FACTS
 failure_stage=$failure_stage
 scenario_exit=$scenario_exit
