@@ -203,7 +203,12 @@ live_tests=(m9-live-xeyes m9-live-xclock-analog m9-live-xclock-digital m9-live-c
 # xeyes +shape +render -geometry 150x100+32+32
 # xclock -analog -norender -update 0 -geometry 164x164+240+32
 # xclock -digital -brief -twentyfour -norender -update 0 -geometry +240+240
+export GW_M9_EVIDENCE_DIR="$scene_dir/live"
 meson test -C "$runtime_dir" --print-errorlogs "${live_tests[@]}"
+find "$GW_M9_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -name scene.jsonl -print0 |
+  sort -z | xargs -0 cat >"$scene_dir/scene.jsonl"
+[[ -s "$scene_dir/scene.jsonl" ]]
+unset GW_M9_EVIDENCE_DIR
 xeyes=passed xclock_analog=passed xclock_digital=passed combined=passed
 cp "$source_dir/tests/fixtures/m9/xeyes-final.ppm" "$control_dir/xeyes.frame"
 cp "$source_dir/tests/fixtures/m9/xclock-analog.ppm" "$control_dir/xclock-analog.frame"

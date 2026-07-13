@@ -38,6 +38,7 @@ trap cleanup EXIT HUP INT TERM
 mkdir "$run/dump"
 
 "$gwcomp" --ipc-socket "$run/gwcomp.sock" --dump-dir "$run/dump" \
+  --scene-manifest "$run/scene.jsonl" \
   >"$run/gwcomp.out" 2>"$run/gwcomp.err" & comp_pid=$!
 "$gwm" --ipc-socket "$run/gwm.sock" >"$run/gwm.out" 2>"$run/gwm.err" & wm_pid=$!
 for ignored in $(seq 1 200); do
@@ -117,4 +118,13 @@ fi
 if ! cmp "$run/trace.json" "$fixtures/$profile.trace.json"; then
   diff -u "$fixtures/$profile.trace.json" "$run/trace.json" >&2 || true
   exit 1
+fi
+if test -n "${GW_M9_EVIDENCE_DIR-}"; then
+  profile_evidence=$GW_M9_EVIDENCE_DIR/$profile
+  mkdir -p "$profile_evidence"
+  cp "$run/dump/$frame" "$profile_evidence/final.ppm"
+  cp "$run/dump/frames.jsonl" "$profile_evidence/frames.jsonl"
+  cp "$run/scene.jsonl" "$profile_evidence/scene.jsonl"
+  cp "$run/trace.jsonl" "$profile_evidence/requests.jsonl"
+  cp "$run/trace.json" "$profile_evidence/trace.json"
 fi
