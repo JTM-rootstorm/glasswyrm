@@ -53,6 +53,43 @@ test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
 
 test_source_root_include = include_directories('..')
 
+m9_fixed_time = shared_library(
+  'gw_m9_fixed_time',
+  files('apps/m9_fixed_time.c'),
+  dependencies: meson.get_compiler('c').find_library('dl'),
+  install: false,
+)
+m9_fixed_time_test = executable(
+  'm9_fixed_time_test',
+  files('apps/m9_fixed_time_test.cpp'),
+)
+test(
+  'm9-fixed-time',
+  m9_fixed_time_test,
+  env: ['LD_PRELOAD=' + m9_fixed_time.full_path()],
+  depends: m9_fixed_time,
+  timeout: 10,
+)
+
+m9_app_runner = executable(
+  'm9_app_runner',
+  files('apps/m9_app_runner.cpp'),
+  install: false,
+)
+m9_runner_fixture = find_program('apps/m9_runner_fixture.sh')
+test(
+  'm9-app-runner',
+  m9_app_runner,
+  args: [
+    '--expected-version', '1.2.3',
+    '--evidence', meson.current_build_dir() / 'm9-runner-evidence',
+    '--result', meson.current_build_dir() / 'm9-runner-result.json',
+    '--timeout-ms', '1000', '--', m9_runner_fixture,
+    meson.current_build_dir() / 'm9-runner-evidence',
+  ],
+  timeout: 10,
+)
+
 if get_option('gwm')
   gwm_options_test = executable(
     'gwm_options_test',
@@ -599,6 +636,7 @@ if get_option('glasswyrmd')
     ['atom-table', 'atom_table_test.cpp'],
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
+    ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],
