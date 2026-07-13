@@ -178,7 +178,11 @@ if get_option('glasswyrmd')
       'core/geometry/rectangle.cpp',
       'core/geometry/region.cpp',
       'glasswyrmd/pixel_storage.cpp',
+      'glasswyrmd/bitmap_storage.cpp',
       'glasswyrmd/raster_ops.cpp',
+      'glasswyrmd/font.cpp',
+      'glasswyrmd/m9_raster_ops.cpp',
+      'glasswyrmd/subtree_compositor.cpp',
       'input/input_state.cpp',
       'input/input_router.cpp',
     ),
@@ -192,6 +196,7 @@ if get_option('glasswyrmd')
   )
   gw_server_core_sources = files(
     'glasswyrmd/options.cpp',
+    'glasswyrmd/compatibility_trace.cpp',
     'glasswyrmd/client_connection.cpp',
     'glasswyrmd/event_router.cpp',
     'glasswyrmd/server.cpp',

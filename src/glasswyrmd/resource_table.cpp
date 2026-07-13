@@ -35,6 +35,9 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   resources_.emplace(
       screen.root_window,
       ResourceRecord{ResourceType::Window, std::nullopt, std::move(root)});
+  resources_.emplace(kDefaultFontXid,
+                     ResourceRecord{ResourceType::Font, std::nullopt,
+                                    FontResource{}});
 }
 
 const ResourceRecord* ResourceTable::find(const std::uint32_t xid) const noexcept {
@@ -75,6 +78,10 @@ const GraphicsContextResource* ResourceTable::find_gc(const std::uint32_t xid) c
 GraphicsContextResource* ResourceTable::find_gc(const std::uint32_t xid) noexcept {
   auto* resource = find(xid);
   return resource ? std::get_if<GraphicsContextResource>(&resource->payload) : nullptr;
+}
+const FontResource* ResourceTable::find_font(const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<FontResource>(&resource->payload) : nullptr;
 }
 
 bool ResourceTable::is_policy_candidate(const std::uint32_t xid) const noexcept {
@@ -289,19 +296,29 @@ CreatePixmapStatus ResourceTable::create_pixmap(
       (anchor_window->parent != screen_.root_window ||
        anchor_window->window_class != WindowClass::InputOutput || anchor_window->depth != 24))
     return CreatePixmapStatus::BadMatch;
-  if (depth != 24 || width == 0 || height == 0)
+  if ((depth != 1 && depth != 24) || width == 0 || height == 0)
     return CreatePixmapStatus::BadValue;
   if (resource_count(ResourceType::Pixmap) >= limits_.maximum_pixmaps)
     return CreatePixmapStatus::BadAlloc;
-  auto storage = PixelStorage::create(width, height);
-  if (!storage) return CreatePixmapStatus::BadAlloc;
-  if (storage->byte_size() > limits_.maximum_canonical_drawable_bytes -
-                                 canonical_drawable_bytes_)
+  std::variant<std::shared_ptr<BitmapStorage>, std::shared_ptr<PixelStorage>>
+      storage;
+  if (depth == 1) {
+    auto bitmap = BitmapStorage::create(width, height);
+    if (!bitmap) return CreatePixmapStatus::BadAlloc;
+    storage = std::make_shared<BitmapStorage>(std::move(*bitmap));
+  } else {
+    auto pixels = PixelStorage::create(width, height);
+    if (!pixels) return CreatePixmapStatus::BadAlloc;
+    storage = std::make_shared<PixelStorage>(std::move(*pixels));
+  }
+  const auto bytes = std::visit(
+      [](const auto& value) { return value->byte_size(); }, storage);
+  if (bytes > limits_.maximum_canonical_drawable_bytes -
+                  canonical_drawable_bytes_)
     return CreatePixmapStatus::BadAlloc;
-  const auto bytes = storage->byte_size();
   try {
     PixmapResource pixmap{screen_.root_window, depth, width, height,
-                          std::make_shared<PixelStorage>(std::move(*storage))};
+                          std::move(storage)};
     resources_.emplace(xid, ResourceRecord{ResourceType::Pixmap, owner,
                                            std::move(pixmap)});
     try { resources_by_owner_[owner].push_back(xid); }
@@ -315,7 +332,7 @@ FreePixmapStatus ResourceTable::free_pixmap(const std::uint32_t xid) {
   const auto* pixmap = find_pixmap(xid);
   if (!pixmap) return FreePixmapStatus::BadPixmap;
   const auto owner = find(xid)->owner;
-  const auto bytes = pixmap->storage ? pixmap->storage->byte_size() : 0;
+  const auto bytes = pixmap->byte_size();
   resources_.erase(xid);
   if (owner) {
     auto iterator = resources_by_owner_.find(*owner);
@@ -344,7 +361,12 @@ CreateGcStatus ResourceTable::create_gc(
   }
   else if (const auto* pixmap = find_pixmap(drawable)) depth = pixmap->depth;
   else return CreateGcStatus::BadDrawable;
-  if (depth != 24) return CreateGcStatus::BadMatch;
+  if (depth != 1 && depth != 24) return CreateGcStatus::BadMatch;
+  if (depth == 1) {
+    gc.foreground &= 1U;
+    gc.background &= 1U;
+    gc.plane_mask &= 1U;
+  }
   if (resource_count(ResourceType::GraphicsContext) >=
       limits_.maximum_graphics_contexts)
     return CreateGcStatus::BadAlloc;
@@ -370,6 +392,45 @@ FreeGcStatus ResourceTable::free_gc(const std::uint32_t xid) {
     }
   }
   return FreeGcStatus::Success;
+}
+
+OpenFontStatus ResourceTable::open_font(
+    const ClientId owner, const std::uint32_t resource_base,
+    const std::uint32_t resource_mask, const std::uint32_t xid) {
+  if (!valid_new_resource_id(xid, resource_base, resource_mask))
+    return OpenFontStatus::BadIdChoice;
+  std::size_t client_fonts = 0;
+  std::size_t total_fonts = 0;
+  for (const auto& [resource_xid, record] : resources_) {
+    static_cast<void>(resource_xid);
+    if (record.type != ResourceType::Font || !record.owner) continue;
+    ++total_fonts;
+    if (*record.owner == owner) ++client_fonts;
+  }
+  if (client_fonts >= limits_.maximum_fonts_per_client ||
+      total_fonts >= limits_.maximum_total_fonts)
+    return OpenFontStatus::BadAlloc;
+  try {
+    resources_.emplace(xid, ResourceRecord{ResourceType::Font, owner,
+                                           FontResource{}});
+    try { resources_by_owner_[owner].push_back(xid); }
+    catch (...) { resources_.erase(xid); throw; }
+  } catch (const std::bad_alloc&) { return OpenFontStatus::BadAlloc; }
+  return OpenFontStatus::Success;
+}
+
+CloseFontStatus ResourceTable::close_font(const std::uint32_t xid) {
+  const auto* font = find_font(xid);
+  const auto* record = find(xid);
+  if (!font || !record || !record->owner) return CloseFontStatus::BadFont;
+  const auto owner = *record->owner;
+  resources_.erase(xid);
+  auto iterator = resources_by_owner_.find(owner);
+  if (iterator != resources_by_owner_.end()) {
+    std::erase(iterator->second, xid);
+    if (iterator->second.empty()) resources_by_owner_.erase(iterator);
+  }
+  return CloseFontStatus::Success;
 }
 
 DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
@@ -560,6 +621,7 @@ CleanupResult ResourceTable::commit_client_cleanup(
     for (const auto xid : remaining) {
       if (find_pixmap(xid)) (void)free_pixmap(xid);
       else if (find_gc(xid)) (void)free_gc(xid);
+      else if (find_font(xid)) (void)close_font(xid);
       ++result.resources_destroyed;
     }
   }
@@ -767,13 +829,19 @@ bool ResourceTable::invariants_hold() const noexcept {
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
-      if (!resource.owner || resource.type == ResourceType::Window) return false;
+      if ((!resource.owner && resource.type != ResourceType::Font) ||
+          resource.type == ResourceType::Window) return false;
+      if (!resource.owner) {
+        if (xid != kDefaultFontXid ||
+            !std::holds_alternative<FontResource>(resource.payload)) return false;
+        continue;
+      }
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(), xid) != 1)
         return false;
       if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload))
-        calculated_drawable_bytes += pixmap->storage ? pixmap->storage->byte_size() : 0;
+        calculated_drawable_bytes += pixmap->byte_size();
       continue;
     }
     calculated_property_bytes += window_property_bytes(*window);

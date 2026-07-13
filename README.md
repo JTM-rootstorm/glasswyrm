@@ -4,7 +4,8 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 8. `glasswyrmd` retains its standalone
+The project has completed Milestone 9.
+`glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
 default; the explicit M7 `--software-content` mode adds depth-24 pixmaps,
@@ -24,9 +25,13 @@ structural event routing are implemented and remain covered by the M6
 regression path. Milestone 7 adds the first honestly painted client windows
 without moving X11 raster semantics into `gwcomp`. Milestone 8 keeps input
 state and X11 event semantics in `glasswyrmd` while click focus remains a GWM
-policy transaction. There is still no real-device input, grabs, XKB, cursors,
-text or font rendering, child-window composition, broad X11 application
-support, or DRM/KMS output. Runtime tools remain placeholders.
+policy transaction. Milestone 9 adds a built-in fixed font, bounded core text
+and raster requests, depth-1 pixmaps, child-window flattening, coordinate
+queries, and opt-in safe protocol tracing. Pinned `xeyes` 1.3.1 and `xclock`
+1.2.0 profiles pass exact frame and normalized-trace goldens in the Gentoo VM.
+There is still no real-device
+input, grabs, XKB, cursors, broad X11 application support, or DRM/KMS output.
+Runtime tools remain placeholders.
 
 ## Build
 
@@ -92,6 +97,7 @@ The complete command line is:
 glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
             [--software-content] [--synthetic-input-socket PATH]
+            [--x11-trace PATH]
             [--help] [--version]
 ```
 
@@ -149,6 +155,37 @@ subset only. Add the M8 listener to the same three-process launch with:
 The provider supplies device-like records, never target XIDs. This remains a
 repository-owned toy-client path and does not claim real input or normal
 application compatibility.
+
+## Milestone 9 compatibility work
+
+M9 targets only `xeyes` 1.3.1 and `xclock` 1.2.0 with the exact commands and
+environment in `tests/compat/m9/clients.toml`. Shape and Render remain absent.
+The official release hashes are pinned, and reviewed frame and normalized
+trace fixtures prove the analog, digital, xeyes, and combined profiles. This is
+a command-specific compatibility claim, not broad xeyes, xclock, Xt, or Xaw
+compatibility.
+
+For a trace-enabled integrated development launch, add a new output path:
+
+```sh
+./build/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock \
+  --software-content \
+  --synthetic-input-socket /tmp/glasswyrm-input.sock \
+  --x11-trace /tmp/glasswyrm-m9.jsonl
+tests/compat/m9/m9_trace_summarize /tmp/glasswyrm-m9.jsonl
+```
+
+The trace path must not already exist. The fresh-VM acceptance route is
+intentionally gated on committed source and verified client hashes:
+
+```sh
+./tools/gw-vm milestone9-runtime-test --yes
+```
+
+See [the compatibility profiles](docs/compatibility/README.md) for the exact
+supported subsets and current evidence status.
 
 ## Setup probes
 

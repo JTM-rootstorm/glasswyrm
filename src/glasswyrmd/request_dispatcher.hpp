@@ -13,6 +13,14 @@
 
 namespace glasswyrm::server {
 
+struct InputSnapshot {
+  std::int32_t root_x{0};
+  std::int32_t root_y{0};
+  std::uint16_t state_mask{0};
+  std::uint32_t pointer_target{1};
+  std::uint32_t logical_time{1};
+};
+
 struct DispatchContext {
   ClientId client_id{0};
   std::uint32_t resource_base{0};
@@ -21,6 +29,7 @@ struct DispatchContext {
   gw::protocol::x11::ByteOrder byte_order{
       gw::protocol::x11::ByteOrder::LittleEndian};
   bool integrated_lifecycle{false};
+  InputSnapshot input{};
 };
 
 enum class StructuralTransitionKind { Map, Unmap, Configure, Destroy };

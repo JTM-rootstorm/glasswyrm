@@ -461,6 +461,32 @@ FACTS
       fi
       ;;
     milestone8-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone9-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.5.0
+soversion=0
+wire_version=1.0
+x_servers_absent=true
+mesa_absent=true
+libdrm_absent=true
+libinput_absent=true
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+xeyes_version=1.3.1
+xclock_version=1.2.0
+FACTS
+      for result in full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api05_consumers client_versions xeyes xclock_analog xclock_digital combined normalized_traces exact_frames restart_replay policy_replay post_restart_input m4_pixel_regression m5_policy_regression m6_metadata_no_ppm_regression m7_drawable_regression m8_input_regression service_results socket_cleanup journal_evidence archive_validation; do
+        printf '%s=passed\n' "$result"
+      done
+      if [[ ${GW_VM_TEST_BAD_M9_FACTS:-0} == 1 ]]; then
+        printf 'xclock_digital=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone9-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -527,6 +553,25 @@ if [[ "$*" == *milestone8-input-rendering.tar* ]]; then
   cp "$scratch/final.ppm" "$scratch/selected-runtime.ppm"
   for name in frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json; do printf '{}\n' >"$scratch/$name"; done
   (cd "$scratch" && sha256sum final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS)
+  rm -rf "$scratch"
+fi
+if [[ "$*" == *milestone9-acceptance.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  if [[ $destination == *.sha256 ]]; then
+    (cd "$(dirname "$destination")" && sha256sum milestone9-acceptance.tar >"$(basename "$destination")")
+  else
+    mkdir -p "$scratch/glasswyrm-m9-control" "$scratch/glasswyrm-m9-traces" "$scratch/glasswyrm-m9-scenes"
+    for name in xeyes xclock-analog xclock-digital; do
+      printf '{}\n' >"$scratch/glasswyrm-m9-control/$name.json"
+      printf 'frame\n' >"$scratch/glasswyrm-m9-control/$name.frame"
+    done
+    if [[ ${GW_VM_TEST_BAD_M9_ARCHIVE:-0} == 1 ]]; then
+      rm -f "$scratch/glasswyrm-m9-control/xclock-digital.frame"
+    fi
+    printf '{}\n' >"$scratch/glasswyrm-m9-traces/requests.jsonl"
+    printf '{}\n' >"$scratch/glasswyrm-m9-scenes/frames.jsonl"
+    (cd "$scratch" && tar -cf "$destination" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
+  fi
   rm -rf "$scratch"
 fi
 EOF
@@ -1198,5 +1243,47 @@ run_failure "$work_dir/milestone8-error.out" \
 assert_contains "$work_dir/milestone8-error.out" 'failed during: guest-runtime'
 assert_contains "$command_log" 'milestone8-glasswyrmd-journal.log'
 assert_contains "$command_log" 'milestone8-input-rendering.tar'
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-gate.out" "$gw_vm" milestone9-runtime-test
+assert_contains "$work_dir/milestone9-gate.out" '--yes'
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone9-runtime-test --yes
+assert_contains "$work_dir/milestone9-bad-base.out" \
+  'HEAD is not based on required Milestone 9 commit 0c694b12a88c941b9ab487c5aee1c805ae7c5d0d'
+
+run_failure "$work_dir/milestone9-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone9-runtime-test.sh"
+assert_contains "$work_dir/milestone9-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_success "$work_dir/milestone9.out" "$gw_vm" scenario milestone9-runtime-test --yes
+assert_contains "$artifact_dir/milestone9-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone9-summary.json" \
+  '"required_base_commit": "0c694b12a88c941b9ab487c5aee1c805ae7c5d0d"'
+assert_contains "$artifact_dir/milestone9-summary.json" '"xeyes": "1.3.1"'
+assert_contains "$artifact_dir/milestone9-summary.json" '"xclock": "1.2.0"'
+for expected in /var/tmp/glasswyrm-build-m9 /var/tmp/glasswyrm-build-m9-asan /var/tmp/glasswyrm-build-m9-runtime /var/tmp/glasswyrm-build-m9-server /var/tmp/glasswyrm-build-m9-server-ipc /var/tmp/glasswyrm-build-m9-gwm /var/tmp/glasswyrm-build-m9-gwcomp /var/tmp/glasswyrm-build-m9-ipc-only /var/tmp/glasswyrm-m9-clients /var/tmp/glasswyrm-m9-dumps /var/tmp/glasswyrm-m9-scenes /var/tmp/glasswyrm-m9-traces /var/tmp/glasswyrm-m9-control /var/tmp/glasswyrm-m9-artifacts 'source_sha256 = "PENDING"' x11-base/xorg-server media-libs/mesa x11-libs/libdrm dev-libs/libinput x11-libs/libXpm x11-libs/libXi x11-libs/libXft 'gwm-m9' 'gwcomp-m9' 'glasswyrmd-m9' 'reset-failed glasswyrmd-m9.service' '--timeout-multiplier 3' 'PrivateDevices=yes' 'RestrictAddressFamilies=AF_UNIX' '--x11-trace' 'requests.jsonl' '1.3.1' '1.2.0' 'source_url' 'source_sha256' 'curl --fail --location' 'sha256sum --check --status' 'm9-live-xeyes' 'm9-live-xclock-analog' 'm9-live-xclock-digital' 'm9-live-combined' '+shape' '+render' '-analog' '-digital' '-brief' '-twentyfour' '-norender' '-update 0' 'systemctl restart gwcomp-m9.service' 'systemctl restart gwm-m9.service'; do
+  assert_contains "$command_log" "$expected"
+done
+assert_file_glob "$artifact_dir/milestone9-acceptance.tar"
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-bad-evidence.out" \
+  env GW_VM_TEST_BAD_M9_FACTS=1 "$gw_vm" milestone9-runtime-test --yes
+assert_contains "$artifact_dir/milestone9-summary.json" 'xclock_digital must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-bad-archive.out" \
+  env GW_VM_TEST_BAD_M9_ARCHIVE=1 "$gw_vm" milestone9-runtime-test --yes
+assert_contains "$work_dir/milestone9-bad-archive.out" 'failed during: artifact-validation'
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='--x11-trace' "$gw_vm" milestone9-runtime-test --yes
+assert_contains "$work_dir/milestone9-error.out" 'failed during: guest-runtime'
+assert_contains "$command_log" 'milestone9-glasswyrmd-journal.log'
 
 printf 'gw-vm CLI tests passed\n'

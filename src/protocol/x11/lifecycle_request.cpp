@@ -43,6 +43,18 @@ LifecycleDecodeStatus decode_unmap_window(std::span<const std::uint8_t> bytes,
   return decode_window(bytes, order, CoreOpcode::UnmapWindow, request);
 }
 
+LifecycleDecodeStatus decode_map_subwindows(
+    std::span<const std::uint8_t> bytes, ByteOrder order,
+    WindowLifecycleRequest& request) noexcept {
+  return decode_window(bytes, order, CoreOpcode::MapSubwindows, request);
+}
+
+LifecycleDecodeStatus decode_unmap_subwindows(
+    std::span<const std::uint8_t> bytes, ByteOrder order,
+    WindowLifecycleRequest& request) noexcept {
+  return decode_window(bytes, order, CoreOpcode::UnmapSubwindows, request);
+}
+
 LifecycleDecodeStatus decode_configure_window(
     std::span<const std::uint8_t> bytes, ByteOrder order,
     ConfigureWindowRequest& request) noexcept {

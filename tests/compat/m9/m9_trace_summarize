@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Normalize a bounded Glasswyrm X11 JSONL compatibility trace."""
+import collections
+import json
+import sys
+
+if len(sys.argv) != 2:
+    raise SystemExit("usage: m9_trace_summarize TRACE.jsonl")
+
+records = []
+with open(sys.argv[1], "r", encoding="utf-8") as source:
+    for number, line in enumerate(source, 1):
+        if len(line) > 65536:
+            raise SystemExit(f"trace line {number} exceeds 64 KiB")
+        record = json.loads(line)
+        if not isinstance(record, dict):
+            raise SystemExit(f"trace line {number} is not an object")
+        records.append(record)
+
+requests = [r for r in records if r.get("direction") == "request"]
+counts = collections.Counter(r.get("name", "Unknown") for r in requests)
+recurring_names = {"QueryPointer"}
+opcodes = collections.Counter(str(r.get("opcode", "unknown")) for r in requests
+                              if r.get("name") not in recurring_names)
+errors = collections.Counter(r.get("error", "UnknownError") for r in requests
+                             if r.get("outcome") == "error")
+reply_keys = {(r.get("client"), r.get("sequence")) for r in records
+              if r.get("direction") == "reply"}
+summary = {
+    "schema": 1,
+    "first_request_occurrence": list(dict.fromkeys(
+        r.get("name", "Unknown") for r in requests)),
+    "opcode_histogram": dict(sorted(opcodes.items(), key=lambda item: item[0])),
+    "error_histogram": dict(sorted(errors.items())),
+    "reply_requests": list(dict.fromkeys(r.get("name", "Unknown") for r in requests
+        if (r.get("client"), r.get("sequence")) in reply_keys)),
+    "recurring_requests": sorted(name for name in recurring_names if counts[name]),
+    "extension_queries": list(dict.fromkeys(r["extension"] for r in requests
+        if r.get("name") == "QueryExtension" and isinstance(r.get("extension"), str))),
+    "unknown_opcodes": sorted({r.get("opcode") for r in requests
+                               if r.get("name") == "Unknown"}),
+    "application_connection_count": sum(1 for r in records
+        if r.get("direction") == "connection" and r.get("outcome") == "accepted"),
+    "maximum_request_length": max((r.get("length", 0) for r in requests), default=0),
+}
+json.dump(summary, sys.stdout, indent=2, separators=(",", ": "))
+sys.stdout.write("\n")

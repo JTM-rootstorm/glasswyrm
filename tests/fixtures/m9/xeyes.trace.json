@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "first_request_occurrence": [
+    "QueryExtension",
+    "CreateGC",
+    "GetProperty",
+    "InternAtom",
+    "AllocNamedColor",
+    "CreatePixmap",
+    "PutImage",
+    "FreeGC",
+    "QueryColors",
+    "FreePixmap",
+    "GetInputFocus",
+    "CreateWindow",
+    "ChangeProperty",
+    "ClearArea",
+    "MapSubwindows",
+    "MapWindow",
+    "PolyFillArc",
+    "QueryPointer",
+    "PolyFillRectangle"
+  ],
+  "opcode_histogram": {
+    "1": 2,
+    "16": 9,
+    "18": 11,
+    "20": 1,
+    "43": 1,
+    "53": 5,
+    "54": 3,
+    "55": 5,
+    "60": 2,
+    "61": 1,
+    "70": 9,
+    "71": 14,
+    "72": 2,
+    "8": 1,
+    "85": 2,
+    "9": 1,
+    "91": 3,
+    "98": 7
+  },
+  "error_histogram": {
+    "BadPixmap": 3,
+    "BadValue": 3
+  },
+  "reply_requests": [
+    "QueryExtension",
+    "GetProperty",
+    "InternAtom",
+    "AllocNamedColor",
+    "QueryColors",
+    "GetInputFocus",
+    "QueryPointer"
+  ],
+  "recurring_requests": [
+    "QueryPointer"
+  ],
+  "extension_queries": [
+    "OTHER",
+    "XInputExtension",
+    "XFIXES",
+    "DAMAGE",
+    "Present"
+  ],
+  "unknown_opcodes": [],
+  "application_connection_count": 1,
+  "maximum_request_length": 280
+}

@@ -21,7 +21,9 @@ ClientConnection::ClientConnection(const int descriptor,
                                    DeferredHandler deferred_handler,
                                    StructuralTransitionHandler transition_handler,
                                    DrawableDamageHandler damage_handler,
-                                   ExposeIntentHandler expose_handler)
+                                   ExposeIntentHandler expose_handler,
+                                   CompatibilityTrace* trace,
+                                   InputSnapshotProvider input_snapshot_provider)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -30,9 +32,14 @@ ClientConnection::ClientConnection(const int descriptor,
       deferred_handler_(std::move(deferred_handler)),
       transition_handler_(std::move(transition_handler)),
       damage_handler_(std::move(damage_handler)),
-      expose_handler_(std::move(expose_handler)) {}
+      expose_handler_(std::move(expose_handler)),
+      trace_(trace),
+      input_snapshot_provider_(std::move(input_snapshot_provider)) {
+  if (trace_) trace_->connection(identifier_, "accepted");
+}
 
 ClientConnection::~ClientConnection() {
+  if (trace_) trace_->connection(identifier_, "disconnected");
   if (descriptor_ >= 0) {
     ::close(descriptor_);
   }
@@ -87,6 +94,7 @@ bool ClientConnection::enqueue(std::vector<std::uint8_t> bytes,
 
 bool ClientConnection::enqueue_server_packet(std::vector<std::uint8_t> bytes) {
   if (state_ == State::Closing) return false;
+  if (trace_) trace_->packet(identifier_, request_sequence_, bytes, byte_order_);
   return enqueue(std::move(bytes));
 }
 
@@ -207,9 +215,21 @@ void ClientConnection::process_input(
         const DispatchContext context{identifier_, resource_id_base_,
                                       server_state_.screen().resource_id_mask,
                                       request_sequence_, byte_order_,
-                                      integrated_lifecycle_};
+                                      integrated_lifecycle_,
+                                      input_snapshot_provider_
+                                          ? input_snapshot_provider_()
+                                          : InputSnapshot{}};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
+        if (trace_) {
+          trace_->request(identifier_, request_sequence_,
+                          request_framer_->request().opcode,
+                          request_framer_->request().bytes.size(),
+                          result_packet.output,
+                          request_framer_->request().bytes, byte_order_);
+          trace_->packet(identifier_, request_sequence_, result_packet.output,
+                         byte_order_);
+        }
         if (!result_packet.output.empty() &&
             !enqueue(std::move(result_packet.output))) {
           return;

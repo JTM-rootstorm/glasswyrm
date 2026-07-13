@@ -79,9 +79,8 @@ Server::Server(Options options) : options_(std::move(options)) {
       if (transition.kind == StructuralTransitionKind::Map && transition.before &&
           transition.committed && !transition.before->viewable &&
           transition.committed->viewable) {
-        const std::array rectangles{glasswyrm::geometry::Rectangle{
-            0, 0, transition.committed->width, transition.committed->height}};
-        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+        (void)router.route_viewable_subtree_expose(
+            transition.committed->target, recipients);
       } else if (transition.kind == StructuralTransitionKind::Configure &&
                  transition.before && transition.committed) {
         std::vector<glasswyrm::geometry::Rectangle> rectangles;
@@ -279,7 +278,7 @@ void Server::accept_clients() {
           descriptor, next_client_identifier_++, *resource_base, state_,
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
-          expose_intent_handler_));
+          expose_intent_handler_, trace_.get(), input_snapshot_provider_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -346,6 +345,15 @@ void Server::unlink_owned_socket() {
 
 int Server::run() {
   stop_requested = 0;
+  if (options_.x11_trace) {
+    std::string error;
+    trace_ = CompatibilityTrace::create(*options_.x11_trace, error);
+    if (!trace_) {
+      std::fprintf(stderr, "glasswyrmd: cannot initialize X11 trace %s: %s\n",
+                   options_.x11_trace->c_str(), error.c_str());
+      return 1;
+    }
+  }
   int signal_pipe[2] = {-1, -1};
   if (::pipe2(signal_pipe, O_CLOEXEC | O_NONBLOCK) != 0) {
     std::fprintf(stderr, "glasswyrmd: cannot create signal wakeup pipe: %s\n",
@@ -381,6 +389,11 @@ int Server::run() {
   std::unique_ptr<ContentPresenter> content_presenter;
   std::unique_ptr<SyntheticInputPeer> input_peer;
   glasswyrm::input::InputState input_state;
+  input_snapshot_provider_ = [&input_state] {
+    return InputSnapshot{input_state.pointer_x(), input_state.pointer_y(),
+                         input_state.mask(), input_state.pointer_target(),
+                         input_state.time()};
+  };
   std::uint64_t expected_input_id = 1;
   struct PendingFocusInput {
     SyntheticInputRecord record;
@@ -582,9 +595,8 @@ int Server::run() {
         if (committed && operation->kind == LifecycleOperationKind::Map &&
             (!transition_before || !transition_before->viewable) &&
             committed->viewable) {
-          const std::array rectangles{geometry::Rectangle{
-              0, 0, committed->width, committed->height}};
-          (void)router.route_expose(operation->window, rectangles, recipients);
+          (void)router.route_viewable_subtree_expose(operation->window,
+                                                     recipients);
         } else if (committed && transition_before &&
                    operation->kind == LifecycleOperationKind::Configure) {
           std::vector<geometry::Rectangle> rectangles;

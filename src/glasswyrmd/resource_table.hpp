@@ -4,6 +4,7 @@
 #include "glasswyrmd/window.hpp"
 #include "glasswyrmd/pixmap.hpp"
 #include "glasswyrmd/graphics_context.hpp"
+#include "glasswyrmd/font.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,12 +17,13 @@ namespace glasswyrm::server {
 
 using ClientId = std::uint64_t;
 
-enum class ResourceType { Window, Pixmap, GraphicsContext };
+enum class ResourceType { Window, Pixmap, GraphicsContext, Font };
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
-  std::variant<WindowResource, PixmapResource, GraphicsContextResource> payload;
+  std::variant<WindowResource, PixmapResource, GraphicsContextResource,
+               FontResource> payload;
 };
 
 enum class CreateWindowStatus {
@@ -52,6 +54,8 @@ enum class CreatePixmapStatus { Success, BadIdChoice, BadDrawable, BadValue, Bad
 enum class FreePixmapStatus { Success, BadPixmap };
 enum class CreateGcStatus { Success, BadIdChoice, BadDrawable, BadMatch, BadAlloc };
 enum class FreeGcStatus { Success, BadGContext };
+enum class OpenFontStatus { Success, BadIdChoice, BadAlloc };
+enum class CloseFontStatus { Success, BadFont };
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -97,6 +101,8 @@ struct ResourceLimits {
   std::size_t maximum_canonical_drawable_bytes{256U * 1024U * 1024U};
   std::size_t maximum_pixmaps{8192};
   std::size_t maximum_graphics_contexts{8192};
+  std::size_t maximum_fonts_per_client{256};
+  std::size_t maximum_total_fonts{1024};
 };
 
 class ResourceTable {
@@ -114,6 +120,7 @@ class ResourceTable {
   [[nodiscard]] PixmapResource* find_pixmap(std::uint32_t xid) noexcept;
   [[nodiscard]] const GraphicsContextResource* find_gc(std::uint32_t xid) const noexcept;
   [[nodiscard]] GraphicsContextResource* find_gc(std::uint32_t xid) noexcept;
+  [[nodiscard]] const FontResource* find_font(std::uint32_t xid) const noexcept;
   [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
   [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
                                                           bool mapped);
@@ -138,6 +145,10 @@ class ResourceTable {
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       std::uint32_t xid, std::uint32_t drawable, GraphicsContextResource gc);
   [[nodiscard]] FreeGcStatus free_gc(std::uint32_t xid);
+  [[nodiscard]] OpenFontStatus open_font(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid);
+  [[nodiscard]] CloseFontStatus close_font(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(

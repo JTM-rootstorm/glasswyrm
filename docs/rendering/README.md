@@ -9,6 +9,10 @@ These documents define the implemented reference boundary:
   image byte order, plane masks, and exposure behavior.
 - [Content publication](M7_CONTENT_PUBLICATION.md): persistent published
   buffers, damage scheduling, lifecycle arbitration, release, and replay.
+- [Milestone 9 core fonts](M9_CORE_FONTS.md): the bounded fixed-font identity,
+  metrics, requests, glyph rasterization, and compatibility limits.
+- [Milestone 9 child composition](M9_CHILD_WINDOW_COMPOSITION.md): recursive
+  server-side child flattening without a GWIPC ABI change.
 
 The compositor-facing profile is documented separately in
 [M7 buffered ProtocolServer surfaces](../compositor/M7_BUFFERED_PROTOCOL_SURFACES.md).
