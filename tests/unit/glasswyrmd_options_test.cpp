@@ -84,5 +84,17 @@ int main() {
   if (output.find("--synthetic-input-socket PATH") == std::string::npos) {
     return 5;
   }
+  options = {};
+  if (parse({"glasswyrmd", "--x11-trace", "/tmp/trace.jsonl"}, options,
+            output, error) != ParseOptionsResult::Run ||
+      options.x11_trace != "/tmp/trace.jsonl") {
+    return 6;
+  }
+  options = {};
+  if (parse({"glasswyrmd", "--x11-trace", "/tmp/a", "--x11-trace",
+             "/tmp/b"}, options, output, error) !=
+      ParseOptionsResult::ExitFailure) {
+    return 7;
+  }
   return 0;
 }

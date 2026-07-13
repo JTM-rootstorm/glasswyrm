@@ -1,5 +1,6 @@
 #pragma once
 
+#include "glasswyrmd/compatibility_trace.hpp"
 #include "glasswyrmd/request_dispatcher.hpp"
 #include "glasswyrmd/server_state.hpp"
 #include "protocol/x11/core.hpp"
@@ -61,7 +62,8 @@ class ClientConnection {
                    DeferredHandler deferred_handler = {},
                    StructuralTransitionHandler transition_handler = {},
                    DrawableDamageHandler damage_handler = {},
-                   ExposeIntentHandler expose_handler = {});
+                   ExposeIntentHandler expose_handler = {},
+                   CompatibilityTrace* trace = nullptr);
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -136,6 +138,7 @@ class ClientConnection {
   StructuralTransitionHandler transition_handler_;
   DrawableDamageHandler damage_handler_;
   ExposeIntentHandler expose_handler_;
+  CompatibilityTrace* trace_{nullptr};
 };
 
 }  // namespace glasswyrm::server

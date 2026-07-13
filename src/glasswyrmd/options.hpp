@@ -13,6 +13,7 @@ struct Options {
   std::optional<std::string> wm_socket;
   std::optional<std::string> compositor_socket;
   std::optional<std::string> synthetic_input_socket;
+  std::optional<std::string> x11_trace;
   bool software_content = false;
 
   [[nodiscard]] bool integrated() const noexcept {
