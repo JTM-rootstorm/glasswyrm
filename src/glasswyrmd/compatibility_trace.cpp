@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <optional>
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -31,6 +32,50 @@ std::string_view error_name(const std::uint8_t code) {
     case 17: return "BadImplementation";
     default: return "UnknownError";
   }
+}
+
+std::uint16_t read_u16(const std::span<const std::uint8_t> bytes,
+                       const std::size_t offset,
+                       const gw::protocol::x11::ByteOrder order) {
+  if (order == gw::protocol::x11::ByteOrder::LittleEndian)
+    return static_cast<std::uint16_t>(bytes[offset]) |
+           static_cast<std::uint16_t>(bytes[offset + 1]) << 8U;
+  return static_cast<std::uint16_t>(bytes[offset]) << 8U |
+         static_cast<std::uint16_t>(bytes[offset + 1]);
+}
+
+std::uint32_t read_u32(const std::span<const std::uint8_t> bytes,
+                       const std::size_t offset,
+                       const gw::protocol::x11::ByteOrder order) {
+  if (order == gw::protocol::x11::ByteOrder::LittleEndian)
+    return static_cast<std::uint32_t>(bytes[offset]) |
+           static_cast<std::uint32_t>(bytes[offset + 1]) << 8U |
+           static_cast<std::uint32_t>(bytes[offset + 2]) << 16U |
+           static_cast<std::uint32_t>(bytes[offset + 3]) << 24U;
+  return static_cast<std::uint32_t>(bytes[offset]) << 24U |
+         static_cast<std::uint32_t>(bytes[offset + 1]) << 16U |
+         static_cast<std::uint32_t>(bytes[offset + 2]) << 8U |
+         static_cast<std::uint32_t>(bytes[offset + 3]);
+}
+
+std::optional<std::string_view> extension_name(
+    const std::span<const std::uint8_t> bytes,
+    const gw::protocol::x11::ByteOrder order) {
+  if (bytes.size() < 8) return std::nullopt;
+  const auto length = read_u16(bytes, 4, order);
+  if (length > 32 || 8U + length > bytes.size()) return std::string_view{"OTHER"};
+  const std::string_view candidate(
+      reinterpret_cast<const char*>(bytes.data() + 8), length);
+  constexpr std::string_view known[] = {
+      "SHAPE", "RENDER", "XInputExtension", "XFIXES", "DAMAGE", "Present"};
+  for (const auto name : known)
+    if (candidate == name) return name;
+  return std::string_view{"OTHER"};
+}
+
+std::size_t event_window_offset(const std::uint8_t type) {
+  if (type >= 2 && type <= 8) return 12;
+  return 4;
 }
 
 }  // namespace
@@ -155,13 +200,20 @@ void CompatibilityTrace::request(const std::uint64_t client,
                                  const std::uint64_t sequence,
                                  const std::uint8_t opcode,
                                  const std::size_t length,
-                                 const std::vector<std::uint8_t>& output) {
+                                 const std::vector<std::uint8_t>& output,
+                                 const std::span<const std::uint8_t> request_bytes,
+                                 const gw::protocol::x11::ByteOrder byte_order) {
   const bool is_error = !output.empty() && output[0] == 0;
   std::ostringstream line;
   line << "{\"direction\":\"request\",\"client\":" << client
        << ",\"sequence\":" << sequence << ",\"opcode\":"
        << static_cast<unsigned int>(opcode) << ",\"name\":\""
-       << x11_request_name(opcode) << "\",\"length\":" << length
+       << x11_request_name(opcode) << "\"";
+  if (opcode == 98) {
+    const auto extension = extension_name(request_bytes, byte_order);
+    line << ",\"extension\":\"" << extension.value_or("OTHER") << "\"";
+  }
+  line << ",\"length\":" << length
        << ",\"outcome\":\"" << (is_error ? "error" : "success")
        << "\",\"error\":";
   if (is_error && output.size() > 1)
@@ -174,17 +226,26 @@ void CompatibilityTrace::request(const std::uint64_t client,
 
 void CompatibilityTrace::packet(const std::uint64_t client,
                                 const std::uint64_t sequence,
-                                const std::vector<std::uint8_t>& bytes) {
+                                const std::vector<std::uint8_t>& bytes,
+                                const gw::protocol::x11::ByteOrder byte_order) {
   if (bytes.empty()) return;
   const char* direction = bytes[0] == 0 ? "error" :
                           bytes[0] == 1 ? "reply" : "event";
   std::ostringstream line;
+  const auto type = static_cast<std::uint8_t>(bytes[0] & 0x7fU);
+  const auto record_sequence = bytes[0] > 1 && bytes.size() >= 4
+                                   ? read_u16(bytes, 2, byte_order)
+                                   : sequence;
   line << "{\"direction\":\"" << direction << "\",\"client\":" << client
-       << ",\"sequence\":" << sequence;
+       << ",\"sequence\":" << record_sequence;
   if (bytes[0] == 0 && bytes.size() > 1)
     line << ",\"error\":\"" << error_name(bytes[1]) << "\"";
-  if (bytes[0] > 1)
-    line << ",\"event_type\":" << static_cast<unsigned int>(bytes[0] & 0x7fU);
+  if (bytes[0] > 1) {
+    line << ",\"event_type\":" << static_cast<unsigned int>(type);
+    const auto offset = event_window_offset(type);
+    if (bytes.size() >= offset + 4)
+      line << ",\"window\":" << read_u32(bytes, offset, byte_order);
+  }
   line << "}\n";
   (void)append(line.str());
 }

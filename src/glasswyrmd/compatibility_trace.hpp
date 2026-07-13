@@ -1,8 +1,11 @@
 #pragma once
 
+#include "protocol/x11/byte_order.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,9 +26,14 @@ class CompatibilityTrace {
   void connection(std::uint64_t client, std::string_view outcome);
   void request(std::uint64_t client, std::uint64_t sequence,
                std::uint8_t opcode, std::size_t length,
-               const std::vector<std::uint8_t>& output);
+               const std::vector<std::uint8_t>& output,
+               std::span<const std::uint8_t> request_bytes = {},
+               gw::protocol::x11::ByteOrder byte_order =
+                   gw::protocol::x11::ByteOrder::LittleEndian);
   void packet(std::uint64_t client, std::uint64_t sequence,
-              const std::vector<std::uint8_t>& bytes);
+              const std::vector<std::uint8_t>& bytes,
+              gw::protocol::x11::ByteOrder byte_order =
+                  gw::protocol::x11::ByteOrder::LittleEndian);
 
   [[nodiscard]] bool enabled() const noexcept { return descriptor_ >= 0; }
   [[nodiscard]] std::size_t bytes_written() const noexcept { return bytes_; }
