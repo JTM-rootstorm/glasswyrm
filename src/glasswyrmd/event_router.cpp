@@ -2,14 +2,19 @@
 
 #include "protocol/x11/event.hpp"
 #include "protocol/x11/exposure_event.hpp"
+#include "input/input_router.hpp"
+#include "protocol/x11/crossing_event.hpp"
+#include "protocol/x11/focus_event.hpp"
+#include "protocol/x11/input_event.hpp"
+#include "protocol/x11/event_mask.hpp"
 
 #include <algorithm>
 
 namespace glasswyrm::server {
 namespace {
-constexpr std::uint32_t kStructureNotifyMask = 1U << 17U;
-constexpr std::uint32_t kSubstructureNotifyMask = 1U << 19U;
-constexpr std::uint32_t kExposureMask = 1U << 15U;
+constexpr auto kStructureNotifyMask = gw::protocol::x11::event_mask::StructureNotify;
+constexpr auto kSubstructureNotifyMask = gw::protocol::x11::event_mask::SubstructureNotify;
+constexpr auto kExposureMask = gw::protocol::x11::event_mask::Exposure;
 
 ClientConnection *find_client(std::span<ClientConnection *const> clients,
                               const ClientId id) {
@@ -48,6 +53,28 @@ std::size_t route(const ResourceTable &resources, const std::uint32_t target,
   return delivered;
 }
 } // namespace
+
+namespace {
+std::vector<glasswyrm::input::RouteWindow> route_windows(
+    const ResourceTable& resources, std::uint32_t source) {
+  std::vector<glasswyrm::input::RouteWindow> result;
+  while (source != 0) {
+    const auto* window = resources.find_window(source);
+    if (!window) break;
+    glasswyrm::input::RouteWindow route{};
+    route.xid = source;
+    route.parent = window->parent;
+    route.do_not_propagate = window->attributes.do_not_propagate_mask;
+    route.selections.reserve(window->event_selections.size());
+    for (const auto& [client, mask] : window->event_selections)
+      route.selections.push_back({client, mask, true});
+    result.push_back(std::move(route));
+    if (window->parent == source) break;
+    source = window->parent;
+  }
+  return result;
+}
+}  // namespace
 
 std::optional<StructuralEventState>
 EventRouter::capture(const std::uint32_t target) const {
@@ -221,6 +248,244 @@ std::size_t EventRouter::route_expose(
            static_cast<std::uint16_t>(rectangle.height),
            static_cast<std::uint16_t>(rectangles.size() - index - 1)})))
         ++delivered;
+    }
+  }
+  return delivered;
+}
+
+std::size_t EventRouter::route_input(
+    const gw::protocol::x11::CoreEventType type, const std::uint8_t detail,
+    const std::uint32_t time, const std::uint32_t source,
+    const std::uint16_t state, const std::uint32_t delivery_mask,
+    const std::int32_t root_x, const std::int32_t root_y,
+    const std::uint32_t pointer_target,
+    const std::span<ClientConnection *const> clients) const {
+  const auto windows = route_windows(resources_, source);
+  const auto target = glasswyrm::input::propagate_event(
+      windows, source, delivery_mask);
+  if (target.event_window == 0) return 0;
+  const auto coordinates = glasswyrm::input::event_coordinates(
+      resources_, target.event_window, pointer_target, root_x, root_y);
+  std::size_t delivered = 0;
+  for (const auto client_id : target.clients) {
+    auto* client = find_client(clients, client_id);
+    if (!client) continue;
+    gw::protocol::x11::InputEvent event{};
+    event.type = type;
+    event.detail = detail;
+    event.time = time;
+    event.root = resources_.screen().root_window;
+    event.event = target.event_window;
+    event.child = coordinates.child;
+    event.root_x = coordinates.root_x;
+    event.root_y = coordinates.root_y;
+    event.event_x = coordinates.event_x;
+    event.event_y = coordinates.event_y;
+    event.state = state;
+    if (client->enqueue_server_packet(gw::protocol::x11::encode_input_event(
+            client->byte_order(), client->last_request_sequence(), event)))
+      ++delivered;
+  }
+  return delivered;
+}
+
+std::size_t EventRouter::route_crossing(
+    const std::uint32_t old_target, const std::uint32_t new_target,
+    const std::uint32_t focus, const glasswyrm::input::InputState& input,
+    const std::span<ClientConnection *const> clients) const {
+  if (old_target == new_target) return 0;
+  const auto root = resources_.screen().root_window;
+  const auto details = glasswyrm::input::crossing_details(
+      root, old_target, new_target);
+  std::size_t delivered = 0;
+  const auto deliver = [&](const std::uint32_t window,
+                           const std::uint32_t mask,
+                           const gw::protocol::x11::CoreEventType type,
+                           const gw::protocol::x11::NotifyDetail detail) {
+    const auto routes = route_windows(resources_, window);
+    const auto target = glasswyrm::input::select_direct(routes, window, mask);
+    const auto coordinates = glasswyrm::input::event_coordinates(
+        resources_, window, input.pointer_target(), input.pointer_x(),
+        input.pointer_y());
+    for (const auto client_id : target.clients) {
+      auto* client = find_client(clients, client_id);
+      if (!client) continue;
+      gw::protocol::x11::CrossingEvent event{};
+      event.type = type;
+      event.detail = detail;
+      event.time = input.time();
+      event.root = root;
+      event.event = window;
+      event.child = coordinates.child;
+      event.root_x = coordinates.root_x;
+      event.root_y = coordinates.root_y;
+      event.event_x = coordinates.event_x;
+      event.event_y = coordinates.event_y;
+      event.state = input.mask();
+      event.focus = glasswyrm::input::crossing_focus(root, window, focus);
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_crossing_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+  };
+  deliver(old_target, gw::protocol::x11::event_mask::LeaveWindow,
+          gw::protocol::x11::CoreEventType::LeaveNotify, details.first);
+  deliver(new_target, gw::protocol::x11::event_mask::EnterWindow,
+          gw::protocol::x11::CoreEventType::EnterNotify, details.second);
+  return delivered;
+}
+
+std::size_t EventRouter::route_focus(
+    const std::uint32_t old_focus, const std::uint32_t new_focus,
+    const std::span<ClientConnection *const> clients) const {
+  if (old_focus == new_focus) return 0;
+  const auto root = resources_.screen().root_window;
+  const auto details = glasswyrm::input::crossing_details(root, old_focus,
+                                                           new_focus);
+  std::size_t delivered = 0;
+  const auto deliver = [&](const std::uint32_t window,
+                           const gw::protocol::x11::CoreEventType type,
+                           const gw::protocol::x11::NotifyDetail detail) {
+    const auto routes = route_windows(resources_, window);
+    const auto target = glasswyrm::input::select_direct(
+        routes, window, gw::protocol::x11::event_mask::FocusChange);
+    for (const auto client_id : target.clients) {
+      auto* client = find_client(clients, client_id);
+      if (!client) continue;
+      const gw::protocol::x11::FocusEvent event{type, detail, window,
+                                                gw::protocol::x11::NotifyMode::Normal};
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_focus_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+  };
+  deliver(old_focus, gw::protocol::x11::CoreEventType::FocusOut, details.first);
+  deliver(new_focus, gw::protocol::x11::CoreEventType::FocusIn, details.second);
+  return delivered;
+}
+
+InputTransitionState EventRouter::capture_input_transition(
+    const std::uint32_t focus, const std::uint32_t pointer_target) const {
+  InputTransitionState result{};
+  result.focus = focus;
+  result.pointer_target = pointer_target;
+  const auto capture = [&](const std::uint32_t xid, DirectInputEventState& out) {
+    out.window = xid;
+    const auto* window = resources_.find_window(xid);
+    if (!window) return;
+    out.x = window->x;
+    out.y = window->y;
+    for (const auto& [client, mask] : window->event_selections) {
+      if ((mask & gw::protocol::x11::event_mask::FocusChange) != 0)
+        out.focus_recipients.push_back(client);
+      if ((mask & gw::protocol::x11::event_mask::LeaveWindow) != 0)
+        out.leave_recipients.push_back(client);
+    }
+  };
+  capture(focus, result.focus_window);
+  capture(pointer_target, result.pointer_window);
+  return result;
+}
+
+std::size_t EventRouter::route_lifecycle_input_transition(
+    const InputTransitionState& before, const std::uint32_t new_focus,
+    const std::uint32_t new_pointer_target,
+    const glasswyrm::input::InputState& input,
+    const std::span<ClientConnection *const> clients) const {
+  std::size_t delivered = 0;
+  const auto enqueue_focus = [&](const DirectInputEventState& state,
+                                 const gw::protocol::x11::CoreEventType type,
+                                 const gw::protocol::x11::NotifyDetail detail) {
+    for (const auto id : state.focus_recipients) {
+      auto* client = find_client(clients, id);
+      if (!client) continue;
+      const gw::protocol::x11::FocusEvent event{
+          type, detail, state.window, gw::protocol::x11::NotifyMode::Normal};
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_focus_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+  };
+  if (before.focus != new_focus) {
+    const auto details = glasswyrm::input::crossing_details(
+        resources_.screen().root_window, before.focus, new_focus);
+    enqueue_focus(before.focus_window,
+                  gw::protocol::x11::CoreEventType::FocusOut, details.first);
+    const auto* arrival = resources_.find_window(new_focus);
+    if (arrival) {
+      for (const auto& [id, mask] : arrival->event_selections) {
+        if ((mask & gw::protocol::x11::event_mask::FocusChange) == 0) continue;
+        auto* client = find_client(clients, id);
+        if (!client) continue;
+        const gw::protocol::x11::FocusEvent event{
+            gw::protocol::x11::CoreEventType::FocusIn, details.second,
+            new_focus, gw::protocol::x11::NotifyMode::Normal};
+        if (client->enqueue_server_packet(gw::protocol::x11::encode_focus_event(
+                client->byte_order(), client->last_request_sequence(), event)))
+          ++delivered;
+      }
+    }
+  }
+
+  if (before.pointer_target != new_pointer_target) {
+    const auto root = resources_.screen().root_window;
+    const auto details = glasswyrm::input::crossing_details(
+        root, before.pointer_target, new_pointer_target);
+    for (const auto id : before.pointer_window.leave_recipients) {
+      auto* client = find_client(clients, id);
+      if (!client) continue;
+      gw::protocol::x11::CrossingEvent event{};
+      event.type = gw::protocol::x11::CoreEventType::LeaveNotify;
+      event.detail = details.first;
+      event.time = input.time();
+      event.root = root;
+      event.event = before.pointer_target;
+      event.child = before.pointer_target == root ? new_pointer_target : 0;
+      event.root_x = input.pointer_x();
+      event.root_y = input.pointer_y();
+      event.event_x = before.pointer_target == root
+                          ? input.pointer_x()
+                          : input.pointer_x() - before.pointer_window.x;
+      event.event_y = before.pointer_target == root
+                          ? input.pointer_y()
+                          : input.pointer_y() - before.pointer_window.y;
+      event.state = input.mask();
+      event.focus = glasswyrm::input::crossing_focus(
+          root, before.pointer_target, new_focus);
+      if (client->enqueue_server_packet(gw::protocol::x11::encode_crossing_event(
+              client->byte_order(), client->last_request_sequence(), event)))
+        ++delivered;
+    }
+    // The old target is intentionally equal to the new target here only for
+    // selecting the committed EnterNotify recipients; emit it explicitly.
+    const auto* window = resources_.find_window(new_pointer_target);
+    if (window) {
+      const auto coordinates = glasswyrm::input::event_coordinates(
+          resources_, new_pointer_target, new_pointer_target,
+          input.pointer_x(), input.pointer_y());
+      for (const auto& [id, mask] : window->event_selections) {
+        if ((mask & gw::protocol::x11::event_mask::EnterWindow) == 0) continue;
+        auto* client = find_client(clients, id);
+        if (!client) continue;
+        gw::protocol::x11::CrossingEvent event{};
+        event.type = gw::protocol::x11::CoreEventType::EnterNotify;
+        event.detail = details.second;
+        event.time = input.time();
+        event.root = root;
+        event.event = new_pointer_target;
+        event.child = coordinates.child;
+        event.root_x = coordinates.root_x;
+        event.root_y = coordinates.root_y;
+        event.event_x = coordinates.event_x;
+        event.event_y = coordinates.event_y;
+        event.state = input.mask();
+        event.focus = glasswyrm::input::crossing_focus(root, new_pointer_target,
+                                                       new_focus);
+        if (client->enqueue_server_packet(
+                gw::protocol::x11::encode_crossing_event(
+                    client->byte_order(), client->last_request_sequence(), event)))
+          ++delivered;
+      }
     }
   }
   return delivered;

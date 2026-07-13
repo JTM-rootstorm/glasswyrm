@@ -70,6 +70,7 @@ class ServerState {
       if (!window || !staged.resources_.is_policy_candidate(xid)) return false;
       window->map_requested = intent.map_requested;
       window->map_serial = intent.map_serial;
+      window->focus_serial = intent.focus_serial;
       window->requested_x = intent.requested_x;
       window->requested_y = intent.requested_y;
       window->requested_width = intent.requested_width;

@@ -34,6 +34,15 @@ enum class CoreOpcode : std::uint8_t {
 };
 
 enum class CoreEventType : std::uint8_t {
+  KeyPress = 2,
+  KeyRelease = 3,
+  ButtonPress = 4,
+  ButtonRelease = 5,
+  MotionNotify = 6,
+  EnterNotify = 7,
+  LeaveNotify = 8,
+  FocusIn = 9,
+  FocusOut = 10,
   Expose = 12,
   GraphicsExpose = 13,
   NoExpose = 14,

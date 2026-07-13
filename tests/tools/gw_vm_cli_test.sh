@@ -435,6 +435,32 @@ FACTS
       fi
       ;;
     milestone7-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone8-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.5.0
+soversion=0
+wire_version=1.0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+xcb_proto=x11-base/xcb-proto-1.17.0
+scene_manifest=present
+x_servers_absent=true
+libinput_absent=true
+sanitizer=passed
+FACTS
+      for result in full_tests runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api05_consumers m4_pixel_regression m5_policy_regression m6_metadata_regression m7_drawable_regression input_socket_security raw_little raw_big motion crossing buttons button_motion keyboard modifiers propagation do_not_propagate click_focus focus_events scene_change_crossing two_client_routing xcb_drawing final_frame_golden event_trace_golden malformed_provider_isolation input_reconnect gwm_restart compositor_restart input_connection_survival x11_connection_survival focus_replay pointer_replay replay_hash post_restart_hash post_restart_input no_device_access service_results socket_cleanup rendering_archive archive_validation journal_evidence; do
+        printf '%s=passed\n' "$result"
+      done
+      if [[ ${GW_VM_TEST_BAD_M8_FACTS:-0} == 1 ]]; then
+        printf 'event_trace_golden=failed\nscenario_exit=1\n'
+      fi
+      ;;
+    milestone8-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -493,6 +519,14 @@ if [[ "$*" == *milestone7-rendering.tar* ]]; then
   printf '{}\n' >"$scratch/xcb-result.json"
   printf '{}\n' >"$scratch/result.json"
   (cd "$scratch" && sha256sum final.ppm frames.jsonl xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm frames.jsonl xcb-result.json result.json SHA256SUMS)
+  rm -rf "$scratch"
+fi
+if [[ "$*" == *milestone8-input-rendering.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  printf 'P6\n1 1\n255\n000' >"$scratch/final.ppm"
+  cp "$scratch/final.ppm" "$scratch/selected-runtime.ppm"
+  for name in frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json; do printf '{}\n' >"$scratch/$name"; done
+  (cd "$scratch" && sha256sum final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json >SHA256SUMS && tar -cf "$destination" final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS)
   rm -rf "$scratch"
 fi
 EOF
@@ -1120,5 +1154,49 @@ run_failure "$work_dir/milestone7-error.out" \
   env GW_VM_TEST_FAIL_MATCH='--software-content' "$gw_vm" milestone7-runtime-test --yes
 assert_contains "$work_dir/milestone7-error.out" 'failed during: guest-runtime'
 assert_contains "$command_log" 'milestone7-glasswyrmd-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone8-gate.out" "$gw_vm" milestone8-runtime-test
+assert_contains "$work_dir/milestone8-gate.out" '--yes'
+assert_not_contains "$command_log" '.glasswyrm-vm-source'
+
+: >"$command_log"
+run_failure "$work_dir/milestone8-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone8-runtime-test --yes
+assert_contains "$work_dir/milestone8-bad-base.out" \
+  'HEAD is not based on required Milestone 8 commit d3f8b4097704c704edf2693b8b213be572fe95e7'
+
+run_failure "$work_dir/milestone8-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone8-runtime-test.sh"
+assert_contains "$work_dir/milestone8-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_success "$work_dir/milestone8.out" "$gw_vm" scenario milestone8-runtime-test --yes
+assert_contains "$artifact_dir/milestone8-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone8-summary.json" \
+  '"required_base_commit": "d3f8b4097704c704edf2693b8b213be572fe95e7"'
+assert_contains "$artifact_dir/milestone8-summary.json" '"event_trace_golden": "passed"'
+assert_contains "$artifact_dir/milestone8-summary.json" '"input_connection_survival": "passed"'
+assert_contains "$artifact_dir/milestone8-summary.json" '"libinput_absent": "true"'
+for expected in /var/tmp/glasswyrm-build-m8-runtime /var/tmp/glasswyrm-build-m8-server /var/tmp/glasswyrm-build-m8-server-ipc /var/tmp/glasswyrm-build-m8-gwm /var/tmp/glasswyrm-build-m8-gwcomp /var/tmp/glasswyrm-build-m8-ipc-only /var/tmp/glasswyrm-m8-dumps /var/tmp/glasswyrm-m8-scenes /var/tmp/glasswyrm-m8-control /var/tmp/glasswyrm-m8-events /run/glasswyrm-m8-input/input.sock gwipc_input_c_consumer.c gwipc-input-contract input-foundation event-router x11_milestone8_probe xcb_milestone8_probe m8_restart_hold_probe 'PrivateDevices=yes' 'RuntimeDirectory=glasswyrm-m8-input' '--synthetic-input-socket' 'systemctl restart gwm-m8.service' 'systemctl restart gwcomp-m8.service'; do
+  assert_contains "$command_log" "$expected"
+done
+assert_contains "$command_log" 'milestone8-glasswyrmd-journal.log'
+assert_file_glob "$artifact_dir/milestone8-input-rendering.tar"
+for archived in final.ppm selected-runtime.ppm frames.jsonl scene.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json SHA256SUMS; do
+  tar -tf "$artifact_dir/milestone8-input-rendering.tar" | grep -Fx "$archived" >/dev/null || fail "M8 archive lacks $archived"
+done
+
+: >"$command_log"
+run_failure "$work_dir/milestone8-bad-evidence.out" \
+  env GW_VM_TEST_BAD_M8_FACTS=1 "$gw_vm" milestone8-runtime-test --yes
+assert_contains "$artifact_dir/milestone8-summary.json" 'event_trace_golden must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone8-error.out" \
+  env GW_VM_TEST_FAIL_MATCH='--synthetic-input-socket' "$gw_vm" milestone8-runtime-test --yes
+assert_contains "$work_dir/milestone8-error.out" 'failed during: guest-runtime'
+assert_contains "$command_log" 'milestone8-glasswyrmd-journal.log'
+assert_contains "$command_log" 'milestone8-input-rendering.tar'
 
 printf 'gw-vm CLI tests passed\n'

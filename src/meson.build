@@ -13,6 +13,9 @@ gw_x11_setup_lib = static_library(
     'protocol/x11/event.cpp',
     'protocol/x11/exposure_event.cpp',
     'protocol/x11/lifecycle_request.cpp',
+    'protocol/x11/input_event.cpp',
+    'protocol/x11/crossing_event.cpp',
+    'protocol/x11/focus_event.cpp',
   ),
   include_directories: include_directories('.'),
 )
@@ -85,6 +88,7 @@ if get_option('libgwipc')
     'ipc/wire/compositor_contract.cpp',
     'ipc/wire/policy_contract.cpp',
     'ipc/wire/lifecycle_contract.cpp',
+    'ipc/wire/input_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
   gwipc_wire_lib = static_library(
@@ -122,7 +126,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.4.0',
+    version: '0.5.0',
     soversion: '0',
     install: true,
   )
@@ -146,6 +150,7 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/control.h',
     '../include/glasswyrm/ipc/policy.h',
     '../include/glasswyrm/ipc/lifecycle.h',
+    '../include/glasswyrm/ipc/input.h',
     subdir: 'glasswyrm/ipc',
   )
 
@@ -155,7 +160,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.4.0',
+    version: '0.5.0',
   )
 endif
 
@@ -174,6 +179,8 @@ if get_option('glasswyrmd')
       'core/geometry/region.cpp',
       'glasswyrmd/pixel_storage.cpp',
       'glasswyrmd/raster_ops.cpp',
+      'input/input_state.cpp',
+      'input/input_router.cpp',
     ),
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),
@@ -199,6 +206,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',
+      'glasswyrmd/synthetic_input_peer.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
   endif

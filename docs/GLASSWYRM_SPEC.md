@@ -935,7 +935,7 @@ M4  Headless compositor and synthetic surfaces   complete
 M5  Window-manager policy scaffold              complete
 M6  Three-process mapped-window lifecycle       complete
 M7  Drawable and software-rendering bridge        complete
-M8  Synthetic input and event routing
+M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients
 M10 DRM/KMS software scanout
 M11 Interactive desktop baseline
@@ -978,6 +978,18 @@ reviewed pixel evidence, strict compiler builds, sanitizers, component builds,
 and the fixed Gentoo VM scenario define the accepted boundary; input, fonts,
 child composition, acceleration, and normal application compatibility remain
 deferred.
+
+Milestone 8 adds explicit `--synthetic-input-socket` integrated mode and GWIPC
+API 0.5 DiagnosticTool motion, button, raw-keycode, barrier, and acknowledgement
+records while preserving SOVERSION 0 and wire 1.0. `glasswyrmd` owns input
+state, one-layer top-level hit testing, X11 event selection/propagation, fixed
+modifier state, crossing, and event encoding. Button 1 click focus is committed
+through the existing GWM lifecycle policy transaction and projected to
+`gwcomp`. Repository raw/XCB/restart probes, reviewed event and pixel fixtures,
+strict builds, sanitizers, component builds, and the fixed Gentoo VM scenario
+define the accepted boundary. Real devices, grabs, cursors, XKB, mapping
+requests, child/InputOnly hit testing, and M9 application compatibility remain
+unsupported.
 
 ## 26. Definition of done
 
