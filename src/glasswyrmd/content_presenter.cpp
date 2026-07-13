@@ -84,6 +84,11 @@ bool ContentPresenter::prepare_lifecycle(
     auto storage = stage_storage(xid, projected.applied_width,
                                  projected.applied_height, resources);
     if (!storage) return false;
+    auto composed = compose_top_level_subtree(resources, xid);
+    const PixelStorage* presentation = storage.get();
+    if (composed && composed->width() == storage->width() &&
+        composed->height() == storage->height())
+      presentation = &*composed;
     bool replaced = false;
     auto* buffer = ensure_buffer(xid, *storage, replaced);
     if (!buffer) return false;
@@ -92,7 +97,7 @@ bool ContentPresenter::prepare_lifecycle(
                            {0, 0, storage->width(), storage->height()});
     if (!buffer->announced() || replaced)
       dirty = {{0, 0, storage->width(), storage->height()}};
-    if (!dirty.empty() && !buffer->copy_from(*storage, dirty)) return false;
+    if (!dirty.empty() && !buffer->copy_from(*presentation, dirty)) return false;
     if (!buffer->announced()) {
       CompositorSnapshotSubmission::Buffer attachment;
       attachment.attach.struct_size = sizeof(attachment.attach);
