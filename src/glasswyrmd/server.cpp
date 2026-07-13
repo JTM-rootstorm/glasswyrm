@@ -79,9 +79,8 @@ Server::Server(Options options) : options_(std::move(options)) {
       if (transition.kind == StructuralTransitionKind::Map && transition.before &&
           transition.committed && !transition.before->viewable &&
           transition.committed->viewable) {
-        const std::array rectangles{glasswyrm::geometry::Rectangle{
-            0, 0, transition.committed->width, transition.committed->height}};
-        (void)router.route_expose(transition.committed->target, rectangles, recipients);
+        (void)router.route_viewable_subtree_expose(
+            transition.committed->target, recipients);
       } else if (transition.kind == StructuralTransitionKind::Configure &&
                  transition.before && transition.committed) {
         std::vector<glasswyrm::geometry::Rectangle> rectangles;
@@ -596,9 +595,8 @@ int Server::run() {
         if (committed && operation->kind == LifecycleOperationKind::Map &&
             (!transition_before || !transition_before->viewable) &&
             committed->viewable) {
-          const std::array rectangles{geometry::Rectangle{
-              0, 0, committed->width, committed->height}};
-          (void)router.route_expose(operation->window, rectangles, recipients);
+          (void)router.route_viewable_subtree_expose(operation->window,
+                                                     recipients);
         } else if (committed && transition_before &&
                    operation->kind == LifecycleOperationKind::Configure) {
           std::vector<geometry::Rectangle> rectangles;
