@@ -36,7 +36,13 @@ struct ConfigureWindowRequest {
 [[nodiscard]] LifecycleDecodeStatus decode_map_window(
     std::span<const std::uint8_t> bytes, ByteOrder order,
     WindowLifecycleRequest& request) noexcept;
+[[nodiscard]] LifecycleDecodeStatus decode_map_subwindows(
+    std::span<const std::uint8_t> bytes, ByteOrder order,
+    WindowLifecycleRequest& request) noexcept;
 [[nodiscard]] LifecycleDecodeStatus decode_unmap_window(
+    std::span<const std::uint8_t> bytes, ByteOrder order,
+    WindowLifecycleRequest& request) noexcept;
+[[nodiscard]] LifecycleDecodeStatus decode_unmap_subwindows(
     std::span<const std::uint8_t> bytes, ByteOrder order,
     WindowLifecycleRequest& request) noexcept;
 [[nodiscard]] LifecycleDecodeStatus decode_configure_window(
