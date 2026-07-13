@@ -293,7 +293,7 @@ PresentedFrame PresentationTransaction::commit(
       value.commit_id,
       value.producer_generation,
       frame_ordinal_ + 1U};
-  const auto presentation = presenter_.present(frame);
+  const auto presentation = presenter_->present(frame);
   if (presentation.disposition !=
       glasswyrm::output::PresentDisposition::Complete) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;

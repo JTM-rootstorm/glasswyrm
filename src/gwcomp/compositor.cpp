@@ -2,6 +2,10 @@
 
 #include "gwcomp/presentation_transaction.hpp"
 
+#if GW_HAS_HEADLESS_BACKEND
+#include "backends/headless/presenter.hpp"
+#endif
+
 #include <unistd.h>
 #include <utility>
 
@@ -32,10 +36,19 @@ select_peer_profile(const gwipc_role role,
   return std::nullopt;
 }
 
+#if GW_HAS_HEADLESS_BACKEND
 Compositor::Compositor(
     std::filesystem::path dump_directory,
     std::optional<std::filesystem::path> scene_manifest)
-    : presenter_(std::move(dump_directory)) {
+    : Compositor(std::make_unique<glasswyrm::headless::Presenter>(
+                     std::move(dump_directory)),
+                 std::move(scene_manifest)) {}
+#endif
+
+Compositor::Compositor(
+    std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
+    std::optional<std::filesystem::path> scene_manifest)
+    : presenter_(std::move(presenter)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
 

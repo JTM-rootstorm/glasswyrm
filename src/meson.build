@@ -61,21 +61,34 @@ gw_render_software_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
-if get_option('headless_backend')
-  gw_headless_lib = static_library(
-    'gw-headless',
+  gw_output_lib = static_library(
+    'gw-output',
     files(
       'backends/output/software_frame.cpp',
-      'backends/headless/output.cpp',
       'backends/headless/frame_dump.cpp',
-      'backends/headless/presenter.cpp',
     ),
     dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
+  gw_output_dep = declare_dependency(
+    link_with: gw_output_lib,
+    dependencies: gw_compositor_geometry_dep,
+    include_directories: include_directories('.'),
+  )
+
+if get_option('headless_backend')
+  gw_headless_lib = static_library(
+    'gw-headless',
+    files(
+      'backends/headless/output.cpp',
+      'backends/headless/presenter.cpp',
+    ),
+    dependencies: gw_output_dep,
+    include_directories: include_directories('.'),
+  )
   gw_headless_dep = declare_dependency(
     link_with: gw_headless_lib,
-    dependencies: gw_compositor_geometry_dep,
+    dependencies: gw_output_dep,
     include_directories: include_directories('.'),
   )
 endif
@@ -336,6 +349,14 @@ if get_option('gwm')
 endif
 
 if get_option('gwcomp')
+  gwcomp_backend_dependencies = [gw_output_dep]
+  if get_option('headless_backend')
+    gwcomp_backend_dependencies += gw_headless_dep
+  endif
+  if get_option('drm_backend')
+    gwcomp_backend_dependencies += [gw_drm_model_dep, gw_session_dep,
+                                    libdrm_dep]
+  endif
   gwcomp_options_lib = static_library(
     'gwcomp-options',
     files('gwcomp/options.cpp', 'gwcomp/compositor.cpp',
@@ -344,19 +365,19 @@ if get_option('gwcomp')
           'gwcomp/presentation_transaction.cpp'),
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
   )
   gwcomp_options_dep = declare_dependency(
     link_with: gwcomp_options_lib,
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   gwcomp_program = executable(
     'gwcomp',
     files('gwcomp/main.cpp'),
     dependencies: [gwcomp_options_dep, gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
     install: true,
   )
   gwcomp_m4_producer_program = executable(

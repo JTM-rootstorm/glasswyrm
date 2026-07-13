@@ -383,7 +383,7 @@ if get_option('glasswyrmd') and get_option('libgwipc')
   test('lifecycle-projection', lifecycle_projection_test, timeout: 10)
 endif
 
-if get_option('gwcomp')
+if get_option('gwcomp') and get_option('headless_backend')
   m6_fixture_test = executable(
     'm6_fixture_test',
     files('unit/m6_fixture_test.cpp'),
@@ -513,6 +513,22 @@ software_renderer_test = executable(
 )
 test('software-renderer', software_renderer_test, timeout: 10)
 
+software_frame_test = executable(
+  'software_frame_test',
+  files('output/software_frame_test.cpp'),
+  dependencies: gw_output_dep,
+  include_directories: test_source_root_include,
+)
+test('software-frame', software_frame_test, timeout: 10)
+
+frame_dump_staging_test = executable(
+  'frame_dump_staging_test',
+  files('output/frame_dump_staging_test.cpp'),
+  dependencies: gw_output_dep,
+  include_directories: test_source_root_include,
+)
+test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
+
 if get_option('headless_backend')
   headless_output_test = executable(
     'headless_output_test',
@@ -521,22 +537,6 @@ if get_option('headless_backend')
     include_directories: test_source_root_include,
   )
   test('headless-output', headless_output_test, timeout: 10)
-
-  software_frame_test = executable(
-    'software_frame_test',
-    files('output/software_frame_test.cpp'),
-    dependencies: gw_headless_dep,
-    include_directories: test_source_root_include,
-  )
-  test('software-frame', software_frame_test, timeout: 10)
-
-  frame_dump_staging_test = executable(
-    'frame_dump_staging_test',
-    files('output/frame_dump_staging_test.cpp'),
-    dependencies: gw_headless_dep,
-    include_directories: test_source_root_include,
-  )
-  test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
 
   headless_presenter_test = executable(
     'headless_presenter_test',
