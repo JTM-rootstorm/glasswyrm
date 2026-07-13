@@ -1,6 +1,7 @@
 #include "glasswyrmd/content_presenter.hpp"
 
 #include "core/geometry/region.hpp"
+#include "glasswyrmd/subtree_compositor.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -204,7 +205,9 @@ bool ContentPresenter::prepare_content(
                            {0, 0, window->storage->width(),
                             window->storage->height()});
     if (dirty.empty()) continue;
-    if (!buffer->copy_from(*window->storage, dirty)) return false;
+    auto composed = compose_top_level_subtree(resources, xid);
+    if (!composed) return false;
+    if (!buffer->copy_from(*composed, dirty)) return false;
     found->second.pending.clear();
     found->second.inflight = dirty;
     submission.damages.push_back(make_damage(xid, dirty));

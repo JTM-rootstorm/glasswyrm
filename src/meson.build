@@ -182,6 +182,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/raster_ops.cpp',
       'glasswyrmd/font.cpp',
       'glasswyrmd/m9_raster_ops.cpp',
+      'glasswyrmd/subtree_compositor.cpp',
       'input/input_state.cpp',
       'input/input_router.cpp',
     ),
