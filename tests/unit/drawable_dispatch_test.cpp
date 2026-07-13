@@ -142,5 +142,21 @@ int main() {
     const auto* bitmap=state.resources().find_pixmap(base+7)->bitmap();
     gw::test::require(result.output.empty()&&bitmap&&bitmap->at(0,0)==1&&bitmap->at(1,0)==0&&bitmap->at(2,0)==1,
                       "XYBitmap uses LSBFirst 32-bit rows in either client order");
+
+    WindowCreateSpec parent; parent.xid=base+9; parent.parent=state.screen().root_window;
+    parent.width=8; parent.height=8; parent.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,parent)==CreateWindowStatus::Success,
+                      "nested parent");
+    WindowCreateSpec child; child.xid=base+10; child.parent=base+9; child.x=2; child.y=3;
+    child.border_width=1; child.width=2; child.height=2; child.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,child)==CreateWindowStatus::Success,
+                      "nested child");
+    x11::ByteWriter child_fill(order); child_fill.write_u8(70); child_fill.write_u8(0); child_fill.write_u16(5);
+    child_fill.write_u32(base+10); child_fill.write_u32(base+2);
+    child_fill.write_u16(0); child_fill.write_u16(0); child_fill.write_u16(2); child_fill.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(child_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&result.drawable_damage.size()==1&&
+                      result.drawable_damage[0].window==base+9&&result.drawable_damage[0].rectangle.x==3&&
+                      result.drawable_damage[0].rectangle.y==4,"child damage translates to top-level content");
   }
 }

@@ -149,8 +149,33 @@ bool supported_window_drawable(const ResourceTable& resources,
                                const std::uint32_t xid) {
   const auto* window = resources.find_window(xid);
   return window && xid != resources.screen().root_window &&
-         window->parent == resources.screen().root_window &&
          window->window_class == WindowClass::InputOutput && window->depth == 24;
+}
+
+std::optional<DrawableDamage> translate_window_damage(
+    const ResourceTable& resources, std::uint32_t xid,
+    geometry::Rectangle rectangle) {
+  for (;;) {
+    const auto* window = resources.find_window(xid);
+    if (!window || window->window_class != WindowClass::InputOutput)
+      return std::nullopt;
+    const auto clipped = geometry::intersect(
+        rectangle, {0, 0, window->width, window->height});
+    if (!clipped) return std::nullopt;
+    rectangle = *clipped;
+    if (window->parent == resources.screen().root_window)
+      return DrawableDamage{xid, rectangle};
+    rectangle.x += static_cast<std::int32_t>(window->x) + window->border_width;
+    rectangle.y += static_cast<std::int32_t>(window->y) + window->border_width;
+    xid = window->parent;
+  }
+}
+
+void add_window_damage(DispatchResult& result, const ResourceTable& resources,
+                       const std::uint32_t drawable,
+                       const geometry::Rectangle rectangle) {
+  if (const auto translated = translate_window_damage(resources, drawable, rectangle))
+    result.drawable_damage.push_back(*translated);
 }
 
 bool known_drawable(const ResourceTable& resources, const std::uint32_t xid) {
@@ -724,7 +749,7 @@ DispatchResult poly_line(ServerState& state, const DispatchContext& context,
     draw_line(*storage, points[index - 1], points[index], gc->foreground, gc->plane_mask);
   DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, points)) result.drawable_damage.push_back({drawable, *damage});
+    if (const auto damage = clipped_bounds(*storage, points)) add_window_damage(result, state.resources(), drawable, *damage);
   return result;
 }
 
@@ -753,7 +778,7 @@ DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
   draw_segments(*storage, segments, gc->foreground, gc->plane_mask);
   DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, damage_points)) result.drawable_damage.push_back({drawable, *damage});
+    if (const auto damage = clipped_bounds(*storage, damage_points)) add_window_damage(result, state.resources(), drawable, *damage);
   return result;
 }
 
@@ -783,7 +808,7 @@ DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
   fill_convex_polygon(*storage, points, gc->foreground, gc->plane_mask);
   DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, points)) result.drawable_damage.push_back({drawable, *damage});
+    if (const auto damage = clipped_bounds(*storage, points)) add_window_damage(result, state.resources(), drawable, *damage);
   return result;
 }
 
@@ -818,7 +843,7 @@ DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
   }
   DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    for (const auto& rectangle : damage.rectangles()) result.drawable_damage.push_back({drawable, rectangle});
+    for (const auto& rectangle : damage.rectangles()) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -958,7 +983,7 @@ DispatchResult image_text8(ServerState& state, const DispatchContext& context,
       gc->plane_mask, true);
   DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    result.drawable_damage.push_back({drawable, raster.damage});
+    add_window_damage(result, state.resources(), drawable, raster.damage);
   return result;
 }
 
@@ -1008,7 +1033,7 @@ DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
   DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
     for (const auto& rectangle : damage.rectangles())
-      result.drawable_damage.push_back({drawable, rectangle});
+      add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -1059,7 +1084,7 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
   if (!raster.success) return error(context, request, x11::CoreErrorCode::BadLength);
   DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    result.drawable_damage.push_back({drawable, raster.damage});
+    add_window_damage(result, state.resources(), drawable, raster.damage);
   return result;
 }
 
@@ -1087,7 +1112,7 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   for (const auto& rectangle : damage.rectangles()) {
     storage->fill(rectangle, gc->foreground, gc->plane_mask);
     if (supported_window_drawable(state.resources(), drawable))
-      result.drawable_damage.push_back({drawable, rectangle});
+      add_window_damage(result, state.resources(), drawable, rectangle);
   }
   return result;
 }
@@ -1114,7 +1139,8 @@ DispatchResult copy_area_request(ServerState& state, const DispatchContext& cont
   try { raster = copy_area(*source_storage, *destination_storage, static_cast<std::int16_t>(sx), static_cast<std::int16_t>(sy), width, height, static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), gc->plane_mask); }
   catch (const std::bad_alloc&) { return error(context, request, x11::CoreErrorCode::BadAlloc); }
   DispatchResult result;
-  if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination)) result.drawable_damage.push_back({destination, raster.damage});
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination))
+    add_window_damage(result, state.resources(), destination, raster.damage);
   if (gc->graphics_exposures) {
     const auto requested = geometry::intersect({static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), width, height}, {0, 0, destination_storage->width(), destination_storage->height()});
     if (requested && raster.damage == *requested)
@@ -1153,7 +1179,7 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
   DispatchResult result; if (!clipped) return result;
   if (window->attributes.background_source != BackgroundSource::None) {
     storage->fill(*clipped, window->attributes.background_source == BackgroundSource::Pixel ? window->attributes.background_pixel : 0);
-    result.drawable_damage.push_back({window_id, *clipped});
+    add_window_damage(result, state.resources(), window_id, *clipped);
   }
   if (request.data == 1) result.expose_intents.push_back({window_id, *clipped});
   return result;
