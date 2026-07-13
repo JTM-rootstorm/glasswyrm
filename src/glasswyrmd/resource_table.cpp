@@ -35,6 +35,9 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   resources_.emplace(
       screen.root_window,
       ResourceRecord{ResourceType::Window, std::nullopt, std::move(root)});
+  resources_.emplace(kDefaultFontXid,
+                     ResourceRecord{ResourceType::Font, std::nullopt,
+                                    FontResource{}});
 }
 
 const ResourceRecord* ResourceTable::find(const std::uint32_t xid) const noexcept {
@@ -75,6 +78,10 @@ const GraphicsContextResource* ResourceTable::find_gc(const std::uint32_t xid) c
 GraphicsContextResource* ResourceTable::find_gc(const std::uint32_t xid) noexcept {
   auto* resource = find(xid);
   return resource ? std::get_if<GraphicsContextResource>(&resource->payload) : nullptr;
+}
+const FontResource* ResourceTable::find_font(const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<FontResource>(&resource->payload) : nullptr;
 }
 
 bool ResourceTable::is_policy_candidate(const std::uint32_t xid) const noexcept {
@@ -370,6 +377,34 @@ FreeGcStatus ResourceTable::free_gc(const std::uint32_t xid) {
     }
   }
   return FreeGcStatus::Success;
+}
+
+OpenFontStatus ResourceTable::open_font(
+    const ClientId owner, const std::uint32_t resource_base,
+    const std::uint32_t resource_mask, const std::uint32_t xid) {
+  if (!valid_new_resource_id(xid, resource_base, resource_mask))
+    return OpenFontStatus::BadIdChoice;
+  try {
+    resources_.emplace(xid, ResourceRecord{ResourceType::Font, owner,
+                                           FontResource{}});
+    try { resources_by_owner_[owner].push_back(xid); }
+    catch (...) { resources_.erase(xid); throw; }
+  } catch (const std::bad_alloc&) { return OpenFontStatus::BadAlloc; }
+  return OpenFontStatus::Success;
+}
+
+CloseFontStatus ResourceTable::close_font(const std::uint32_t xid) {
+  const auto* font = find_font(xid);
+  const auto* record = find(xid);
+  if (!font || !record || !record->owner) return CloseFontStatus::BadFont;
+  const auto owner = *record->owner;
+  resources_.erase(xid);
+  auto iterator = resources_by_owner_.find(owner);
+  if (iterator != resources_by_owner_.end()) {
+    std::erase(iterator->second, xid);
+    if (iterator->second.empty()) resources_by_owner_.erase(iterator);
+  }
+  return CloseFontStatus::Success;
 }
 
 DestroyWindowStatus ResourceTable::destroy_window(const std::uint32_t xid,
@@ -767,7 +802,13 @@ bool ResourceTable::invariants_hold() const noexcept {
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
-      if (!resource.owner || resource.type == ResourceType::Window) return false;
+      if ((!resource.owner && resource.type != ResourceType::Font) ||
+          resource.type == ResourceType::Window) return false;
+      if (!resource.owner) {
+        if (xid != kDefaultFontXid ||
+            !std::holds_alternative<FontResource>(resource.payload)) return false;
+        continue;
+      }
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(), xid) != 1)
