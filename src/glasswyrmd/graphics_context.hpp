@@ -13,5 +13,6 @@ struct GraphicsContextResource {
   bool graphics_exposures{true};
   std::int16_t clip_x_origin{}, clip_y_origin{};
   std::uint32_t clip_mask{};
+  std::uint32_t font{0xfffffff0U};
 };
 }  // namespace glasswyrm::server

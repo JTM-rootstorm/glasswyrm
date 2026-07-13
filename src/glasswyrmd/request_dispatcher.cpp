@@ -11,6 +11,8 @@
 
 #include <bit>
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -18,6 +20,8 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <string>
+#include <string>
 #include <type_traits>
 #include <tuple>
 #include <utility>
@@ -37,6 +41,64 @@ DispatchResult error(const DispatchContext& context,
 
 bool exact_size(const x11::FramedRequest& request, const std::size_t size) {
   return request.bytes.size() == size;
+}
+
+std::size_t padded_size(const std::size_t size) { return (size + 3U) & ~std::size_t{3U}; }
+
+struct Color { std::uint16_t red{}, green{}, blue{}; };
+
+std::optional<Color> parse_color_name(std::span<const std::uint8_t> bytes) {
+  std::string name(bytes.begin(), bytes.end());
+  if (!name.empty() && name.front() == '#') {
+    const auto digits = name.size() - 1;
+    if (digits != 3 && digits != 6 && digits != 12) return std::nullopt;
+    auto nibble = [](const char value) -> std::optional<std::uint8_t> {
+      if (value >= '0' && value <= '9') return value - '0';
+      if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+      if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+      return std::nullopt;
+    };
+    std::array<std::uint16_t, 3> values{};
+    const auto width = digits / 3;
+    for (std::size_t component = 0; component < 3; ++component) {
+      std::uint16_t value = 0;
+      for (std::size_t offset = 0; offset < width; ++offset) {
+        const auto parsed = nibble(name[1 + component * width + offset]);
+        if (!parsed) return std::nullopt;
+        value = static_cast<std::uint16_t>((value << 4U) | *parsed);
+      }
+      values[component] = width == 1 ? static_cast<std::uint16_t>(value * 0x1111U)
+                        : width == 2 ? static_cast<std::uint16_t>(value * 0x0101U)
+                                     : value;
+    }
+    return Color{values[0], values[1], values[2]};
+  }
+  std::ranges::transform(name, name.begin(), [](const unsigned char value) {
+    return static_cast<char>(std::tolower(value));
+  });
+  if (name == "black") return Color{0, 0, 0};
+  if (name == "white") return Color{0xffff, 0xffff, 0xffff};
+  if (name == "red") return Color{0xffff, 0, 0};
+  if (name == "green") return Color{0, 0xffff, 0};
+  if (name == "blue") return Color{0, 0, 0xffff};
+  if (name == "yellow") return Color{0xffff, 0xffff, 0};
+  if (name == "cyan") return Color{0, 0xffff, 0xffff};
+  if (name == "magenta") return Color{0xffff, 0, 0xffff};
+  if (name == "gray" || name == "grey") return Color{0x8080, 0x8080, 0x8080};
+  if (name == "light gray" || name == "light grey") return Color{0xd3d3, 0xd3d3, 0xd3d3};
+  if (name == "dark gray" || name == "dark grey") return Color{0xa9a9, 0xa9a9, 0xa9a9};
+  return std::nullopt;
+}
+
+Color quantize_color(const Color color) {
+  return {static_cast<std::uint16_t>((color.red >> 8U) * 257U),
+          static_cast<std::uint16_t>((color.green >> 8U) * 257U),
+          static_cast<std::uint16_t>((color.blue >> 8U) * 257U)};
+}
+std::uint32_t color_pixel(const Color color) {
+  return (static_cast<std::uint32_t>(color.red >> 8U) << 16U) |
+         (static_cast<std::uint32_t>(color.green >> 8U) << 8U) |
+         (color.blue >> 8U);
 }
 
 std::optional<StructuralEventState> capture_structural_state(
@@ -582,6 +644,196 @@ DispatchResult free_gc(ServerState& state, const DispatchContext& context,
       ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadGContext, xid);
 }
 
+bool valid_fontable(const ResourceTable& resources, const std::uint32_t xid) {
+  return resources.find_font(xid) || resources.find_gc(xid);
+}
+
+DispatchResult open_font(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; std::uint16_t name_length{};
+  (void)reader.read_u32(xid); (void)reader.read_u16(name_length); (void)reader.skip(2);
+  const auto padded = (static_cast<std::size_t>(name_length) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 12U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto name = std::string_view(
+      reinterpret_cast<const char*>(request.bytes.data() + 12), name_length);
+  if (!matches_fixed_font(name))
+    return error(context, request, x11::CoreErrorCode::BadName);
+  switch (state.resources().open_font(context.client_id, context.resource_base,
+                                      context.resource_mask, xid)) {
+    case OpenFontStatus::Success: return {};
+    case OpenFontStatus::BadIdChoice:
+      return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);
+    case OpenFontStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
+  }
+  return {};
+}
+
+DispatchResult close_font(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  return state.resources().close_font(xid) == CloseFontStatus::Success
+      ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadFont, xid);
+}
+
+void write_char_info(x11::ByteWriter& writer) {
+  writer.write_u16(0); writer.write_u16(kFixedFontAdvance);
+  writer.write_u16(kFixedFontAdvance); writer.write_u16(kFixedFontAscent);
+  writer.write_u16(kFixedFontDescent); writer.write_u16(0);
+}
+
+DispatchResult query_font(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  if (!valid_fontable(state.resources(), xid))
+    return error(context, request, x11::CoreErrorCode::BadFont, xid);
+  x11::ByteWriter reply(context.byte_order);
+  reply.write_u8(1); reply.write_u8(0); reply.write_u16(x11::wire_sequence(context.sequence));
+  constexpr std::uint32_t characters = kFixedFontLastCharacter - kFixedFontFirstCharacter + 1U;
+  constexpr std::uint32_t extra_bytes = 52U - 32U + characters * 12U;
+  reply.write_u32(extra_bytes / 4U);
+  write_char_info(reply); reply.write_padding(4); write_char_info(reply); reply.write_padding(4);
+  reply.write_u16(kFixedFontFirstCharacter); reply.write_u16(kFixedFontLastCharacter);
+  reply.write_u16(kFixedFontDefaultCharacter); reply.write_u16(0);
+  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(1);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  reply.write_u32(characters);
+  for (std::uint32_t index = 0; index < characters; ++index) write_char_info(reply);
+  return {std::move(reply).take()};
+}
+
+DispatchResult query_text_extents(ServerState& state,
+                                  const DispatchContext& context,
+                                  const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8 || (request.bytes.size() & 3U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}; (void)reader.read_u32(xid);
+  if (!valid_fontable(state.resources(), xid))
+    return error(context, request, x11::CoreErrorCode::BadFont, xid);
+  const auto bytes_after_font = request.bytes.size() - 8U;
+  if ((bytes_after_font & 1U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const std::size_t characters = bytes_after_font / 2U - (request.data ? 1U : 0U);
+  if (request.data > 1 || characters * 2U + (request.data ? 2U : 0U) != bytes_after_font)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  for (std::size_t index = 0; index < characters; ++index) {
+    std::uint8_t byte1{}, byte2{}; (void)reader.read_u8(byte1); (void)reader.read_u8(byte2);
+    if (byte1 != 0) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 0);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  reply.write_u16(kFixedFontAscent); reply.write_u16(kFixedFontDescent);
+  const auto width = static_cast<std::uint32_t>(characters * kFixedFontAdvance);
+  reply.write_u32(width); reply.write_u32(0); reply.write_u32(width);
+  reply.write_padding(4);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult list_fonts(const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint16_t maximum{}, pattern_length{};
+  (void)reader.read_u16(maximum); (void)reader.read_u16(pattern_length);
+  const auto padded = (static_cast<std::size_t>(pattern_length) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 8U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto pattern = std::string_view(
+      reinterpret_cast<const char*>(request.bytes.data() + 8), pattern_length);
+  const bool match = maximum != 0 && matches_fixed_font(pattern);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u16(match ? 1 : 0); reply.write_padding(22);
+  if (match) {
+    constexpr std::array<std::uint8_t, 6> fixed_name{'\x05','f','i','x','e','d'};
+    reply.write_payload(fixed_name);
+  }
+  return {std::move(reply).finish()};
+}
+
+DispatchResult image_text8(ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  const auto padded = (static_cast<std::size_t>(request.data) + 3U) & ~std::size_t{3U};
+  if (!exact_size(request, 16U + padded))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint16_t raw_x{}, raw_y{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  const auto text = std::span<const std::uint8_t>(request.bytes).subspan(16, request.data);
+  const auto raster = raster_text8(*storage, static_cast<std::int16_t>(raw_x),
+      static_cast<std::int16_t>(raw_y), text, gc->foreground, gc->background,
+      gc->plane_mask, true);
+  DispatchResult result;
+  if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
+    result.drawable_damage.push_back({drawable, raster.damage});
+  return result;
+}
+
+DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
+                          const x11::FramedRequest& request) {
+  if (request.bytes.size() < 16 || (request.bytes.size() & 3U) != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint16_t raw_x{}, raw_y{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  struct TextItem { std::int8_t delta{}; std::vector<std::uint8_t> text; };
+  std::vector<TextItem> items;
+  while (reader.remaining() != 0) {
+    std::uint8_t length{}; (void)reader.read_u8(length);
+    if (length == 0) continue;
+    if (length == 255) {
+      std::uint32_t font{}; if (!reader.read_u32(font)) return error(context, request, x11::CoreErrorCode::BadLength);
+      if (!state.resources().find_font(font)) return error(context, request, x11::CoreErrorCode::BadFont, font);
+      continue;
+    }
+    std::uint8_t delta{}; if (!reader.read_u8(delta) || reader.remaining() < length)
+      return error(context, request, x11::CoreErrorCode::BadLength);
+    TextItem item{static_cast<std::int8_t>(delta), {}}; item.text.reserve(length);
+    for (std::uint8_t index = 0; index < length; ++index) {
+      std::uint8_t value{}; (void)reader.read_u8(value); item.text.push_back(value);
+    }
+    items.push_back(std::move(item));
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  std::int32_t x = static_cast<std::int16_t>(raw_x);
+  const auto y = static_cast<std::int16_t>(raw_y);
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto& item : items) {
+    x += item.delta;
+    const auto raster = raster_text8(*storage, x, y, item.text, gc->foreground,
+                                    gc->background, gc->plane_mask, false);
+    if (!raster.damage.empty()) damage.add(raster.damage);
+    x += static_cast<std::int32_t>(item.text.size()) * kFixedFontAdvance;
+  }
+  DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles())
+      result.drawable_damage.push_back({drawable, rectangle});
+  return result;
+}
+
 DispatchResult put_image(ServerState& state, const DispatchContext& context,
                          const x11::FramedRequest& request) {
   if (request.bytes.size() < 24) return error(context, request, x11::CoreErrorCode::BadLength);
@@ -1002,6 +1254,121 @@ DispatchResult get_input_focus(const ServerState& state,
   return {std::move(reply).finish()};
 }
 
+DispatchResult query_extension(const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint16_t name_length{};
+  if (!reader.read_u16(name_length) || !reader.skip(2) ||
+      !exact_size(request, 8 + padded_size(name_length)))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  std::span<const std::uint8_t> name;
+  if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(0);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult list_extensions(const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  return {std::move(x11::ReplyBuilder(context.byte_order, context.sequence, 0)).finish()};
+}
+
+DispatchResult alloc_color(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  if (!exact_size(request, 16)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t colormap{}; Color color{};
+  if (!reader.read_u32(colormap) || !reader.read_u16(color.red) ||
+      !reader.read_u16(color.green) || !reader.read_u16(color.blue) || !reader.skip(2))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  color = quantize_color(color);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  reply.write_padding(2); reply.write_u32(color_pixel(color));
+  return {std::move(reply).finish()};
+}
+
+DispatchResult named_color(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request, const bool allocate) {
+  if (request.bytes.size() < 12) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t colormap{}; std::uint16_t name_length{};
+  if (!reader.read_u32(colormap) || !reader.read_u16(name_length) || !reader.skip(2) ||
+      !exact_size(request, 12 + padded_size(name_length)))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  std::span<const std::uint8_t> name;
+  if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto parsed = parse_color_name(name);
+  if (!parsed) return error(context, request, x11::CoreErrorCode::BadName);
+  const auto color = quantize_color(*parsed);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  if (allocate) reply.write_u32(color_pixel(color));
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  reply.write_u16(color.red); reply.write_u16(color.green); reply.write_u16(color.blue);
+  return {std::move(reply).finish()};
+}
+
+DispatchResult free_colors(const ServerState& state, const DispatchContext& context,
+                           const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || request.bytes.size() % 4 != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
+  if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  return {};
+}
+
+DispatchResult query_colors(const ServerState& state, const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (request.bytes.size() < 8 || request.bytes.size() % 4 != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
+  if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (colormap != state.screen().default_colormap)
+    return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
+  const auto count = (request.bytes.size() - 8) / 4;
+  if (count > std::numeric_limits<std::uint16_t>::max()) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence); reply.write_u16(static_cast<std::uint16_t>(count)); reply.write_padding(22);
+  for (std::size_t i = 0; i < count; ++i) { std::uint32_t pixel{}; (void)reader.read_u32(pixel); reply.write_payload_u16(static_cast<std::uint16_t>(((pixel >> 16U) & 0xffU) * 257U)); reply.write_payload_u16(static_cast<std::uint16_t>(((pixel >> 8U) & 0xffU) * 257U)); reply.write_payload_u16(static_cast<std::uint16_t>((pixel & 0xffU) * 257U)); reply.write_payload_u16(0); }
+  return {std::move(reply).finish()};
+}
+
+std::uint32_t keysym_for(const std::uint8_t keycode, const bool shifted) {
+  constexpr std::array<std::pair<std::uint8_t, char>, 26> letters{{
+    {38,'a'},{56,'b'},{54,'c'},{40,'d'},{26,'e'},{41,'f'},{42,'g'},{43,'h'},{31,'i'},{44,'j'},{45,'k'},{46,'l'},{58,'m'},{57,'n'},{32,'o'},{33,'p'},{24,'q'},{27,'r'},{39,'s'},{28,'t'},{30,'u'},{55,'v'},{25,'w'},{53,'x'},{29,'y'},{52,'z'}}};
+  for (const auto [code, letter] : letters) if (keycode == code) return static_cast<std::uint32_t>(shifted ? letter - 32 : letter);
+  if (keycode >= 10 && keycode <= 18) return shifted ? std::array<std::uint32_t,9>{0x21,0x40,0x23,0x24,0x25,0x5e,0x26,0x2a,0x28}[keycode-10] : 0x31U + keycode-10;
+  if (keycode == 19) return shifted ? 0x29 : 0x30;
+  switch (keycode) { case 9:return 0xff1b; case 22:return 0xff08; case 23:return 0xff09; case 36:return 0xff0d; case 37:return 0xffe3; case 50:return 0xffe1; case 62:return 0xffe2; case 64:return 0xffe9; case 65:return 0x20; case 105:return 0xffe4; case 108:return 0xffea; default:return 0; }
+}
+
+DispatchResult get_keyboard_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 8)) return error(context, request, x11::CoreErrorCode::BadLength);
+  const auto first = request.bytes[4], count = request.bytes[5];
+  if (first < 8 || count == 0 || static_cast<unsigned>(first) + count > 256)
+    return error(context, request, x11::CoreErrorCode::BadValue, first);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 2);
+  for (unsigned keycode = first; keycode < static_cast<unsigned>(first) + count; ++keycode) { reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), false)); reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), true)); }
+  return {std::move(reply).finish()};
+}
+
+DispatchResult get_pointer_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 5); constexpr std::array<std::uint8_t,5> map{1,2,3,4,5}; reply.write_payload(map); return {std::move(reply).finish()};
+}
+
+DispatchResult get_modifier_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
+  if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ReplyBuilder reply(context.byte_order, context.sequence, 2); constexpr std::array<std::uint8_t,16> map{50,62, 0,0, 37,105, 64,108, 0,0, 0,0, 0,0, 0,0}; reply.write_payload(map); return {std::move(reply).finish()};
+}
+
 DispatchResult lifecycle_decode_error(const DispatchContext& context,
                                       const x11::FramedRequest& request,
                                       x11::LifecycleDecodeStatus status) {
@@ -1140,6 +1507,36 @@ DispatchResult dispatch_request(ServerState& state,
         return list_properties(state, context, request);
       case x11::CoreOpcode::GetInputFocus:
         return get_input_focus(state, context, request);
+      case x11::CoreOpcode::OpenFont:
+        return open_font(state, context, request);
+      case x11::CoreOpcode::CloseFont:
+        return close_font(state, context, request);
+      case x11::CoreOpcode::QueryFont:
+        return query_font(state, context, request);
+      case x11::CoreOpcode::QueryTextExtents:
+        return query_text_extents(state, context, request);
+      case x11::CoreOpcode::ListFonts:
+        return list_fonts(context, request);
+      case x11::CoreOpcode::AllocColor:
+        return alloc_color(state, context, request);
+      case x11::CoreOpcode::AllocNamedColor:
+        return named_color(state, context, request, true);
+      case x11::CoreOpcode::FreeColors:
+        return free_colors(state, context, request);
+      case x11::CoreOpcode::QueryColors:
+        return query_colors(state, context, request);
+      case x11::CoreOpcode::LookupColor:
+        return named_color(state, context, request, false);
+      case x11::CoreOpcode::QueryExtension:
+        return query_extension(context, request);
+      case x11::CoreOpcode::ListExtensions:
+        return list_extensions(context, request);
+      case x11::CoreOpcode::GetKeyboardMapping:
+        return get_keyboard_mapping(context, request);
+      case x11::CoreOpcode::GetPointerMapping:
+        return get_pointer_mapping(context, request);
+      case x11::CoreOpcode::GetModifierMapping:
+        return get_modifier_mapping(context, request);
       case x11::CoreOpcode::CreatePixmap:
         return create_pixmap(state, context, request);
       case x11::CoreOpcode::FreePixmap:
@@ -1158,8 +1555,14 @@ DispatchResult dispatch_request(ServerState& state,
         return poly_fill_rectangle(state, context, request);
       case x11::CoreOpcode::PutImage:
         return put_image(state, context, request);
+      case x11::CoreOpcode::PolyText8:
+        return poly_text8(state, context, request);
+      case x11::CoreOpcode::ImageText8:
+        return image_text8(state, context, request);
       case x11::CoreOpcode::NoOperation:
         return {};
+      default:
+        break;
     }
   } catch (const std::bad_alloc&) {
     return error(context, request, x11::CoreErrorCode::BadAlloc);

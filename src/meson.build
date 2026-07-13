@@ -180,6 +180,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/pixel_storage.cpp',
       'glasswyrmd/bitmap_storage.cpp',
       'glasswyrmd/raster_ops.cpp',
+      'glasswyrmd/font.cpp',
       'glasswyrmd/m9_raster_ops.cpp',
       'input/input_state.cpp',
       'input/input_router.cpp',
