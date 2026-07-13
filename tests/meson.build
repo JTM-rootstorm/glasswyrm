@@ -43,6 +43,13 @@ test(
   args: [meson.project_source_root() / 'tests/fixtures/m8'],
   timeout: 10,
 )
+m9_fixture_validate = find_program('tools/m9_fixture_validate.sh')
+test(
+  'm9-fixture-checksums',
+  m9_fixture_validate,
+  args: [meson.project_source_root()],
+  timeout: 10,
+)
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
