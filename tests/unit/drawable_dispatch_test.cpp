@@ -84,6 +84,34 @@ int main() {
                       result.expose_intents[0].rectangle.height==2&&result.drawable_damage.size()==1,
                       "ClearArea zero extents clip and expose intent");
 
+    WindowCreateSpec clip_child; clip_child.xid=base+5; clip_child.parent=base+4; clip_child.x=1; clip_child.y=1;
+    clip_child.width=2; clip_child.height=1; clip_child.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,clip_child)==CreateWindowStatus::Success,
+                      "ClipByChildren child");
+    state.resources().find_window(base+4)->map_state=MapState::Viewable;
+    state.resources().find_window(base+5)->map_requested=true;
+    state.resources().find_window(base+5)->map_state=MapState::Viewable;
+    state.resources().find_gc(base+2)->foreground=0x00abcdefU;
+    state.resources().find_gc(base+2)->plane_mask=0x00ffffffU;
+    x11::ByteWriter parent_fill(order); parent_fill.write_u8(70); parent_fill.write_u8(0); parent_fill.write_u16(5);
+    parent_fill.write_u32(base+4); parent_fill.write_u32(base+2); parent_fill.write_u16(0); parent_fill.write_u16(0); parent_fill.write_u16(4); parent_fill.write_u16(3);
+    result=dispatch_request(state,context,finish(std::move(parent_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(state.resources().find_window(base+4)->storage->at(0,0)==0xffabcdefU&&
+                      state.resources().find_window(base+4)->storage->at(1,1)==0xff010203U,
+                      "ClipByChildren preserves parent pixels beneath mapped child");
+    for (const auto& item : result.drawable_damage)
+      gw::test::require(!glasswyrm::geometry::intersect(item.rectangle,{1,1,2,1}),
+                        "ClipByChildren damage excludes child outer bounds");
+    x11::ByteWriter unmap_child(order); unmap_child.write_u8(10); unmap_child.write_u8(0); unmap_child.write_u16(2); unmap_child.write_u32(base+5);
+    result=dispatch_request(state,context,finish(std::move(unmap_child),x11::CoreOpcode::UnmapWindow,0));
+    gw::test::require(result.expose_intents.size()==1&&result.expose_intents[0].window==base+4,
+                      "unmapping child exposes preserved parent region");
+    x11::ByteWriter revealed_fill(order); revealed_fill.write_u8(70); revealed_fill.write_u8(0); revealed_fill.write_u16(5);
+    revealed_fill.write_u32(base+4); revealed_fill.write_u32(base+2); revealed_fill.write_u16(0); revealed_fill.write_u16(0); revealed_fill.write_u16(4); revealed_fill.write_u16(3);
+    result=dispatch_request(state,context,finish(std::move(revealed_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(state.resources().find_window(base+4)->storage->at(1,1)==0xffabcdefU,
+                      "unmapped child no longer clips parent drawing");
+
     x11::ByteWriter line_gc(order); line_gc.write_u8(56); line_gc.write_u8(0); line_gc.write_u16(7);
     line_gc.write_u32(base+2); line_gc.write_u32((1U<<4U)|(1U<<5U)|(1U<<6U)|(1U<<7U));
     line_gc.write_u32(0); line_gc.write_u32(0); line_gc.write_u32(1); line_gc.write_u32(0);
