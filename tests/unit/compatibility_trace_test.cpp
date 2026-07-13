@@ -1,9 +1,11 @@
 #include "glasswyrmd/compatibility_trace.hpp"
 
 #include <cstdlib>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <vector>
 
@@ -72,5 +74,21 @@ int main() {
   std::filesystem::create_symlink(path, symlink);
   auto followed = glasswyrm::server::CompatibilityTrace::create(symlink, error);
   require(!followed);
+  const auto fault_path = directory / "write-fault.jsonl";
+  auto fault_trace =
+      glasswyrm::server::CompatibilityTrace::create(fault_path, error);
+  require(fault_trace != nullptr);
+  rlimit previous_limit{};
+  require(::getrlimit(RLIMIT_FSIZE, &previous_limit) == 0);
+  auto limited = previous_limit;
+  limited.rlim_cur = 64;
+  const auto previous_handler = std::signal(SIGXFSZ, SIG_IGN);
+  require(previous_handler != SIG_ERR &&
+          ::setrlimit(RLIMIT_FSIZE, &limited) == 0);
+  fault_trace->connection(100, "accepted");
+  fault_trace->connection(101, "accepted");
+  require(!fault_trace->enabled());
+  require(::setrlimit(RLIMIT_FSIZE, &previous_limit) == 0);
+  require(std::signal(SIGXFSZ, previous_handler) != SIG_ERR);
   std::filesystem::remove_all(directory);
 }
