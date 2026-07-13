@@ -1,1 +1,1 @@
-{"client_a":{"window":2097152,"event_count":17},"client_b":{"window":4194304,"event_count":12},"crossing_order":["leave-a","enter-b"],"final_focus":4194304}
+{"client_a":{"window":2097152,"event_count":12},"client_b":{"window":4194304,"event_count":9},"crossing_order":["leave-a","enter-b"],"final_focus":4194304}
