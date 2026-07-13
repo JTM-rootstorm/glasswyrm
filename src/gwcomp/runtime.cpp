@@ -1,5 +1,6 @@
 #include "gwcomp/contract_dispatch.hpp"
 #include "gwcomp/runtime.hpp"
+#include "gwcomp/signal_runtime.hpp"
 
 #include "backends/output/presentation_backend.hpp"
 #include "config.hpp"
@@ -10,11 +11,9 @@
 #include <glasswyrm/ipc.h>
 
 #include <cerrno>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
-#include <fcntl.h>
 #include <memory>
 #include <poll.h>
 #include <string>
@@ -36,12 +35,6 @@ constexpr std::uint64_t kOfferedCapabilities =
     kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
-int signal_write_fd = -1;
-
-void wake_for_signal(int) {
-  const std::uint8_t byte = 1;
-  if (signal_write_fd >= 0) (void)::write(signal_write_fd, &byte, sizeof(byte));
-}
 
 struct ListenerDeleter {
   void operator()(gwipc_listener* value) const { gwipc_listener_destroy(value); }
@@ -95,14 +88,14 @@ int run(const Options& options) {
     return 1;
   }
 
-  int signal_pipe[2] = {-1, -1};
-  if (::pipe2(signal_pipe, O_NONBLOCK | O_CLOEXEC) != 0) {
-    std::perror("gwcomp: signal pipe");
+  SignalRuntime signals;
+  std::string signal_error;
+  if (!signals.install(options.backend == Backend::Drm &&
+                           !options.external_session,
+                       signal_error)) {
+    std::fprintf(stderr, "gwcomp: %s\n", signal_error.c_str());
     return 1;
   }
-  signal_write_fd = signal_pipe[1];
-  const auto previous_int = std::signal(SIGINT, wake_for_signal);
-  const auto previous_term = std::signal(SIGTERM, wake_for_signal);
 
   gwipc_listener_options listener_options{};
   listener_options.struct_size = sizeof(listener_options);
@@ -125,9 +118,6 @@ int run(const Options& options) {
     std::fprintf(stderr, "gwcomp: listener creation failed: %s errno=%d\n",
                  gwipc_status_string(status),
                  raw_listener ? gwipc_listener_system_errno(raw_listener) : 0);
-    signal_write_fd = -1;
-    (void)::close(signal_pipe[0]);
-    (void)::close(signal_pipe[1]);
     return 1;
   }
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
@@ -169,7 +159,7 @@ int run(const Options& options) {
                                       producer.get())
                                 : 0),
          0},
-        {signal_pipe[0], POLLIN, 0},
+        {signals.poll_fd(), POLLIN, 0},
         {compositor.presentation_poll_fd(),
          compositor.presentation_poll_events(), 0}};
     const int count =
@@ -181,9 +171,15 @@ int run(const Options& options) {
       break;
     }
     if ((descriptors[2].revents & POLLIN) != 0) {
-      std::uint8_t bytes[32];
-      while (::read(signal_pipe[0], bytes, sizeof(bytes)) > 0) {}
-      stopping = true;
+      const auto events = signals.drain();
+      if (events.stop) stopping = true;
+      if (events.virtual_terminal_release ||
+          events.virtual_terminal_acquire) {
+        std::fprintf(stderr,
+                     "gwcomp: VT signal arrived before DRM session initialization\n");
+        stopping = true;
+        exit_status = 1;
+      }
     }
     if (stopping) continue;
     if (compositor.presentation_pending() &&
@@ -299,11 +295,6 @@ int run(const Options& options) {
 
   producer.reset();
   listener.reset();
-  signal_write_fd = -1;
-  (void)::signal(SIGINT, previous_int);
-  (void)::signal(SIGTERM, previous_term);
-  (void)::close(signal_pipe[0]);
-  (void)::close(signal_pipe[1]);
   std::fprintf(stderr, "gwcomp: stopped\n");
   return exit_status;
 }
