@@ -14,6 +14,6 @@ why each group is in scope. Frozen traces may narrow this profile or prove a
 contingency request, but must not silently broaden it.
 
 Compatibility is limited to the commands in `tests/compat/m9/clients.toml`.
-That manifest still contains `PENDING` source hashes, and the repository does
-not yet contain reviewed M9 trace/frame fixtures. Therefore this document does
+That manifest pins the official release hashes, but the repository does not
+yet contain reviewed M9 trace/frame fixtures. Therefore this document does
 not declare that xeyes or xclock works end to end.

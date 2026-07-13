@@ -11,5 +11,5 @@ that an external application works.
 - [M9 request profile](M9_REQUEST_PROFILE.md) summarizes implemented protocol
   scope and acceptance status.
 
-Milestone 9 remains in progress until exact source hashes replace the manifest
-placeholders and the Gentoo VM produces reviewed normalized traces and frames.
+Milestone 9 remains in progress until the pinned sources are built and verified
+and the Gentoo VM produces reviewed normalized traces and frames.
