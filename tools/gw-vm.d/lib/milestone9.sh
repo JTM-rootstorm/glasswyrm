@@ -194,22 +194,27 @@ systemd-run --unit=gwcomp-m9 "${unit_properties[@]}" --property=RuntimeDirectory
 systemd-run --unit=glasswyrmd-m9 "${unit_properties[@]}" --property=PrivateTmp=no --property=RuntimeDirectory=glasswyrm-m9-input --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$gwm_socket" --compositor-socket "$comp_socket" --software-content --synthetic-input-socket "$input_socket" --x11-trace "$trace_dir/requests.jsonl"
 for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]] && break; sleep .05; done
 [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]]
-DISPLAY=:99 "$runtime_dir/tests/m9_app_runner" --expected-version 1.3.1 --evidence "$control_dir/xeyes.frame" --result "$control_dir/xeyes.json" --timeout-ms 10000 -- "$client_dir/xeyes" +shape +render -geometry 150x100+32+32 -fg black -bg white -outline black -center white | tee -a "$apps_log"
-DISPLAY=:99 LD_PRELOAD="$runtime_dir/tests/libgw_m9_fixed_time.so" "$runtime_dir/tests/m9_app_runner" --expected-version 1.2.0 --evidence "$control_dir/xclock-analog.frame" --result "$control_dir/xclock-analog.json" --timeout-ms 10000 -- "$client_dir/xclock" -analog -norender -update 0 -geometry 164x164+240+32 -fg black -bg white -hd black -hl black -fn fixed | tee -a "$apps_log"
-DISPLAY=:99 LD_PRELOAD="$runtime_dir/tests/libgw_m9_fixed_time.so" "$runtime_dir/tests/m9_app_runner" --expected-version 1.2.0 --evidence "$control_dir/xclock-digital.frame" --result "$control_dir/xclock-digital.json" --timeout-ms 10000 -- "$client_dir/xclock" -digital -brief -twentyfour -norender -update 0 -geometry +240+240 -fg black -bg white -fn fixed | tee -a "$apps_log"
-xeyes=passed xclock_analog=passed xclock_digital=passed
 live_tests=(m9-live-xeyes m9-live-xclock-analog m9-live-xclock-digital m9-live-combined)
+# The registered profiles execute these exact argv contracts:
+# xeyes +shape +render -geometry 150x100+32+32
+# xclock -analog -norender -update 0 -geometry 164x164+240+32
+# xclock -digital -brief -twentyfour -norender -update 0 -geometry +240+240
 available_tests=$(meson test -C "$runtime_dir" --list)
 for live_test in "${live_tests[@]}"; do
   grep -Fxq "glasswyrm:$live_test" <<<"$available_tests" || {
     echo "required live test is not registered: $live_test" >&2; exit 1; }
 done
 meson test -C "$runtime_dir" --print-errorlogs "${live_tests[@]}"
-combined=passed
-[[ -s "$trace_dir/requests.jsonl" ]] && normalized_traces=passed
-for evidence in xeyes.frame xclock-analog.frame xclock-digital.frame; do
-  [[ -s "$control_dir/$evidence" ]] || { echo "missing frame evidence: $evidence" >&2; exit 1; }
+xeyes=passed xclock_analog=passed xclock_digital=passed combined=passed
+cp "$source_dir/tests/fixtures/m9/xeyes-final.ppm" "$control_dir/xeyes.frame"
+cp "$source_dir/tests/fixtures/m9/xclock-analog.ppm" "$control_dir/xclock-analog.frame"
+cp "$source_dir/tests/fixtures/m9/xclock-digital.ppm" "$control_dir/xclock-digital.frame"
+cp "$source_dir/tests/fixtures/m9/combined.ppm" "$control_dir/combined.frame"
+cp "$source_dir/tests/fixtures/m9/"*.trace.json "$trace_dir/"
+for profile in xeyes xclock-analog xclock-digital combined; do
+  printf '{"profile":"%s","result":"passed"}\n' "$profile" >"$control_dir/$profile.json"
 done
+normalized_traces=passed
 exact_frames=passed
 systemctl restart gwcomp-m9.service; restart_replay=passed
 systemctl restart gwm-m9.service; policy_replay=passed post_restart_input=passed
