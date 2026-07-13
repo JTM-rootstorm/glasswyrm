@@ -5,6 +5,7 @@
 #include "protocol/x11/reply.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
 #include "glasswyrmd/raster_ops.hpp"
+#include "glasswyrmd/m9_raster_ops.hpp"
 #include "core/geometry/region.hpp"
 #include "protocol/x11/exposure_event.hpp"
 #include "protocol/x11/event_mask.hpp"
@@ -20,7 +21,6 @@
 #include <optional>
 #include <span>
 #include <string_view>
-#include <string>
 #include <string>
 #include <type_traits>
 #include <tuple>
@@ -197,7 +197,8 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
                                 GraphicsContextResource gc,
                                 const ResourceTable& resources) {
   constexpr std::uint32_t supported = (1U << 0U) | (1U << 1U) | (1U << 2U) |
-      (1U << 3U) | (1U << 8U) | (1U << 14U) | (1U << 15U) |
+      (1U << 3U) | (1U << 4U) | (1U << 5U) | (1U << 6U) |
+      (1U << 7U) | (1U << 8U) | (1U << 14U) | (1U << 15U) |
       (1U << 16U) | (1U << 17U) |
       (1U << 18U) | (1U << 19U);
   GcDecodeResult result{}; result.gc = gc;
@@ -210,6 +211,24 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
       case 1: result.gc.plane_mask=value; break;
       case 2: result.gc.foreground=value & 0x00ffffffU; break;
       case 3: result.gc.background=value & 0x00ffffffU; break;
+      case 4:
+        if (value > std::numeric_limits<std::uint16_t>::max()) {
+          result.error=x11::CoreErrorCode::BadValue; return result;
+        }
+        if (value != 0) return result;
+        result.gc.line_width=0; break;
+      case 5:
+        if (value > 2) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 0) return result;
+        result.gc.line_style=0; break;
+      case 6:
+        if (value > 3) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 1) return result;
+        result.gc.cap_style=1; break;
+      case 7:
+        if (value > 2) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 0) return result;
+        result.gc.join_style=0; break;
       case 8: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.fill_style=0; break;
       case 14:
         if (!resources.find_font(value)) {
@@ -652,6 +671,155 @@ DispatchResult free_gc(ServerState& state, const DispatchContext& context,
   x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t xid{}; (void)reader.read_u32(xid);
   return state.resources().free_gc(xid) == FreeGcStatus::Success
       ? DispatchResult{} : error(context, request, x11::CoreErrorCode::BadGContext, xid);
+}
+
+std::optional<geometry::Rectangle> clipped_bounds(
+    const PixelStorage& storage, const std::span<const RasterPoint> points) {
+  if (points.empty()) return std::nullopt;
+  auto minimum_x = points.front().x, maximum_x = points.front().x;
+  auto minimum_y = points.front().y, maximum_y = points.front().y;
+  for (const auto point : points) {
+    minimum_x = std::min(minimum_x, point.x); maximum_x = std::max(maximum_x, point.x);
+    minimum_y = std::min(minimum_y, point.y); maximum_y = std::max(maximum_y, point.y);
+  }
+  return geometry::intersect(
+      {minimum_x, minimum_y,
+       static_cast<std::uint32_t>(static_cast<std::int64_t>(maximum_x) - minimum_x + 1),
+       static_cast<std::uint32_t>(static_cast<std::int64_t>(maximum_y) - minimum_y + 1)},
+      {0, 0, storage.width(), storage.height()});
+}
+
+DispatchResult poly_line(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 4U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 1)
+    return error(context, request, x11::CoreErrorCode::BadValue, request.data);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterPoint> points;
+  points.reserve((request.bytes.size() - 12U) / 4U);
+  while (reader.remaining() != 0) {
+    std::uint16_t raw_x{}, raw_y{}; (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
+    RasterPoint point{static_cast<std::int16_t>(raw_x), static_cast<std::int16_t>(raw_y)};
+    if (request.data == 1 && !points.empty()) {
+      const auto x = static_cast<std::int64_t>(points.back().x) + point.x;
+      const auto y = static_cast<std::int64_t>(points.back().y) + point.y;
+      if (x < std::numeric_limits<std::int32_t>::min() || x > std::numeric_limits<std::int32_t>::max() ||
+          y < std::numeric_limits<std::int32_t>::min() || y > std::numeric_limits<std::int32_t>::max())
+        return error(context, request, x11::CoreErrorCode::BadValue);
+      point = {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)};
+    }
+    points.push_back(point);
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (points.size() == 1) draw_line(*storage, points[0], points[0], gc->foreground, gc->plane_mask);
+  else for (std::size_t index = 1; index < points.size(); ++index)
+    draw_line(*storage, points[index - 1], points[index], gc->foreground, gc->plane_mask);
+  DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, points)) result.drawable_damage.push_back({drawable, *damage});
+  return result;
+}
+
+DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 8U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterSegment> segments;
+  std::vector<RasterPoint> damage_points;
+  while (reader.remaining() != 0) {
+    std::uint16_t x1{}, y1{}, x2{}, y2{};
+    (void)reader.read_u16(x1); (void)reader.read_u16(y1); (void)reader.read_u16(x2); (void)reader.read_u16(y2);
+    RasterSegment segment{{static_cast<std::int16_t>(x1), static_cast<std::int16_t>(y1)},
+                          {static_cast<std::int16_t>(x2), static_cast<std::int16_t>(y2)}};
+    segments.push_back(segment); damage_points.push_back(segment.first); damage_points.push_back(segment.second);
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  draw_segments(*storage, segments, gc->foreground, gc->plane_mask);
+  DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, damage_points)) result.drawable_damage.push_back({drawable, *damage});
+  return result;
+}
+
+DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
+                         const x11::FramedRequest& request) {
+  if (request.bytes.size() < 16 || (request.bytes.size() - 16U) % 4U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; std::uint8_t shape{}, mode{};
+  (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  (void)reader.read_u8(shape); (void)reader.read_u8(mode); (void)reader.skip(2);
+  if (shape > 2) return error(context, request, x11::CoreErrorCode::BadValue, shape);
+  if (mode > 1) return error(context, request, x11::CoreErrorCode::BadValue, mode);
+  if (shape != 2 || mode != 0) return error(context, request, x11::CoreErrorCode::BadImplementation);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterPoint> points;
+  while (reader.remaining() != 0) {
+    std::uint16_t x{}, y{}; (void)reader.read_u16(x); (void)reader.read_u16(y);
+    points.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y)});
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  fill_convex_polygon(*storage, points, gc->foreground, gc->plane_mask);
+  DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    if (const auto damage = clipped_bounds(*storage, points)) result.drawable_damage.push_back({drawable, *damage});
+  return result;
+}
+
+DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
+                             const x11::FramedRequest& request) {
+  if (request.bytes.size() < 12 || (request.bytes.size() - 12U) % 12U != 0)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
+  const auto* gc = state.resources().find_gc(gc_id);
+  if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
+    return error(context, request, known_drawable(state.resources(), drawable)
+        ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
+  std::vector<RasterEllipse> ellipses;
+  while (reader.remaining() != 0) {
+    std::uint16_t x{}, y{}, width{}, height{}, angle1{}, angle2{};
+    (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(width); (void)reader.read_u16(height);
+    (void)reader.read_u16(angle1); (void)reader.read_u16(angle2);
+    static_cast<void>(angle1);
+    const auto extent = static_cast<std::int16_t>(angle2);
+    if (extent != 360 * 64 && extent != -360 * 64)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    ellipses.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), width, height});
+  }
+  auto* storage = mutable_storage(state.resources(), drawable);
+  if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto ellipse : ellipses) {
+    fill_ellipse(*storage, ellipse, gc->foreground, gc->plane_mask);
+    damage.add({ellipse.x, ellipse.y, ellipse.width, ellipse.height});
+  }
+  DispatchResult result;
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles()) result.drawable_damage.push_back({drawable, rectangle});
+  return result;
 }
 
 bool valid_fontable(const ResourceTable& resources, const std::uint32_t xid) {
@@ -1660,8 +1828,16 @@ DispatchResult dispatch_request(ServerState& state,
         return clear_area(state, context, request);
       case x11::CoreOpcode::CopyArea:
         return copy_area_request(state, context, request);
+      case x11::CoreOpcode::PolyLine:
+        return poly_line(state, context, request);
+      case x11::CoreOpcode::PolySegment:
+        return poly_segment(state, context, request);
+      case x11::CoreOpcode::FillPoly:
+        return fill_poly(state, context, request);
       case x11::CoreOpcode::PolyFillRectangle:
         return poly_fill_rectangle(state, context, request);
+      case x11::CoreOpcode::PolyFillArc:
+        return poly_fill_arc(state, context, request);
       case x11::CoreOpcode::PutImage:
         return put_image(state, context, request);
       case x11::CoreOpcode::PolyText8:
