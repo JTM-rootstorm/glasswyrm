@@ -282,7 +282,12 @@ if get_option('gwm')
   )
   gwm_program = executable(
     'gwm',
-    files('gwm/main.cpp'),
+    files(
+      'gwm/main.cpp',
+      'gwm/runtime.cpp',
+      'gwm/contract_dispatch.cpp',
+      'gwm/signal_runtime.cpp',
+    ),
     dependencies: [gwm_options_dep, gw_wm_policy_dep, gwipc_dep],
     install: true,
   )
