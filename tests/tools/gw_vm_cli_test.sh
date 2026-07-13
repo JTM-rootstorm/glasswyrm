@@ -140,6 +140,18 @@ if [[ -n ${GW_VM_TEST_FAIL_VIRSH:-} && " $* " == *" $GW_VM_TEST_FAIL_VIRSH "* ]]
 fi
 case " $* " in
   *' domstate '*) printf 'running\n' ;;
+  *' dumpxml '*) printf '<domain><devices><video><model type="virtio"/></video><graphics type="spice"/></devices></domain>\n' ;;
+  *' help screenshot '*) printf 'screenshot DOMAIN [FILE]\n' ;;
+  *' screenshot '*)
+    for argument in "$@"; do
+      if [[ $argument == *.ppm ]]; then
+        python3 - "$argument" <<'PY'
+import pathlib,sys
+pathlib.Path(sys.argv[1]).write_bytes(b'P6\n1024 768\n255\n' + bytes(1024*768*3))
+PY
+      fi
+    done
+    ;;
   *' start '*) printf 'Domain started\n' ;;
   *' shutdown '*) printf 'Domain is being shutdown\n' ;;
   *' snapshot-revert '*) printf 'Snapshot reverted\n' ;;
@@ -193,6 +205,32 @@ if [[ $script == *'marker="$destination/.glasswyrm-vm-source"'* ]]; then
   printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
   bash -s -- "${guest_args[@]}" <<<"$script"
   exit $?
+fi
+
+if [[ $script == *'M10 prerequisite failed before package installation: no DRM primary node'* && $script != *'build=/var/tmp/glasswyrm-build-m10'* ]]; then
+  printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
+  if [[ ${GW_VM_TEST_M10_NO_DRM:-0} == 1 ]]; then
+    printf '%s\n' 'M10 prerequisite failed before package installation: no DRM primary node (/dev/dri/card*) is exposed by the current guest kernel.' >&2
+    printf '%s\n' 'Configure the libvirt video device and its virtual GPU DRM driver in the clean snapshot; the M10 harness will never install or rebuild a kernel.' >&2
+    exit 20
+  fi
+  cat <<'PREFLIGHT'
+drm_primary_node=/dev/dri/card0
+drm_driver=virtio_gpu
+drm_connector=Virtual-1
+drm_connectors=Virtual-1
+drm_modes=Virtual-1:1024x768
+drm_mode=1024x768
+target_vt=/dev/tty2
+virtual_terminals=/dev/tty1,/dev/tty2
+PREFLIGHT
+  exit 0
+fi
+
+if [[ $script == *'test -f "$1"; cat "$1"'* ]]; then
+  marker=${guest_args[0]:-}
+  printf 'ready\ncommit_id=%s\ngeneration=1\ncanonical_hash=0123456789abcdef\nscanout_hash=0123456789abcdef\nmode=1024x768\nconnector=Virtual-1\n' "${marker##*/}"
+  exit 0
 fi
 
 if [[ $script == *'cat "$1"'* ]]; then
@@ -487,6 +525,46 @@ FACTS
       fi
       ;;
     milestone9-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone10-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.5.0
+soversion=0
+wire_version=1.0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.7.0
+ninja_version=1.12.0
+systemd_version=systemd 257
+libdrm_version=2.4.124
+x_servers_absent=true
+mesa_absent=true
+libinput_absent=true
+drm_primary_node=/dev/dri/card0
+drm_driver=virtio_gpu
+drm_connector=Virtual-1
+drm_mode=1024x768
+drm_crtc=42
+drm_primary_plane=43
+dumb_buffer=true
+atomic_capability=true
+drm_api=atomic
+atomic_test_only=passed
+canonical_hash=0123456789abcdef
+scanout_hash=0123456789abcdef
+mirror_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+screenshot_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FACTS
+      for result in strict_tests source_layout_audit source_layout_budget refactor_parity sanitizer clang headless_no_libdrm dual_backend drm_only historical_components m4_m9_regressions initial_modeset page_flip delayed_ack delayed_release hash_parity screenshot_equal vt_release vt_acquire remodeset post_vt_screenshot_equal kms_restore kd_restore vt_mode_restore active_vt_restore getty_restore device_exclusivity service_results socket_cleanup archive_validation journal_evidence; do
+        printf '%s=passed\n' "$result"
+      done
+      if [[ ${GW_VM_TEST_BAD_M10_FACTS:-0} == 1 ]]; then printf 'page_flip=failed\nscenario_exit=1\n'; fi
+      ;;
+    milestone10-drm-probe.json) printf '{"device":"/dev/dri/card0","driver":"virtio_gpu","connector":"Virtual-1","mode":"1024x768"}\n' ;;
+    milestone10-drm-report.jsonl) printf '{"record":"selection","api":"atomic"}\n' ;;
+    milestone10-kms-*.json|milestone10-vt-*.json) printf '{}\n' ;;
+    milestone10-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -574,6 +652,16 @@ if [[ "$*" == *milestone9-acceptance.tar* ]]; then
   fi
   rm -rf "$scratch"
 fi
+if [[ "$*" == *milestone10-drm-evidence.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  printf 'P6\n1 1\n255\n000' >"$scratch/canonical.ppm"
+  cp "$scratch/canonical.ppm" "$scratch/milestone10-screen.ppm"
+  cp "$scratch/canonical.ppm" "$scratch/milestone10-screen-after-vt.ppm"
+  for name in frames.jsonl scene.jsonl milestone10-drm-report.jsonl milestone10-kms-before.json milestone10-kms-active.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-active.json milestone10-vt-after.json pinned-client-result.json; do printf '{}\n' >"$scratch/$name"; done
+  if [[ ${GW_VM_TEST_BAD_M10_ARCHIVE:-0} == 1 ]]; then rm -f "$scratch/milestone10-kms-after.json"; fi
+  (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -608,7 +696,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -1285,5 +1373,63 @@ run_failure "$work_dir/milestone9-error.out" \
   env GW_VM_TEST_FAIL_MATCH='--x11-trace' "$gw_vm" milestone9-runtime-test --yes
 assert_contains "$work_dir/milestone9-error.out" 'failed during: guest-runtime'
 assert_contains "$command_log" 'milestone9-glasswyrmd-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-gate.out" "$gw_vm" milestone10-runtime-test
+assert_contains "$work_dir/milestone10-gate.out" '--yes'
+
+run_failure "$work_dir/milestone10-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone10-runtime-test.sh"
+assert_contains "$work_dir/milestone10-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10-bad-base.out" \
+  'HEAD is not based on required Milestone 10 commit fe0faab39f7a6d28157ee6b96a4f6292a0b7984e'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-dirty.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10-dirty.out" 'requires committed source outside Plans/'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-no-drm.out" \
+  env GW_VM_TEST_M10_NO_DRM=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10-no-drm.out" 'no DRM primary node (/dev/dri/card*)'
+assert_contains "$work_dir/milestone10-no-drm.out" 'will never install or rebuild a kernel'
+assert_not_contains "$command_log" 'x11-libs/libdrm'
+
+: >"$command_log"
+run_success "$work_dir/milestone10.out" "$gw_vm" scenario milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10.out" 'reset; milestone9-runtime-test; reset; milestone10-runtime-test'
+assert_contains "$artifact_dir/milestone10-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone10-summary.json" \
+  '"required_base_commit": "fe0faab39f7a6d28157ee6b96a4f6292a0b7984e"'
+for expected in /var/tmp/glasswyrm-build-m10 /var/tmp/glasswyrm-build-m10-asan /var/tmp/glasswyrm-build-m10-runtime /var/tmp/glasswyrm-build-m10-drm-only /var/tmp/glasswyrm-build-m10-headless /var/tmp/glasswyrm-build-m10-server /var/tmp/glasswyrm-build-m10-gwm /var/tmp/glasswyrm-build-m10-ipc-only /var/tmp/glasswyrm-m10-dumps /var/tmp/glasswyrm-m10-scenes /var/tmp/glasswyrm-m10-drm /var/tmp/glasswyrm-m10-control /var/tmp/glasswyrm-m10-artifacts x11-libs/libdrm -Ddrm_backend=false -Ddrm_backend=true -Dheadless_backend=false -Dasan=true -Dubsan=true source_layout_test.sh gw_drm_probe '--require-mode 1024x768' '--snapshot-state' '--expect-active' '--expect-restored' getty@tty2.service gwm-m10 gwcomp-m10 glasswyrmd-m10 '--backend drm' '--mirror-dump-dir' '--drm-report' screenshot-ready screen-captured screenshot-after-vt-ready screen-after-vt-captured 'chvt 1' 'chvt 2' milestone10-kms-before.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-after.json; do
+  assert_contains "$command_log" "$expected"
+done
+assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
+assert_file_glob "$artifact_dir/milestone10-drm-evidence.tar"
+for artifact in milestone10-runtime-test.log milestone10-meson-test.log milestone10-drm-probe.json milestone10-drm-report.jsonl milestone10-kms-before.json milestone10-kms-active.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-active.json milestone10-vt-after.json milestone10-apps.log milestone10-screenshot-validation.log milestone10-glasswyrmd-journal.log milestone10-gwm-journal.log milestone10-gwcomp-journal.log milestone10-facts.env milestone10-summary.json milestone10-screen.ppm milestone10-screen-after-vt.ppm milestone10-drm-evidence.tar; do
+  [[ -f $artifact_dir/$artifact ]] || fail "milestone10 scenario did not create $artifact"
+done
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-bad-facts.out" \
+  env GW_VM_TEST_BAD_M10_FACTS=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$artifact_dir/milestone10-summary.json" 'page_flip must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-bad-archive.out" \
+  env GW_VM_TEST_BAD_M10_ARCHIVE=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10-bad-archive.out" 'failed during: artifact-validation'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-source-layout-error.out" \
+  env GW_VM_TEST_FAIL_MATCH=source_layout_test.sh "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$work_dir/milestone10-source-layout-error.out" 'failed during: guest-runtime'
+assert_contains "$command_log" 'milestone10-gwcomp-journal.log'
+assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
 printf 'gw-vm CLI tests passed\n'
