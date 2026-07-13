@@ -169,6 +169,14 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('drawable-core', drawable_core_test, timeout: 10)
+
+  subtree_compositor_test = executable(
+    'subtree_compositor_test',
+    files('unit/subtree_compositor_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_include_dirs,
+  )
+  test('subtree-compositor', subtree_compositor_test, timeout: 10)
   drawable_resource_test = executable(
     'drawable_resource_test',
     files('unit/drawable_resource_test.cpp'),
@@ -183,6 +191,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('drawable-dispatch', drawable_dispatch_test, timeout: 10)
+  font_dispatch_test = executable(
+    'font_dispatch_test',
+    files('unit/font_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('font-dispatch', font_dispatch_test, timeout: 10)
   glasswyrmd_options_test = executable(
     'glasswyrmd_options_test',
     files('unit/glasswyrmd_options_test.cpp'),
