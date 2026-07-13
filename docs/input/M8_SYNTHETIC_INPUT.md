@@ -65,6 +65,7 @@ gwinput_m8 --socket PATH --scenario NAME --output PATH
 
 Scenarios are `barrier`, `motion`, `crossing`, `buttons`, `button-motion`,
 `modifiers`, `keyboard`, `click-focus`, `invalid-transition`, `malformed`,
-`queue-limit`, and `reconnect`. Output is deterministic JSON; arbitrary input
-scripts are intentionally unsupported.
-
+`queue-limit`, `reconnect`, and `m9-xeyes`. The last scenario is the fixed M9
+xeyes acceptance path: left of the window, inside each eye, then a final root
+position, with a barrier and bounded poll interval after every motion. Output
+is deterministic JSON; arbitrary input scripts are intentionally unsupported.
