@@ -112,6 +112,22 @@ if get_option('drm_backend')
     include_directories: include_directories('.'),
   )
 
+  gw_drm_api_lib = static_library(
+    'gw-drm-api',
+    files(
+      'backends/drm/device.cpp',
+      'backends/drm/fake_drm_api.cpp',
+      'backends/drm/real_drm_api.cpp',
+    ),
+    dependencies: [gw_drm_model_dep, libdrm_dep],
+    include_directories: include_directories('.'),
+  )
+  gw_drm_api_dep = declare_dependency(
+    link_with: gw_drm_api_lib,
+    dependencies: [gw_drm_model_dep, libdrm_dep],
+    include_directories: include_directories('.'),
+  )
+
   gw_session_lib = static_library(
     'gw-session',
     files(
@@ -356,8 +372,7 @@ if get_option('gwcomp')
     gwcomp_backend_dependencies += gw_headless_dep
   endif
   if get_option('drm_backend')
-    gwcomp_backend_dependencies += [gw_drm_model_dep, gw_session_dep,
-                                    libdrm_dep]
+    gwcomp_backend_dependencies += [gw_drm_api_dep, gw_session_dep]
   endif
   gwcomp_options_lib = static_library(
     'gwcomp-options',

@@ -575,6 +575,19 @@ if get_option('drm_backend')
   )
   test('drm-dumb-buffer', drm_dumb_buffer_test, timeout: 10)
 
+  foreach drm_api_test : [
+    ['drm-device-api', 'device_api_test.cpp'],
+    ['drm-fake-events', 'fake_drm_event_test.cpp'],
+  ]
+    drm_api_test_executable = executable(
+      drm_api_test[0].underscorify(),
+      files('drm' / drm_api_test[1]),
+      dependencies: gw_drm_api_dep,
+      include_directories: test_source_root_include,
+    )
+    test(drm_api_test[0], drm_api_test_executable, timeout: 10)
+  endforeach
+
   vt_session_test = executable(
     'vt_session_test',
     files('session/vt_session_test.cpp'),
