@@ -83,5 +83,45 @@ int main() {
     gw::test::require(result.expose_intents.size()==1&&result.expose_intents[0].rectangle.width==4&&
                       result.expose_intents[0].rectangle.height==2&&result.drawable_damage.size()==1,
                       "ClearArea zero extents clip and expose intent");
+
+    x11::ByteWriter line_gc(order); line_gc.write_u8(56); line_gc.write_u8(0); line_gc.write_u16(7);
+    line_gc.write_u32(base+2); line_gc.write_u32((1U<<4U)|(1U<<5U)|(1U<<6U)|(1U<<7U));
+    line_gc.write_u32(0); line_gc.write_u32(0); line_gc.write_u32(1); line_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(line_gc),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.empty()&&state.resources().find_gc(base+2)->cap_style==1,
+                      "GC line subset");
+    x11::ByteWriter wide_gc(order); wide_gc.write_u8(56); wide_gc.write_u8(0); wide_gc.write_u16(4);
+    wide_gc.write_u32(base+2); wide_gc.write_u32(1U<<4U); wide_gc.write_u32(1);
+    result=dispatch_request(state,context,finish(std::move(wide_gc),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation)&&
+                      state.resources().find_gc(base+2)->line_width==0,"unsupported line width is atomic");
+
+    x11::ByteWriter line(order); line.write_u8(65); line.write_u8(1); line.write_u16(6);
+    line.write_u32(base+1); line.write_u32(base+2);
+    line.write_u16(0); line.write_u16(0); line.write_u16(1); line.write_u16(0); line.write_u16(0); line.write_u16(1);
+    result=dispatch_request(state,context,finish(std::move(line),x11::CoreOpcode::PolyLine,1));
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(1,1)!=0xff000000U,
+                      "PolyLine CoordModePrevious");
+    x11::ByteWriter segments(order); segments.write_u8(66); segments.write_u8(0); segments.write_u16(5);
+    segments.write_u32(base+1); segments.write_u32(base+2);
+    segments.write_u16(0); segments.write_u16(1); segments.write_u16(1); segments.write_u16(0);
+    result=dispatch_request(state,context,finish(std::move(segments),x11::CoreOpcode::PolySegment,0));
+    gw::test::require(result.output.empty(),"PolySegment");
+    x11::ByteWriter polygon(order); polygon.write_u8(69); polygon.write_u8(0); polygon.write_u16(7);
+    polygon.write_u32(base+1); polygon.write_u32(base+2); polygon.write_u8(2); polygon.write_u8(0); polygon.write_u16(0);
+    polygon.write_u16(0); polygon.write_u16(0); polygon.write_u16(2); polygon.write_u16(0); polygon.write_u16(0); polygon.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(polygon),x11::CoreOpcode::FillPoly,0));
+    gw::test::require(result.output.empty(),"FillPoly convex origin");
+    x11::ByteWriter ellipse(order); ellipse.write_u8(71); ellipse.write_u8(0); ellipse.write_u16(6);
+    ellipse.write_u32(base+1); ellipse.write_u32(base+2); ellipse.write_u16(0); ellipse.write_u16(0);
+    ellipse.write_u16(2); ellipse.write_u16(2); ellipse.write_u16(0); ellipse.write_u16(360*64);
+    result=dispatch_request(state,context,finish(std::move(ellipse),x11::CoreOpcode::PolyFillArc,0));
+    gw::test::require(result.output.empty(),"PolyFillArc full ellipse");
+    x11::ByteWriter partial(order); partial.write_u8(71); partial.write_u8(0); partial.write_u16(6);
+    partial.write_u32(base+1); partial.write_u32(base+2); partial.write_u16(0); partial.write_u16(0);
+    partial.write_u16(2); partial.write_u16(2); partial.write_u16(0); partial.write_u16(90*64);
+    result=dispatch_request(state,context,finish(std::move(partial),x11::CoreOpcode::PolyFillArc,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
+                      "partial arc rejected before drawing");
   }
 }
