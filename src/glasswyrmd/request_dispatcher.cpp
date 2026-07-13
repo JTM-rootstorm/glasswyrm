@@ -1097,19 +1097,18 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
                          const x11::FramedRequest& request) {
   if (request.bytes.size() < 24) return error(context, request, x11::CoreErrorCode::BadLength);
   if (request.data > 2) return error(context, request, x11::CoreErrorCode::BadValue, request.data);
-  if (request.data == 1) return error(context, request, x11::CoreErrorCode::BadImplementation);
   x11::ByteReader reader(request.body(), context.byte_order);
   std::uint32_t drawable{}, gc_id{}; std::uint16_t width{}, height{}, raw_x{}, raw_y{}; std::uint8_t left_pad{}, depth{};
   (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id); (void)reader.read_u16(width);
   (void)reader.read_u16(height); (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
   (void)reader.read_u8(left_pad); (void)reader.read_u8(depth); (void)reader.skip(2);
-  const auto payload_size = request.data == 0
+  const auto payload_size = request.data <= 1
       ? ((static_cast<std::uint64_t>(width) + 31U) / 32U * 4U) * height
       : static_cast<std::uint64_t>(width) * height * 4U;
   if (payload_size > std::numeric_limits<std::size_t>::max() ||
       request.bytes.size() != 24U + payload_size)
     return error(context, request, x11::CoreErrorCode::BadLength);
-  const auto expected_depth = request.data == 0 ? 1U : 24U;
+  const auto expected_depth = request.data <= 1 ? 1U : 24U;
   if (depth != expected_depth || left_pad != 0)
     return error(context, request, x11::CoreErrorCode::BadValue,
                  depth != expected_depth ? depth : left_pad);
@@ -1123,7 +1122,7 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
       (!pixmap && expected_depth != 24))
     return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
   const auto payload = std::span<const std::uint8_t>(request.bytes).subspan(24);
-  if (request.data == 0) {
+  if (request.data <= 1) {
     auto* bitmap = pixmap ? pixmap->bitmap() : nullptr;
     if (!bitmap) return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
     return put_xybitmap_lsb32(*bitmap, static_cast<std::int16_t>(raw_x),
