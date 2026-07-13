@@ -50,6 +50,13 @@ test(
   args: [meson.project_source_root()],
   timeout: 10,
 )
+m9_trace_summarize_test = find_program('compat/m9/m9_trace_summarize_test.py')
+test(
+  'm9-trace-summarize',
+  m9_trace_summarize_test,
+  args: [meson.current_source_dir() / 'compat/m9/m9_trace_summarize'],
+  timeout: 10,
+)
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
