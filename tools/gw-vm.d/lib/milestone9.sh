@@ -42,6 +42,8 @@ m4_pixel_regression=not-run m5_policy_regression=not-run
 m6_metadata_no_ppm_regression=not-run m7_drawable_regression=not-run
 m8_input_regression=not-run service_results=not-run socket_cleanup=not-run
 journal_evidence=not-run archive_validation=not-run
+x_servers_absent=not-run mesa_absent=not-run libdrm_absent=not-run
+libinput_absent=not-run
 mkdir -p "$artifact_dir" "$client_dir" "$dump_dir" "$scene_dir" "$trace_dir" "$control_dir"
 rm -f "$artifact_dir"/milestone9-* "$facts"
 touch "$runtime_log" "$meson_log" "$apps_log"
@@ -104,7 +106,7 @@ trap record_facts EXIT
 exec > >(tee -a "$runtime_log") 2>&1
 
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja virtual/pkgconfig \
-  net-misc/curl sys-devel/make \
+  net-misc/curl dev-build/make \
   x11-libs/libxcb x11-base/xcb-proto x11-libs/libX11 x11-libs/libXt \
   x11-libs/libXaw x11-libs/libXmu x11-libs/libXext x11-libs/libXrender
 for forbidden in x11-base/xorg-server gui-libs/wayland x11-base/xwayland media-libs/mesa \
