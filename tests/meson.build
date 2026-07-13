@@ -847,3 +847,10 @@ test(
   args: [meson.project_source_root()],
   timeout: 60,
 )
+
+source_layout_test = find_program('tools/source_layout_test.sh')
+test(
+  'source-layout',
+  source_layout_test,
+  timeout: 30,
+)
