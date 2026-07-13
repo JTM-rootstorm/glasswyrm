@@ -44,6 +44,7 @@ m8_input_regression=not-run service_results=not-run socket_cleanup=not-run
 journal_evidence=not-run archive_validation=not-run
 x_servers_absent=not-run mesa_absent=not-run libdrm_absent=not-run
 libinput_absent=not-run
+rm -rf "$dump_dir" "$scene_dir" "$trace_dir" "$control_dir"
 mkdir -p "$artifact_dir" "$client_dir" "$dump_dir" "$scene_dir" "$trace_dir" "$control_dir"
 rm -f "$artifact_dir"/milestone9-* "$facts"
 touch "$runtime_log" "$meson_log" "$apps_log"
