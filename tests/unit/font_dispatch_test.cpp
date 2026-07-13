@@ -65,6 +65,27 @@ int main() {
     gw::test::require(result.output.size() == 60U + 95U * 12U &&
                       result.output[0] == 1, "QueryFont reply");
 
+    auto extents = header(order, x11::CoreOpcode::QueryTextExtents, 0, 3);
+    extents.write_u32(base + 1); extents.write_u8(0); extents.write_u8('0');
+    extents.write_u8(0); extents.write_u8(':');
+    result = dispatch_request(state, context,
+        finish(std::move(extents), x11::CoreOpcode::QueryTextExtents));
+    x11::ByteReader extents_reply(
+        std::span<const std::uint8_t>(result.output).subspan(16), order);
+    std::uint32_t extent_width{}; (void)extents_reply.read_u32(extent_width);
+    gw::test::require(result.output.size() == 32 && extent_width == 12,
+                      "QueryTextExtents fixed advance");
+
+    auto list = header(order, x11::CoreOpcode::ListFonts, 0, 4);
+    list.write_u16(1); list.write_u16(5);
+    list.write_bytes(std::span(reinterpret_cast<const std::uint8_t*>("fixed"), 5));
+    list.write_padding(3);
+    result = dispatch_request(state, context,
+        finish(std::move(list), x11::CoreOpcode::ListFonts));
+    gw::test::require(result.output.size() == 40 && result.output[32] == 5 &&
+                      std::string_view(reinterpret_cast<const char*>(result.output.data() + 33), 5) == "fixed",
+                      "ListFonts fixed result");
+
     auto pixmap = header(order, x11::CoreOpcode::CreatePixmap, 24, 4);
     pixmap.write_u32(base + 2); pixmap.write_u32(state.screen().root_window);
     pixmap.write_u16(24); pixmap.write_u16(16);
@@ -86,9 +107,22 @@ int main() {
     result = dispatch_request(state, context,
         finish(std::move(image), x11::CoreOpcode::ImageText8, 2));
     gw::test::require(result.output.empty() &&
-                      state.resources().find_pixmap(base + 2)->storage->at(1, 1) ==
+                      std::get<std::shared_ptr<PixelStorage>>(
+                          state.resources().find_pixmap(base + 2)->storage)->at(1, 1) ==
                           0xff102030U,
                       "ImageText8 background");
+
+    auto poly = header(order, x11::CoreOpcode::PolyText8, 0, 5);
+    poly.write_u32(base + 2); poly.write_u32(base + 3);
+    poly.write_u16(1); poly.write_u16(11);
+    poly.write_u8(2); poly.write_u8(1); poly.write_u8('0'); poly.write_u8(':');
+    result = dispatch_request(state, context,
+        finish(std::move(poly), x11::CoreOpcode::PolyText8));
+    gw::test::require(result.output.empty() &&
+                      std::get<std::shared_ptr<PixelStorage>>(
+                          state.resources().find_pixmap(base + 2)->storage)->at(3, 3) ==
+                          0xffffffffU,
+                      "PolyText8 signed delta and glyph foreground");
 
     auto close = header(order, x11::CoreOpcode::CloseFont, 0, 2);
     close.write_u32(base + 1);
