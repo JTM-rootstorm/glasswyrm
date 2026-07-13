@@ -29,6 +29,19 @@ int main() {
                                         std::span<const std::uint8_t>{}, 1, 0,
                                         1),
                     "XYBitmap validates padded payload");
+  gw::test::require(bitmap->at(1, 0) == 1 && bitmap->at(2, 0) == 0 &&
+                        bitmap->at(4, 0) == 1,
+                    "malformed XYBitmap is atomic");
+  const std::array<std::uint8_t, 4> ignored_payload{0xff, 0, 0, 0};
+  gw::test::require(put_xybitmap_lsb32(*bitmap, 0, 0, 4, 1,
+                                       ignored_payload, 0, 1, 0),
+                    "zero plane mask accepts bounded bitmap payload");
+  gw::test::require(bitmap->at(1, 0) == 1 && bitmap->at(2, 0) == 0,
+                    "zero plane mask preserves bitmap");
+  gw::test::require(!glasswyrm::server::BitmapStorage::create(
+                         glasswyrm::server::BitmapStorage::kMaximumDimension + 1U,
+                         1U),
+                    "bitmap rejects oversized dimension");
   auto pixels = PixelStorage::create(4, 3);
   gw::test::require(pixels.has_value(), "create storage");
   gw::test::require(pixels->stride() == 16U, "stride");

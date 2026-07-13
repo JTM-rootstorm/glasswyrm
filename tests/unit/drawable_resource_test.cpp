@@ -45,17 +45,25 @@ int main() {
                         stored_bitmap_gc->background == 0 &&
                         stored_bitmap_gc->plane_mask == 1,
                     "depth-one gc values canonicalized");
+  gw::test::require(table.open_font(owner, base, mask, base | 5U) ==
+                        OpenFontStatus::Success &&
+                        table.find_font(base | 5U) != nullptr,
+                    "open client font for cleanup");
   const auto cleanup = table.cleanup_client(owner);
-  gw::test::require(cleanup.resources_destroyed == 4, "cleanup typed resources");
+  gw::test::require(cleanup.resources_destroyed == 5, "cleanup typed resources");
   gw::test::require(table.resource_count(ResourceType::Pixmap) == 0, "pixmap cleanup");
   gw::test::require(table.resource_count(ResourceType::GraphicsContext) == 0,
                     "gc cleanup");
+  gw::test::require(table.resource_count(ResourceType::Font) == 1 &&
+                        table.find_font(kDefaultFontXid) != nullptr,
+                    "client cleanup preserves only server default font");
   gw::test::require(table.canonical_drawable_bytes() == 0, "cleanup accounting");
 
   ResourceLimits limits;
   limits.maximum_canonical_drawable_bytes = 16;
   limits.maximum_pixmaps = 1;
   limits.maximum_graphics_contexts = 1;
+  limits.maximum_fonts = 1;
   ResourceTable bounded(kScreenModel, limits);
   gw::test::require(bounded.create_pixmap(owner, base, mask, base|10,
       bounded.screen().root_window, 24, 2, 2) == CreatePixmapStatus::Success,
@@ -68,5 +76,17 @@ int main() {
   gw::test::require(bounded.create_pixmap(owner, base, mask, base|12,
       bounded.screen().root_window, 24, 3, 2) == CreatePixmapStatus::BadAlloc,
       "pixmap byte limit is atomic");
+  gw::test::require(
+      bounded.open_font(owner, base, mask, base | 13U) ==
+              OpenFontStatus::Success &&
+          bounded.open_font(owner, base, mask, base | 14U) ==
+              OpenFontStatus::BadAlloc &&
+          bounded.find_font(base | 14U) == nullptr,
+      "font limit is atomic and excludes server default");
+  gw::test::require(
+      bounded.close_font(base | 13U) == CloseFontStatus::Success &&
+          bounded.open_font(owner, base, mask, base | 14U) ==
+              OpenFontStatus::Success,
+      "font capacity is released");
   return 0;
 }
