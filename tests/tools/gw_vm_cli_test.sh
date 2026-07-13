@@ -557,11 +557,21 @@ if [[ "$*" == *milestone8-input-rendering.tar* ]]; then
 fi
 if [[ "$*" == *milestone9-acceptance.tar* ]]; then
   destination=${!#}; scratch=$(mktemp -d)
-  mkdir -p "$scratch/glasswyrm-m9-control" "$scratch/glasswyrm-m9-traces" "$scratch/glasswyrm-m9-scenes"
-  printf '{}\n' >"$scratch/glasswyrm-m9-control/xeyes.json"
-  printf '{}\n' >"$scratch/glasswyrm-m9-traces/requests.jsonl"
-  printf '{}\n' >"$scratch/glasswyrm-m9-scenes/scene.jsonl"
-  (cd "$scratch" && tar -cf "$destination" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
+  if [[ $destination == *.sha256 ]]; then
+    (cd "$(dirname "$destination")" && sha256sum milestone9-acceptance.tar >"$(basename "$destination")")
+  else
+    mkdir -p "$scratch/glasswyrm-m9-control" "$scratch/glasswyrm-m9-traces" "$scratch/glasswyrm-m9-scenes"
+    for name in xeyes xclock-analog xclock-digital; do
+      printf '{}\n' >"$scratch/glasswyrm-m9-control/$name.json"
+      printf 'frame\n' >"$scratch/glasswyrm-m9-control/$name.frame"
+    done
+    if [[ ${GW_VM_TEST_BAD_M9_ARCHIVE:-0} == 1 ]]; then
+      rm -f "$scratch/glasswyrm-m9-control/xclock-digital.frame"
+    fi
+    printf '{}\n' >"$scratch/glasswyrm-m9-traces/requests.jsonl"
+    printf '{}\n' >"$scratch/glasswyrm-m9-scenes/scene.jsonl"
+    (cd "$scratch" && tar -cf "$destination" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
+  fi
   rm -rf "$scratch"
 fi
 EOF
@@ -1255,7 +1265,7 @@ assert_contains "$artifact_dir/milestone9-summary.json" \
   '"required_base_commit": "0c694b12a88c941b9ab487c5aee1c805ae7c5d0d"'
 assert_contains "$artifact_dir/milestone9-summary.json" '"xeyes": "1.3.1"'
 assert_contains "$artifact_dir/milestone9-summary.json" '"xclock": "1.2.0"'
-for expected in /var/tmp/glasswyrm-build-m9 /var/tmp/glasswyrm-build-m9-asan /var/tmp/glasswyrm-build-m9-runtime /var/tmp/glasswyrm-build-m9-server /var/tmp/glasswyrm-build-m9-server-ipc /var/tmp/glasswyrm-build-m9-gwm /var/tmp/glasswyrm-build-m9-gwcomp /var/tmp/glasswyrm-build-m9-ipc-only /var/tmp/glasswyrm-m9-clients /var/tmp/glasswyrm-m9-dumps /var/tmp/glasswyrm-m9-scenes /var/tmp/glasswyrm-m9-traces /var/tmp/glasswyrm-m9-control /var/tmp/glasswyrm-m9-artifacts 'source_sha256 = "PENDING"' x11-base/xorg-server media-libs/mesa x11-libs/libdrm dev-libs/libinput 'gwm-m9' 'gwcomp-m9' 'glasswyrmd-m9' 'PrivateDevices=yes' 'RestrictAddressFamilies=AF_UNIX' '--x11-trace' 'requests.jsonl' '1.3.1' '1.2.0' '+shape' '+render' '-analog' '-digital' '-brief' '-twentyfour' '-norender' '-update 0' 'systemctl restart gwcomp-m9.service' 'systemctl restart gwm-m9.service'; do
+for expected in /var/tmp/glasswyrm-build-m9 /var/tmp/glasswyrm-build-m9-asan /var/tmp/glasswyrm-build-m9-runtime /var/tmp/glasswyrm-build-m9-server /var/tmp/glasswyrm-build-m9-server-ipc /var/tmp/glasswyrm-build-m9-gwm /var/tmp/glasswyrm-build-m9-gwcomp /var/tmp/glasswyrm-build-m9-ipc-only /var/tmp/glasswyrm-m9-clients /var/tmp/glasswyrm-m9-dumps /var/tmp/glasswyrm-m9-scenes /var/tmp/glasswyrm-m9-traces /var/tmp/glasswyrm-m9-control /var/tmp/glasswyrm-m9-artifacts 'source_sha256 = "PENDING"' x11-base/xorg-server media-libs/mesa x11-libs/libdrm dev-libs/libinput 'gwm-m9' 'gwcomp-m9' 'glasswyrmd-m9' 'PrivateDevices=yes' 'RestrictAddressFamilies=AF_UNIX' '--x11-trace' 'requests.jsonl' '1.3.1' '1.2.0' 'source_url' 'source_sha256' 'curl --fail --location' 'sha256sum --check --status' 'm9-live-xeyes' 'm9-live-xclock-analog' 'm9-live-xclock-digital' 'm9-live-combined' '+shape' '+render' '-analog' '-digital' '-brief' '-twentyfour' '-norender' '-update 0' 'systemctl restart gwcomp-m9.service' 'systemctl restart gwm-m9.service'; do
   assert_contains "$command_log" "$expected"
 done
 assert_file_glob "$artifact_dir/milestone9-acceptance.tar"
@@ -1264,6 +1274,11 @@ assert_file_glob "$artifact_dir/milestone9-acceptance.tar"
 run_failure "$work_dir/milestone9-bad-evidence.out" \
   env GW_VM_TEST_BAD_M9_FACTS=1 "$gw_vm" milestone9-runtime-test --yes
 assert_contains "$artifact_dir/milestone9-summary.json" 'xclock_digital must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone9-bad-archive.out" \
+  env GW_VM_TEST_BAD_M9_ARCHIVE=1 "$gw_vm" milestone9-runtime-test --yes
+assert_contains "$work_dir/milestone9-bad-archive.out" 'failed during: artifact-validation'
 
 : >"$command_log"
 run_failure "$work_dir/milestone9-error.out" \
