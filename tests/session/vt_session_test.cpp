@@ -249,6 +249,25 @@ void acquisition_failures_unwind() {
                       "reverse-order failed-acquire cleanup");
 }
 
+void suspended_restore_reacquires_display_authority() {
+  OperationLog log;
+  FakeVirtualTerminalApi api(log);
+  FakeDisplayControl display(log);
+  DirectVirtualTerminalSession session(api, display);
+  std::string error;
+  gw::test::require(session.acquire("/dev/tty4", signals(), error) &&
+                        session.release(error),
+                    "prepare suspended restoration");
+  gw::test::require(session.restore(error),
+                    "suspended session restores original display");
+  require_subsequence(
+      log.values,
+      {"ack_release", "activate:4", "wait:4", "acquire_master",
+       "restore_display", "drop_master", "restore_kd:0", "restore_vt_mode",
+       "activate:2", "wait:2", "close"},
+      "suspended restoration reacquires display authority");
+}
+
 void transition_failures() {
   OperationLog log;
   FakeVirtualTerminalApi api(log);
@@ -287,6 +306,7 @@ int main() {
   device_validation();
   lifecycle_and_restore_order();
   acquisition_failures_unwind();
+  suspended_restore_reacquires_display_authority();
   transition_failures();
   return 0;
 }
