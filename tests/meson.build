@@ -555,6 +555,8 @@ if get_option('drm_backend')
     ['drm-mode-selector', 'mode_selector_test.cpp'],
     ['drm-pipeline-selector', 'pipeline_selector_test.cpp'],
     ['drm-property-cache', 'property_cache_test.cpp'],
+    ['drm-report-serialization', 'drm_report_serialization_test.cpp'],
+    ['drm-report-staging', 'drm_report_staging_test.cpp'],
   ]
     drm_test_executable = executable(
       drm_model_test[0].underscorify(),
