@@ -70,6 +70,7 @@ record_facts() {
   journalctl -u gwm-m8.service --no-pager >"$artifact_dir/milestone8-gwm-journal.log" 2>&1
   journalctl -u gwcomp-m8.service --no-pager >"$artifact_dir/milestone8-gwcomp-journal.log" 2>&1
   if [[ -s "$artifact_dir/milestone8-glasswyrmd-journal.log" && -s "$artifact_dir/milestone8-gwm-journal.log" && -s "$artifact_dir/milestone8-gwcomp-journal.log" ]]; then journal_evidence=passed; fi
+  if grep -Eq 'published buffer released buffer=[0-9]+ reason=[12]' "$artifact_dir/milestone8-glasswyrmd-journal.log"; then buffer_release=passed; fi
   if [[ "$(systemctl show -p Result --value glasswyrmd-m8.service 2>/dev/null)" == success && "$(systemctl show -p Result --value gwm-m8.service 2>/dev/null)" == success && "$(systemctl show -p Result --value gwcomp-m8.service 2>/dev/null)" == success ]]; then service_results=passed; fi
   systemctl reset-failed glasswyrmd-m8.service gwm-m8.service gwcomp-m8.service >/dev/null 2>&1
   if [[ ! -e /run/glasswyrm-m8-gwm/gwm.sock && ! -e /run/glasswyrm-m8-gwcomp/gwcomp.sock && ! -e /run/glasswyrm-m8-input/input.sock && ! -e /tmp/.X11-unix/X99 ]]; then socket_cleanup=passed; fi
@@ -181,13 +182,6 @@ wait_for_frame_after() { previous=$1; for _ in {1..200}; do current=$(frame_coun
 expected_pre="$(sed -n 's/.*"pre_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
 expected_post="$(sed -n 's/.*"post_restart": "\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
 [[ ${#expected_pre} -eq 16 && ${#expected_post} -eq 16 ]]
-for _ in {1..200}; do
-  release_snapshot="$(journalctl -u glasswyrmd-m8.service --no-pager 2>/dev/null || true)"
-  grep -Eq 'published buffer released buffer=[0-9]+ reason=[12]' <<<"$release_snapshot" && break
-  sleep .05
-done
-grep -Eq 'published buffer released buffer=[0-9]+ reason=[12]' <<<"$release_snapshot"
-buffer_release=passed
 before_hold=$(frame_count)
 "$runtime_build_dir/tests/m8_restart_hold_probe" --display :99 --input-socket "$input_socket" --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
 for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
