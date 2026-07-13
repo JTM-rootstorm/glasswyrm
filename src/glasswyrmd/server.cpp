@@ -279,7 +279,7 @@ void Server::accept_clients() {
           descriptor, next_client_identifier_++, *resource_base, state_,
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
-          expose_intent_handler_, trace_.get()));
+          expose_intent_handler_, trace_.get(), input_snapshot_provider_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -390,6 +390,11 @@ int Server::run() {
   std::unique_ptr<ContentPresenter> content_presenter;
   std::unique_ptr<SyntheticInputPeer> input_peer;
   glasswyrm::input::InputState input_state;
+  input_snapshot_provider_ = [&input_state] {
+    return InputSnapshot{input_state.pointer_x(), input_state.pointer_y(),
+                         input_state.mask(), input_state.pointer_target(),
+                         input_state.time()};
+  };
   std::uint64_t expected_input_id = 1;
   struct PendingFocusInput {
     SyntheticInputRecord record;

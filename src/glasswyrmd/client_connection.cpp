@@ -22,7 +22,8 @@ ClientConnection::ClientConnection(const int descriptor,
                                    StructuralTransitionHandler transition_handler,
                                    DrawableDamageHandler damage_handler,
                                    ExposeIntentHandler expose_handler,
-                                   CompatibilityTrace* trace)
+                                   CompatibilityTrace* trace,
+                                   InputSnapshotProvider input_snapshot_provider)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -32,7 +33,8 @@ ClientConnection::ClientConnection(const int descriptor,
       transition_handler_(std::move(transition_handler)),
       damage_handler_(std::move(damage_handler)),
       expose_handler_(std::move(expose_handler)),
-      trace_(trace) {
+      trace_(trace),
+      input_snapshot_provider_(std::move(input_snapshot_provider)) {
   if (trace_) trace_->connection(identifier_, "accepted");
 }
 
@@ -211,7 +213,10 @@ void ClientConnection::process_input(
         const DispatchContext context{identifier_, resource_id_base_,
                                       server_state_.screen().resource_id_mask,
                                       request_sequence_, byte_order_,
-                                      integrated_lifecycle_};
+                                      integrated_lifecycle_,
+                                      input_snapshot_provider_
+                                          ? input_snapshot_provider_()
+                                          : InputSnapshot{}};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
         if (trace_) {

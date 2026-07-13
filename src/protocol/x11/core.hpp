@@ -20,6 +20,8 @@ enum class CoreOpcode : std::uint8_t {
   DeleteProperty = 19,
   GetProperty = 20,
   ListProperties = 21,
+  QueryPointer = 38,
+  TranslateCoordinates = 40,
   AllocColor = 84,
   AllocNamedColor = 85,
   FreeColors = 88,
