@@ -1,6 +1,6 @@
 # X11 Milestone 9 simple-client profile
 
-Status: implemented protocol foundation; pinned-client acceptance pending.
+Status: accepted for the pinned Milestone 9 commands.
 
 This profile is intentionally bounded to `xeyes` 1.3.1 and `xclock` 1.2.0
 under the exact commands documented in the compatibility notes. It is not a

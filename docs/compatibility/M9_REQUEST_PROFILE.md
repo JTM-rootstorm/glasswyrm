@@ -1,6 +1,6 @@
 # Milestone 9 request profile
 
-Status: implemented request foundation; pinned-client traces pending.
+Status: accepted for the pinned Milestone 9 client commands.
 
 New implemented groups are extension discovery; default-colormap color
 queries; fixed core fonts and text; pointer/coordinate queries; fixed keyboard,
@@ -10,10 +10,11 @@ InputOutput windows are flattened into their managed top-level buffer.
 
 The exact request subsets and errors are normative in
 [the protocol note](../protocols/x11-milestone-9.md). The audit table explains
-why each group is in scope. Frozen traces may narrow this profile or prove a
-contingency request, but must not silently broaden it.
+why each group is in scope. The reviewed traces define the observed profile and
+prove trace-gated contingency requests without broadening the compatibility
+claim.
 
 Compatibility is limited to the commands in `tests/compat/m9/clients.toml`.
-That manifest pins the official release hashes, but the repository does not
-yet contain reviewed M9 trace/frame fixtures. Therefore this document does
-not declare that xeyes or xclock works end to end.
+That manifest pins the official release hashes. Reviewed trace and frame
+fixtures under `tests/fixtures/m9/` and the Gentoo VM acceptance prove the
+documented end-to-end profiles.

@@ -936,7 +936,7 @@ M5  Window-manager policy scaffold              complete
 M6  Three-process mapped-window lifecycle       complete
 M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
-M9  Simple real X11 clients
+M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout
 M11 Interactive desktop baseline
 M12 Efficient buffers and game-oriented clients
@@ -988,8 +988,16 @@ through the existing GWM lifecycle policy transaction and projected to
 `gwcomp`. Repository raw/XCB/restart probes, reviewed event and pixel fixtures,
 strict builds, sanitizers, component builds, and the fixed Gentoo VM scenario
 define the accepted boundary. Real devices, grabs, cursors, XKB, mapping
-requests, child/InputOnly hit testing, and M9 application compatibility remain
-unsupported.
+requests and child/InputOnly hit testing remain unsupported.
+
+Milestone 9 establishes the first command-specific external application tier:
+unmodified `xeyes` 1.3.1 and `xclock` 1.2.0 run under the pinned profiles with
+reviewed exact frames and normalized traces. The implementation adds the
+bounded fixed-font, depth-1 bitmap, child composition, core raster, color,
+mapping, pointer, and coordinate behavior required by those profiles while
+keeping Shape, Render, XKB, real devices, and broad toolkit compatibility out
+of scope. Strict builds, sanitizers, component matrices, restart checks, and
+the terminal-only Gentoo VM gate define the accepted boundary.
 
 ## 26. Definition of done
 
@@ -1010,7 +1018,6 @@ These should be resolved through future design notes or implementation experienc
 
 - Whether to use CMake instead of Meson if project needs change.
 - Whether to vendor `xcb-proto` XML or require it as a build-time dependency.
-- Exact first subset of X11 requests needed for `xeyes` and `xclock`.
 - Whether to support a nested X11 backend before real DRM/KMS.
 - Whether first GL path should use EGL/GLES or desktop OpenGL.
 - Whether Vulkan should be a serious early render backend or postponed.
