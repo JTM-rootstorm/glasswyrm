@@ -218,6 +218,12 @@ if get_option('glasswyrmd')
     'glasswyrmd/client_connection.cpp',
     'glasswyrmd/event_router.cpp',
     'glasswyrmd/server.cpp',
+    'glasswyrmd/server_signals.cpp',
+    'glasswyrmd/x11_listener.cpp',
+    'glasswyrmd/client_registry.cpp',
+    'glasswyrmd/server_reactor.cpp',
+    'glasswyrmd/server_shutdown.cpp',
+    'glasswyrmd/integrated_runtime.cpp',
   )
   gw_server_core_dependencies = [gw_server_state_dep]
   if get_option('libgwipc')
@@ -230,6 +236,8 @@ if get_option('glasswyrmd')
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',
       'glasswyrmd/synthetic_input_peer.cpp',
+      'glasswyrmd/lifecycle_runtime.cpp',
+      'glasswyrmd/input_runtime.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
   endif

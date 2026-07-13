@@ -15,6 +15,8 @@
 
 namespace glasswyrm::server {
 
+class ServerRuntime;
+
 class Server {
  public:
   explicit Server(Options options);
@@ -26,6 +28,8 @@ class Server {
   int run();
 
  private:
+  friend class ServerRuntime;
+
   bool open_listener();
   bool prepare_socket_path();
   bool remove_stale_socket();
