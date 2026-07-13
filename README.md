@@ -160,8 +160,9 @@ application compatibility.
 
 M9 targets only `xeyes` 1.3.1 and `xclock` 1.2.0 with the exact commands and
 environment in `tests/compat/m9/clients.toml`. Shape and Render remain absent.
-The protocol implementation and test harness foundations are present, but the
-manifest source hashes and reviewed VM traces/frames are still pending. Do not
+The protocol implementation and test harness foundations are present, and the
+official release hashes are pinned. Reviewed VM traces/frames are still
+pending. Do not
 interpret this as “xeyes works” or “xclock works” without that evidence.
 
 For a trace-enabled integrated development launch, add a new output path:
