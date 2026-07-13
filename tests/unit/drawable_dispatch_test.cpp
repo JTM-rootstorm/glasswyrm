@@ -123,5 +123,24 @@ int main() {
     result=dispatch_request(state,context,finish(std::move(partial),x11::CoreOpcode::PolyFillArc,0));
     gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
                       "partial arc rejected before drawing");
+
+    x11::ByteWriter bitmap_pixmap(order); bitmap_pixmap.write_u8(53); bitmap_pixmap.write_u8(1); bitmap_pixmap.write_u16(4);
+    bitmap_pixmap.write_u32(base+7); bitmap_pixmap.write_u32(state.screen().root_window);
+    bitmap_pixmap.write_u16(3); bitmap_pixmap.write_u16(1);
+    result=dispatch_request(state,context,finish(std::move(bitmap_pixmap),x11::CoreOpcode::CreatePixmap,1));
+    gw::test::require(result.output.empty(),"depth-one pixmap");
+    x11::ByteWriter bitmap_gc(order); bitmap_gc.write_u8(55); bitmap_gc.write_u8(0); bitmap_gc.write_u16(7);
+    bitmap_gc.write_u32(base+8); bitmap_gc.write_u32(base+7); bitmap_gc.write_u32((1U<<1U)|(1U<<2U)|(1U<<3U));
+    bitmap_gc.write_u32(1); bitmap_gc.write_u32(1); bitmap_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(bitmap_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.empty(),"depth-one GC");
+    x11::ByteWriter bitmap_image(order); bitmap_image.write_u8(72); bitmap_image.write_u8(0); bitmap_image.write_u16(7);
+    bitmap_image.write_u32(base+7); bitmap_image.write_u32(base+8); bitmap_image.write_u16(3); bitmap_image.write_u16(1);
+    bitmap_image.write_u16(0); bitmap_image.write_u16(0); bitmap_image.write_u8(0); bitmap_image.write_u8(1); bitmap_image.write_u16(0);
+    bitmap_image.write_u8(0b00000101); bitmap_image.write_padding(3);
+    result=dispatch_request(state,context,finish(std::move(bitmap_image),x11::CoreOpcode::PutImage,0));
+    const auto* bitmap=state.resources().find_pixmap(base+7)->bitmap();
+    gw::test::require(result.output.empty()&&bitmap&&bitmap->at(0,0)==1&&bitmap->at(1,0)==0&&bitmap->at(2,0)==1,
+                      "XYBitmap uses LSBFirst 32-bit rows in either client order");
   }
 }
