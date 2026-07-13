@@ -569,7 +569,7 @@ if [[ "$*" == *milestone9-acceptance.tar* ]]; then
       rm -f "$scratch/glasswyrm-m9-control/xclock-digital.frame"
     fi
     printf '{}\n' >"$scratch/glasswyrm-m9-traces/requests.jsonl"
-    printf '{}\n' >"$scratch/glasswyrm-m9-scenes/scene.jsonl"
+    printf '{}\n' >"$scratch/glasswyrm-m9-scenes/frames.jsonl"
     (cd "$scratch" && tar -cf "$destination" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
   fi
   rm -rf "$scratch"

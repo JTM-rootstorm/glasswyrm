@@ -205,9 +205,9 @@ live_tests=(m9-live-xeyes m9-live-xclock-analog m9-live-xclock-digital m9-live-c
 # xclock -digital -brief -twentyfour -norender -update 0 -geometry +240+240
 export GW_M9_EVIDENCE_DIR="$scene_dir/live"
 meson test -C "$runtime_dir" --print-errorlogs "${live_tests[@]}"
-find "$GW_M9_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -name scene.jsonl -print0 |
-  sort -z | xargs -0 cat >"$scene_dir/scene.jsonl"
-[[ -s "$scene_dir/scene.jsonl" ]]
+find "$GW_M9_EVIDENCE_DIR" -mindepth 2 -maxdepth 2 -name frames.jsonl -print0 |
+  sort -z | xargs -0 cat >"$scene_dir/frames.jsonl"
+[[ -s "$scene_dir/frames.jsonl" ]]
 unset GW_M9_EVIDENCE_DIR
 xeyes=passed xclock_analog=passed xclock_digital=passed combined=passed
 cp "$source_dir/tests/fixtures/m9/xeyes-final.ppm" "$control_dir/xeyes.frame"
@@ -229,7 +229,7 @@ service_results=passed
 for member in glasswyrm-m9-control/xeyes.json glasswyrm-m9-control/xclock-analog.json \
   glasswyrm-m9-control/xclock-digital.json glasswyrm-m9-control/xeyes.frame \
   glasswyrm-m9-control/xclock-analog.frame glasswyrm-m9-control/xclock-digital.frame \
-  glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/scene.jsonl; do
+  glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/frames.jsonl; do
   tar -tf "$artifact_dir/milestone9-acceptance.tar" | grep -Fxq "$member"
 done
 (cd "$artifact_dir" && sha256sum milestone9-acceptance.tar >milestone9-acceptance.tar.sha256)
@@ -278,7 +278,7 @@ validate_milestone9_archive() {
   for member in glasswyrm-m9-control/xeyes.json glasswyrm-m9-control/xclock-analog.json \
     glasswyrm-m9-control/xclock-digital.json glasswyrm-m9-control/xeyes.frame \
     glasswyrm-m9-control/xclock-analog.frame glasswyrm-m9-control/xclock-digital.frame \
-    glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/scene.jsonl; do
+    glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/frames.jsonl; do
     grep -Fxq "$member" <<<"$listing" || return
   done
 }

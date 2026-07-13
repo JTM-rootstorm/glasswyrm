@@ -124,7 +124,6 @@ if test -n "${GW_M9_EVIDENCE_DIR-}"; then
   mkdir -p "$profile_evidence"
   cp "$run/dump/$frame" "$profile_evidence/final.ppm"
   cp "$run/dump/frames.jsonl" "$profile_evidence/frames.jsonl"
-  cp "$run/scene.jsonl" "$profile_evidence/scene.jsonl"
   cp "$run/trace.jsonl" "$profile_evidence/requests.jsonl"
   cp "$run/trace.json" "$profile_evidence/trace.json"
 fi
