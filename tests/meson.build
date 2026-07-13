@@ -548,6 +548,40 @@ if get_option('headless_backend')
 endif
 endif
 
+if get_option('drm_backend')
+  foreach drm_model_test : [
+    ['drm-connector-name', 'connector_name_test.cpp'],
+    ['drm-connector-selector', 'connector_selector_test.cpp'],
+    ['drm-mode-selector', 'mode_selector_test.cpp'],
+    ['drm-pipeline-selector', 'pipeline_selector_test.cpp'],
+    ['drm-property-cache', 'property_cache_test.cpp'],
+  ]
+    drm_test_executable = executable(
+      drm_model_test[0].underscorify(),
+      files('drm' / drm_model_test[1]),
+      dependencies: gw_drm_model_dep,
+      include_directories: test_source_root_include,
+    )
+    test(drm_model_test[0], drm_test_executable, timeout: 10)
+  endforeach
+
+  vt_session_test = executable(
+    'vt_session_test',
+    files('session/vt_session_test.cpp'),
+    dependencies: gw_session_dep,
+    include_directories: test_source_root_include,
+  )
+  test('vt-session', vt_session_test, timeout: 10)
+
+  external_session_test = executable(
+    'external_session_test',
+    files('session/external_session_test.cpp'),
+    dependencies: gw_session_dep,
+    include_directories: test_source_root_include,
+  )
+  test('external-session', external_session_test, timeout: 10)
+endif
+
 if get_option('libgwipc')
   public_control_api_test = executable(
     'public_control_api_test',
