@@ -186,8 +186,13 @@ before_hold=$(frame_count)
 DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/m8_restart_hold_probe" --display :99 --input-socket "$input_socket" --control-dir "$control_dir" >>"$restart_log" 2>&1 & hold_pid=$!
 for _ in {1..200}; do [[ -f "$control_dir/ready" ]] && break; kill -0 "$hold_pid" 2>/dev/null || break; sleep .05; done
 [[ -f "$control_dir/ready" ]] || { wait "$hold_pid"; exit 1; }
-wait_for_frame_after "$before_hold"
-pre_restart_hash="$(last_frame_field fnv1a64)"; [[ "$pre_restart_hash" == "$expected_pre" ]]
+for _ in {1..200}; do
+  pre_restart_hash="$(last_frame_field fnv1a64)"
+  [[ "$(frame_count)" -gt "$before_hold" && "$pre_restart_hash" == "$expected_pre" ]] && break
+  kill -0 "$hold_pid" 2>/dev/null || break
+  sleep .05
+done
+[[ "$pre_restart_hash" == "$expected_pre" ]]
 pre_restart_count=$(frame_count)
 systemctl restart gwcomp-m8.service
 for _ in {1..200}; do systemctl is-active --quiet gwcomp-m8.service && [[ -S "$comp_socket" ]] && break; sleep .05; done
