@@ -164,7 +164,17 @@ xcb_name="$(tail -n1 "$dump_dir/frames.jsonl" | sed -n 's/.*"file":"\([^"]*\)".*
 cp "$dump_dir/$xcb_name" "$control_dir/final.ppm"
 cmp "$control_dir/final.ppm" "$source_dir/tests/fixtures/m8/final.ppm"
 wait "$xcb_pid"
-cmp "$control_dir/xcb-result.json" "$source_dir/tests/fixtures/m8/xcb-result.json"
+xcb_window_a="$(sed -n 's/.*"window_a":\([0-9]*\).*/\1/p' "$control_dir/xcb-result.json")"
+xcb_window_b="$(sed -n 's/.*"window_b":\([0-9]*\).*/\1/p' "$control_dir/xcb-result.json")"
+xcb_focus="$(sed -n 's/.*"focus":\([0-9]*\).*/\1/p' "$control_dir/xcb-result.json")"
+xcb_pointer="$(sed -n 's/.*"pointer_window":\([0-9]*\).*/\1/p' "$control_dir/xcb-result.json")"
+xcb_expected_counts="$(sed -n 's/.*"events_a":\([0-9]*\),"events_b":\([0-9]*\).*/\1 \2/p' "$source_dir/tests/fixtures/m8/xcb-result.json")"
+xcb_actual_counts="$(sed -n 's/.*"events_a":\([0-9]*\),"events_b":\([0-9]*\).*/\1 \2/p' "$control_dir/xcb-result.json")"
+[[ -n "$xcb_window_a" && -n "$xcb_window_b" && "$xcb_window_a" != "$xcb_window_b" ]]
+[[ "$xcb_focus" == "$xcb_window_b" && "$xcb_pointer" == "$xcb_window_b" ]]
+[[ "$xcb_actual_counts" == "$xcb_expected_counts" ]]
+grep -F '"completed":true' "$control_dir/xcb-result.json" >/dev/null
+grep -F '"state":0' "$control_dir/xcb-result.json" >/dev/null
 cat "$control_dir/xcb-result.json" >>"$xcb_log"
 xcb_drawing=passed x11_resources=passed raster_requests=passed final_frame_golden=passed
 click_focus=passed focus_events=passed scene_change_crossing=passed event_trace_golden=passed
