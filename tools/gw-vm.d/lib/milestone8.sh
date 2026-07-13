@@ -151,10 +151,22 @@ motion=passed crossing=passed buttons=passed button_motion=passed keyboard=passe
 "$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario propagation >>"$events_log" 2>&1; exposure_events=passed propagation=passed do_not_propagate=passed
 "$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario state >>"$events_log" 2>&1
 "$runtime_build_dir/tests/x11_milestone8_probe" --display :99 --input-socket "$input_socket" --byte-order little --scenario errors 2>>"$malformed_log" | tee "$event_dir/input-acknowledgements.json" >>"$malformed_log"; malformed_x11=passed malformed_provider_isolation=passed input_reconnect=passed
-DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone8_probe" --input-socket "$input_socket" --output "$control_dir/xcb-result.json" 2>>"$xcb_log"
+expected_xcb="$(sed -n 's/.*"xcb_final":"\([0-9a-f]*\)".*/\1/p' "$source_dir/tests/fixtures/m8/frame-hashes.json")"
+DISPLAY=:99 XAUTHORITY=/dev/null "$runtime_build_dir/tests/xcb_milestone8_probe" --input-socket "$input_socket" --output "$control_dir/xcb-result.json" 2>>"$xcb_log" & xcb_pid=$!
+for _ in {1..200}; do
+  xcb_hash="$(tail -n1 "$dump_dir/frames.jsonl" 2>/dev/null | sed -n 's/.*"fnv1a64":"\([^"]*\)".*/\1/p')"
+  [[ "$xcb_hash" == "$expected_xcb" ]] && break
+  kill -0 "$xcb_pid" 2>/dev/null || break
+  sleep .05
+done
+[[ "$xcb_hash" == "$expected_xcb" ]]
+xcb_name="$(tail -n1 "$dump_dir/frames.jsonl" | sed -n 's/.*"file":"\([^"]*\)".*/\1/p')"
+cp "$dump_dir/$xcb_name" "$control_dir/final.ppm"
+cmp "$control_dir/final.ppm" "$source_dir/tests/fixtures/m8/final.ppm"
+wait "$xcb_pid"
 cmp "$control_dir/xcb-result.json" "$source_dir/tests/fixtures/m8/xcb-result.json"
 cat "$control_dir/xcb-result.json" >>"$xcb_log"
-xcb_drawing=passed x11_resources=passed raster_requests=passed
+xcb_drawing=passed x11_resources=passed raster_requests=passed final_frame_golden=passed
 click_focus=passed focus_events=passed scene_change_crossing=passed event_trace_golden=passed
 frame_count() { [[ -f "$dump_dir/frames.jsonl" ]] && wc -l <"$dump_dir/frames.jsonl" || printf '0\n'; }
 last_frame_field() { tail -n1 "$dump_dir/frames.jsonl" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
@@ -199,19 +211,17 @@ connection_survival=passed input_connection_survival=passed x11_connection_survi
 wait_for_frame_after "$pre_continue_count"
 post_restart_frame=$((pre_continue_count + 1))
 post_restart_hash_value="$(frame_field_at "$post_restart_frame" fnv1a64)"; [[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
-post_restart_hash=passed final_frame_golden=passed
+post_restart_hash=passed
 cp "$restart_result" "$artifact_dir/milestone8-restart-result.json"
-final_name="$(frame_field_at "$post_restart_frame" file)"; final_ppm="$dump_dir/$final_name"; [[ -n "$final_name" && -s "$final_ppm" ]]
-cmp "$final_ppm" "$source_dir/tests/fixtures/m8/final.ppm"
-sha256sum "$final_ppm" | tee "$control_dir/final-frame.sha256"
+post_name="$(frame_field_at "$post_restart_frame" file)"; post_ppm="$dump_dir/$post_name"; [[ -n "$post_name" && -s "$post_ppm" ]]
+sha256sum "$post_ppm" | tee "$control_dir/post-restart-frame.sha256"
 journalctl -u glasswyrmd-m8.service -u gwcomp-m8.service --no-pager >>"$events_log"
 cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"
-cp "$final_ppm" "$control_dir/final.ppm"
-cp "$final_ppm" "$control_dir/selected-runtime.ppm"
+cp "$post_ppm" "$control_dir/selected-runtime.ppm"
 cp "$event_dir/raw-little-events.json" "$control_dir/raw-little-events.json"
 cp "$event_dir/raw-big-events.json" "$control_dir/raw-big-events.json"
 cp "$event_dir/input-acknowledgements.json" "$control_dir/input-acknowledgements.json"
-archive_files=(final.ppm selected-runtime.ppm frames.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json final-frame.sha256)
+archive_files=(final.ppm selected-runtime.ppm frames.jsonl raw-little-events.json raw-big-events.json input-acknowledgements.json xcb-result.json result.json post-restart-frame.sha256)
 if [[ -s "$scene_dir/scene.jsonl" ]]; then
   cp "$scene_dir/scene.jsonl" "$control_dir/scene.jsonl"
   archive_files+=(scene.jsonl)
