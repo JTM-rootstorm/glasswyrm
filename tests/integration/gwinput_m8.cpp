@@ -189,8 +189,8 @@ std::vector<Record> scenario(std::string_view name) {
                  std::uint8_t pressed = 0) {
     result.push_back({kind, result.size() + 1, time, x, y, detail, pressed});
   };
-  if (name == "barrier") add(K::barrier, 0);
-  else if (name == "motion" || name == "crossing") {
+  if (name == "barrier") {
+  } else if (name == "motion" || name == "crossing") {
     add(K::motion, 2, 100, 100);
     add(K::motion, 3, 700, 500);
     add(K::barrier, 0);
@@ -259,7 +259,16 @@ int main(int argc, char** argv) {
   auto connection = connect_to(socket);
   if (!connection) { std::fprintf(stderr, "gwinput_m8: connection failed\n"); return 1; }
   std::vector<gwipc_synthetic_input_acknowledged> acknowledgements;
-  for (const auto& record : scenario(name)) {
+  const Record initial{Record::Kind::barrier, 1, 0};
+  if (!send(connection.get(), initial)) return 1;
+  gwipc_synthetic_input_acknowledged initial_ack{};
+  if (!receive_ack(connection.get(), initial_ack) || initial_ack.input_id != 1)
+    return 1;
+  acknowledgements.push_back(initial_ack);
+  auto records = scenario(name);
+  for (auto& record : records) {
+    ++record.id;
+    if (record.time != 0) record.time += initial_ack.time_ms - 1;
     if (!send(connection.get(), record)) return 1;
     gwipc_synthetic_input_acknowledged ack{};
     if (!receive_ack(connection.get(), ack) || ack.input_id != record.id) return 1;
