@@ -227,6 +227,23 @@ std::size_t EventRouter::route_configure(
                });
 }
 
+std::size_t EventRouter::route_viewable_subtree_expose(
+    const std::uint32_t window,
+    const std::span<ClientConnection *const> clients) const {
+  const auto* resource = resources_.find_window(window);
+  if (!resource || resource->map_state != MapState::Viewable)
+    return 0;
+  std::size_t delivered = 0;
+  if (resource->window_class == WindowClass::InputOutput) {
+    const std::array rectangles{glasswyrm::geometry::Rectangle{
+        0, 0, resource->width, resource->height}};
+    delivered += route_expose(window, rectangles, clients);
+  }
+  for (const auto child : resource->children)
+    delivered += route_viewable_subtree_expose(child, clients);
+  return delivered;
+}
+
 std::size_t EventRouter::route_expose(
     const std::uint32_t window_id,
     const std::span<const glasswyrm::geometry::Rectangle> rectangles,

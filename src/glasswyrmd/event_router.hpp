@@ -60,6 +60,9 @@ public:
   [[nodiscard]] std::size_t route_expose(
       std::uint32_t window, std::span<const glasswyrm::geometry::Rectangle> rectangles,
       std::span<ClientConnection *const> clients) const;
+  [[nodiscard]] std::size_t route_viewable_subtree_expose(
+      std::uint32_t window,
+      std::span<ClientConnection *const> clients) const;
   [[nodiscard]] std::size_t route_input(
       gw::protocol::x11::CoreEventType type, std::uint8_t detail,
       std::uint32_t time, std::uint32_t source, std::uint16_t state,

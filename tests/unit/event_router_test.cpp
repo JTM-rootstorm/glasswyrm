@@ -147,6 +147,29 @@ int main() {
                               after_map, after_map, clients) == 0,
       "no-op map emits no event");
 
+  glasswyrm::server::WindowCreateSpec exposed_child = spec;
+  exposed_child.xid = 0x00200003U;
+  exposed_child.parent = spec.xid;
+  exposed_child.width = 20;
+  exposed_child.height = 10;
+  require(state.resources().create_window(
+              1, 0x00200000U, state.screen().resource_id_mask,
+              exposed_child) == glasswyrm::server::CreateWindowStatus::Success,
+          "create exposed child");
+  auto* child_window = state.resources().find_window(exposed_child.xid);
+  child_window->map_requested = true;
+  state.resources().recompute_map_states(exposed_child.xid);
+  require(state.resources().set_event_selection(
+              exposed_child.xid, 1,
+              gw::protocol::x11::event_mask::Exposure),
+          "select child exposure");
+  require(router.route_viewable_subtree_expose(spec.xid, clients) == 1,
+          "mapped ancestor exposes its viewable child subtree");
+  const auto child_expose = receive_event(target_client);
+  require(child_expose[0] == 12 && child_expose[12] == 20 &&
+              child_expose[14] == 10,
+          "child receives full drawable exposure");
+
   glasswyrm::server::WindowCreateSpec sibling_spec = spec;
   sibling_spec.xid = 0x00200002U;
   require(state.resources().create_window(
