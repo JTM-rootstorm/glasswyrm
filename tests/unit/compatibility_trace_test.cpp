@@ -14,6 +14,18 @@ void require(bool condition) {
 }
 
 int main() {
+  using glasswyrm::server::x11_request_name;
+  require(x11_request_name(9) == "MapSubwindows");
+  require(x11_request_name(38) == "QueryPointer");
+  require(x11_request_name(45) == "OpenFont");
+  require(x11_request_name(65) == "PolyLine");
+  require(x11_request_name(71) == "PolyFillArc");
+  require(x11_request_name(76) == "ImageText8");
+  require(x11_request_name(84) == "AllocColor");
+  require(x11_request_name(98) == "QueryExtension");
+  require(x11_request_name(101) == "GetKeyboardMapping");
+  require(x11_request_name(119) == "GetModifierMapping");
+  require(x11_request_name(250) == "Unknown");
   const auto directory = std::filesystem::temp_directory_path() /
                          ("gw-m9-trace-" + std::to_string(::getpid()));
   std::filesystem::create_directory(directory);
