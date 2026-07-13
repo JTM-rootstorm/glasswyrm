@@ -255,6 +255,69 @@ std::vector<geometry::Rectangle> rectangle_difference(
   return result;
 }
 
+class ClipByChildrenGuard {
+ public:
+  ClipByChildrenGuard(const ResourceTable& resources, const std::uint32_t drawable,
+                      const GraphicsContextResource& gc, PixelStorage& storage)
+      : storage_(storage) {
+    if (gc.subwindow_mode != 0) return;
+    const auto* window = resources.find_window(drawable);
+    if (!window) return;
+    for (const auto child_id : window->children) {
+      const auto* child = resources.find_window(child_id);
+      if (!child || child->window_class != WindowClass::InputOutput ||
+          child->map_state != MapState::Viewable)
+        continue;
+      const auto clipped = geometry::intersect(
+          {child->x, child->y,
+           static_cast<std::uint32_t>(child->width) + child->border_width * 2U,
+           static_cast<std::uint32_t>(child->height) + child->border_width * 2U},
+          {0, 0, storage.width(), storage.height()});
+      if (!clipped) continue;
+      Saved saved{*clipped, {}};
+      saved.pixels.reserve(static_cast<std::size_t>(clipped->width) * clipped->height);
+      for (std::uint32_t y = 0; y < clipped->height; ++y)
+        for (std::uint32_t x = 0; x < clipped->width; ++x)
+          saved.pixels.push_back(storage.at(static_cast<std::uint32_t>(clipped->x) + x,
+                                            static_cast<std::uint32_t>(clipped->y) + y));
+      saved_.push_back(std::move(saved));
+    }
+  }
+
+  void restore() {
+    if (restored_) return;
+    for (const auto& saved : saved_) {
+      std::size_t index = 0;
+      for (std::uint32_t y = 0; y < saved.rectangle.height; ++y)
+        for (std::uint32_t x = 0; x < saved.rectangle.width; ++x)
+          storage_.at(static_cast<std::uint32_t>(saved.rectangle.x) + x,
+                      static_cast<std::uint32_t>(saved.rectangle.y) + y) =
+              saved.pixels[index++];
+    }
+    restored_ = true;
+  }
+
+  [[nodiscard]] std::vector<geometry::Rectangle> visible(
+      const geometry::Rectangle rectangle) const {
+    std::vector<geometry::Rectangle> visible{rectangle};
+    for (const auto& saved : saved_) {
+      std::vector<geometry::Rectangle> next;
+      for (const auto candidate : visible) {
+        auto pieces = rectangle_difference(candidate, saved.rectangle);
+        next.insert(next.end(), pieces.begin(), pieces.end());
+      }
+      visible = std::move(next);
+    }
+    return visible;
+  }
+
+ private:
+  struct Saved { geometry::Rectangle rectangle; std::vector<std::uint32_t> pixels; };
+  PixelStorage& storage_;
+  std::vector<Saved> saved_;
+  bool restored_{false};
+};
+
 PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid) {
   if (auto* pixmap = resources.find_pixmap(xid)) return pixmap->pixels();
   if (!supported_window_drawable(resources, xid)) return nullptr;
@@ -800,12 +863,14 @@ DispatchResult poly_line(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   if (points.size() == 1) draw_line(*storage, points[0], points[0], gc->foreground, gc->plane_mask);
   else for (std::size_t index = 1; index < points.size(); ++index)
     draw_line(*storage, points[index - 1], points[index], gc->foreground, gc->plane_mask);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, points)) add_window_damage(result, state.resources(), drawable, *damage);
+    if (const auto damage = clipped_bounds(*storage, points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -831,10 +896,12 @@ DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   draw_segments(*storage, segments, gc->foreground, gc->plane_mask);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, damage_points)) add_window_damage(result, state.resources(), drawable, *damage);
+    if (const auto damage = clipped_bounds(*storage, damage_points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -861,10 +928,12 @@ DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   fill_convex_polygon(*storage, points, gc->foreground, gc->plane_mask);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    if (const auto damage = clipped_bounds(*storage, points)) add_window_damage(result, state.resources(), drawable, *damage);
+    if (const auto damage = clipped_bounds(*storage, points))
+      for (const auto rectangle : child_clip.visible(*damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -892,14 +961,16 @@ DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   geometry::Region damage({0, 0, storage->width(), storage->height()});
   for (const auto ellipse : ellipses) {
     fill_ellipse(*storage, ellipse, gc->foreground, gc->plane_mask);
     damage.add({ellipse.x, ellipse.y, ellipse.width, ellipse.height});
   }
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
-    for (const auto& rectangle : damage.rectangles()) add_window_damage(result, state.resources(), drawable, rectangle);
+    for (const auto& rectangle : damage.rectangles())
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
   return result;
 }
 
@@ -1033,13 +1104,14 @@ DispatchResult image_text8(ServerState& state, const DispatchContext& context,
         ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   const auto text = std::span<const std::uint8_t>(request.bytes).subspan(16, request.data);
   const auto raster = raster_text8(*storage, static_cast<std::int16_t>(raw_x),
       static_cast<std::int16_t>(raw_y), text, gc->foreground, gc->background,
       gc->plane_mask, true);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    add_window_damage(result, state.resources(), drawable, raster.damage);
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -1076,6 +1148,7 @@ DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   std::int32_t x = static_cast<std::int16_t>(raw_x);
   const auto y = static_cast<std::int16_t>(raw_y);
   geometry::Region damage({0, 0, storage->width(), storage->height()});
@@ -1086,10 +1159,10 @@ DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
     if (!raster.damage.empty()) damage.add(raster.damage);
     x += static_cast<std::int32_t>(item.text.size()) * kFixedFontAdvance;
   }
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (supported_window_drawable(state.resources(), drawable))
     for (const auto& rectangle : damage.rectangles())
-      add_window_damage(result, state.resources(), drawable, rectangle);
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
   return result;
 }
 
@@ -1134,12 +1207,13 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   const auto raster = put_zpixmap(*storage, static_cast<std::int16_t>(raw_x),
       static_cast<std::int16_t>(raw_y), width, height, payload, gc->plane_mask);
   if (!raster.success) return error(context, request, x11::CoreErrorCode::BadLength);
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    add_window_damage(result, state.resources(), drawable, raster.damage);
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), drawable, rectangle);
   return result;
 }
 
@@ -1159,6 +1233,7 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   DispatchResult result;
   geometry::Region damage({0, 0, storage->width(), storage->height()});
   for (const auto& fill : fills) damage.add(fill.rectangle);
@@ -1166,9 +1241,11 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
     result.drawable_damage.reserve(damage.rectangles().size());
   for (const auto& rectangle : damage.rectangles()) {
     storage->fill(rectangle, gc->foreground, gc->plane_mask);
-    if (supported_window_drawable(state.resources(), drawable))
-      add_window_damage(result, state.resources(), drawable, rectangle);
   }
+  child_clip.restore();
+  if (supported_window_drawable(state.resources(), drawable))
+    for (const auto& rectangle : damage.rectangles())
+      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
   return result;
 }
 
@@ -1190,12 +1267,13 @@ DispatchResult copy_area_request(ServerState& state, const DispatchContext& cont
   }
   auto* source_storage = mutable_storage(state.resources(), source); auto* destination_storage = mutable_storage(state.resources(), destination);
   if (!source_storage || !destination_storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  ClipByChildrenGuard child_clip(state.resources(), destination, *gc, *destination_storage);
   RasterResult raster;
   try { raster = copy_area(*source_storage, *destination_storage, static_cast<std::int16_t>(sx), static_cast<std::int16_t>(sy), width, height, static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), gc->plane_mask); }
   catch (const std::bad_alloc&) { return error(context, request, x11::CoreErrorCode::BadAlloc); }
-  DispatchResult result;
+  child_clip.restore(); DispatchResult result;
   if (!raster.damage.empty() && supported_window_drawable(state.resources(), destination))
-    add_window_damage(result, state.resources(), destination, raster.damage);
+    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), destination, rectangle);
   if (gc->graphics_exposures) {
     const auto requested = geometry::intersect({static_cast<std::int16_t>(dx), static_cast<std::int16_t>(dy), width, height}, {0, 0, destination_storage->width(), destination_storage->height()});
     if (requested && raster.damage == *requested)
@@ -1227,6 +1305,8 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
   if (!window) return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
   if (!supported_window_drawable(state.resources(), window_id)) return error(context, request, x11::CoreErrorCode::BadMatch, window_id);
   auto* storage = mutable_storage(state.resources(), window_id); if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  const GraphicsContextResource clear_gc{};
+  ClipByChildrenGuard child_clip(state.resources(), window_id, clear_gc, *storage);
   const auto signed_x = static_cast<std::int16_t>(x), signed_y = static_cast<std::int16_t>(y);
   const auto effective_width = width ? width : (signed_x < static_cast<std::int32_t>(window->width) ? window->width - signed_x : 0U);
   const auto effective_height = height ? height : (signed_y < static_cast<std::int32_t>(window->height) ? window->height - signed_y : 0U);
@@ -1234,7 +1314,9 @@ DispatchResult clear_area(ServerState& state, const DispatchContext& context,
   DispatchResult result; if (!clipped) return result;
   if (window->attributes.background_source != BackgroundSource::None) {
     storage->fill(*clipped, window->attributes.background_source == BackgroundSource::Pixel ? window->attributes.background_pixel : 0);
-    add_window_damage(result, state.resources(), window_id, *clipped);
+    child_clip.restore();
+    for (const auto rectangle : child_clip.visible(*clipped))
+      add_window_damage(result, state.resources(), window_id, rectangle);
   }
   if (request.data == 1) result.expose_intents.push_back({window_id, *clipped});
   return result;
