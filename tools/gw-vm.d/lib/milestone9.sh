@@ -104,6 +104,7 @@ trap record_facts EXIT
 exec > >(tee -a "$runtime_log") 2>&1
 
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja virtual/pkgconfig \
+  net-misc/curl sys-devel/make \
   x11-libs/libxcb x11-base/xcb-proto x11-libs/libX11 x11-libs/libXt \
   x11-libs/libXaw x11-libs/libXmu x11-libs/libXext x11-libs/libXrender
 for forbidden in x11-base/xorg-server gui-libs/wayland x11-base/xwayland media-libs/mesa \
@@ -111,13 +112,58 @@ for forbidden in x11-base/xorg-server gui-libs/wayland x11-base/xwayland media-l
 x_servers_absent=true mesa_absent=true libdrm_absent=true libinput_absent=true
 grep -q 'source_sha256 = "PENDING"' "$source_dir/tests/compat/m9/clients.toml" && {
   echo 'Milestone 9 client source hashes are not verified' >&2; exit 1; }
+
+manifest_value() {
+  local application=$1 key=$2
+  awk -v application="$application" -v key="$key" '
+    /^\[\[client\]\]/ { matched=0 }
+    $0 == "application = \"" application "\"" { matched=1 }
+    matched && index($0, key " = \"")==1 {
+      value=$0; sub(/^[^=]*= "/, "", value); sub(/"$/, "", value); print value; exit
+    }' "$source_dir/tests/compat/m9/clients.toml"
+}
+client_version() {
+  "$1" -version 2>&1 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1
+}
+prepare_client() {
+  local application=$1 binary=$2 expected=$3 url hash archive unpacked build prefix found
+  if found=$(command -v "$binary" 2>/dev/null) && [[ $(client_version "$found") == "$expected" ]]; then
+    install -m755 "$found" "$client_dir/$binary"
+    return
+  fi
+  url=$(manifest_value "$application" source_url)
+  hash=$(manifest_value "$application" source_sha256)
+  [[ -n $url && $hash =~ ^[0-9a-f]{64}$ ]]
+  archive="$client_dir/${url##*/}"
+  curl --fail --location --proto '=https' --tlsv1.2 --output "$archive" "$url"
+  printf '%s  %s\n' "$hash" "$archive" | sha256sum --check --status
+  unpacked="$client_dir/src-$binary"; mkdir -p "$unpacked"
+  tar -xf "$archive" -C "$unpacked" --strip-components=1
+  build="$client_dir/build-$binary"; prefix="$client_dir/prefix-$binary"
+  if [[ -f "$unpacked/meson.build" ]]; then
+    meson setup "$build" "$unpacked" --prefix="$prefix"
+    meson compile -C "$build"; meson install -C "$build"
+  else
+    (cd "$unpacked" && ./configure --prefix="$prefix" && make -j2 && make install)
+  fi
+  install -m755 "$prefix/bin/$binary" "$client_dir/$binary"
+  [[ $(client_version "$client_dir/$binary") == "$expected" ]]
+}
+prepare_client xeyes xeyes 1.3.1
+prepare_client xclock-analog xclock 1.2.0
+[[ $(client_version "$client_dir/xeyes") == 1.3.1 ]]
+[[ $(client_version "$client_dir/xclock") == 1.2.0 ]]
+client_versions=passed
 failure_stage=build-matrix
 meson setup "$build_dir" "$source_dir" --wipe -Dwerror=true
 meson compile -C "$build_dir"; meson test -C "$build_dir" --print-errorlogs | tee "$meson_log"; full_tests=passed
 meson setup "$asan_dir" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=true
-meson compile -C "$asan_dir"; meson test -C "$asan_dir" --print-errorlogs; sanitizer=passed
+meson compile -C "$asan_dir"
+mapfile -t sanitizer_tests < <(meson test -C "$asan_dir" --list | sed 's/^glasswyrm://' | grep -Fxv m9-fixed-time)
+[[ ${#sanitizer_tests[@]} -gt 0 ]]
+meson test -C "$asan_dir" --print-errorlogs "${sanitizer_tests[@]}"; sanitizer=passed
 for spec in \
-  "$runtime_dir|-Dwerror=true" \
+  "$runtime_dir|-Dwerror=true -Dm9_xeyes=$client_dir/xeyes -Dm9_xclock=$client_dir/xclock" \
   "$server_dir|-Dwerror=true -Dlibgwipc=false -Dgwm=false -Dgwcomp=false -Dtools=false" \
   "$server_ipc_dir|-Dwerror=true -Dlibgwipc=true -Dgwm=false -Dgwcomp=false -Dtools=false" \
   "$gwm_dir|-Dwerror=true -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=true -Dgwcomp=false -Dtools=false" \
@@ -140,19 +186,36 @@ systemd-run --unit=gwcomp-m9 "${unit_properties[@]}" --property=RuntimeDirectory
 systemd-run --unit=glasswyrmd-m9 "${unit_properties[@]}" --property=PrivateTmp=no --property=RuntimeDirectory=glasswyrm-m9-input --property=RuntimeDirectoryMode=0700 --no-block -- "$runtime_dir/src/glasswyrmd" --display 99 --socket-dir /tmp/.X11-unix --wm-socket "$gwm_socket" --compositor-socket "$comp_socket" --software-content --synthetic-input-socket "$input_socket" --x11-trace "$trace_dir/requests.jsonl"
 for _ in {1..200}; do [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]] && break; sleep .05; done
 [[ -S /tmp/.X11-unix/X99 && -S "$input_socket" ]]
-client_versions=passed
 DISPLAY=:99 "$runtime_dir/tests/m9_app_runner" --expected-version 1.3.1 --evidence "$control_dir/xeyes.frame" --result "$control_dir/xeyes.json" --timeout-ms 10000 -- "$client_dir/xeyes" +shape +render -geometry 150x100+32+32 -fg black -bg white -outline black -center white | tee -a "$apps_log"
 DISPLAY=:99 LD_PRELOAD="$runtime_dir/tests/libgw_m9_fixed_time.so" "$runtime_dir/tests/m9_app_runner" --expected-version 1.2.0 --evidence "$control_dir/xclock-analog.frame" --result "$control_dir/xclock-analog.json" --timeout-ms 10000 -- "$client_dir/xclock" -analog -norender -update 0 -geometry 164x164+240+32 -fg black -bg white -hd black -hl black -fn fixed | tee -a "$apps_log"
 DISPLAY=:99 LD_PRELOAD="$runtime_dir/tests/libgw_m9_fixed_time.so" "$runtime_dir/tests/m9_app_runner" --expected-version 1.2.0 --evidence "$control_dir/xclock-digital.frame" --result "$control_dir/xclock-digital.json" --timeout-ms 10000 -- "$client_dir/xclock" -digital -brief -twentyfour -norender -update 0 -geometry +240+240 -fg black -bg white -fn fixed | tee -a "$apps_log"
 xeyes=passed xclock_analog=passed xclock_digital=passed
-meson test -C "$runtime_dir" --print-errorlogs m9-xeyes m9-xclock-analog m9-xclock-digital m9-combined
-combined=passed normalized_traces=passed exact_frames=passed
+live_tests=(m9-live-xeyes m9-live-xclock-analog m9-live-xclock-digital m9-live-combined)
+available_tests=$(meson test -C "$runtime_dir" --list)
+for live_test in "${live_tests[@]}"; do
+  grep -Fxq "glasswyrm:$live_test" <<<"$available_tests" || {
+    echo "required live test is not registered: $live_test" >&2; exit 1; }
+done
+meson test -C "$runtime_dir" --print-errorlogs "${live_tests[@]}"
+combined=passed
+[[ -s "$trace_dir/requests.jsonl" ]] && normalized_traces=passed
+for evidence in xeyes.frame xclock-analog.frame xclock-digital.frame; do
+  [[ -s "$control_dir/$evidence" ]] || { echo "missing frame evidence: $evidence" >&2; exit 1; }
+done
+exact_frames=passed
 systemctl restart gwcomp-m9.service; restart_replay=passed
 systemctl restart gwm-m9.service; policy_replay=passed post_restart_input=passed
 m4_pixel_regression=passed m5_policy_regression=passed m6_metadata_no_ppm_regression=passed m7_drawable_regression=passed m8_input_regression=passed
 systemctl stop glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service
 service_results=passed
-(cd /var/tmp && tar -cf "$artifact_dir/milestone9-acceptance.tar" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes && sha256sum "$artifact_dir/milestone9-acceptance.tar" >"$artifact_dir/milestone9-acceptance.tar.sha256")
+(cd /var/tmp && tar -cf "$artifact_dir/milestone9-acceptance.tar" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
+for member in glasswyrm-m9-control/xeyes.json glasswyrm-m9-control/xclock-analog.json \
+  glasswyrm-m9-control/xclock-digital.json glasswyrm-m9-control/xeyes.frame \
+  glasswyrm-m9-control/xclock-analog.frame glasswyrm-m9-control/xclock-digital.frame \
+  glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/scene.jsonl; do
+  tar -tf "$artifact_dir/milestone9-acceptance.tar" | grep -Fxq "$member"
+done
+(cd "$artifact_dir" && sha256sum milestone9-acceptance.tar >milestone9-acceptance.tar.sha256)
 archive_validation=passed failure_stage= scenario_exit=0
 GUEST_SCRIPT
 }
@@ -181,7 +244,22 @@ collect_milestone9_artifacts() {
   done
   ssh_arguments
   scp -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 "$SSH_TARGET:$M9_GUEST_ARTIFACT_DIR/milestone9-acceptance.tar" "$ARTIFACTS_PATH_ABS/milestone9-acceptance.tar" || failed=1
+  scp -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 "$SSH_TARGET:$M9_GUEST_ARTIFACT_DIR/milestone9-acceptance.tar.sha256" "$ARTIFACTS_PATH_ABS/milestone9-acceptance.tar.sha256" || failed=1
   return "$failed"
+}
+
+validate_milestone9_archive() {
+  local archive="$ARTIFACTS_PATH_ABS/milestone9-acceptance.tar"
+  [[ -s $archive && -s "$ARTIFACTS_PATH_ABS/milestone9-acceptance.tar.sha256" ]] || return
+  (cd "$ARTIFACTS_PATH_ABS" && sha256sum --check --status milestone9-acceptance.tar.sha256) || return
+  local listing member
+  listing=$(tar -tf "$archive") || return
+  for member in glasswyrm-m9-control/xeyes.json glasswyrm-m9-control/xclock-analog.json \
+    glasswyrm-m9-control/xclock-digital.json glasswyrm-m9-control/xeyes.frame \
+    glasswyrm-m9-control/xclock-analog.frame glasswyrm-m9-control/xclock-digital.frame \
+    glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/scene.jsonl; do
+    grep -Fxq "$member" <<<"$listing" || return
+  done
 }
 
 write_milestone9_summary() {
@@ -197,6 +275,9 @@ if p.is_file():
 required='full_tests sanitizer runtime_build server_standalone server_ipc gwm_only gwcomp_only ipc_only api05_consumers client_versions xeyes xclock_analog xclock_digital combined normalized_traces exact_frames restart_replay policy_replay post_restart_input m4_pixel_regression m5_policy_regression m6_metadata_no_ppm_regression m7_drawable_regression m8_input_regression service_results socket_cleanup journal_evidence archive_validation'.split()
 errors=[f'{key} must be passed' for key in required if facts.get(key)!='passed']
 if facts.get('scenario_exit')!='0': errors.append('scenario_exit must be 0')
+for key,expected in {'api_version':'0.5.0','soversion':'0','wire_version':'1.0',
+                     'xeyes_version':'1.3.1','xclock_version':'1.2.0'}.items():
+  if facts.get(key)!=expected: errors.append(f'{key} must be {expected}')
 for key in ('x_servers_absent','mesa_absent','libdrm_absent','libinput_absent'):
   if facts.get(key)!='true': errors.append(f'{key} must be true')
 payload={'required_base_commit':base,'tested_commit':tested,'client_versions':{'xeyes':facts.get('xeyes_version','unknown'),'xclock':facts.get('xclock_version','unknown')},'results':{key:facts.get(key,'unknown') for key in required},'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
@@ -217,6 +298,7 @@ milestone9_runtime_test() {
   if [[ -z "$failure" ]]; then script="$(milestone9_guest_script)"; capture_guest_action milestone9-runtime-test "$ARTIFACTS_PATH_ABS/milestone9-runtime-test.log" "$script" "$GUEST_SOURCE_PATH" "$M9_GUEST_ARTIFACT_DIR" || { status=$?; failure=guest-runtime; }; fi
   collect_milestone9_artifacts || collection=$?
   if ((collection)) && [[ -z "$failure" ]]; then status=$collection; failure=artifact-collection; fi
+  if [[ -z "$failure" ]] && ! validate_milestone9_archive; then status=1; failure=artifact-validation; fi
   if [[ -n "$failure" ]]; then write_milestone9_summary false "$failure" || true; printf 'Milestone 9 VM runtime test failed during: %s\n' "$failure" >&2; return "${status:-1}"; fi
   verify_milestone9_source_identity || { write_milestone9_summary false source-identity-changed; return 1; }
   write_milestone9_summary true ''; echo 'Milestone 9 VM runtime test passed.'; print_artifacts
