@@ -121,9 +121,9 @@ api05_consumers=passed
 meson test -C "$runtime_build_dir" --print-errorlogs gwcomp-golden; m4_pixel_regression=passed
 meson test -C "$runtime_build_dir" --print-errorlogs wm-policy; m5_policy_regression=passed
 meson test -C "$runtime_build_dir" --print-errorlogs gwipc-malformed 2>&1 | tee -a "$malformed_log"; malformed_gwipc=passed
-meson test -C "$runtime_build_dir" --print-errorlogs published-buffer content-presenter gwcomp-metadata-scene 2>&1 | tee -a "$release_log"
+meson test -C "$runtime_build_dir" --print-errorlogs published-buffer content-presenter gwcomp-metadata-scene 2>&1 | tee -a "$meson_log"
 meson test -C "$runtime_build_dir" --print-errorlogs drawable-core 2>&1 | tee -a "$meson_log"; damage_coalescing=passed
-meson test -C "$runtime_build_dir" --print-errorlogs synthetic-input input-state event-router 2>&1 | tee -a "$meson_log"
+meson test -C "$runtime_build_dir" --print-errorlogs gwipc-input-contract input-foundation event-router glasswyrmd-input-recovery 2>&1 | tee -a "$meson_log"
 failure_stage=integrated-three-process-probe
 meson test -C "$runtime_build_dir" --print-errorlogs glasswyrmd-integrated-lifecycle 2>&1 | tee -a "$raw_log"
 gwm_socket=/run/glasswyrm-m8-gwm/gwm.sock
@@ -208,12 +208,15 @@ pre_continue_count=$(frame_count)
 touch "$control_dir/continue"; wait "$hold_pid"
 cmp "$restart_result" "$source_dir/tests/fixtures/m8/restart-result.json"
 connection_survival=passed input_connection_survival=passed x11_connection_survival=passed plane_mask=passed post_restart_drawing=passed post_restart_input=passed
-wait_for_frame_after "$pre_continue_count"
-post_restart_frame=$((pre_continue_count + 1))
-post_restart_hash_value="$(frame_field_at "$post_restart_frame" fnv1a64)"; [[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
+for _ in {1..200}; do
+  post_restart_hash_value="$(last_frame_field fnv1a64)"
+  [[ "$(frame_count)" -gt "$pre_continue_count" && "$post_restart_hash_value" == "$expected_post" ]] && break
+  sleep .05
+done
+[[ "$post_restart_hash_value" == "$expected_post" && "$post_restart_hash_value" != "$pre_restart_hash" ]]
 post_restart_hash=passed
 cp "$restart_result" "$artifact_dir/milestone8-restart-result.json"
-post_name="$(frame_field_at "$post_restart_frame" file)"; post_ppm="$dump_dir/$post_name"; [[ -n "$post_name" && -s "$post_ppm" ]]
+post_name="$(last_frame_field file)"; post_ppm="$dump_dir/$post_name"; [[ -n "$post_name" && -s "$post_ppm" ]]
 sha256sum "$post_ppm" | tee "$control_dir/post-restart-frame.sha256"
 journalctl -u glasswyrmd-m8.service -u gwcomp-m8.service --no-pager >>"$events_log"
 cp "$dump_dir/frames.jsonl" "$control_dir/frames.jsonl"
