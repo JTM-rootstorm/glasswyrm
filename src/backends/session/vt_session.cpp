@@ -181,6 +181,25 @@ bool DirectVirtualTerminalSession::restore(std::string& error) {
 
   bool success = true;
   std::string operation_error;
+  if (!master_owned_ && graphics_mode_set_) {
+    if (!api_.activate(terminal_fd_, terminal_number_)) {
+      append_api_error("reactivate Glasswyrm virtual terminal for display restore",
+                       error);
+      success = false;
+    } else if (!api_.wait_until_active(terminal_fd_, terminal_number_)) {
+      append_api_error("wait for Glasswyrm virtual terminal during restore",
+                       error);
+      success = false;
+    } else if (!display_.acquire_master(operation_error)) {
+      append_error(operation_error.empty() ? "reacquire DRM master for restore"
+                                           : operation_error,
+                   error);
+      success = false;
+      operation_error.clear();
+    } else {
+      master_owned_ = true;
+    }
+  }
   if (master_owned_) {
     if (!display_.restore_original_display(operation_error)) {
       append_error(operation_error.empty() ? "restore original display"
