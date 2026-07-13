@@ -7,6 +7,7 @@ records = [
  {"direction":"request","client":1,"sequence":2,"opcode":38,"name":"QueryPointer","length":8,"outcome":"success","error":None},
  {"direction":"request","client":1,"sequence":3,"opcode":38,"name":"QueryPointer","length":8,"outcome":"success","error":None},
  {"direction":"request","client":1,"sequence":4,"opcode":250,"name":"Unknown","length":12,"outcome":"error","error":"BadRequest"},
+ {"direction":"connection","client":1,"outcome":"disconnected"},
 ]
 with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "raw.jsonl"

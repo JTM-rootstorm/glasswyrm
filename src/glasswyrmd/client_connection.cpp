@@ -39,6 +39,7 @@ ClientConnection::ClientConnection(const int descriptor,
 }
 
 ClientConnection::~ClientConnection() {
+  if (trace_) trace_->connection(identifier_, "disconnected");
   if (descriptor_ >= 0) {
     ::close(descriptor_);
   }
@@ -93,6 +94,7 @@ bool ClientConnection::enqueue(std::vector<std::uint8_t> bytes,
 
 bool ClientConnection::enqueue_server_packet(std::vector<std::uint8_t> bytes) {
   if (state_ == State::Closing) return false;
+  if (trace_) trace_->packet(identifier_, request_sequence_, bytes, byte_order_);
   return enqueue(std::move(bytes));
 }
 
@@ -223,8 +225,10 @@ void ClientConnection::process_input(
           trace_->request(identifier_, request_sequence_,
                           request_framer_->request().opcode,
                           request_framer_->request().bytes.size(),
-                          result_packet.output);
-          trace_->packet(identifier_, request_sequence_, result_packet.output);
+                          result_packet.output,
+                          request_framer_->request().bytes, byte_order_);
+          trace_->packet(identifier_, request_sequence_, result_packet.output,
+                         byte_order_);
         }
         if (!result_packet.output.empty() &&
             !enqueue(std::move(result_packet.output))) {
