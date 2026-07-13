@@ -193,9 +193,11 @@ PixelStorage* mutable_storage(ResourceTable& resources, const std::uint32_t xid)
 
 struct GcDecodeResult { bool success{}; x11::CoreErrorCode error{x11::CoreErrorCode::BadImplementation}; std::uint32_t bad{}; GraphicsContextResource gc; };
 GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
-                                GraphicsContextResource gc) {
+                                GraphicsContextResource gc,
+                                const ResourceTable& resources) {
   constexpr std::uint32_t supported = (1U << 0U) | (1U << 1U) | (1U << 2U) |
-      (1U << 3U) | (1U << 8U) | (1U << 15U) | (1U << 16U) | (1U << 17U) |
+      (1U << 3U) | (1U << 8U) | (1U << 14U) | (1U << 15U) |
+      (1U << 16U) | (1U << 17U) |
       (1U << 18U) | (1U << 19U);
   GcDecodeResult result{}; result.gc = gc;
   if ((mask & ~supported) != 0) return result;
@@ -208,6 +210,13 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
       case 2: result.gc.foreground=value & 0x00ffffffU; break;
       case 3: result.gc.background=value & 0x00ffffffU; break;
       case 8: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.fill_style=0; break;
+      case 14:
+        if (!resources.find_font(value)) {
+          result.error = x11::CoreErrorCode::BadFont;
+          return result;
+        }
+        result.gc.font = kDefaultFontXid;
+        break;
       case 15: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.subwindow_mode=0; break;
       case 16: if (value > 1) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.graphics_exposures=value != 0; break;
       case 17: result.gc.clip_x_origin=static_cast<std::int16_t>(value); break;
@@ -609,7 +618,7 @@ DispatchResult create_gc(ServerState& state, const DispatchContext& context,
   (void)reader.read_u32(xid); (void)reader.read_u32(drawable); (void)reader.read_u32(mask);
   if (!exact_size(request, 16 + static_cast<std::size_t>(std::popcount(mask)) * 4U))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  const auto decoded = decode_gc_values(reader, mask, {});
+  const auto decoded = decode_gc_values(reader, mask, {}, state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
   switch (state.resources().create_gc(context.client_id, context.resource_base,
       context.resource_mask, xid, drawable, decoded.gc)) {
@@ -631,7 +640,7 @@ DispatchResult change_gc(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadLength);
   auto* gc = state.resources().find_gc(xid);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, xid);
-  const auto decoded = decode_gc_values(reader, mask, *gc);
+  const auto decoded = decode_gc_values(reader, mask, *gc, state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad);
   *gc = decoded.gc; return {};
 }
@@ -697,7 +706,7 @@ DispatchResult query_font(ServerState& state, const DispatchContext& context,
   x11::ByteWriter reply(context.byte_order);
   reply.write_u8(1); reply.write_u8(0); reply.write_u16(x11::wire_sequence(context.sequence));
   constexpr std::uint32_t characters = kFixedFontLastCharacter - kFixedFontFirstCharacter + 1U;
-  constexpr std::uint32_t extra_bytes = 52U - 32U + characters * 12U;
+  constexpr std::uint32_t extra_bytes = 60U - 32U + characters * 12U;
   reply.write_u32(extra_bytes / 4U);
   write_char_info(reply); reply.write_padding(4); write_char_info(reply); reply.write_padding(4);
   reply.write_u16(kFixedFontFirstCharacter); reply.write_u16(kFixedFontLastCharacter);
