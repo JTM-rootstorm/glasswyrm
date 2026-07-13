@@ -19,7 +19,9 @@ with open(sys.argv[1], "r", encoding="utf-8") as source:
 
 requests = [r for r in records if r.get("direction") == "request"]
 counts = collections.Counter(r.get("name", "Unknown") for r in requests)
-opcodes = collections.Counter(str(r.get("opcode", "unknown")) for r in requests)
+recurring_names = {"QueryPointer"}
+opcodes = collections.Counter(str(r.get("opcode", "unknown")) for r in requests
+                              if r.get("name") not in recurring_names)
 errors = collections.Counter(r.get("error", "UnknownError") for r in requests
                              if r.get("outcome") == "error")
 reply_keys = {(r.get("client"), r.get("sequence")) for r in records
@@ -32,7 +34,7 @@ summary = {
     "error_histogram": dict(sorted(errors.items())),
     "reply_requests": list(dict.fromkeys(r.get("name", "Unknown") for r in requests
         if (r.get("client"), r.get("sequence")) in reply_keys)),
-    "recurring_requests": sorted(name for name, count in counts.items() if count > 1),
+    "recurring_requests": sorted(name for name in recurring_names if counts[name]),
     "extension_queries": list(dict.fromkeys(r["extension"] for r in requests
         if r.get("name") == "QueryExtension" and isinstance(r.get("extension"), str))),
     "unknown_opcodes": sorted({r.get("opcode") for r in requests
