@@ -175,7 +175,9 @@ bool valid(const DiscoveryReport& value) {
 
 bool valid(const SelectionReport& value) {
   return !value.connector_name.empty() && value.connector_id != 0 &&
-         value.crtc_id != 0 && value.primary_plane_id != 0 &&
+         value.crtc_id != 0 &&
+         (value.api == ReportApiPath::Legacy ||
+          value.primary_plane_id != 0) &&
          !value.mode_name.empty() && value.width != 0 && value.height != 0 &&
          value.refresh_millihz != 0 && !value.framebuffer_format.empty() &&
          value.pitches.size() == 2 && value.sizes.size() == 2;

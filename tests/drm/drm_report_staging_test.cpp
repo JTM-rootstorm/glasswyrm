@@ -231,6 +231,13 @@ void invalid_records_are_rejected() {
   gw::test::require(
       !report.stage(DrmReportRecord{one_buffer}, staged, error),
       "M10 selection diagnostics require exactly two dumb buffers");
+  auto implicit_primary = selection();
+  implicit_primary.api = ReportApiPath::Legacy;
+  implicit_primary.primary_plane_id = 0;
+  gw::test::require(
+      report.stage(DrmReportRecord{implicit_primary}, staged, error),
+      "legacy diagnostics may represent the implicit primary plane");
+  report.abort(staged);
 }
 
 } // namespace
