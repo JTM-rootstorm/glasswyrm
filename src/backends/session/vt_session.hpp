@@ -18,29 +18,30 @@ class DisplaySessionControl {
 public:
   virtual ~DisplaySessionControl() = default;
 
-  [[nodiscard]] virtual bool quiesce_pending_flip(std::string& error) = 0;
-  [[nodiscard]] virtual bool acquire_master(std::string& error) = 0;
-  [[nodiscard]] virtual bool drop_master(std::string& error) = 0;
-  [[nodiscard]] virtual bool present_committed_frame(std::string& error) = 0;
-  [[nodiscard]] virtual bool restore_original_display(std::string& error) = 0;
+  [[nodiscard]] virtual bool quiesce_pending_flip(std::string &error) = 0;
+  [[nodiscard]] virtual bool acquire_master(std::string &error) = 0;
+  [[nodiscard]] virtual bool drop_master(std::string &error) = 0;
+  [[nodiscard]] virtual bool present_committed_frame(std::string &error) = 0;
+  [[nodiscard]] virtual bool restore_original_display(std::string &error) = 0;
+  [[nodiscard]] virtual bool release_scanout_resources(std::string &error) = 0;
 };
 
 class DirectVirtualTerminalSession final {
 public:
-  DirectVirtualTerminalSession(VirtualTerminalApi& api,
-                               DisplaySessionControl& display) noexcept;
+  DirectVirtualTerminalSession(VirtualTerminalApi &api,
+                               DisplaySessionControl &display) noexcept;
   ~DirectVirtualTerminalSession();
 
-  DirectVirtualTerminalSession(const DirectVirtualTerminalSession&) = delete;
-  DirectVirtualTerminalSession&
-  operator=(const DirectVirtualTerminalSession&) = delete;
+  DirectVirtualTerminalSession(const DirectVirtualTerminalSession &) = delete;
+  DirectVirtualTerminalSession &
+  operator=(const DirectVirtualTerminalSession &) = delete;
 
   [[nodiscard]] bool acquire(std::string_view path,
                              VirtualTerminalSignals signals,
-                             std::string& error);
-  [[nodiscard]] bool release(std::string& error);
-  [[nodiscard]] bool reacquire(std::string& error);
-  [[nodiscard]] bool restore(std::string& error);
+                             std::string &error);
+  [[nodiscard]] bool release(std::string &error);
+  [[nodiscard]] bool reacquire(std::string &error);
+  [[nodiscard]] bool restore(std::string &error);
 
   [[nodiscard]] DirectSessionState state() const noexcept { return state_; }
   [[nodiscard]] int terminal_fd() const noexcept { return terminal_fd_; }
@@ -52,12 +53,12 @@ public:
   }
 
 private:
-  void append_api_error(std::string_view operation, std::string& error) const;
-  static void append_error(std::string_view detail, std::string& error);
-  void unwind_failed_acquire(std::string& error);
+  void append_api_error(std::string_view operation, std::string &error) const;
+  static void append_error(std::string_view detail, std::string &error);
+  void unwind_failed_acquire(std::string &error);
 
-  VirtualTerminalApi& api_;
-  DisplaySessionControl& display_;
+  VirtualTerminalApi &api_;
+  DisplaySessionControl &display_;
   DirectSessionState state_{DirectSessionState::Empty};
   int terminal_fd_{-1};
   unsigned terminal_number_{};

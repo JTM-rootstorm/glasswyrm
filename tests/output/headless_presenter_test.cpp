@@ -59,7 +59,11 @@ int main() {
                         !rejected.error.empty(),
                     "invalid presentation is rejected without publication");
 
-  presenter.shutdown();
+  gw::test::require(
+      presenter.shutdown(error) ==
+              glasswyrm::output::BackendStateResult::Complete &&
+          error.empty(),
+      "headless shutdown completes without restoration work");
   std::filesystem::remove_all(directory);
   return 0;
 }

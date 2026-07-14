@@ -11,22 +11,23 @@
 namespace glasswyrm::drm {
 
 class DumbBuffer {
- public:
+public:
   static constexpr std::uint64_t kMaximumBytes = 64U * 1024U * 1024U;
 
   DumbBuffer() = default;
   ~DumbBuffer();
-  DumbBuffer(DumbBuffer&& other) noexcept;
-  DumbBuffer& operator=(DumbBuffer&& other) noexcept;
-  DumbBuffer(const DumbBuffer&) = delete;
-  DumbBuffer& operator=(const DumbBuffer&) = delete;
+  DumbBuffer(DumbBuffer &&other) noexcept;
+  DumbBuffer &operator=(DumbBuffer &&other) noexcept;
+  DumbBuffer(const DumbBuffer &) = delete;
+  DumbBuffer &operator=(const DumbBuffer &) = delete;
 
-  [[nodiscard]] static bool create(DumbBufferApi& api, std::uint32_t width,
-                                   std::uint32_t height, DumbBuffer& output,
-                                   std::string& error);
+  [[nodiscard]] static bool create(DumbBufferApi &api, std::uint32_t width,
+                                   std::uint32_t height, DumbBuffer &output,
+                                   std::string &error);
   [[nodiscard]] bool copy_from(std::span<const std::uint32_t> pixels,
-                               std::string& error);
+                               std::string &error);
   [[nodiscard]] std::uint64_t visible_hash() const noexcept;
+  [[nodiscard]] bool release(std::string &error) noexcept;
   void reset() noexcept;
 
   [[nodiscard]] bool valid() const noexcept { return mapping_ != nullptr; }
@@ -42,9 +43,9 @@ class DumbBuffer {
     return {mapping_, size_};
   }
 
- private:
-  DumbBufferApi* api_{};
-  std::byte* mapping_{};
+private:
+  DumbBufferApi *api_{};
+  std::byte *mapping_{};
   std::size_t size_{};
   std::uint32_t width_{};
   std::uint32_t height_{};
@@ -54,30 +55,32 @@ class DumbBuffer {
 };
 
 class DumbBufferPair {
- public:
+public:
   DumbBufferPair() = default;
-  DumbBufferPair(DumbBufferPair&&) noexcept = default;
-  DumbBufferPair& operator=(DumbBufferPair&&) noexcept = default;
-  DumbBufferPair(const DumbBufferPair&) = delete;
-  DumbBufferPair& operator=(const DumbBufferPair&) = delete;
+  DumbBufferPair(DumbBufferPair &&) noexcept = default;
+  DumbBufferPair &operator=(DumbBufferPair &&) noexcept = default;
+  DumbBufferPair(const DumbBufferPair &) = delete;
+  DumbBufferPair &operator=(const DumbBufferPair &) = delete;
 
-  [[nodiscard]] static bool create(DumbBufferApi& api, std::uint32_t width,
-                                   std::uint32_t height,
-                                   DumbBufferPair& output,
-                                   std::string& error);
-  [[nodiscard]] DumbBuffer& front() noexcept { return buffers_[front_index_]; }
-  [[nodiscard]] const DumbBuffer& front() const noexcept {
+  [[nodiscard]] static bool create(DumbBufferApi &api, std::uint32_t width,
+                                   std::uint32_t height, DumbBufferPair &output,
+                                   std::string &error);
+  [[nodiscard]] DumbBuffer &front() noexcept { return buffers_[front_index_]; }
+  [[nodiscard]] const DumbBuffer &front() const noexcept {
     return buffers_[front_index_];
   }
-  [[nodiscard]] DumbBuffer& back() noexcept { return buffers_[1 - front_index_]; }
-  [[nodiscard]] const DumbBuffer& back() const noexcept {
+  [[nodiscard]] DumbBuffer &back() noexcept {
+    return buffers_[1 - front_index_];
+  }
+  [[nodiscard]] const DumbBuffer &back() const noexcept {
     return buffers_[1 - front_index_];
   }
   void promote_back() noexcept { front_index_ = 1 - front_index_; }
+  [[nodiscard]] bool release(std::string &error) noexcept;
 
- private:
+private:
   std::array<DumbBuffer, 2> buffers_;
   std::size_t front_index_{};
 };
 
-}  // namespace glasswyrm::drm
+} // namespace glasswyrm::drm

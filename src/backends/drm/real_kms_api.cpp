@@ -85,9 +85,9 @@ public:
   bool map_dumb(int, std::uint32_t, std::uint64_t &, std::string &) override;
   std::byte *map_memory(int, std::uint64_t, std::size_t,
                         std::string &) override;
-  void remove_framebuffer(int, std::uint32_t) noexcept override;
-  void unmap_memory(std::byte *, std::size_t) noexcept override;
-  void destroy_dumb(int, std::uint32_t) noexcept override;
+  bool remove_framebuffer(int, std::uint32_t, std::string &) noexcept override;
+  bool unmap_memory(std::byte *, std::size_t, std::string &) noexcept override;
+  bool destroy_dumb(int, std::uint32_t, std::string &) noexcept override;
   bool object_properties(int, KmsObjectType, std::uint32_t,
                          std::vector<ObjectProperty> &, std::string &) override;
   bool read_connector_crtc(int, std::uint32_t, std::uint32_t &,
@@ -160,16 +160,28 @@ std::byte *RealKmsApi::map_memory(int fd, std::uint64_t off, std::size_t size,
   e.clear();
   return static_cast<std::byte *>(p);
 }
-void RealKmsApi::remove_framebuffer(int fd, std::uint32_t fb) noexcept {
-  (void)drmModeRmFB(fd, fb);
+bool RealKmsApi::remove_framebuffer(int fd, std::uint32_t fb,
+                                    std::string &error) noexcept {
+  if (drmModeRmFB(fd, fb) != 0)
+    return fail(error, "drmModeRmFB failed");
+  error.clear();
+  return true;
 }
-void RealKmsApi::unmap_memory(std::byte *p, std::size_t s) noexcept {
-  (void)munmap(p, s);
+bool RealKmsApi::unmap_memory(std::byte *p, std::size_t s,
+                              std::string &error) noexcept {
+  if (munmap(p, s) != 0)
+    return fail(error, "dumb-buffer munmap failed");
+  error.clear();
+  return true;
 }
-void RealKmsApi::destroy_dumb(int fd, std::uint32_t h) noexcept {
+bool RealKmsApi::destroy_dumb(int fd, std::uint32_t h,
+                              std::string &error) noexcept {
   drm_mode_destroy_dumb d{};
   d.handle = h;
-  (void)drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &d);
+  if (drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &d) != 0)
+    return fail(error, "DESTROY_DUMB failed");
+  error.clear();
+  return true;
 }
 bool RealKmsApi::object_properties(int fd, KmsObjectType type, std::uint32_t id,
                                    std::vector<ObjectProperty> &out,

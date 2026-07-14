@@ -20,7 +20,10 @@ enum class KmsOperation {
   CreateBlob,
   AtomicCommit,
   LegacySetCrtc,
-  LegacyPageFlip
+  LegacyPageFlip,
+  RemoveFramebuffer,
+  UnmapMemory,
+  DestroyDumb
 };
 struct AtomicCommitRecord {
   std::vector<AtomicPropertyValue> properties;
@@ -56,9 +59,9 @@ public:
   bool map_dumb(int, std::uint32_t, std::uint64_t &, std::string &) override;
   std::byte *map_memory(int, std::uint64_t, std::size_t,
                         std::string &) override;
-  void remove_framebuffer(int, std::uint32_t) noexcept override;
-  void unmap_memory(std::byte *, std::size_t) noexcept override;
-  void destroy_dumb(int, std::uint32_t) noexcept override;
+  bool remove_framebuffer(int, std::uint32_t, std::string &) noexcept override;
+  bool unmap_memory(std::byte *, std::size_t, std::string &) noexcept override;
+  bool destroy_dumb(int, std::uint32_t, std::string &) noexcept override;
   bool object_properties(int, KmsObjectType, std::uint32_t,
                          std::vector<ObjectProperty> &, std::string &) override;
   bool read_connector_crtc(int, std::uint32_t, std::uint32_t &,

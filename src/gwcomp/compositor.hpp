@@ -93,6 +93,7 @@ public:
       short revents, std::string& error);
   [[nodiscard]] bool suspend_presentation(std::string& error);
   [[nodiscard]] bool resume_presentation(std::string& error);
+  [[nodiscard]] bool shutdown_presentation(std::string& error) noexcept;
   [[nodiscard]] bool presentation_suspended() const noexcept {
     return presentation_suspended_;
   }
@@ -120,6 +121,7 @@ private:
   std::unique_ptr<PresentationTransaction> pending_presentation_;
   PresentationTiming timing_;
   bool presentation_suspended_{};
+  bool presentation_shutdown_{};
   std::optional<SceneManifest> scene_manifest_;
   std::map<std::uint64_t, gwipc_buffer_release_reason> releases_;
   std::uint64_t frame_ordinal_{};

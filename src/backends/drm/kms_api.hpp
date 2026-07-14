@@ -92,10 +92,13 @@ public:
   [[nodiscard]] virtual std::byte *map_memory(int fd, std::uint64_t offset,
                                               std::size_t size,
                                               std::string &error) = 0;
-  virtual void remove_framebuffer(int fd,
-                                  std::uint32_t framebuffer_id) noexcept = 0;
-  virtual void unmap_memory(std::byte *mapping, std::size_t size) noexcept = 0;
-  virtual void destroy_dumb(int fd, std::uint32_t handle) noexcept = 0;
+  [[nodiscard]] virtual bool
+  remove_framebuffer(int fd, std::uint32_t framebuffer_id,
+                     std::string &error) noexcept = 0;
+  [[nodiscard]] virtual bool unmap_memory(std::byte *mapping, std::size_t size,
+                                          std::string &error) noexcept = 0;
+  [[nodiscard]] virtual bool destroy_dumb(int fd, std::uint32_t handle,
+                                          std::string &error) noexcept = 0;
 
   [[nodiscard]] virtual bool
   object_properties(int fd, KmsObjectType type, std::uint32_t object_id,
@@ -139,9 +142,9 @@ public:
                         std::string &) override;
   bool map_dumb(std::uint32_t, std::uint64_t &, std::string &) override;
   std::byte *map_memory(std::uint64_t, std::size_t, std::string &) override;
-  void remove_framebuffer(std::uint32_t) noexcept override;
-  void unmap_memory(std::byte *, std::size_t) noexcept override;
-  void destroy_dumb(std::uint32_t) noexcept override;
+  bool remove_framebuffer(std::uint32_t, std::string &) noexcept override;
+  bool unmap_memory(std::byte *, std::size_t, std::string &) noexcept override;
+  bool destroy_dumb(std::uint32_t, std::string &) noexcept override;
 
 private:
   KmsApi &api_;

@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace gw::compositor {
 
@@ -25,7 +26,8 @@ public:
   [[nodiscard]] static PresentationCompletion service(
       Compositor& compositor, short revents, std::string& error);
   [[nodiscard]] static int timeout_ms(const Compositor& compositor);
-  static void abort(Compositor& compositor) noexcept;
+  static void abort(Compositor& compositor,
+                    std::string_view reason = {}) noexcept;
 
 private:
   using AttachmentMap = std::map<std::uint64_t, std::uint64_t>;

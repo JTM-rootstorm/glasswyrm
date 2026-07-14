@@ -55,7 +55,8 @@ Compositor::Compositor(
 
 Compositor::~Compositor() {
   PresentationTransaction::abort(*this);
-  if (presenter_) presenter_->shutdown();
+  std::string ignored;
+  (void)shutdown_presentation(ignored);
 }
 
 bool Compositor::begin_snapshot() {
@@ -258,6 +259,20 @@ bool Compositor::resume_presentation(std::string& error) {
   presentation_suspended_ = false;
   error.clear();
   return true;
+}
+
+bool Compositor::shutdown_presentation(std::string& error) noexcept {
+  if (presentation_shutdown_) {
+    error.clear();
+    return true;
+  }
+  presentation_shutdown_ = true;
+  if (!presenter_) {
+    error.clear();
+    return true;
+  }
+  return presenter_->shutdown(error) ==
+         glasswyrm::output::BackendStateResult::Complete;
 }
 
 void Compositor::disconnect() {
