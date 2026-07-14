@@ -72,6 +72,14 @@ assert_not_contains() {
   fi
 }
 
+assert_before() {
+  local file=$1 first=$2 second=$3 first_line second_line
+  first_line=$(awk -v needle="$first" 'index($0, needle) { print NR; exit }' "$file")
+  second_line=$(awk -v needle="$second" 'index($0, needle) { print NR; exit }' "$file")
+  [[ -n $first_line && -n $second_line && $first_line -lt $second_line ]] ||
+    fail "$file does not place '$first' before '$second'"
+}
+
 assert_file_glob() {
   local pattern=$1
   compgen -G "$pattern" >/dev/null || fail "no file matched: $pattern"
@@ -140,7 +148,13 @@ if [[ -n ${GW_VM_TEST_FAIL_VIRSH:-} && " $* " == *" $GW_VM_TEST_FAIL_VIRSH "* ]]
 fi
 case " $* " in
   *' domstate '*) printf 'running\n' ;;
-  *' dumpxml '*) printf '<domain><devices><video><model type="virtio"/></video><graphics type="spice"/></devices></domain>\n' ;;
+  *' dumpxml '*)
+    if [[ ${GW_VM_TEST_QXL_LOW:-0} == 1 ]]; then
+      printf '<domain><devices><video><model type="qxl" vgamem="16384"/></video><graphics type="spice"/></devices></domain>\n'
+    else
+      printf '<domain><devices><video><model type="virtio"/></video><graphics type="spice"/></devices></domain>\n'
+    fi
+    ;;
   *' help screenshot '*) printf 'screenshot DOMAIN [FILE]\n' ;;
   *' screenshot '*)
     destination=${!#}
@@ -716,6 +730,11 @@ done
 
 run_allow_failure "$work_dir/doctor.out" env GLASSWYRM_VM_CONFIG="$no_domain_config" "$gw_vm" doctor
 assert_contains "$work_dir/doctor.out" 'GLASSWYRM_VM_NAME'
+
+run_failure "$work_dir/doctor-qxl-low.out" \
+  env GW_VM_TEST_QXL_LOW=1 "$gw_vm" doctor
+assert_contains "$work_dir/doctor-qxl-low.out" \
+  'QXL requires at least 65536 KiB vgamem for M10 double buffering'
 
 run_failure "$work_dir/status-no-domain.out" env GLASSWYRM_VM_CONFIG="$no_domain_config" "$gw_vm" status
 assert_contains "$work_dir/status-no-domain.out" 'No VM domain configured.'
@@ -1431,6 +1450,13 @@ assert_contains "$command_log" 'mask --runtime --now'
 assert_contains "$command_log" 'unmask --runtime'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
 assert_contains "$command_log" 'magick <'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  '>"$control/screenshot-after-vt-ready"' 'touch "$control/post-vt-input"'
+scenario_source=$(sed -n '/name == "m10-xeyes-repaint"/,/^  }/p' \
+  "$repo_root/tests/integration/gwinput_m8.cpp")
+[[ $(grep -c 'add(K::motion' <<<"$scenario_source") -eq 1 &&
+   $(grep -c 'add(K::barrier' <<<"$scenario_source") -eq 1 ]] ||
+  fail 'M10 repaint scenario must contain exactly one motion and one barrier'
 assert_file_glob "$artifact_dir/milestone10-drm-evidence.tar"
 for artifact in milestone10-runtime-test.log milestone10-meson-test.log milestone10-drm-probe.json milestone10-drm-report.jsonl milestone10-kms-before.json milestone10-kms-active.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-active.json milestone10-vt-after.json milestone10-apps.log milestone10-screenshot-validation.log milestone10-glasswyrmd-journal.log milestone10-gwm-journal.log milestone10-gwcomp-journal.log milestone10-facts.env milestone10-summary.json milestone10-screen.ppm milestone10-screen-after-vt.ppm milestone10-drm-evidence.tar; do
   [[ -f $artifact_dir/$artifact ]] || fail "milestone10 scenario did not create $artifact"
