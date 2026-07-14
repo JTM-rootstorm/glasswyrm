@@ -140,6 +140,8 @@ getty_active_before=unknown getty_enabled_before=unknown
 logind_unit=systemd-logind.service logind_socket=systemd-logind-varlink.socket
 logind_state_captured=false logind_active_before=unknown logind_active_after=unknown
 logind_socket_active_before=unknown logind_socket_active_after=unknown
+logind_enabled_before=unknown logind_enabled_after=unknown
+logind_socket_enabled_before=unknown logind_socket_enabled_after=unknown
 getty_active_after=unknown getty_enabled_after=unknown
 results=(strict_tests source_layout_audit source_layout_budget refactor_parity sanitizer clang
  headless_no_libdrm dual_backend drm_only historical_components m4_m9_regressions
@@ -204,12 +206,16 @@ restore_getty_state() {
 capture_logind_state() {
   logind_active_before=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
   logind_socket_active_before=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
+  logind_enabled_before=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
+  logind_socket_enabled_before=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
   [[ ($logind_active_before == active || $logind_active_before == inactive) &&
-     ($logind_socket_active_before == active || $logind_socket_active_before == inactive) ]]
+     ($logind_socket_active_before == active || $logind_socket_active_before == inactive) &&
+     -n $logind_enabled_before && -n $logind_socket_enabled_before ]]
   logind_state_captured=true
 }
 restore_logind_state() {
   [[ $logind_state_captured == true ]] || return 0
+  systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1 || return 1
   if [[ $logind_socket_active_before == active ]]; then
     systemctl start "$logind_socket" >/dev/null 2>&1 || return 1
   else
@@ -220,12 +226,21 @@ restore_logind_state() {
   else
     systemctl stop "$logind_unit" >/dev/null 2>&1 || return 1
   fi
+  [[ $logind_enabled_before != masked-runtime ]] ||
+    systemctl mask --runtime --now "$logind_unit" >/dev/null 2>&1 || return 1
+  [[ $logind_socket_enabled_before != masked-runtime ]] ||
+    systemctl mask --runtime --now "$logind_socket" >/dev/null 2>&1 || return 1
   logind_active_after=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
   logind_socket_active_after=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
-  printf 'logind_restore unit=%s active=%s socket=%s socket_active=%s\n' \
-    "$logind_unit" "$logind_active_after" "$logind_socket" "$logind_socket_active_after"
+  logind_enabled_after=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
+  logind_socket_enabled_after=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
+  printf 'logind_restore unit=%s active=%s enabled=%s socket=%s socket_active=%s socket_enabled=%s\n' \
+    "$logind_unit" "$logind_active_after" "$logind_enabled_after" "$logind_socket" \
+    "$logind_socket_active_after" "$logind_socket_enabled_after"
   [[ $logind_active_after == "$logind_active_before" &&
-     $logind_socket_active_after == "$logind_socket_active_before" ]]
+     $logind_socket_active_after == "$logind_socket_active_before" &&
+     $logind_enabled_after == "$logind_enabled_before" &&
+     $logind_socket_enabled_after == "$logind_socket_enabled_before" ]]
 }
 unit_property_equals() {
   local unit=$1 property=$2 expected=$3 actual
@@ -289,6 +304,9 @@ record_facts() {
       "$logind_unit" "$logind_active_before" "$logind_active_after"
     printf 'logind_socket=%s\nlogind_socket_active_before=%s\nlogind_socket_active_after=%s\n' \
       "$logind_socket" "$logind_socket_active_before" "$logind_socket_active_after"
+    printf 'logind_enabled_before=%s\nlogind_enabled_after=%s\nlogind_socket_enabled_before=%s\nlogind_socket_enabled_after=%s\n' \
+      "$logind_enabled_before" "$logind_enabled_after" \
+      "$logind_socket_enabled_before" "$logind_socket_enabled_after"
     for key in "${results[@]}"; do printf '%s=%s\n' "$key" "${result[$key]}"; done
   } >"$facts"
   exit "$status"
@@ -400,9 +418,11 @@ capture_vt_state "$artifact_dir/milestone10-vt-before.json"
 capture_getty_state
 [[ $getty_was_active == false ]] || systemctl stop "$getty_unit"
 capture_logind_state
-systemctl stop "$logind_socket" "$logind_unit"
+systemctl mask --runtime --now "$logind_socket" "$logind_unit"
 [[ $(systemctl is-active "$logind_unit" 2>/dev/null || true) == inactive &&
-   $(systemctl is-active "$logind_socket" 2>/dev/null || true) == inactive ]]
+   $(systemctl is-active "$logind_socket" 2>/dev/null || true) == inactive &&
+   $(systemctl is-enabled "$logind_unit" 2>/dev/null || true) == masked-runtime &&
+   $(systemctl is-enabled "$logind_socket" 2>/dev/null || true) == masked-runtime ]]
 
 failure_stage=drm-runtime
 gwm_socket=/run/glasswyrm-m10-gwm/gwm.sock comp_socket=/run/glasswyrm-m10-gwcomp/gwcomp.sock input_socket=/run/glasswyrm-m10-input/input.sock

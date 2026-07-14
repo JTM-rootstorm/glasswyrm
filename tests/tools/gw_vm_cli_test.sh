@@ -1419,6 +1419,8 @@ assert_contains "$command_log" "header.index('tgid')"
 assert_contains "$command_log" 'capture_logind_state'
 assert_contains "$command_log" 'restore_logind_state'
 assert_contains "$command_log" 'systemd-logind-varlink.socket'
+assert_contains "$command_log" 'mask --runtime --now'
+assert_contains "$command_log" 'unmask --runtime'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
 assert_file_glob "$artifact_dir/milestone10-drm-evidence.tar"
 for artifact in milestone10-runtime-test.log milestone10-meson-test.log milestone10-drm-probe.json milestone10-drm-report.jsonl milestone10-kms-before.json milestone10-kms-active.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-active.json milestone10-vt-after.json milestone10-apps.log milestone10-screenshot-validation.log milestone10-glasswyrmd-journal.log milestone10-gwm-journal.log milestone10-gwcomp-journal.log milestone10-facts.env milestone10-summary.json milestone10-screen.ppm milestone10-screen-after-vt.ppm milestone10-drm-evidence.tar; do
