@@ -21,6 +21,8 @@ capabilities:
 - `M7BufferedProtocolServer` requires window lifecycle plus FD passing, memfd
   buffers, and damage regions. It requires buffered surfaces with matching
   policy records and produces the normal deterministic PPM and `frames.jsonl`.
+  When `--scene-manifest` is configured, it also records the policy-approved
+  buffered scene with `metadata_only=false`.
 
 A ProtocolServer negotiating any one of FD passing, memfd buffers, or damage
 regions must negotiate all three. Partial combinations are rejected before
@@ -52,3 +54,11 @@ omitted surfaces use `SurfaceRemoved`; otherwise retired unattached buffers use
 `ConsumerDone`. The process sends `FrameAcknowledged` before queued
 `BufferRelease` records. Rejected commits do not promote scene or attachment
 state. Disconnect drops all mappings and attachment knowledge.
+
+Scene-manifest records follow the same presentation transaction. Their JSON is
+prepared before submission, published only after immediate presentation or a
+matching asynchronous completion, and consumed exactly once. A rejected,
+timed-out, abandoned, or failed presentation appends no record. Publication
+failure after scanout is fatal and leaves the candidate scene, frame ordinal,
+attachments, and retired-buffer releases unpromoted so normal backend shutdown
+can restore display authority without acknowledging an unproven transaction.

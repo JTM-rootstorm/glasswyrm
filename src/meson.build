@@ -61,17 +61,103 @@ gw_render_software_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
+  gw_output_lib = static_library(
+    'gw-output',
+    files(
+      'backends/output/software_frame.cpp',
+      'backends/headless/frame_dump.cpp',
+    ),
+    dependencies: gw_compositor_geometry_dep,
+    include_directories: include_directories('.'),
+  )
+  gw_output_dep = declare_dependency(
+    link_with: gw_output_lib,
+    dependencies: gw_compositor_geometry_dep,
+    include_directories: include_directories('.'),
+  )
+
 if get_option('headless_backend')
   gw_headless_lib = static_library(
     'gw-headless',
     files(
       'backends/headless/output.cpp',
-      'backends/headless/frame_dump.cpp',
+      'backends/headless/presenter.cpp',
     ),
+    dependencies: gw_output_dep,
     include_directories: include_directories('.'),
   )
   gw_headless_dep = declare_dependency(
     link_with: gw_headless_lib,
+    dependencies: gw_output_dep,
+    include_directories: include_directories('.'),
+  )
+endif
+
+if get_option('drm_backend')
+  gw_drm_model_lib = static_library(
+    'gw-drm-model',
+    files(
+      'backends/drm/connector_name.cpp',
+      'backends/drm/connector_selector.cpp',
+      'backends/drm/dumb_buffer.cpp',
+      'backends/drm/drm_report.cpp',
+      'backends/drm/mode_selector.cpp',
+      'backends/drm/pipeline_selector.cpp',
+      'backends/drm/property_cache.cpp',
+    ),
+    include_directories: include_directories('.'),
+  )
+  gw_drm_model_dep = declare_dependency(
+    link_with: gw_drm_model_lib,
+    include_directories: include_directories('.'),
+  )
+
+  gw_drm_api_lib = static_library(
+    'gw-drm-api',
+    files(
+      'backends/drm/device.cpp',
+      'backends/drm/fake_drm_api.cpp',
+      'backends/drm/fake_kms_api.cpp',
+      'backends/drm/kms_dumb_buffer_api.cpp',
+      'backends/drm/kms_state.cpp',
+      'backends/drm/real_drm_api.cpp',
+      'backends/drm/real_kms_api.cpp',
+    ),
+    dependencies: [gw_drm_model_dep, libdrm_dep],
+    include_directories: include_directories('.'),
+  )
+  gw_drm_api_dep = declare_dependency(
+    link_with: gw_drm_api_lib,
+    dependencies: [gw_drm_model_dep, libdrm_dep],
+    include_directories: include_directories('.'),
+  )
+
+  gw_session_lib = static_library(
+    'gw-session',
+    files(
+      'backends/session/external_session.cpp',
+      'backends/session/vt_api.cpp',
+      'backends/session/vt_session.cpp',
+    ),
+    include_directories: include_directories('.'),
+  )
+  gw_session_dep = declare_dependency(
+    link_with: gw_session_lib,
+    include_directories: include_directories('.'),
+  )
+
+  gw_drm_presenter_lib = static_library(
+    'gw-drm-presenter',
+    files(
+      'backends/drm/presenter.cpp',
+      'backends/drm/presenter_pipeline.cpp',
+    ),
+    dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
+    include_directories: include_directories('.'),
+  )
+  gw_drm_presenter_dep = declare_dependency(
+    link_with: gw_drm_presenter_lib,
+    dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
     include_directories: include_directories('.'),
   )
 endif
@@ -170,11 +256,29 @@ if get_option('glasswyrmd')
     files(
       'glasswyrmd/property.cpp',
       'glasswyrmd/resource_table.cpp',
+      'glasswyrmd/window_store.cpp',
+      'glasswyrmd/drawable_store.cpp',
+      'glasswyrmd/font_store.cpp',
+      'glasswyrmd/property_store.cpp',
+      'glasswyrmd/resource_cleanup.cpp',
+      'glasswyrmd/resource_invariants.cpp',
       'glasswyrmd/atom_table.cpp',
       'glasswyrmd/server_state.cpp',
       'glasswyrmd/lifecycle_snapshot.cpp',
       'glasswyrmd/lifecycle_coordinator.cpp',
       'glasswyrmd/request_dispatcher.cpp',
+      'glasswyrmd/request_handlers/common.cpp',
+      'glasswyrmd/request_handlers/drawable_access.cpp',
+      'glasswyrmd/request_handlers/lifecycle.cpp',
+      'glasswyrmd/request_handlers/window.cpp',
+      'glasswyrmd/request_handlers/drawable_resource.cpp',
+      'glasswyrmd/request_handlers/drawing.cpp',
+      'glasswyrmd/request_handlers/font.cpp',
+      'glasswyrmd/request_handlers/text.cpp',
+      'glasswyrmd/request_handlers/query.cpp',
+      'glasswyrmd/request_handlers/atom.cpp',
+      'glasswyrmd/request_handlers/property.cpp',
+      'glasswyrmd/request_handlers/color.cpp',
       'core/geometry/rectangle.cpp',
       'core/geometry/region.cpp',
       'glasswyrmd/pixel_storage.cpp',
@@ -200,6 +304,12 @@ if get_option('glasswyrmd')
     'glasswyrmd/client_connection.cpp',
     'glasswyrmd/event_router.cpp',
     'glasswyrmd/server.cpp',
+    'glasswyrmd/server_signals.cpp',
+    'glasswyrmd/x11_listener.cpp',
+    'glasswyrmd/client_registry.cpp',
+    'glasswyrmd/server_reactor.cpp',
+    'glasswyrmd/server_shutdown.cpp',
+    'glasswyrmd/integrated_runtime.cpp',
   )
   gw_server_core_dependencies = [gw_server_state_dep]
   if get_option('libgwipc')
@@ -212,6 +322,8 @@ if get_option('glasswyrmd')
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',
       'glasswyrmd/synthetic_input_peer.cpp',
+      'glasswyrmd/lifecycle_runtime.cpp',
+      'glasswyrmd/input_runtime.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
   endif
@@ -256,7 +368,12 @@ if get_option('gwm')
   )
   gwm_program = executable(
     'gwm',
-    files('gwm/main.cpp'),
+    files(
+      'gwm/main.cpp',
+      'gwm/runtime.cpp',
+      'gwm/contract_dispatch.cpp',
+      'gwm/signal_runtime.cpp',
+    ),
     dependencies: [gwm_options_dep, gw_wm_policy_dep, gwipc_dep],
     install: true,
   )
@@ -269,25 +386,43 @@ if get_option('gwm')
 endif
 
 if get_option('gwcomp')
+  gwcomp_backend_dependencies = [gw_output_dep]
+  if get_option('headless_backend')
+    gwcomp_backend_dependencies += gw_headless_dep
+  endif
+  if get_option('drm_backend')
+    gwcomp_backend_dependencies += gw_drm_presenter_dep
+  endif
+  gwcomp_options_sources = files(
+    'gwcomp/options.cpp',
+    'gwcomp/compositor.cpp',
+    'gwcomp/scene_manifest.cpp',
+    'gwcomp/runtime.cpp',
+    'gwcomp/signal_runtime.cpp',
+    'gwcomp/contract_dispatch.cpp',
+    'gwcomp/presentation_transaction.cpp',
+  )
+  if get_option('drm_backend')
+    gwcomp_options_sources += files('gwcomp/drm_runtime.cpp')
+  endif
   gwcomp_options_lib = static_library(
     'gwcomp-options',
-    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp',
-          'gwcomp/scene_manifest.cpp'),
+    gwcomp_options_sources,
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
   )
   gwcomp_options_dep = declare_dependency(
     link_with: gwcomp_options_lib,
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
   gwcomp_program = executable(
     'gwcomp',
     files('gwcomp/main.cpp'),
     dependencies: [gwcomp_options_dep, gwipc_dep, gw_compositor_geometry_dep,
-                   gw_render_software_dep, gw_headless_dep],
+                   gw_render_software_dep] + gwcomp_backend_dependencies,
     install: true,
   )
   gwcomp_m4_producer_program = executable(

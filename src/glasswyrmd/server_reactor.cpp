@@ -1,0 +1,137 @@
+#include "glasswyrmd/server_runtime.hpp"
+
+#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
+#include <poll.h>
+
+namespace glasswyrm::server {
+
+int Server::run() { return ServerRuntime(*this).run(); }
+
+bool ServerRuntime::initialize_trace() {
+  if (!server_.options_.x11_trace) return true;
+  std::string error;
+  server_.trace_ = CompatibilityTrace::create(*server_.options_.x11_trace,
+                                               error);
+  if (!server_.trace_) {
+    std::fprintf(stderr, "glasswyrmd: cannot initialize X11 trace %s: %s\n",
+                 server_.options_.x11_trace->c_str(), error.c_str());
+    return false;
+  }
+  return true;
+}
+
+int ServerRuntime::run() {
+  if (!initialize_trace()) return 1;
+  SignalRuntime signals;
+  if (!signals.start()) return 1;
+  const int integrated_status = initialize_integrated(signals);
+  if (integrated_status != 0) {
+    signals.close();
+    return integrated_status == 2 ? 0 : 1;
+  }
+  if (!server_.open_listener()) {
+    signals.close();
+    return 1;
+  }
+  std::fprintf(stderr, "glasswyrmd: listening on %s\n",
+               server_.socket_path_.c_str());
+  const int result = event_loop(signals);
+  if (result != 0) {
+    signals.close();
+    return result;
+  }
+  shutdown(signals);
+  return 0;
+}
+
+int ServerRuntime::event_loop(SignalRuntime& signals) {
+  while (!SignalRuntime::stop_requested()) {
+    std::vector<pollfd> descriptors;
+    descriptors.reserve(server_.clients_.size() + 6);
+    short listener_events = POLLIN;
+#ifdef GW_SERVER_HAS_IPC
+    if (bridge_ && !bridge_->ready()) listener_events = 0;
+#endif
+    descriptors.push_back(pollfd{server_.listener_, listener_events, 0});
+    descriptors.push_back(pollfd{signals.read_descriptor(), POLLIN, 0});
+#ifdef GW_SERVER_HAS_IPC
+    std::optional<std::size_t> policy_index;
+    std::optional<std::size_t> compositor_index;
+    std::optional<std::size_t> input_listener_index;
+    std::optional<std::size_t> input_connection_index;
+    if (bridge_) {
+      policy_index = descriptors.size();
+      descriptors.push_back(
+          pollfd{bridge_->policy_fd(), bridge_->policy_events(), 0});
+      compositor_index = descriptors.size();
+      descriptors.push_back(
+          pollfd{bridge_->compositor_fd(), bridge_->compositor_events(), 0});
+    }
+    if (input_peer_) {
+      input_listener_index = descriptors.size();
+      descriptors.push_back(pollfd{
+          input_peer_->listener_fd(),
+          static_cast<short>((!bridge_ || bridge_->ready())
+                                 ? input_peer_->listener_events()
+                                 : 0),
+          0});
+      input_connection_index = descriptors.size();
+      descriptors.push_back(pollfd{input_peer_->connection_fd(),
+                                   input_peer_->connection_events(), 0});
+    }
+#endif
+    const std::size_t client_offset = descriptors.size();
+    for (const auto& client : server_.clients_) {
+      descriptors.push_back(
+          pollfd{client->descriptor(), client->poll_events(), 0});
+    }
+    bool pending_work = std::any_of(
+        server_.clients_.begin(), server_.clients_.end(),
+        [](const auto& client) { return client->needs_service(); });
+#ifdef GW_SERVER_HAS_IPC
+    pending_work = pending_work ||
+                   (input_peer_ && input_peer_->has_records() &&
+                    !pending_focus_input_);
+#endif
+    int poll_timeout = pending_work ? 0 : -1;
+#ifdef GW_SERVER_HAS_IPC
+    if (bridge_ && !bridge_->ready())
+      poll_timeout = bridge_->poll_timeout_ms(RuntimeBridge::Clock::now());
+#endif
+    const int result =
+        ::poll(descriptors.data(), descriptors.size(), poll_timeout);
+    if (result < 0) {
+      if (errno == EINTR) continue;
+      std::fprintf(stderr, "glasswyrmd: poll failed: %s\n",
+                   std::strerror(errno));
+      return 1;
+    }
+    const std::size_t polled_client_count = server_.clients_.size();
+    for (std::size_t index = 0; index < polled_client_count; ++index) {
+      server_.clients_[index]->handle_events(
+          descriptors[index + client_offset].revents);
+    }
+#ifdef GW_SERVER_HAS_IPC
+    if (bridge_ &&
+        !service_integrated(descriptors[*policy_index].revents,
+                            descriptors[*compositor_index].revents))
+      return 1;
+    if (input_peer_)
+      service_input(descriptors[*input_listener_index].revents,
+                    descriptors[*input_connection_index].revents);
+#endif
+    server_.remove_closed_clients();
+    bool accepts_ready = true;
+#ifdef GW_SERVER_HAS_IPC
+    accepts_ready = !bridge_ || bridge_->ready();
+#endif
+    if (accepts_ready && (descriptors.front().revents & POLLIN) != 0)
+      server_.accept_clients();
+  }
+  return 0;
+}
+
+}  // namespace glasswyrm::server

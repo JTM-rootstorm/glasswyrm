@@ -4,7 +4,9 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The project has completed Milestone 9.
+Milestone 10 DRM/KMS software scanout is complete and validated on the
+configured Gentoo QXL VM through its real DRM primary node, graphical console,
+and VT lifecycle.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -29,8 +31,12 @@ policy transaction. Milestone 9 adds a built-in fixed font, bounded core text
 and raster requests, depth-1 pixmaps, child-window flattening, coordinate
 queries, and opt-in safe protocol tracing. Pinned `xeyes` 1.3.1 and `xclock`
 1.2.0 profiles pass exact frame and normalized-trace goldens in the Gentoo VM.
-There is still no real-device
-input, grabs, XKB, cursors, broad X11 application support, or DRM/KMS output.
+Milestone 10 preserves that canonical software frame and adds an opt-in Linux
+DRM/KMS presenter using XRGB8888 dumb buffers, atomic modesetting when fully
+usable, a legacy fallback, delayed presentation completion, and direct or
+inherited session ownership. Headless remains the default. There is still no
+real-device input, grabs, XKB, cursors, broad X11 application support,
+acceleration, or multi-output policy.
 Runtime tools remain placeholders.
 
 ## Build
@@ -73,10 +79,22 @@ meson compile -C build-ipc-only
 meson test -C build-ipc-only --print-errorlogs
 ```
 
-Meson's built-in `werror` option is available for strict builds. The spec's
-backend, renderer, built-in policy, assembly, and experimental switches are
-accepted as reserved configuration. IPC tracing applies only to `libgwipc`;
-the other switches do not enable runtime behavior until their milestones land.
+Meson's built-in `werror` option is available for strict builds. The DRM
+backend is Linux-only and opt-in; enabling it discovers libdrm and verifies the
+KMS, atomic, page-flip, AddFB2, and dumb-buffer API at configure time:
+
+```sh
+meson setup build-drm -Ddrm_backend=true -Dwerror=true
+meson compile -C build-drm
+meson test -C build-drm --print-errorlogs
+```
+
+The default `drm_backend=false` build does not discover or link libdrm. The
+headless and DRM backends may be built together, or a DRM-only compositor may
+be configured with `-Dheadless_backend=false -Ddrm_backend=true`. IPC tracing
+applies only to `libgwipc`; the remaining reserved renderer, policy, assembly,
+and experimental switches do not enable runtime behavior until their
+milestones land.
 
 `compile_commands.json` is generated in each Meson build directory.
 
@@ -187,6 +205,54 @@ intentionally gated on committed source and verified client hashes:
 See [the compatibility profiles](docs/compatibility/README.md) for the exact
 supported subsets and current evidence status.
 
+## Milestone 10 DRM/KMS output
+
+Start `gwm` normally, then launch a DRM-enabled `gwcomp` on a verified spare VT
+and primary DRM node:
+
+```sh
+./build-drm/src/gwm --ipc-socket /run/glasswyrm/gwm.sock
+./build-drm/src/gwcomp \
+  --backend drm \
+  --ipc-socket /run/glasswyrm/gwcomp.sock \
+  --drm-device /dev/dri/card0 \
+  --tty /dev/tty2 \
+  --connector Virtual-1 \
+  --mode 1024x768 \
+  --drm-api auto \
+  --mirror-dump-dir /var/tmp/glasswyrm-mirror \
+  --scene-manifest /var/tmp/glasswyrm-scenes.jsonl \
+  --drm-report /var/tmp/glasswyrm-drm.jsonl
+./build-drm/src/glasswyrmd --display 99 \
+  --wm-socket /run/glasswyrm/gwm.sock \
+  --compositor-socket /run/glasswyrm/gwcomp.sock \
+  --software-content
+```
+
+This path requires a Linux DRM primary node with dumb-buffer and KMS support,
+permission to become DRM master, a free Linux VT, and an exact output mode.
+The M10 backend presents exactly one unscaled, unrotated XRGB8888 output using
+two CPU-mapped dumb buffers. It provides no GPU acceleration, real input,
+hotplug recovery, cursor plane, multiple outputs, VRR, or HDR.
+
+An external session owner can instead pass an already usable primary-node FD
+with `--drm-fd N --external-session`; `gwcomp` then never acquires/drops DRM
+master or changes VT/KD state. See [the output documentation](docs/output/) for
+the exact ownership, atomic fallback, reporting, and restoration boundaries.
+
+The fixed hardware acceptance route is:
+
+```sh
+./tools/gw-vm milestone10-runtime-test --yes
+```
+
+The accepted route starts from the single internal `base` snapshot, proves the
+historical M9 gate before libdrm is installed, resets to `base`, then validates
+QXL atomic KMS scanout, exact screenshots, VT release/acquire, a later
+input-driven repaint, ordered restoration, and the checksum-protected evidence
+archive. Mocked host coverage remains an additional regression layer rather
+than a substitute for this graphical-console proof.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:
@@ -235,9 +301,11 @@ core error. It never maps or displays the window.
   standalone M2, the integrated lifecycle, and opt-in M7/M8 content and input.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
-- `gwcomp`: owns headless composition and final display authority; it retains
-  the M4 raster path, accepts M6 metadata-only scenes without fake buffers, and
-  accepts buffered ProtocolServer surfaces in M7 software-content mode.
+- `gwcomp`: owns software composition and final display authority; it retains
+  the default headless path and can present the identical canonical frame
+  through the opt-in M10 DRM/KMS backend. It accepts M6 metadata-only scenes
+  without fake buffers and buffered ProtocolServer surfaces in M7
+  software-content mode.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -269,8 +337,8 @@ and tested compatibility boundary.
 - `src/ipc/`: versioned wire codecs and local seqpacket transport.
 - `src/protocol/`: endian-safe, bounded X11 setup and core wire codecs.
 - `src/compositor/`: bounded staged scene, geometry, and damage primitives.
-- `src/backends/`: tested headless output/dump primitives plus reserved DRM/KMS
-  and possible nested backends.
+- `src/backends/`: component-neutral software frames, tested headless output,
+  DRM/KMS software scanout, and direct/external session boundaries.
 - `src/input/`: reserved for `glasswyrmd` input routing.
 - `src/render/`: reference software renderer plus reserved accelerated paths.
 - `tools/`: developer and runtime command-line tools.
@@ -367,6 +435,19 @@ It preserves M1-M7 regressions, runs both raw client byte orders and the
 two-client XCB script, validates event and framebuffer goldens, isolates a
 malformed provider, and holds the same X11 and input connections across GWM
 and compositor restart. No Xorg, Xwayland, libinput, or device access is used.
+
+The Milestone 9 pinned-client and Milestone 10 DRM acceptance commands are:
+
+```sh
+./tools/gw-vm milestone9-runtime-test --yes
+./tools/gw-vm milestone10-runtime-test --yes
+```
+
+M10 starts from the accepted M9-clean guest, installs libdrm without Mesa or an
+X server, and requires a pre-existing kernel DRM primary node. The configured
+QXL guest meets that boundary and the command validates atomic scanout,
+graphical-console screenshots, VT switching, input-driven repaint, restoration,
+and the required binary evidence archive.
 
 ## Compatibility
 

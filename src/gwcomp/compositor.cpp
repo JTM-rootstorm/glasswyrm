@@ -1,44 +1,15 @@
 #include "gwcomp/compositor.hpp"
 
-#include "render/software/renderer.hpp"
+#include "gwcomp/presentation_transaction.hpp"
 
-#include <algorithm>
-#include <cstddef>
-#include <cstring>
-#include <span>
+#if GW_HAS_HEADLESS_BACKEND
+#include "backends/headless/presenter.hpp"
+#endif
+
 #include <unistd.h>
-#include <vector>
+#include <utility>
 
 namespace gw::compositor {
-namespace {
-
-using gw::render::software::FramebufferView;
-using gw::render::software::ImageView;
-using gw::render::software::PixelFormat;
-using gw::render::software::RenderResult;
-
-std::span<std::byte> pixel_bytes(std::span<std::uint32_t> pixels) {
-  return {reinterpret_cast<std::byte*>(pixels.data()), pixels.size_bytes()};
-}
-
-std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
-                                        const gwipc_output_upsert& output) {
-  Rectangle local{0, 0, surface.logical_width, surface.logical_height};
-  if (surface.clipping) {
-    const auto clipped = intersection(
-        local, Rectangle{surface.clip_x, surface.clip_y, surface.clip_width,
-                         surface.clip_height});
-    if (!clipped) return std::nullopt;
-    local = *clipped;
-  }
-  const auto placed = translate(local, surface.logical_x, surface.logical_y);
-  if (!placed) return std::nullopt;
-  return intersection(*placed,
-                      Rectangle{0, 0, output.logical_width, output.logical_height});
-}
-
-} // namespace
-
 std::optional<PeerProfile>
 select_peer_profile(const gwipc_role role,
                     const std::uint64_t capabilities) noexcept {
@@ -65,15 +36,33 @@ select_peer_profile(const gwipc_role role,
   return std::nullopt;
 }
 
+#if GW_HAS_HEADLESS_BACKEND
 Compositor::Compositor(
     std::filesystem::path dump_directory,
     std::optional<std::filesystem::path> scene_manifest)
-    : dumper_(std::move(dump_directory)) {
+    : Compositor(std::make_unique<glasswyrm::headless::Presenter>(
+                     std::move(dump_directory)),
+                 std::move(scene_manifest)) {}
+#endif
+
+Compositor::Compositor(
+    std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
+    std::optional<std::filesystem::path> scene_manifest,
+    PresentationTiming timing)
+    : presenter_(std::move(presenter)), timing_(std::move(timing)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
 
+Compositor::~Compositor() {
+  PresentationTransaction::abort(*this);
+  std::string ignored;
+  (void)shutdown_presentation(ignored);
+}
+
 bool Compositor::begin_snapshot() {
-  if (snapshot_active_ || !scene_.begin_complete_snapshot()) return false;
+  if (pending_presentation_ || snapshot_active_ ||
+      !scene_.begin_complete_snapshot())
+    return false;
   pre_snapshot_attachments_ = pending_attachments_;
   if (profile_ == PeerProfile::M7BufferedProtocolServer)
     pending_attachments_ = committed_attachments_;
@@ -87,7 +76,9 @@ bool Compositor::begin_snapshot() {
 }
 
 bool Compositor::end_snapshot() {
-  if (!snapshot_active_ || !scene_.end_complete_snapshot()) return false;
+  if (pending_presentation_ || !snapshot_active_ ||
+      !scene_.end_complete_snapshot())
+    return false;
   if (profile_ == PeerProfile::M7BufferedProtocolServer) {
     for (auto attachment = pending_attachments_.begin();
          attachment != pending_attachments_.end();) {
@@ -105,6 +96,7 @@ bool Compositor::end_snapshot() {
 }
 
 void Compositor::abort_snapshot() {
+  if (pending_presentation_) return;
   scene_.abort_complete_snapshot();
   pending_attachments_ = pre_snapshot_attachments_;
   pre_snapshot_attachments_.clear();
@@ -114,9 +106,14 @@ void Compositor::abort_snapshot() {
   snapshot_invalid_ = false;
 }
 
-bool Compositor::apply(const gwipc_output_upsert& value) { return scene_.apply(value); }
-bool Compositor::apply(const gwipc_output_remove& value) { return scene_.apply(value); }
+bool Compositor::apply(const gwipc_output_upsert& value) {
+  return !pending_presentation_ && scene_.apply(value);
+}
+bool Compositor::apply(const gwipc_output_remove& value) {
+  return !pending_presentation_ && scene_.apply(value);
+}
 bool Compositor::apply(const gwipc_surface_upsert& value) {
+  if (pending_presentation_) return false;
   if (snapshot_active_ && !snapshot_surface_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
@@ -125,6 +122,7 @@ bool Compositor::apply(const gwipc_surface_upsert& value) {
 }
 
 bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
+  if (pending_presentation_) return false;
   if (snapshot_active_ && !snapshot_policy_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
@@ -133,17 +131,24 @@ bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
 }
 
 bool Compositor::apply(const gwipc_surface_remove& value) {
-  if (!scene_.apply(value)) return false;
+  if (pending_presentation_ || !scene_.apply(value)) return false;
   pending_attachments_.erase(value.surface_id);
   return true;
 }
 
 bool Compositor::apply(const gwipc_surface_damage& value) {
-  if (profile_ == PeerProfile::M6MetadataProtocolServer) return false;
+  if (pending_presentation_ ||
+      profile_ == PeerProfile::M6MetadataProtocolServer)
+    return false;
   return scene_.apply(value);
 }
 
 bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& error) {
+  if (pending_presentation_) {
+    if (fd >= 0) (void)::close(fd);
+    error = "buffer mutation cannot overtake a pending presentation";
+    return false;
+  }
   if (profile_ == PeerProfile::M6MetadataProtocolServer) {
     if (fd >= 0) (void)::close(fd);
     error = "metadata-only ProtocolServer peers cannot attach buffers";
@@ -178,253 +183,100 @@ bool Compositor::attach(const gwipc_buffer_attach& value, int fd, std::string& e
 }
 
 bool Compositor::detach(const gwipc_buffer_detach& value) {
-  if (!scene_.snapshot_active() && !scene_.initial_snapshot_received()) return false;
+  if (pending_presentation_ ||
+      (!scene_.snapshot_active() && !scene_.initial_snapshot_received()))
+    return false;
   const auto found = pending_attachments_.find(value.surface_id);
   if (found == pending_attachments_.end() || found->second != value.buffer_id) return false;
   pending_attachments_.erase(found);
   return true;
 }
 
-void Compositor::release_retired_buffers(const Scene& staged) {
-  for (const auto& [surface_id, old_buffer] : committed_attachments_) {
-    const auto now = pending_attachments_.find(surface_id);
-    if (now == pending_attachments_.end()) {
-      releases_[old_buffer] = staged.surfaces.contains(surface_id)
-                                  ? GWIPC_BUFFER_RELEASE_CONSUMER_DONE
-                                  : GWIPC_BUFFER_RELEASE_SURFACE_REMOVED;
-    } else if (now->second != old_buffer) {
-      releases_[old_buffer] = GWIPC_BUFFER_RELEASE_REPLACED;
-    }
-  }
-  for (const auto& [buffer_id, mapping] : mappings_) {
-    (void)mapping;
-    const bool remains_attached = std::any_of(
-        pending_attachments_.begin(), pending_attachments_.end(),
-        [buffer_id](const auto& item) { return item.second == buffer_id; });
-    if (!remains_attached && !releases_.contains(buffer_id))
-      releases_[buffer_id] = GWIPC_BUFFER_RELEASE_CONSUMER_DONE;
-  }
-  for (const auto& [buffer_id, reason] : releases_) {
-    (void)reason;
-    mappings_.erase(buffer_id);
-  }
-}
-
 PresentedFrame Compositor::commit(const gwipc_frame_commit& value,
                                   std::string& error) {
-  PresentedFrame presented;
-  if (snapshot_invalid_) {
-    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-    error = "complete snapshot contains duplicate surface records";
-    return presented;
+  if (pending_presentation_) {
+    error = "frame commit cannot overtake a pending presentation";
+    return {};
   }
-  if (value.commit_id <= last_commit_id_ || value.producer_generation < last_generation_) {
-    error = "commit IDs must increase and generations must not decrease";
-    return presented;
-  }
-  last_commit_id_ = value.commit_id;
+  return PresentationTransaction::commit(*this, value, error);
+}
 
-  SceneModel candidate = scene_;
-  auto result = candidate.commit(value);
-  presented.result = result.result;
-  presented.generation = result.presented_generation;
-  if (!result.accepted()) return presented;
+bool Compositor::presentation_pending() const noexcept {
+  return pending_presentation_ != nullptr;
+}
 
-  const auto& staged = candidate.committed();
-  const bool metadata_only_peer =
-      profile_ == PeerProfile::M6MetadataProtocolServer;
-  const bool protocol_server = profile_ != PeerProfile::M4TestProducer;
-  for (const auto& [surface_id, surface] : staged.surfaces) {
-    const bool metadata_only = surface.presentation_flags ==
-                               GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
-    if (metadata_only_peer != metadata_only) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = metadata_only_peer ? "ProtocolServer supplied a buffered surface"
-                                 : "TestProducer supplied a metadata-only surface";
-      return presented;
-    }
-    const auto policy = staged.surface_policies.find(surface_id);
-    if (protocol_server &&
-        (policy == staged.surface_policies.end() ||
-         policy->second.x11_window_id != surface.x11_window_id)) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "ProtocolServer surface is missing matching policy metadata";
-      return presented;
-    }
-    if (!protocol_server && policy != staged.surface_policies.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "TestProducer surfaces cannot carry policy metadata";
-      return presented;
-    }
-    const auto attachment = pending_attachments_.find(surface_id);
-    const bool new_buffered_protocol_surface =
-        profile_ == PeerProfile::M7BufferedProtocolServer &&
-        !scene_.committed().surfaces.contains(surface_id);
-    if (!metadata_only && (surface.visible || new_buffered_protocol_surface) &&
-        attachment == pending_attachments_.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = new_buffered_protocol_surface
-                  ? "new buffered ProtocolServer surface has no attached buffer"
-                  : "visible surface has no attached buffer";
-      return presented;
-    }
-    if (metadata_only && attachment != pending_attachments_.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "metadata-only surface has an attached buffer";
-      return presented;
-    }
-    if (attachment == pending_attachments_.end()) continue;
-    const auto mapping = mappings_.find(attachment->second);
-    if (mapping == mappings_.end() || mapping->second->width() != surface.logical_width ||
-        mapping->second->height() != surface.logical_height) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "surface and buffer dimensions do not match";
-      return presented;
-    }
-    if (profile_ == PeerProfile::M7BufferedProtocolServer &&
-        mapping->second->pixel_format() != GWIPC_PIXEL_FORMAT_XRGB8888) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "buffered ProtocolServer surfaces require XRGB8888";
-      return presented;
-    }
-  }
-  if (protocol_server &&
-      staged.surface_policies.size() != staged.surfaces.size()) {
-    presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
-    error = "surface policy references an unknown surface";
-    return presented;
-  }
+int Compositor::presentation_poll_fd() const noexcept {
+  return presenter_->poll_fd();
+}
 
-  if (!staged.output || !staged.output->enabled) {
-    if (!metadata_only_peer) release_retired_buffers(staged);
-    scene_ = std::move(candidate);
-    committed_attachments_ = pending_attachments_;
-    output_.disable();
-    last_generation_ = value.producer_generation;
-    return presented;
-  }
+short Compositor::presentation_poll_events() const noexcept {
+  return presenter_->poll_events();
+}
 
-  if (metadata_only_peer) {
-    SceneManifestResult manifest_result;
-    if (scene_manifest_) {
-      if (!scene_manifest_->append(value.commit_id, value.producer_generation,
-                                   staged, manifest_result, error)) {
-        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-        return presented;
-      }
-    } else {
-      std::string ignored_json;
-      if (!SceneManifest::describe(value.commit_id, value.producer_generation,
-                                   staged, manifest_result, ignored_json,
-                                   error)) {
-        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-        return presented;
-      }
-    }
-    scene_ = std::move(candidate);
-    committed_attachments_.clear();
-    output_.disable();
-    ++frame_ordinal_;
-    last_generation_ = value.producer_generation;
-    presented.ordinal = frame_ordinal_;
-    presented.hash = manifest_result.hash;
-    return presented;
-  }
-  for (const auto& [surface_id, buffer_id] : pending_attachments_) {
-    (void)buffer_id;
-    if (!staged.surfaces.contains(surface_id)) {
-      presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
-      error = "buffer references an unknown surface";
-      return presented;
-    }
-  }
+int Compositor::presentation_timeout_ms() const {
+  return PresentationTransaction::timeout_ms(*this);
+}
 
-  DamageRegion attachment_damage(
-      Rectangle{0, 0, staged.output->logical_width, staged.output->logical_height});
-  for (const auto& rectangle : result.damage) attachment_damage.add(rectangle);
-  for (const auto& [surface_id, surface] : staged.surfaces) {
-    if (!surface.visible) continue;
-    const auto old = committed_attachments_.find(surface_id);
-    const auto now = pending_attachments_.find(surface_id);
-    const bool changed = old == committed_attachments_.end()
-                             ? now != pending_attachments_.end()
-                             : now == pending_attachments_.end() || old->second != now->second;
-    if (changed)
-      if (const auto bounds = surface_bounds(surface, *staged.output))
-        attachment_damage.add(*bounds);
-  }
-  result.damage = attachment_damage.rectangles();
+PresentationCompletion Compositor::service_presentation(
+    const short revents, std::string& error) {
+  return PresentationTransaction::service(*this, revents, error);
+}
 
-  glasswyrm::headless::Output scratch;
-  if (!scratch.configure(staged.output->output_id, staged.output->logical_width,
-                         staged.output->logical_height, error)) {
-    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-    return presented;
+bool Compositor::suspend_presentation(std::string& error) {
+  if (pending_presentation_) {
+    error = "cannot suspend while a presentation is pending";
+    return false;
   }
-  if (output_.enabled() && output_.id() == scratch.id() &&
-      output_.width() == scratch.width() && output_.height() == scratch.height()) {
-    std::copy(output_.pixels().begin(), output_.pixels().end(), scratch.pixels().begin());
+  if (presentation_suspended_) {
+    error = "presentation backend is already suspended";
+    return false;
   }
-  FramebufferView framebuffer{pixel_bytes(scratch.pixels()), scratch.width(),
-                              scratch.height(), scratch.width() * 4U};
-  for (const auto& rectangle : result.damage) {
-    if (gw::render::software::clear(framebuffer, rectangle) != RenderResult::Success) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "framebuffer damage is invalid";
-      return presented;
-    }
-    for (const auto surface_id : candidate.stacking_order()) {
-      const auto& surface = staged.surfaces.at(surface_id);
-      if (!surface.visible || surface.opacity == 0 ||
-          surface.presentation_flags ==
-              GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
-        continue;
-      auto bounds = surface_bounds(surface, *staged.output);
-      if (!bounds || !intersection(*bounds, rectangle)) continue;
-      const auto mapping = mappings_.at(pending_attachments_.at(surface_id));
-      Rectangle local{0, 0, surface.logical_width, surface.logical_height};
-      if (surface.clipping)
-        local = {surface.clip_x, surface.clip_y, surface.clip_width, surface.clip_height};
-      const ImageView image{mapping->bytes(), mapping->width(), mapping->height(),
-                            mapping->stride(),
-                            mapping->pixel_format() == GWIPC_PIXEL_FORMAT_XRGB8888
-                                ? PixelFormat::Xrgb8888
-                                : PixelFormat::Argb8888Premultiplied};
-      const auto render = gw::render::software::composite(
-          framebuffer, image, local, surface.logical_x + local.x,
-          surface.logical_y + local.y, surface.opacity);
-      if (render != RenderResult::Success) {
-        presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-        error = render == RenderResult::InvalidPremultipliedPixel
-                    ? "ARGB buffer contains a non-premultiplied pixel"
-                    : "buffer view is invalid";
-        return presented;
-      }
-    }
-  }
+  if (presenter_->suspend(error) !=
+      glasswyrm::output::BackendStateResult::Complete)
+    return false;
+  presentation_suspended_ = true;
+  error.clear();
+  return true;
+}
 
-  glasswyrm::headless::FrameDumpMetadata metadata{
-      frame_ordinal_ + 1U, value.commit_id, value.producer_generation,
-      staged.output->output_id, staged.output->logical_width,
-      staged.output->logical_height, static_cast<std::uint32_t>(result.damage.size())};
-  glasswyrm::headless::FrameDumpResult dump;
-  if (!dumper_.dump(metadata, scratch.pixels(), dump, error)) {
-    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-    return presented;
+bool Compositor::resume_presentation(std::string& error) {
+  if (!presentation_suspended_) {
+    error = "presentation backend is not suspended";
+    return false;
   }
+  const glasswyrm::output::SoftwareFrameView committed{
+      output_.spec(), output_.pixels(), {}, 0, last_generation_,
+      frame_ordinal_};
+  const auto resumed = presenter_->resume(committed);
+  if (resumed.disposition !=
+          glasswyrm::output::PresentDisposition::Complete ||
+      resumed.visible_hash != output_.visible_hash()) {
+    error = resumed.error.empty()
+                ? "presentation backend did not restore the committed frame"
+                : resumed.error;
+    return false;
+  }
+  presentation_suspended_ = false;
+  error.clear();
+  return true;
+}
 
-  release_retired_buffers(staged);
-  scene_ = std::move(candidate);
-  committed_attachments_ = pending_attachments_;
-  output_ = std::move(scratch);
-  ++frame_ordinal_;
-  last_generation_ = value.producer_generation;
-  presented.ordinal = frame_ordinal_;
-  presented.hash = dump.fnv1a64;
-  return presented;
+bool Compositor::shutdown_presentation(std::string& error) noexcept {
+  if (presentation_shutdown_) {
+    error.clear();
+    return true;
+  }
+  presentation_shutdown_ = true;
+  if (!presenter_) {
+    error.clear();
+    return true;
+  }
+  return presenter_->shutdown(error) ==
+         glasswyrm::output::BackendStateResult::Complete;
 }
 
 void Compositor::disconnect() {
+  PresentationTransaction::abort(*this);
   scene_.disconnect();
   mappings_.clear();
   pending_attachments_.clear();
