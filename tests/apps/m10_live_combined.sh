@@ -40,8 +40,6 @@ clock_pid=$!
 sleep 3
 kill -0 "$eyes_pid"
 kill -0 "$clock_pid"
-"$gwinput" --socket "$input_socket" --scenario m9-xeyes \
-  --output "$control/initial-input.json"
 printf 'ready\n' >"$control/clients-ready"
 
 post_vt_done=false
@@ -49,7 +47,7 @@ while test ! -f "$control/stop-clients"; do
   kill -0 "$eyes_pid"
   kill -0 "$clock_pid"
   if test "$post_vt_done" = false -a -f "$control/post-vt-input"; then
-    "$gwinput" --socket "$input_socket" --scenario m9-xeyes \
+    "$gwinput" --socket "$input_socket" --scenario m10-xeyes-repaint \
       --output "$control/post-vt-input.json"
     post_vt_done=true
     printf 'complete\n' >"$control/post-vt-input-complete"
