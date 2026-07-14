@@ -147,6 +147,8 @@ int run(const Options& options) {
   bool accepted_any_frame = false;
   bool stop_after_flush = false;
   bool stopping = false;
+  bool vt_release_requested = false;
+  bool vt_acquire_requested = false;
   int exit_status = 0;
   std::optional<std::uint64_t> pending_reply_sequence;
   while (!stopping) {
@@ -173,12 +175,11 @@ int run(const Options& options) {
     if ((descriptors[2].revents & POLLIN) != 0) {
       const auto events = signals.drain();
       if (events.stop) stopping = true;
-      if (events.virtual_terminal_release ||
-          events.virtual_terminal_acquire) {
-        std::fprintf(stderr,
-                     "gwcomp: VT signal arrived before DRM session initialization\n");
-        stopping = true;
-        exit_status = 1;
+      if (!stopping && events.virtual_terminal_release) {
+        vt_release_requested = true;
+      }
+      if (!stopping && events.virtual_terminal_acquire) {
+        vt_acquire_requested = true;
       }
     }
     if (stopping) continue;
@@ -210,6 +211,31 @@ int run(const Options& options) {
               accepted_any_frame || dispatch.accepted_frame;
           stop_after_flush = stop_after_flush || dispatch.stop_after_flush;
         }
+      }
+    }
+    if (stopping) continue;
+    if (vt_release_requested && !compositor.presentation_pending() &&
+        !compositor.presentation_suspended()) {
+      std::string vt_error;
+      if (!compositor.suspend_presentation(vt_error)) {
+        std::fprintf(stderr, "gwcomp: VT release failed: %s\n",
+                     vt_error.c_str());
+        stopping = true;
+        exit_status = 1;
+      } else {
+        vt_release_requested = false;
+      }
+    }
+    if (!stopping && vt_acquire_requested &&
+        compositor.presentation_suspended()) {
+      std::string vt_error;
+      if (!compositor.resume_presentation(vt_error)) {
+        std::fprintf(stderr, "gwcomp: VT acquire failed: %s\n",
+                     vt_error.c_str());
+        stopping = true;
+        exit_status = 1;
+      } else {
+        vt_acquire_requested = false;
       }
     }
     if (stopping) continue;
@@ -250,6 +276,7 @@ int run(const Options& options) {
     std::size_t messages = 0;
     std::size_t payload_bytes = 0;
     while (producer && peer_validated && !compositor.presentation_pending() &&
+           !compositor.presentation_suspended() && !vt_release_requested &&
            messages < kMaximumMessagesPerTurn &&
            payload_bytes < kMaximumPayloadBytesPerTurn) {
       gwipc_message* raw_message = nullptr;
