@@ -195,6 +195,17 @@ bool DumbBuffer::release(std::string &error) noexcept {
   return success;
 }
 
+void DumbBuffer::abandon() noexcept {
+  api_ = nullptr;
+  mapping_ = nullptr;
+  size_ = 0;
+  width_ = 0;
+  height_ = 0;
+  pitch_ = 0;
+  handle_ = 0;
+  framebuffer_id_ = 0;
+}
+
 bool DumbBufferPair::create(DumbBufferApi &api, const std::uint32_t width,
                             const std::uint32_t height, DumbBufferPair &output,
                             std::string &error) {
@@ -220,6 +231,12 @@ bool DumbBufferPair::release(std::string &error) noexcept {
   }
   front_index_ = 0;
   return success;
+}
+
+void DumbBufferPair::abandon() noexcept {
+  for (auto &buffer : buffers_)
+    buffer.abandon();
+  front_index_ = 0;
 }
 
 } // namespace glasswyrm::drm

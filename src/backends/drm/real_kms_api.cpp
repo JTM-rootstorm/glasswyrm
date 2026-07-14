@@ -75,6 +75,7 @@ drmModeModeInfo to_mode(const KmsMode &m) {
 }
 class RealKmsApi final : public KmsApi {
 public:
+  bool is_master(int, bool &, std::string &) override;
   bool acquire_master(int, std::string &) override;
   bool drop_master(int, std::string &) override;
   bool create_dumb(int, std::uint32_t, std::uint32_t, std::uint32_t,
@@ -104,6 +105,15 @@ public:
   bool legacy_page_flip(int, std::uint32_t, std::uint32_t, PageFlipCookie &,
                         std::string &) override;
 };
+bool RealKmsApi::is_master(int fd, bool &master, std::string &error) {
+  errno = 0;
+  const int result = drmIsMaster(fd);
+  if (result < 0)
+    return fail(error, "drmIsMaster failed");
+  master = result != 0;
+  error.clear();
+  return true;
+}
 bool RealKmsApi::acquire_master(int fd, std::string &e) {
   if (drmSetMaster(fd) != 0)
     return fail(e, "drmSetMaster failed");

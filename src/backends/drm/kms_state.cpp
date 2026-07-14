@@ -49,6 +49,11 @@ void ModeBlob::reset() noexcept {
   fd_ = -1;
   id_ = 0;
 }
+void ModeBlob::abandon() noexcept {
+  api_ = nullptr;
+  fd_ = -1;
+  id_ = 0;
+}
 
 bool capture_saved_state(KmsApi &api, int fd, PipelineIds ids,
                          std::span<const std::uint32_t> connectors, bool atomic,

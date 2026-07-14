@@ -7,6 +7,7 @@
 #include <vector>
 namespace glasswyrm::drm {
 enum class KmsOperation {
+  CheckMaster,
   AcquireMaster,
   DropMaster,
   CreateDumb,
@@ -49,6 +50,7 @@ public:
   std::optional<std::uint32_t> atomic_result_connector_crtc;
 
   void fail_next(KmsOperation operation) { failure_ = operation; }
+  bool is_master(int, bool &, std::string &) override;
   bool acquire_master(int, std::string &) override;
   bool drop_master(int, std::string &) override;
   bool create_dumb(int, std::uint32_t, std::uint32_t, std::uint32_t,

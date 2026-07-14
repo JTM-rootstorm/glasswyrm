@@ -64,9 +64,10 @@ int main() {
       "stable selection JSON");
 
   require_record(
-      ModesetReport{9, 11, 0, 55, 0x12ab, 0x12ab,
+      ModesetReport{3, 9, 11, 0, 55, 0x12ab, 0x12ab,
                     ReportApiPath::Atomic},
-      "{\"record\":\"modeset\",\"commit_id\":9,\"generation\":11,"
+      "{\"record\":\"modeset\",\"ordinal\":3,\"commit_id\":9,"
+      "\"generation\":11,"
       "\"front_buffer\":0,\"framebuffer_id\":55,"
       "\"canonical_hash\":\"00000000000012ab\","
       "\"scanout_hash\":\"00000000000012ab\",\"api\":\"atomic\"}",

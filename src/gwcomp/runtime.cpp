@@ -7,6 +7,9 @@
 #if GW_HAS_HEADLESS_BACKEND
 #include "backends/headless/presenter.hpp"
 #endif
+#if GW_HAS_DRM_BACKEND
+#include "gwcomp/drm_runtime.hpp"
+#endif
 
 #include <glasswyrm/ipc.h>
 
@@ -87,6 +90,12 @@ int run(const Options& options) {
                  directory_error.c_str());
     return 1;
   }
+  if (options.mirror_dump_dir &&
+      !prepare_dump_directory(*options.mirror_dump_dir, directory_error)) {
+    std::fprintf(stderr, "gwcomp: cannot prepare mirror directory: %s\n",
+                 directory_error.c_str());
+    return 1;
+  }
 
   SignalRuntime signals;
   std::string signal_error;
@@ -95,6 +104,36 @@ int run(const Options& options) {
                        signal_error)) {
     std::fprintf(stderr, "gwcomp: %s\n", signal_error.c_str());
     return 1;
+  }
+
+  std::optional<std::filesystem::path> manifest_path;
+  if (options.scene_manifest) manifest_path = *options.scene_manifest;
+#if GW_HAS_DRM_BACKEND
+  DrmRuntimeResources drm_resources;
+#endif
+  std::unique_ptr<glasswyrm::output::PresentationBackend> presenter;
+  if (options.backend == Backend::Headless) {
+#if GW_HAS_HEADLESS_BACKEND
+    presenter = std::make_unique<glasswyrm::headless::Presenter>(
+        options.dump_dir);
+#else
+    std::fprintf(stderr,
+                 "gwcomp: headless backend was not enabled at build time\n");
+    return 1;
+#endif
+  } else {
+#if GW_HAS_DRM_BACKEND
+    std::string drm_error;
+    if (!create_drm_presenter(options, drm_resources, presenter, drm_error)) {
+      std::fprintf(stderr, "gwcomp: DRM initialization failed: %s\n",
+                   drm_error.c_str());
+      return 1;
+    }
+#else
+    std::fprintf(stderr,
+                 "gwcomp: DRM backend was not enabled at build time\n");
+    return 1;
+#endif
   }
 
   gwipc_listener_options listener_options{};
@@ -123,23 +162,6 @@ int run(const Options& options) {
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
 
   std::unique_ptr<gwipc_connection, ConnectionDeleter> producer;
-  std::optional<std::filesystem::path> manifest_path;
-  if (options.scene_manifest) manifest_path = *options.scene_manifest;
-  std::unique_ptr<glasswyrm::output::PresentationBackend> presenter;
-  if (options.backend == Backend::Headless) {
-#if GW_HAS_HEADLESS_BACKEND
-    presenter = std::make_unique<glasswyrm::headless::Presenter>(
-        options.dump_dir);
-#else
-    std::fprintf(stderr,
-                 "gwcomp: headless backend was not enabled at build time\n");
-    return 1;
-#endif
-  } else {
-    std::fprintf(stderr,
-                 "gwcomp: DRM backend initialization is not yet available\n");
-    return 1;
-  }
   gw::compositor::Compositor compositor(std::move(presenter), manifest_path);
   bool peer_validated = false;
   gwipc_role peer_role = GWIPC_ROLE_UNKNOWN;

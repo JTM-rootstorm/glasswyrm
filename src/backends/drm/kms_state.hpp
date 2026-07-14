@@ -34,6 +34,7 @@ public:
   [[nodiscard]] bool create(KmsApi &, int fd, const KmsMode &,
                             std::string &error);
   void reset() noexcept;
+  void abandon() noexcept;
   [[nodiscard]] std::uint32_t id() const noexcept { return id_; }
 
 private:
