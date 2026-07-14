@@ -70,7 +70,7 @@ GUEST_SCRIPT
 }
 
 milestone10_doctor() {
-  local failed=0 xml video graphics state probe
+  local failed=0 xml video graphics vgamem state probe
   command_exists virsh || return 1
   if command_exists magick; then
     printf '[ok] ImageMagick screenshot conversion\n'
@@ -80,8 +80,16 @@ milestone10_doctor() {
   if xml=$(virsh --connect "$LIBVIRT_URI" dumpxml "$VM_DOMAIN" 2>/dev/null); then
     video=$(sed -n "s/.*<model[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
     graphics=$(sed -n "s/.*<graphics[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
+    vgamem=$(sed -n "s/.*<model[^>]*vgamem=['\"]\([0-9]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
     if [[ -n $video ]]; then printf '[ok] libvirt video model: %s\n' "$video"; else printf '[missing] libvirt video model\n'; failed=1; fi
     if [[ -n $graphics ]]; then printf '[ok] libvirt graphics type: %s\n' "$graphics"; else printf '[missing] libvirt graphics console\n'; failed=1; fi
+    if [[ $video == qxl ]]; then
+      if [[ $vgamem =~ ^[0-9]+$ && $vgamem -ge 65536 ]]; then
+        printf '[ok] QXL vgamem: %s KiB\n' "$vgamem"
+      else
+        printf '[missing] QXL requires at least 65536 KiB vgamem for M10 double buffering\n'; failed=1
+      fi
+    fi
   else
     printf '[failed] unable to inspect libvirt domain XML\n'; failed=1
   fi
@@ -611,32 +619,6 @@ while True:
         time.sleep(.05)
 PY
 result[vt_release]=passed result[vt_acquire]=passed result[remodeset]=passed
-pre_repaint_ordinal=$(python3 - "$artifact_dir/milestone10-drm-report.jsonl" <<'PY'
-import json,sys
-records=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
-print(max(r['ordinal'] for r in records if r.get('record') in ('modeset','flip')))
-PY
-)
-touch "$control/post-vt-input"
-for _ in {1..600}; do [[ -f $control/post-vt-input-complete ]] && break; sleep .05; done
-[[ -f $control/post-vt-input-complete ]] && kill -0 "$clients_pid"
-python3 - "$artifact_dir/milestone10-drm-report.jsonl" "$pre_repaint_ordinal" "$canonical_hash" <<'PY'
-import json,pathlib,sys,time
-path=pathlib.Path(sys.argv[1]); before=int(sys.argv[2]); expected=sys.argv[3]
-deadline=time.monotonic()+5
-while True:
-    try:
-        records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-        flips=[r for r in records if r.get('record')=='flip' and r['ordinal']>before]
-        if flips and flips[-1]['canonical_hash']==expected: break
-    except json.JSONDecodeError: pass
-    if time.monotonic() >= deadline:
-        raise SystemExit('post-VT xeyes repaint did not complete a later matching page flip')
-    time.sleep(.05)
-PY
-mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1)
-cmp "$mirror" "$m9_golden"
-result[post_vt_repaint]=passed
 printf 'ready\ncommit_id=post-vt\ngeneration=1\ncanonical_hash=%s\nscanout_hash=%s\nmode=1024x768\nconnector=%s\n' "$canonical_hash" "$scanout_hash" "$connector" >"$control/screenshot-after-vt-ready"
 for _ in {1..600}; do [[ -f $control/screen-after-vt-captured ]] && break; sleep .1; done; [[ -f $control/screen-after-vt-captured ]]
 python3 - "$mirror" "$artifact_dir/milestone10-screen-after-vt.ppm" <<'PY'
@@ -649,6 +631,48 @@ def payload(path):
 if payload(sys.argv[1]) != payload(sys.argv[2]): raise SystemExit('post-VT RGB payload differs from mirror')
 PY
 result[post_vt_screenshot_equal]=passed
+
+pre_repaint_ordinal=$(python3 - "$artifact_dir/milestone10-drm-report.jsonl" <<'PY'
+import json,sys
+records=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+print(max(r['ordinal'] for r in records if r.get('record') in ('modeset','flip')))
+PY
+)
+touch "$control/post-vt-input"
+for _ in {1..600}; do [[ -f $control/post-vt-input-complete ]] && break; sleep .05; done
+[[ -f $control/post-vt-input-complete ]] && kill -0 "$clients_pid"
+python3 - "$artifact_dir/milestone10-drm-report.jsonl" "$dumps/frames.jsonl" \
+  "$control/post-vt-input.json" "$pre_repaint_ordinal" "$canonical_hash" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); frames_path=pathlib.Path(sys.argv[2])
+input_path=pathlib.Path(sys.argv[3]); before=int(sys.argv[4]); expected=sys.argv[5]
+deadline=time.monotonic()+5
+while True:
+    try:
+        records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        flips=[r for r in records if r.get('record')=='flip' and r['ordinal']>before]
+        flip=flips[-1]
+        frames=[json.loads(line) for line in frames_path.read_text().splitlines() if line.strip()]
+        frame=next(r for r in reversed(frames) if r['frame']==flip['ordinal'])
+        acknowledgements=json.loads(input_path.read_text())['acknowledgements']
+        delivered=any(r['root_x']==35 and r['root_y']==55 and
+                      r['delivered_event_count']>0 for r in acknowledgements)
+        if (flip['canonical_hash']==flip['scanout_hash'] and
+                flip['canonical_hash']!=expected and
+                frame['commit_id']==flip['commit_id'] and
+                frame['generation']==flip['generation'] and
+                frame['fnv1a64']==flip['canonical_hash'] and delivered): break
+    except (IndexError,KeyError,StopIteration,json.JSONDecodeError,FileNotFoundError): pass
+    if time.monotonic() >= deadline:
+        raise SystemExit('post-VT xeyes repaint lacks correlated input, frame, and page-flip proof')
+    time.sleep(.05)
+PY
+post_vt_mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1)
+if cmp -s "$post_vt_mirror" "$m9_golden"; then
+  printf 'post-VT xeyes repaint did not change the canonical mirror\n' >&2
+  exit 1
+fi
+result[post_vt_repaint]=passed
 
 touch "$control/stop-clients"
 wait "$clients_pid"

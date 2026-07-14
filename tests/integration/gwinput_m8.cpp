@@ -54,7 +54,6 @@ void usage(FILE* output) {
       "modifiers, keyboard, click-focus, invalid-transition, malformed, "
       "queue-limit, reconnect, m9-xeyes, m10-xeyes-repaint\n");
 }
-
 bool known_scenario(std::string_view name) {
   return name == "barrier" || name == "motion" || name == "crossing" ||
          name == "buttons" || name == "button-motion" ||
@@ -238,8 +237,6 @@ std::vector<Record> scenario(std::string_view name) {
     add(K::barrier, 0);
   } else if (name == "m10-xeyes-repaint") {
     add(K::motion, 2, 35, 55);
-    add(K::barrier, 0);
-    add(K::motion, 3, 0, 0);
     add(K::barrier, 0);
   }
   return result;

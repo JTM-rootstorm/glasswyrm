@@ -33,6 +33,10 @@ Installing libdrm must not pull Mesa or an X server. Kernel replacement,
 libvirt display-model changes, destructive snapshot work, and permission
 changes are prerequisites managed outside the M10 scenario.
 
+For a QXL-backed 1024x768 VM, configure at least 65536 KiB of `vgamem`.
+Smaller apertures can exhaust QXL/TTM resources when fbcon, two dumb buffers,
+and primary/shadow surfaces coexist; the doctor stage rejects that route.
+
 The fixed harness command is:
 
 ```sh
