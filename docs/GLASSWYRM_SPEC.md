@@ -379,6 +379,24 @@ gwcomp
 
 `gwcomp` should own final display authority: final composition, frame scheduling, scanout decisions, output configuration, HDR/color transforms, VRR policy, per-output scaling, presentation timing, and DRM/KMS state.
 
+Milestone 10 implements the first narrow part of that display authority. One
+component-neutral XRGB8888 `SoftwareFrame` remains the canonical renderer
+output. The default headless presenter completes synchronously; an opt-in Linux
+DRM presenter copies the same frame into two linear dumb buffers and completes
+the compositor transaction only after the blocking first modeset or matching
+asynchronous page-flip event. This is a private `gwcomp` boundary and does not
+change GWIPC API 0.5.0, SOVERSION 0, or wire 1.0.
+
+The implemented DRM profile is intentionally one connected connector, one
+compatible CRTC, one exact-size mode, and one primary plane where the selected
+KMS API requires it. Atomic KMS is preferred only after complete property
+discovery and a successful TEST_ONLY modeset; a pre-modeset legacy fallback is
+available. Direct sessions own an exact Linux VT and DRM master, while inherited
+sessions leave VT and master ownership external. Shutdown restores and reads
+back saved KMS state before removing Glasswyrm framebuffers, then restores DRM
+master and terminal ownership in order. The detailed contract is recorded in
+[`docs/output/`](output/).
+
 The process boundaries must carry explicit metadata. It is not acceptable for `glasswyrmd` or `gwm` to reduce a surface to only "draw this window here" information.
 
 The server/WM policy contract should include at least:
@@ -937,7 +955,7 @@ M6  Three-process mapped-window lifecycle       complete
 M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
-M10 DRM/KMS software scanout
+M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
@@ -999,6 +1017,18 @@ keeping Shape, Render, XKB, real devices, and broad toolkit compatibility out
 of scope. Strict builds, sanitizers, component matrices, restart checks, and
 the terminal-only Gentoo VM gate define the accepted boundary.
 
+Milestone 10 adds a Linux-only, opt-in DRM/KMS presentation backend below the
+existing deterministic compositor. It preserves headless as the default and
+uses two linear XRGB8888 dumb buffers, exact-size single-output selection,
+verified atomic modesetting with a documented legacy fallback, delayed frame
+acknowledgement/release, direct and inherited session boundaries, process-mode
+VT switching, and ordered KMS/KD/VT restoration. DRM and VT behavior has
+deterministic fake-backed host coverage and a fixed Gentoo VM acceptance route.
+The configured QXL guest validates the real primary node, atomic KMS
+presentation, exact graphical-console screenshots, VT release/acquire,
+post-acquire repaint, ordered restoration, and the checksum-protected evidence
+archive.
+
 ## 26. Definition of done
 
 For any implementation task, done means:
@@ -1018,7 +1048,7 @@ These should be resolved through future design notes or implementation experienc
 
 - Whether to use CMake instead of Meson if project needs change.
 - Whether to vendor `xcb-proto` XML or require it as a build-time dependency.
-- Whether to support a nested X11 backend before real DRM/KMS.
+- Whether a nested X11 backend remains useful after the M10 DRM/KMS path.
 - Whether first GL path should use EGL/GLES or desktop OpenGL.
 - Whether Vulkan should be a serious early render backend or postponed.
 - Exact configuration format.

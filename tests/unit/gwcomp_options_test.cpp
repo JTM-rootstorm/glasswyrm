@@ -70,5 +70,65 @@ int main() {
       return 1;
   }
 
+  options = {};
+  if (parse({"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+             "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+             "--connector", "Virtual-1", "--mode", "1024x768@60000",
+             "--drm-api", "atomic", "--mirror-dump-dir", "/tmp/mirror",
+             "--drm-report", "/tmp/report.jsonl"},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.backend != glasswyrm::compositor::Backend::Drm ||
+      options.drm_device != "/dev/dri/card0" || options.tty != "/dev/tty2" ||
+      options.connector != "Virtual-1" || !options.mode ||
+      options.mode->width != 1024 || options.mode->height != 768 ||
+      options.mode->refresh_millihz != 60000 ||
+      options.drm_api != glasswyrm::compositor::DrmApiMode::Atomic ||
+      options.mirror_dump_dir != "/tmp/mirror" ||
+      options.drm_report != "/tmp/report.jsonl")
+    return 1;
+
+  options = {};
+  if (parse({"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+             "--drm-fd", "7", "--external-session", "--mode", "800x600"},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.drm_fd != 7 || !options.external_session || !options.mode ||
+      options.mode->refresh_millihz)
+    return 1;
+
+  const std::vector<std::vector<std::string>> invalid_drm = {
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-fd", "7"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-fd", "7", "--external-session", "--tty", "/dev/tty2"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0", "--drm-fd", "7",
+       "--external-session"},
+      {"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+       "/tmp/frames", "--connector", "Virtual-1"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+       "--dump-dir", "/tmp/frames"},
+  };
+  for (auto arguments : invalid_drm) {
+    options = {};
+    if (parse(std::move(arguments), options, output, error) !=
+        ParseOptionsResult::ExitFailure)
+      return 1;
+  }
+
+  for (const auto* invalid : {"1024", "x768", "1024x", "0x768",
+                              "1024x0", "1024x768@", "1024x768@0",
+                              "1024x768@60x"}) {
+    options = {};
+    if (parse({"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+               "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+               "--mode", invalid},
+              options, output, error) != ParseOptionsResult::ExitFailure)
+      return 1;
+  }
+
   return 0;
 }

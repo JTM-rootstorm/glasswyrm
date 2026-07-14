@@ -166,7 +166,9 @@ bool SceneManifest::describe(const std::uint64_t commit_id,
            << ",\"height\":" << surface.logical_height
            << ",\"stacking\":" << surface.stacking
            << ",\"visible\":" << boolean(surface.visible)
-           << ",\"metadata_only\":true"
+           << ",\"metadata_only\":"
+           << boolean(surface.presentation_flags ==
+                      GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
            << ",\"focused\":" << boolean(policy.focused)
            << ",\"managed\":" << boolean(policy.managed)
            << ",\"decoration_eligible\":" << boolean(policy.decoration_eligible)
@@ -191,9 +193,32 @@ bool SceneManifest::append(const std::uint64_t commit_id,
                            const std::uint64_t generation, const Scene &scene,
                            SceneManifestResult &result,
                            std::string &error) const {
-  std::string json;
-  if (!describe(commit_id, generation, scene, result, json, error))
+  PreparedSceneManifest prepared;
+  if (!prepare(commit_id, generation, scene, prepared, error)) return false;
+  if (!publish(prepared, error)) return false;
+  result = prepared.result;
+  return true;
+}
+
+bool SceneManifest::prepare(const std::uint64_t commit_id,
+                            const std::uint64_t generation, const Scene &scene,
+                            PreparedSceneManifest &prepared,
+                            std::string &error) {
+  PreparedSceneManifest replacement;
+  if (!describe(commit_id, generation, scene, replacement.result,
+                replacement.json, error))
     return false;
+  replacement.active = true;
+  prepared = std::move(replacement);
+  return true;
+}
+
+bool SceneManifest::publish(PreparedSceneManifest &prepared,
+                            std::string &error) const {
+  if (!prepared.active) {
+    error = "scene manifest record is not prepared";
+    return false;
+  }
   std::error_code filesystem_error;
   auto parent = path_.parent_path();
   if (parent.empty())
@@ -232,7 +257,7 @@ bool SceneManifest::append(const std::uint64_t commit_id,
             ::flock(fd, LOCK_EX) == 0;
   const off_t original_size = ok ? status.st_size : -1;
   if (ok)
-    ok = write_all(fd, json) && ::fdatasync(fd) == 0;
+    ok = write_all(fd, prepared.json) && ::fdatasync(fd) == 0;
   if (!ok && original_size >= 0) {
     (void)::ftruncate(fd, original_size);
     (void)::fdatasync(fd);
@@ -244,8 +269,16 @@ bool SceneManifest::append(const std::uint64_t commit_id,
   if (!ok) {
     error = std::string("scene manifest append failed: ") +
             std::strerror(saved_errno);
+    return false;
   }
-  return ok;
+  prepared.active = false;
+  error.clear();
+  return true;
+}
+
+void SceneManifest::abort(PreparedSceneManifest &prepared) noexcept {
+  prepared.active = false;
+  prepared.json.clear();
 }
 
 } // namespace gw::compositor
