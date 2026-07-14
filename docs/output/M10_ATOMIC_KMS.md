@@ -48,7 +48,9 @@ After the first modeset, the selected primary plane's `FB_ID` is the only
 changed property. `drmModeAtomicCommit` uses
 `DRM_MODE_ATOMIC_NONBLOCK|DRM_MODE_PAGE_FLIP_EVENT` with a unique live cookie.
 The presentation remains pending until `drmHandleEvent` returns the matching
-CRTC, token, and nonzero sequence.
+CRTC and token. The kernel sequence is recorded as delivered. Drivers without
+usable vblank accounting, including QXL in its immediate-event path, may report
+sequence zero for an otherwise valid flip-complete event.
 
 ## Auto selection and fallback
 

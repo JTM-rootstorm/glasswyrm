@@ -192,7 +192,7 @@ bool valid(const ModesetReport& value) {
 
 bool valid(const FlipReport& value) {
   return value.ordinal != 0 && value.commit_id != 0 && value.generation != 0 &&
-         value.framebuffer_id != 0 && value.page_flip_sequence != 0 &&
+         value.framebuffer_id != 0 &&
          value.canonical_hash == value.scanout_hash;
 }
 

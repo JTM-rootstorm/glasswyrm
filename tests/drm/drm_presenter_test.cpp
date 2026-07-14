@@ -208,6 +208,27 @@ void presentation_refresh_tolerance() {
       "presentation rejects refresh outside the selected mode tolerance");
 }
 
+void zero_sequence_page_flip_completion() {
+  Rig rig(DrmPresentationApi::Atomic);
+  const std::array pixels{0xff111111U, 0xff222222U, 0xff333333U, 0xff444444U};
+  gw::test::require(
+      rig.presenter->present(frame(pixels, 1)).disposition ==
+          output::PresentDisposition::Complete,
+      "zero-sequence fixture initial frame");
+  const auto pending = rig.presenter->present(frame(pixels, 2));
+  gw::test::require(pending.disposition == output::PresentDisposition::Pending,
+                    "zero-sequence fixture submits page flip");
+  rig.drm.queue_page_flip(pending.token, 40, 0);
+  const auto event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.token == pending.token &&
+          rig.presenter->finalize_pending(pending.token, rig.error) &&
+          contents(rig.report.path()).find("\"page_flip_sequence\":0") !=
+              std::string::npos,
+      "valid page flip without vblank accounting completes and reports zero");
+}
+
 void policy_and_legacy_requests() {
   Rig fallback(DrmPresentationApi::Auto, true, true, true);
   gw::test::require(fallback.initialized &&
@@ -357,6 +378,7 @@ void external_session_never_manages_master() {
 int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
+  zero_sequence_page_flip_completion();
   policy_and_legacy_requests();
   mismatch_resume_and_shutdown_order();
   fatal_abort_and_shutdown_failure_are_observable();

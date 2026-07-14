@@ -104,8 +104,9 @@ Only one page flip may be pending. While it is pending, the candidate scene,
 attachments, release set, mirror PPM, report record, and software frame remain
 uncommitted. The producer socket may be polled but no new compositor contract
 is dequeued. A two-second timeout, event error, HUP, wrong token, wrong CRTC,
-or zero sequence is fatal. Connector loss is fatal in M10; hotplug recovery is
-not implemented.
+or missing completion is fatal. The kernel page-flip sequence is diagnostic:
+drivers without usable vblank accounting may deliver zero with a valid matching
+completion. Connector loss is fatal in M10; hotplug recovery is not implemented.
 
 ## Diagnostics and reports
 
