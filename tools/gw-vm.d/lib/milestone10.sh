@@ -205,7 +205,7 @@ result[historical_components]=passed result[m4_m9_regressions]=passed
 
 failure_stage=drm-probe
 "$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --output "$artifact_dir/milestone10-drm-probe.json"
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --snapshot-state --output "$artifact_dir/milestone10-kms-before.json"
+"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone10-kms-before.json"
 python3 - "$artifact_dir/milestone10-drm-probe.json" <<'PY' >"$drm_dir/probe.env"
 import json,sys
 d=json.load(open(sys.argv[1])); s=d['selected_candidate']; c=d['capabilities']
@@ -250,7 +250,7 @@ if [[ $atomic_capability == true && $drm_api != atomic ]]; then
   printf 'M10 target advertises atomic KMS, but gwcomp selected %s.\n' "$drm_api" >&2
   exit 1
 fi
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --expect-active --output "$artifact_dir/milestone10-kms-active.json"
+"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --expect-active --output "$artifact_dir/milestone10-kms-active.json"
 printf '{"tty":"%s","active_vt":"%s","kd_mode":"graphics"}\n' "$target_vt" "$(fgconsole)" >"$artifact_dir/milestone10-vt-active.json"
 printf 'ready\ncommit_id=combined\ngeneration=1\ncanonical_hash=%s\nscanout_hash=%s\nmode=1024x768\nconnector=%s\n' "$canonical_hash" "$scanout_hash" "$connector" >"$control/screenshot-ready"
 for _ in {1..600}; do [[ -f $control/screen-captured ]] && break; sleep .1; done; [[ -f $control/screen-captured ]]
@@ -321,7 +321,7 @@ restore=next(r for r in reversed(records) if r.get('record')=='restore')
 if not all(restore.get(key) is True for key in ('kms','vt','master_drop','framebuffer_cleanup')):
     raise SystemExit('DRM shutdown report does not prove complete restoration')
 PY
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --expect-restored "$artifact_dir/milestone10-kms-before.json" --output "$artifact_dir/milestone10-kms-after.json"
+"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --expect-restored "$artifact_dir/milestone10-kms-before.json" --output "$artifact_dir/milestone10-kms-after.json"
 printf '{"tty":"%s","active_vt":"%s","kd_mode":"text"}\n' "$target_vt" "$(fgconsole)" >"$artifact_dir/milestone10-vt-after.json"
 cmp "$artifact_dir/milestone10-vt-before.json" "$artifact_dir/milestone10-vt-after.json"
 result[kms_restore]=passed result[kd_restore]=passed result[vt_mode_restore]=passed result[active_vt_restore]=passed

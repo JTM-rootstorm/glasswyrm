@@ -607,6 +607,16 @@ if get_option('drm_backend')
     test(drm_api_test[0], drm_api_test_executable, timeout: 10)
   endforeach
 
+  if get_option('tools')
+    drm_probe_test = executable(
+      'drm_probe_test',
+      files('drm/drm_probe_test.cpp'),
+      dependencies: gw_drm_probe_dep,
+      include_directories: test_source_root_include,
+    )
+    test('drm-probe', drm_probe_test, timeout: 10)
+  endif
+
   vt_session_test = executable(
     'vt_session_test',
     files('session/vt_session_test.cpp'),
