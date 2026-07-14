@@ -2,8 +2,8 @@
 
 Status: Final M10 implementation snapshot
 Required baseline: `fe0faab39f7a6d28157ee6b96a4f6292a0b7984e`
-Final source commit: `fe2ddde19562825e88de8bae31ac6db47f0ff3c1`
-Inventory date: 2026-07-13
+Final source commit: `33aa503`
+Inventory date: 2026-07-14
 
 ## Method and exact counts
 
@@ -21,7 +21,7 @@ exist at the earlier snapshot.
 |---|---:|---:|
 | Before (`fe0faab`) | 148 | 20970 |
 | After Phase 1 | 190 | 21891 |
-| Final M10 (`fe2ddde`) | 240 | 29340 |
+| Final M10 (`33aa503`) | 240 | 29483 |
 
 The largest new Phase 1 file is
 `src/glasswyrmd/request_handlers/lifecycle.cpp` at 390 lines. The largest final
@@ -92,8 +92,10 @@ inventory below. “Dependencies” are direct project-local quoted includes.
 | `src/gwcomp/drm_runtime.hpp` | - | 43 | Opaque runtime owners for real DRM/KMS/report/mirror/VT objects | `options.hpp` | new narrow interface |
 | `src/gwcomp/options.cpp` | 91 | 270 | Headless/DRM CLI parsing and direct/external option validation; `parse_options` | `options.hpp`, `config.hpp` | extended CLI module |
 | `src/gwcomp/options.hpp` | 23 | 42 | Backend, KMS API, mode, device, session, mirror, and report options | - | extended narrow model |
-| `src/gwcomp/presentation_transaction.cpp` | 314 | 457 | Candidate render/present state, pending deadline, completion validation, promotion, acknowledgement inputs, and rollback; `PresentationTransaction` | `presentation_transaction.hpp`, `compositor.hpp`, software renderer | extended transaction owner |
-| `src/gwcomp/presentation_transaction.hpp` | 24 | 60 | Owned pending scene/attachment/release/frame transaction | frame, buffer, scene, compositor contracts | extended narrow interface |
+| `src/gwcomp/presentation_transaction.cpp` | 314 | 484 | Candidate render/present state, pending deadline, completion validation, transactional scene-manifest publication, promotion, acknowledgement inputs, and rollback; `PresentationTransaction` | `presentation_transaction.hpp`, `compositor.hpp`, software renderer | extended transaction owner |
+| `src/gwcomp/presentation_transaction.hpp` | 24 | 65 | Owned pending scene/attachment/release/frame/manifest transaction | frame, buffer, scene, compositor contracts | extended narrow interface |
+| `src/gwcomp/scene_manifest.cpp` | 251 | 284 | Deterministic scene serialization plus prepared, exactly-once publication for metadata and buffered ProtocolServer frames; `SceneManifest` | `scene_manifest.hpp`, compositor scene | extended evidence module |
+| `src/gwcomp/scene_manifest.hpp` | 33 | 47 | Prepared scene-manifest record and serialization/publication declarations | compositor scene | extended narrow evidence interface |
 | `src/gwcomp/runtime.cpp` | 236 | 357 | Listener/producer/signal/presentation poll reactor, VT coordination, and ordered shutdown; `run` | dispatch/runtime/signal, output presentation, optional headless/DRM factories | extended top-level coordinator |
 | `src/gwcomp/signal_runtime.cpp` | - | 143 | Tagged self-pipe handlers for stop and VT release/acquire; `SignalRuntime` | `signal_runtime.hpp` | new final signal boundary |
 | `src/gwcomp/signal_runtime.hpp` | - | 37 | Tagged compositor signal event contract | - | new narrow interface |
@@ -130,7 +132,7 @@ inventory below. “Dependencies” are direct project-local quoted includes.
 | `gwcomp/main.cpp <= 250` | 13 | pass |
 | `gwcomp/runtime.cpp <= 500` | 357 | pass |
 | `gwcomp/compositor.cpp <= 600` | 295 | pass |
-| `presentation_transaction.cpp <= 600` | 457 | pass |
+| `presentation_transaction.cpp <= 600` | 484 | pass |
 | `gwm/main.cpp <= 250` | 13 | pass |
 | new DRM presenter/runtime/probe files `<= 600` | maximum 549 | pass |
 | all new/materially rewritten M10 files `<= 600` | maximum 549 | pass |
@@ -147,7 +149,7 @@ hard-file allowlist entries.
 |---|---:|---|---|
 | `CompositorPeer::submit` in `compositor_peer.cpp:115` | 152 | Keep the serialized snapshot/content submission and acknowledgement state transition together; splitting would duplicate peer transaction invariants. | M11 peer-state review |
 | `ServerRuntime::service_input` in `input_runtime.cpp:12` | 163 | Keep record ordering, state transition, event delivery, focus deferral, and acknowledgement in one single-threaded input turn. | M11 input-routing review |
-| `PresentationTransaction::commit` in `presentation_transaction.cpp:111` | 277 | Keep candidate validation/rendering, backend submit, synchronous completion, and owned asynchronous rollback points in one atomic transaction; event service/finalization is already separate. | M11 transaction-state review |
+| `PresentationTransaction::commit` in `presentation_transaction.cpp:126` | 286 | Keep candidate validation/rendering, manifest preparation, backend submit, synchronous completion, and owned asynchronous rollback points in one atomic transaction; event service/finalization is already separate. | M11 transaction-state review |
 | `run` in `gwcomp/runtime.cpp:85` | 271 | Keep one explicit single-threaded listener/producer/signal/presentation reactor so pending-frame and VT gating remain visible; CLI construction, contract semantics, signal plumbing, and DRM initialization are separate modules. | M11 reactor review |
 | `validate_application` in `ipc/connection.cpp:249` | 183 | Keep the exhaustive wire-type/capability/FD validation switch centralized at the transport trust boundary. | M11 IPC-internals review |
 | `receive_one` in `ipc/connection.cpp:647` | 365 | Keep one recvmsg transaction responsible for credentials, ancillary FDs, envelope validation, and queue admission cleanup. | M11 IPC-internals review |

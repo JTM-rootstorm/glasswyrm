@@ -2,17 +2,15 @@
 
 ## Acceptance status
 
-The implementation and mocked DRM/VT tests are present. Live M10 acceptance is
-not yet recorded: on 2026-07-13 the configured Gentoo guest had no `/dev/dri`,
-no DRM sysfs device, and no available QXL, virtio-gpu, or bochs DRM kernel
-driver. The M10 plan forbids silently rebuilding or replacing the guest kernel,
-so that prerequisite remains an explicit environment blocker rather than a
-software pass.
+Milestone 10 is validated on the configured Gentoo QXL guest. The accepted
+route uses `/dev/dri/card0`, connector `Virtual-1`, an exact 1024x768 mode, QXL
+atomic KMS, two XRGB8888 dumb buffers, `/dev/tty2`, and libvirt's graphical
+console. It proves the M9-clean prerequisite from the single internal `base`
+snapshot before installing libdrm for the separate M10 run.
 
-Do not interpret this document or the M10 implementation-complete roadmap entry
-as a successful graphical-console acceptance result. A valid acceptance run
-must produce and validate every artifact listed below on a guest with an
-existing supported DRM primary node.
+Acceptance requires every artifact and result described below; the summary's
+tested commit is the authoritative identity for a particular run. Mocked tests
+alone remain insufficient.
 
 ## VM prerequisites
 

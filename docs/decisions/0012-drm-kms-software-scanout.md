@@ -1,6 +1,6 @@
 # 0012: Present the Canonical Software Frame Through DRM/KMS
 
-Status: Accepted; hardware acceptance pending
+Status: Accepted and validated
 
 ## Context
 
@@ -65,6 +65,5 @@ private `gwcomp` boundary below the existing compositor contracts.
   DMA-BUF scanout, explicit fences, DPMS, VRR, HDR, and color management remain
   deferred.
 - Forced termination may require manual VT or KMS recovery.
-- Mocked host coverage is complete, but live runtime acceptance is not yet
-  recorded because the configured Gentoo VM currently exposes no `/dev/dri`
-  primary node.
+- Mocked host coverage and the configured Gentoo QXL graphical-console route
+  both validate the output, VT, restoration, and evidence boundaries.
