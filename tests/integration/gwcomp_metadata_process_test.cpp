@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -292,6 +293,17 @@ int main(int argc, char **argv) {
     require(::waitpid(child, &status, 0) == child && WIFEXITED(status) &&
                 WEXITSTATUS(status) == 0,
             "gwcomp exits cleanly");
+    require(std::filesystem::is_regular_file(manifest),
+            "ProtocolServer scene manifest exists");
+    std::ifstream in(manifest);
+    std::string json{std::istreambuf_iterator<char>(in), {}};
+    require(std::count(json.begin(), json.end(), '\n') == 1 &&
+                json.find("\"commit_id\":1") != std::string::npos &&
+                json.find("\"generation\":1") != std::string::npos &&
+                json.find("\"scene_hash\":\"") != std::string::npos &&
+                json.find("\"surface_count\":1") != std::string::npos &&
+                json.find("\"x11_window_id\":1001") != std::string::npos,
+            "manifest records exactly one identified ProtocolServer scene");
     if (buffered) {
       require(std::filesystem::is_regular_file(
                   std::filesystem::path(dumps) / "frames.jsonl"),
@@ -300,14 +312,11 @@ int main(int argc, char **argv) {
                   std::filesystem::path(dumps) /
                   "frame-000001-output-0000000000000001.ppm"),
               "buffered scene creates PPM");
+      require(json.find("\"metadata_only\":false") != std::string::npos,
+              "buffered scene manifest records drawable surface metadata");
     } else {
-      require(std::filesystem::is_regular_file(manifest),
-              "scene manifest exists");
-      std::ifstream in(manifest);
-      std::string json{std::istreambuf_iterator<char>(in), {}};
-      require(json.find("\"surface_count\":1") != std::string::npos &&
-                  json.find("\"x11_window_id\":1001") != std::string::npos,
-              "manifest records metadata scene");
+      require(json.find("\"metadata_only\":true") != std::string::npos,
+              "metadata scene manifest records metadata-only surface");
       require(!std::filesystem::exists(
                   std::filesystem::path(dumps) / "frames.jsonl"),
               "metadata scene creates no frame manifest");

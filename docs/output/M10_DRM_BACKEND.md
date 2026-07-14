@@ -108,6 +108,14 @@ or missing completion is fatal. The kernel page-flip sequence is diagnostic:
 drivers without usable vblank accounting may deliver zero with a valid matching
 completion. Connector loss is fatal in M10; hotplug recovery is not implemented.
 
+When a buffered ProtocolServer configures `--scene-manifest`, its serialized
+scene record is staged with the presentation. Synchronous modesets publish it
+after backend completion; page flips publish it only after the matching event
+and backend diagnostics finalize. Publication precedes logical scene promotion
+and producer acknowledgement. Rejection, timeout, abandonment, or backend
+failure publishes no scene record, and a manifest publication failure is fatal
+without releasing the previous committed buffers.
+
 A timeout cannot cancel an already submitted kernel flip. Glasswyrm therefore
 keeps the abandoned callback record alive until a late event is consumed or
 the DRM FD closes, while discarding all staged compositor and evidence state.

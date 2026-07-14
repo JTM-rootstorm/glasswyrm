@@ -53,7 +53,8 @@ class FakeVirtualTerminal final
 
 class PresenterHarness {
  public:
-  explicit PresenterHarness(gw::compositor::PresentationTiming timing = {});
+  explicit PresenterHarness(gw::compositor::PresentationTiming timing = {},
+                            bool enable_scene_manifest = false);
   ~PresenterHarness();
 
   PresenterHarness(const PresenterHarness&) = delete;
@@ -62,6 +63,8 @@ class PresenterHarness {
   [[nodiscard]] std::filesystem::path mirror_frame(
       std::uint64_t ordinal) const;
   [[nodiscard]] std::string report_contents() const;
+  [[nodiscard]] std::filesystem::path scene_manifest_path() const;
+  [[nodiscard]] std::string scene_manifest_contents() const;
   [[nodiscard]] bool shutdown(std::string& error);
 
   std::filesystem::path root;

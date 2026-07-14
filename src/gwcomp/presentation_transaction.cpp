@@ -44,11 +44,13 @@ std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
 PresentationTransaction::PresentationTransaction(
     SceneModel candidate, AttachmentMap attachments, ReleaseMap releases,
     glasswyrm::output::SoftwareFrame frame, gwipc_frame_commit commit,
-    PresentedFrame presented, const std::uint64_t token,
+    PresentedFrame presented, std::optional<PreparedSceneManifest> manifest,
+    const std::uint64_t token,
     const std::chrono::steady_clock::time_point deadline)
     : candidate_(std::move(candidate)), attachments_(std::move(attachments)),
       releases_(std::move(releases)), frame_(std::move(frame)), commit_(commit),
-      presented_(presented), token_(token), deadline_(deadline) {}
+      presented_(presented), manifest_(std::move(manifest)), token_(token),
+      deadline_(deadline) {}
 
 PresentationTransaction::ReleaseMap
 PresentationTransaction::calculate_retired_buffers(
@@ -106,6 +108,19 @@ PresentedFrame PresentationTransaction::promote(
   presented_.ordinal = compositor.frame_ordinal_;
   presented_.hash = visible_hash;
   return presented_;
+}
+
+bool PresentationTransaction::publish_manifest(Compositor& compositor,
+                                               std::string& error) {
+  if (!manifest_) return true;
+  if (!compositor.scene_manifest_ ||
+      !compositor.scene_manifest_->publish(*manifest_, error)) {
+    if (error.empty()) error = "scene manifest publisher is unavailable";
+    presented_.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    presented_.disposition = PresentedFrame::Disposition::Fatal;
+    return false;
+  }
+  return true;
 }
 
 PresentedFrame PresentationTransaction::commit(
@@ -221,18 +236,14 @@ PresentedFrame PresentationTransaction::commit(
   }
 
   if (metadata_only_peer) {
-    SceneManifestResult manifest_result;
+    PreparedSceneManifest manifest;
+    if (!SceneManifest::prepare(value.commit_id, value.producer_generation,
+                                staged, manifest, error)) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return presented;
+    }
     if (scene_manifest_) {
-      if (!scene_manifest_->append(value.commit_id, value.producer_generation,
-                                   staged, manifest_result, error)) {
-        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-        return presented;
-      }
-    } else {
-      std::string ignored_json;
-      if (!SceneManifest::describe(value.commit_id, value.producer_generation,
-                                   staged, manifest_result, ignored_json,
-                                   error)) {
+      if (!scene_manifest_->publish(manifest, error)) {
         presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
         return presented;
       }
@@ -243,7 +254,7 @@ PresentedFrame PresentationTransaction::commit(
     ++frame_ordinal_;
     last_generation_ = value.producer_generation;
     presented.ordinal = frame_ordinal_;
-    presented.hash = manifest_result.hash;
+    presented.hash = manifest.result.hash;
     presented.disposition = PresentedFrame::Disposition::Complete;
     return presented;
   }
@@ -338,6 +349,15 @@ PresentedFrame PresentationTransaction::commit(
       frame_ordinal_ + 1U};
   const auto canonical_hash = scratch.visible_hash();
   const auto releases = calculate_retired_buffers(compositor, staged);
+  std::optional<PreparedSceneManifest> manifest;
+  if (protocol_server && scene_manifest_) {
+    manifest.emplace();
+    if (!SceneManifest::prepare(value.commit_id, value.producer_generation,
+                                staged, *manifest, error)) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return presented;
+    }
+  }
   const auto presentation = presenter_->present(frame);
   if (presentation.disposition ==
       glasswyrm::output::PresentDisposition::Rejected) {
@@ -361,7 +381,10 @@ PresentedFrame PresentationTransaction::commit(
     }
     PresentationTransaction transaction(
         std::move(candidate), pending_attachments_, releases,
-        std::move(scratch), value, presented, 0, compositor.timing_.now());
+        std::move(scratch), value, presented, std::move(manifest), 0,
+        compositor.timing_.now());
+    if (!transaction.publish_manifest(compositor, error))
+      return transaction.presented_;
     return transaction.promote(compositor, presentation.visible_hash);
   }
   if (presentation.token == 0) {
@@ -375,7 +398,8 @@ PresentedFrame PresentationTransaction::commit(
     compositor.pending_presentation_ =
         std::unique_ptr<PresentationTransaction>(new PresentationTransaction(
             std::move(candidate), pending_attachments_, releases,
-            std::move(scratch), value, presented, presentation.token,
+            std::move(scratch), value, presented, std::move(manifest),
+            presentation.token,
             compositor.timing_.now() + compositor.timing_.timeout));
   } catch (...) {
     compositor.presenter_->abort_pending(presentation.token);
@@ -440,6 +464,9 @@ PresentationCompletion PresentationTransaction::service(
         return fatal(finalize_error.empty()
                          ? "could not finalize pending presentation diagnostics"
                          : finalize_error);
+      if (!compositor.pending_presentation_->publish_manifest(compositor,
+                                                              error))
+        return fatal(error);
       auto pending = std::move(compositor.pending_presentation_);
       completion.kind = PresentationCompletionKind::Complete;
       completion.commit = pending->commit_;
