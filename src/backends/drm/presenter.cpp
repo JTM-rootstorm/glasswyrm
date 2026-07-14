@@ -152,12 +152,16 @@ output::PresentResult DrmPresenter::present(
     return {output::PresentDisposition::Rejected, 0, 0,
             "one DRM page flip is already pending"};
   const auto expected = std::uint64_t{config_.output.width} * config_.output.height;
+  const auto refresh_distance =
+      frame.output.refresh_millihz > config_.output.refresh_millihz
+          ? frame.output.refresh_millihz - config_.output.refresh_millihz
+          : config_.output.refresh_millihz - frame.output.refresh_millihz;
   if (frame.output.width != config_.output.width ||
       frame.output.height != config_.output.height ||
       frame.output.output_id == 0 ||
       (config_.output.output_id != 0 &&
        frame.output.output_id != config_.output.output_id) ||
-      frame.output.refresh_millihz != config_.output.refresh_millihz ||
+      refresh_distance > kDefaultRefreshToleranceMillihz ||
       frame.commit_id == 0 || frame.generation == 0 || frame.ordinal == 0 ||
       frame.pixels.size() != expected)
     return {output::PresentDisposition::Rejected, 0, 0,

@@ -132,8 +132,11 @@ bool RuntimeBridge::service(const short policy_revents,
     if (compositor_.state() == PeerBootstrapState::Connecting ||
         compositor_.state() == PeerBootstrapState::AwaitingReply) {
       const auto outcome = compositor_.process(compositor_revents, error);
-      if (outcome == PeerProcessOutcome::Fatal ||
-          outcome == PeerProcessOutcome::SemanticRejected) return false;
+      if (outcome == PeerProcessOutcome::Fatal) return false;
+      if (outcome == PeerProcessOutcome::SemanticRejected) {
+        if (error.empty()) error = "compositor bootstrap frame was rejected";
+        return false;
+      }
       if (outcome == PeerProcessOutcome::Disconnected) {
         compositor_.disconnect();
         schedule_retry(now);
