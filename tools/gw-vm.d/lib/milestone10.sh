@@ -454,8 +454,11 @@ import pathlib,sys
 lines=[line.split() for line in pathlib.Path(sys.argv[1]).read_text().splitlines() if line.strip()]
 if len(lines)<2: raise SystemExit('DRM clients evidence is empty')
 header=[value.lower() for value in lines[0]]
-try: pid_index=header.index('pid'); master_index=header.index('master')
-except ValueError as error: raise SystemExit('DRM clients evidence lacks pid/master columns') from error
+try:
+    pid_index=header.index('pid') if 'pid' in header else header.index('tgid')
+    master_index=header.index('master')
+except ValueError as error:
+    raise SystemExit('DRM clients evidence lacks pid-or-tgid/master columns') from error
 masters=[row for row in lines[1:] if len(row)>max(pid_index,master_index) and row[master_index].lower() in ('y','yes','1')]
 if len(masters)!=1 or masters[0][pid_index]!=sys.argv[2]:
     raise SystemExit('gwcomp is not the sole DRM master')
