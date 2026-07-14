@@ -43,8 +43,12 @@ public:
     return session_ == DeviceSession::Standalone;
   }
   [[nodiscard]] int duplicate_fd(std::string &error) const;
-  [[nodiscard]] bool arm_page_flip(PageFlipCookie &cookie, std::string &error);
-  void disarm_page_flip(PageFlipCookie &cookie) noexcept;
+  [[nodiscard]] bool
+  arm_page_flip(const std::shared_ptr<PageFlipCookie> &cookie,
+                std::string &error);
+  void cancel_page_flip(const std::shared_ptr<PageFlipCookie> &cookie) noexcept;
+  void
+  abandon_page_flip(const std::shared_ptr<PageFlipCookie> &cookie) noexcept;
   [[nodiscard]] DrmEvent service_events(short revents);
   void reset() noexcept;
 

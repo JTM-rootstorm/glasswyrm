@@ -89,10 +89,15 @@ public:
   virtual void close_device(int handle) noexcept = 0;
   [[nodiscard]] virtual int poll_fd(int handle) const noexcept = 0;
   [[nodiscard]] virtual int duplicate_fd(int handle, std::string &error) = 0;
-  [[nodiscard]] virtual bool arm_page_flip(int handle, PageFlipCookie &cookie,
-                                           std::string &error) = 0;
-  virtual void disarm_page_flip(int handle,
-                                PageFlipCookie &cookie) noexcept = 0;
+  [[nodiscard]] virtual bool
+  arm_page_flip(int handle, const std::shared_ptr<PageFlipCookie> &cookie,
+                std::string &error) = 0;
+  virtual void
+  cancel_page_flip(int handle,
+                   const std::shared_ptr<PageFlipCookie> &cookie) noexcept = 0;
+  virtual void
+  abandon_page_flip(int handle,
+                    const std::shared_ptr<PageFlipCookie> &cookie) noexcept = 0;
   [[nodiscard]] virtual DrmEvent service_events(int handle, short revents) = 0;
 };
 

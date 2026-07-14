@@ -27,9 +27,15 @@ public:
   void close_device(int handle) noexcept override;
   [[nodiscard]] int poll_fd(int handle) const noexcept override;
   [[nodiscard]] int duplicate_fd(int handle, std::string &error) override;
-  [[nodiscard]] bool arm_page_flip(int handle, PageFlipCookie &cookie,
-                                   std::string &error) override;
-  void disarm_page_flip(int handle, PageFlipCookie &cookie) noexcept override;
+  [[nodiscard]] bool
+  arm_page_flip(int handle, const std::shared_ptr<PageFlipCookie> &cookie,
+                std::string &error) override;
+  void cancel_page_flip(
+      int handle,
+      const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
+  void abandon_page_flip(
+      int handle,
+      const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
   [[nodiscard]] DrmEvent service_events(int handle, short revents) override;
 
   void queue_page_flip(std::uint64_t token, std::uint32_t crtc_id,
@@ -63,7 +69,8 @@ private:
   int last_closed_handle_{-1};
   std::size_t close_count_{};
   DeviceOpenOptions last_options_;
-  PageFlipCookie *armed_cookie_{};
+  std::shared_ptr<PageFlipCookie> event_cookie_;
+  bool event_cookie_armed_{};
   std::deque<DrmEvent> events_;
 };
 
