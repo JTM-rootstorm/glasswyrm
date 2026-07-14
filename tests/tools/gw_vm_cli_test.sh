@@ -143,19 +143,27 @@ case " $* " in
   *' dumpxml '*) printf '<domain><devices><video><model type="virtio"/></video><graphics type="spice"/></devices></domain>\n' ;;
   *' help screenshot '*) printf 'screenshot DOMAIN [FILE]\n' ;;
   *' screenshot '*)
-    for argument in "$@"; do
-      if [[ $argument == *.ppm ]]; then
-        python3 - "$argument" <<'PY'
+    destination=${!#}
+    python3 - "$destination" <<'PY'
 import pathlib,sys
 pathlib.Path(sys.argv[1]).write_bytes(b'P6\n1024 768\n255\n' + bytes(1024*768*3))
 PY
-      fi
-    done
     ;;
   *' start '*) printf 'Domain started\n' ;;
   *' shutdown '*) printf 'Domain is being shutdown\n' ;;
   *' snapshot-revert '*) printf 'Snapshot reverted\n' ;;
 esac
+EOF
+
+cat >"$fake_bin/magick" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'magick' >>"$GW_VM_TEST_COMMAND_LOG"
+printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
+printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
+source=$1
+destination=${!#}
+cp "$source" "${destination#ppm:}"
 EOF
 
 cat >"$fake_bin/ssh" <<'EOF'
@@ -690,7 +698,7 @@ case " $* " in
 esac
 EOF
 
-chmod +x "$fake_bin/virsh" "$fake_bin/ssh" "$fake_bin/rsync" "$fake_bin/scp" "$fake_bin/git"
+chmod +x "$fake_bin/virsh" "$fake_bin/magick" "$fake_bin/ssh" "$fake_bin/rsync" "$fake_bin/scp" "$fake_bin/git"
 
 export PATH="$fake_bin:$PATH"
 export GW_VM_TEST_COMMAND_LOG=$command_log
@@ -1422,6 +1430,7 @@ assert_contains "$command_log" 'systemd-logind-varlink.socket'
 assert_contains "$command_log" 'mask --runtime --now'
 assert_contains "$command_log" 'unmask --runtime'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
+assert_contains "$command_log" 'magick <'
 assert_file_glob "$artifact_dir/milestone10-drm-evidence.tar"
 for artifact in milestone10-runtime-test.log milestone10-meson-test.log milestone10-drm-probe.json milestone10-drm-report.jsonl milestone10-kms-before.json milestone10-kms-active.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-active.json milestone10-vt-after.json milestone10-apps.log milestone10-screenshot-validation.log milestone10-glasswyrmd-journal.log milestone10-gwm-journal.log milestone10-gwcomp-journal.log milestone10-facts.env milestone10-summary.json milestone10-screen.ppm milestone10-screen-after-vt.ppm milestone10-drm-evidence.tar; do
   [[ -f $artifact_dir/$artifact ]] || fail "milestone10 scenario did not create $artifact"

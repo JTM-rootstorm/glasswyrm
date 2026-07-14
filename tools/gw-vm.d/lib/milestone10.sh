@@ -72,6 +72,11 @@ GUEST_SCRIPT
 milestone10_doctor() {
   local failed=0 xml video graphics state probe
   command_exists virsh || return 1
+  if command_exists magick; then
+    printf '[ok] ImageMagick screenshot conversion\n'
+  else
+    printf '[missing] ImageMagick magick command for screenshot conversion\n'; failed=1
+  fi
   if xml=$(virsh --connect "$LIBVIRT_URI" dumpxml "$VM_DOMAIN" 2>/dev/null); then
     video=$(sed -n "s/.*<model[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
     graphics=$(sed -n "s/.*<graphics[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
@@ -701,10 +706,19 @@ milestone10_poll_marker() {
 }
 
 milestone10_capture_screen() {
-  local ready=$1 captured=$2 name=$3 guest_pid=$4 marker
+  local ready=$1 captured=$2 name=$3 guest_pid=$4 marker raw_capture
   marker=$(milestone10_poll_marker "$ready" "$guest_pid") || return
   printf '%s\n' "$marker" >>"$ARTIFACTS_PATH_ABS/milestone10-screenshot-validation.log"
-  virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$ARTIFACTS_PATH_ABS/$name" || return
+  raw_capture=$(mktemp "$ARTIFACTS_PATH_ABS/.milestone10-screen.XXXXXX") || return
+  if ! virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw_capture"; then
+    rm -f "$raw_capture"
+    return 1
+  fi
+  if ! magick "$raw_capture" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/$name"; then
+    rm -f "$raw_capture"
+    return 1
+  fi
+  rm -f "$raw_capture"
   [[ -s $ARTIFACTS_PATH_ABS/$name ]] || { printf 'virsh screenshot did not produce %s\n' "$name" >&2; return 1; }
   ssh_arguments
   rsync -a -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" "$ARTIFACTS_PATH_ABS/$name" "$SSH_TARGET:$M10_GUEST_ARTIFACT_DIR/$name" || return
