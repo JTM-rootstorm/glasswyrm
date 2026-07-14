@@ -630,7 +630,7 @@ milestone10_poll_marker() {
         printf '%s\n' "$output"; return 0
       fi
     fi
-    kill -0 "$guest_pid" 2>/dev/null || { wait "$guest_pid" || true; return 1; }
+    kill -0 "$guest_pid" 2>/dev/null || return 1
     sleep .1
   done
   printf 'Timed out waiting for fixed M10 marker %s.\n' "$marker" >&2; return 1
