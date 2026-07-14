@@ -226,11 +226,12 @@ m4_pixel_regression=passed m5_policy_regression=passed m6_metadata_no_ppm_regres
 systemctl stop glasswyrmd-m9.service gwm-m9.service gwcomp-m9.service
 service_results=passed
 (cd /var/tmp && tar -cf "$artifact_dir/milestone9-acceptance.tar" glasswyrm-m9-control glasswyrm-m9-traces glasswyrm-m9-scenes)
+tar -tf "$artifact_dir/milestone9-acceptance.tar" >"$artifact_dir/milestone9-acceptance.members"
 for member in glasswyrm-m9-control/xeyes.json glasswyrm-m9-control/xclock-analog.json \
   glasswyrm-m9-control/xclock-digital.json glasswyrm-m9-control/xeyes.frame \
   glasswyrm-m9-control/xclock-analog.frame glasswyrm-m9-control/xclock-digital.frame \
   glasswyrm-m9-traces/requests.jsonl glasswyrm-m9-scenes/frames.jsonl; do
-  tar -tf "$artifact_dir/milestone9-acceptance.tar" | grep -Fxq "$member"
+  grep -Fxq "$member" "$artifact_dir/milestone9-acceptance.members"
 done
 (cd "$artifact_dir" && sha256sum milestone9-acceptance.tar >milestone9-acceptance.tar.sha256)
 archive_validation=passed failure_stage= scenario_exit=0
