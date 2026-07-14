@@ -5,7 +5,7 @@
 namespace glasswyrm::session {
 
 DirectVirtualTerminalSession::DirectVirtualTerminalSession(
-    VirtualTerminalApi& api, DisplaySessionControl& display) noexcept
+    VirtualTerminalApi &api, DisplaySessionControl &display) noexcept
     : api_(api), display_(display) {}
 
 DirectVirtualTerminalSession::~DirectVirtualTerminalSession() {
@@ -17,13 +17,14 @@ DirectVirtualTerminalSession::~DirectVirtualTerminalSession() {
 }
 
 void DirectVirtualTerminalSession::append_error(const std::string_view detail,
-                                                std::string& error) {
-  if (!error.empty()) error += "; ";
+                                                std::string &error) {
+  if (!error.empty())
+    error += "; ";
   error.append(detail);
 }
 
 void DirectVirtualTerminalSession::append_api_error(
-    const std::string_view operation, std::string& error) const {
+    const std::string_view operation, std::string &error) const {
   std::string detail(operation);
   const auto cause = api_.last_error();
   if (!cause.empty()) {
@@ -33,9 +34,9 @@ void DirectVirtualTerminalSession::append_api_error(
   append_error(detail, error);
 }
 
-bool DirectVirtualTerminalSession::acquire(
-    const std::string_view path, const VirtualTerminalSignals signals,
-    std::string& error) {
+bool DirectVirtualTerminalSession::acquire(const std::string_view path,
+                                           const VirtualTerminalSignals signals,
+                                           std::string &error) {
   error.clear();
   if (state_ != DirectSessionState::Empty) {
     error = "virtual-terminal session was already initialized";
@@ -112,7 +113,8 @@ bool DirectVirtualTerminalSession::acquire(
   }
   graphics_mode_set_ = true;
   if (!display_.acquire_master(error)) {
-    if (error.empty()) error = "acquire DRM master";
+    if (error.empty())
+      error = "acquire DRM master";
     unwind_failed_acquire(error);
     return false;
   }
@@ -121,19 +123,21 @@ bool DirectVirtualTerminalSession::acquire(
   return true;
 }
 
-bool DirectVirtualTerminalSession::release(std::string& error) {
+bool DirectVirtualTerminalSession::release(std::string &error) {
   error.clear();
   if (state_ != DirectSessionState::Active) {
     error = "VT release requires an active direct session";
     return false;
   }
   if (!display_.quiesce_pending_flip(error)) {
-    if (error.empty()) error = "quiesce pending page flip";
+    if (error.empty())
+      error = "quiesce pending page flip";
     state_ = DirectSessionState::Failed;
     return false;
   }
   if (!display_.drop_master(error)) {
-    if (error.empty()) error = "drop DRM master for VT release";
+    if (error.empty())
+      error = "drop DRM master for VT release";
     state_ = DirectSessionState::Failed;
     return false;
   }
@@ -147,7 +151,7 @@ bool DirectVirtualTerminalSession::release(std::string& error) {
   return true;
 }
 
-bool DirectVirtualTerminalSession::reacquire(std::string& error) {
+bool DirectVirtualTerminalSession::reacquire(std::string &error) {
   error.clear();
   if (state_ != DirectSessionState::Suspended) {
     error = "VT acquire requires a suspended direct session";
@@ -159,13 +163,15 @@ bool DirectVirtualTerminalSession::reacquire(std::string& error) {
     return false;
   }
   if (!display_.acquire_master(error)) {
-    if (error.empty()) error = "reacquire DRM master";
+    if (error.empty())
+      error = "reacquire DRM master";
     state_ = DirectSessionState::Failed;
     return false;
   }
   master_owned_ = true;
   if (!display_.present_committed_frame(error)) {
-    if (error.empty()) error = "full modeset of committed frame";
+    if (error.empty())
+      error = "full modeset of committed frame";
     state_ = DirectSessionState::Failed;
     return false;
   }
@@ -173,7 +179,7 @@ bool DirectVirtualTerminalSession::reacquire(std::string& error) {
   return true;
 }
 
-bool DirectVirtualTerminalSession::restore(std::string& error) {
+bool DirectVirtualTerminalSession::restore(std::string &error) {
   error.clear();
   if (state_ == DirectSessionState::Empty ||
       state_ == DirectSessionState::Restored)
@@ -183,8 +189,8 @@ bool DirectVirtualTerminalSession::restore(std::string& error) {
   std::string operation_error;
   if (!master_owned_ && graphics_mode_set_) {
     if (!api_.activate(terminal_fd_, terminal_number_)) {
-      append_api_error("reactivate Glasswyrm virtual terminal for display restore",
-                       error);
+      append_api_error(
+          "reactivate Glasswyrm virtual terminal for display restore", error);
       success = false;
     } else if (!api_.wait_until_active(terminal_fd_, terminal_number_)) {
       append_api_error("wait for Glasswyrm virtual terminal during restore",
@@ -201,17 +207,26 @@ bool DirectVirtualTerminalSession::restore(std::string& error) {
     }
   }
   if (master_owned_) {
+    bool display_restored = true;
     if (!display_.restore_original_display(operation_error)) {
       append_error(operation_error.empty() ? "restore original display"
+                                           : operation_error,
+                   error);
+      success = false;
+      display_restored = false;
+    }
+    operation_error.clear();
+    if (display_restored &&
+        !display_.release_scanout_resources(operation_error)) {
+      append_error(operation_error.empty() ? "release scanout resources"
                                            : operation_error,
                    error);
       success = false;
     }
     operation_error.clear();
     if (!display_.drop_master(operation_error)) {
-      append_error(operation_error.empty() ? "drop DRM master"
-                                           : operation_error,
-                   error);
+      append_error(
+          operation_error.empty() ? "drop DRM master" : operation_error, error);
       success = false;
     } else {
       master_owned_ = false;
@@ -233,8 +248,7 @@ bool DirectVirtualTerminalSession::restore(std::string& error) {
       process_mode_set_ = false;
     }
   }
-  if (activated_ && have_state_ &&
-      saved_state_.active != terminal_number_) {
+  if (activated_ && have_state_ && saved_state_.active != terminal_number_) {
     if (!api_.activate(terminal_fd_, saved_state_.active)) {
       append_api_error("reactivate previous virtual terminal", error);
       success = false;
@@ -250,13 +264,11 @@ bool DirectVirtualTerminalSession::restore(std::string& error) {
   return success;
 }
 
-void DirectVirtualTerminalSession::unwind_failed_acquire(
-    std::string& error) {
+void DirectVirtualTerminalSession::unwind_failed_acquire(std::string &error) {
   if (master_owned_) {
     std::string cleanup_error;
     if (!display_.drop_master(cleanup_error))
-      append_error(cleanup_error.empty() ? "cleanup DRM master"
-                                         : cleanup_error,
+      append_error(cleanup_error.empty() ? "cleanup DRM master" : cleanup_error,
                    error);
     master_owned_ = false;
   }
@@ -270,8 +282,7 @@ void DirectVirtualTerminalSession::unwind_failed_acquire(
       append_api_error("cleanup VT mode", error);
     process_mode_set_ = false;
   }
-  if (activated_ && have_state_ &&
-      saved_state_.active != terminal_number_) {
+  if (activated_ && have_state_ && saved_state_.active != terminal_number_) {
     if (!api_.activate(terminal_fd_, saved_state_.active) ||
         !api_.wait_until_active(terminal_fd_, saved_state_.active))
       append_api_error("cleanup previous virtual terminal", error);

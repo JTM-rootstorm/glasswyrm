@@ -104,7 +104,8 @@ class FakePresenter final
     error.clear();
     return true;
   }
-  void abort_pending(const std::uint64_t token) noexcept override {
+  void abort_pending(const std::uint64_t token,
+                     const std::string_view) noexcept override {
     if (state_->pending_stage && token == state_->pending_token) {
       state_->pending_stage = false;
       ++state_->aborted_diagnostics;
@@ -118,12 +119,15 @@ class FakePresenter final
       const glasswyrm::output::SoftwareFrameView& frame) override {
     return present(frame);
   }
-  void shutdown() noexcept override {
+  glasswyrm::output::BackendStateResult shutdown(
+      std::string& error) noexcept override {
     if (state_->pending_stage) {
       state_->pending_stage = false;
       ++state_->aborted_diagnostics;
     }
     state_->shutdown = true;
+    error.clear();
+    return glasswyrm::output::BackendStateResult::Complete;
   }
 
  private:
@@ -282,9 +286,12 @@ int main() {
   const auto mismatch =
       compositor.service_presentation(ready_events(*state), error);
   gw::test::require(mismatch.kind == PresentationCompletionKind::Fatal &&
-                        compositor.accepted_frames() == 2 && state->shutdown &&
+                        compositor.accepted_frames() == 2 && !state->shutdown &&
                         state->aborted_diagnostics == 1,
-                    "token mismatch is fatal and aborts staged diagnostics");
+                    "token mismatch aborts staged diagnostics before restore");
+  gw::test::require(compositor.shutdown_presentation(error) &&
+                        state->shutdown,
+                    "fatal presentation restores through explicit shutdown");
 
   auto now = gw::compositor::PresentationTiming::Clock::time_point{};
   auto timeout_state = std::make_shared<FakeState>();

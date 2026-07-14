@@ -320,6 +320,12 @@ int run(const Options& options) {
     }
   }
 
+  std::string shutdown_error;
+  if (!compositor.shutdown_presentation(shutdown_error)) {
+    std::fprintf(stderr, "gwcomp: presentation restore failed: %s\n",
+                 shutdown_error.c_str());
+    exit_status = 1;
+  }
   producer.reset();
   listener.reset();
   std::fprintf(stderr, "gwcomp: stopped\n");

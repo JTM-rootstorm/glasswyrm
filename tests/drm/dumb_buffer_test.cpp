@@ -13,10 +13,19 @@
 
 namespace {
 
-enum class Failure { None, Create, AddFramebuffer, MapDumb, MapMemory };
+enum class Failure {
+  None,
+  Create,
+  AddFramebuffer,
+  MapDumb,
+  MapMemory,
+  RemoveFramebuffer,
+  UnmapMemory,
+  DestroyDumb
+};
 
 class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
- public:
+public:
   glasswyrm::drm::DumbAllocation allocation{7, 12, 24};
   Failure failure{Failure::None};
   std::size_t fail_create_call{};
@@ -32,8 +41,8 @@ class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
 
   bool create_dumb(const std::uint32_t width, const std::uint32_t height,
                    const std::uint32_t bits_per_pixel,
-                   glasswyrm::drm::DumbAllocation& output,
-                   std::string& error) override {
+                   glasswyrm::drm::DumbAllocation &output,
+                   std::string &error) override {
     calls.push_back("create");
     ++create_calls;
     gw::test::require(width != 0 && height != 0 && bits_per_pixel == 32,
@@ -47,13 +56,11 @@ class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
     return true;
   }
 
-  bool add_framebuffer2(const std::uint32_t handle,
-                        const std::uint32_t width,
-                        const std::uint32_t height,
-                        const std::uint32_t pitch,
+  bool add_framebuffer2(const std::uint32_t handle, const std::uint32_t width,
+                        const std::uint32_t height, const std::uint32_t pitch,
                         const std::uint32_t format,
-                        std::uint32_t& framebuffer_id,
-                        std::string& error) override {
+                        std::uint32_t &framebuffer_id,
+                        std::string &error) override {
     calls.push_back("addfb2");
     gw::test::require(handle != 0 && width != 0 && height != 0 &&
                           pitch == allocation.pitch &&
@@ -67,8 +74,8 @@ class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
     return true;
   }
 
-  bool map_dumb(const std::uint32_t handle, std::uint64_t& offset,
-                std::string& error) override {
+  bool map_dumb(const std::uint32_t handle, std::uint64_t &offset,
+                std::string &error) override {
     calls.push_back("map_dumb");
     gw::test::require(handle != 0, "MAP_DUMB handle");
     if (failure == Failure::MapDumb) {
@@ -79,8 +86,8 @@ class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
     return true;
   }
 
-  std::byte* map_memory(const std::uint64_t offset, const std::size_t size,
-                        std::string& error) override {
+  std::byte *map_memory(const std::uint64_t offset, const std::size_t size,
+                        std::string &error) override {
     calls.push_back("mmap");
     gw::test::require(offset == 4096 && size == allocation.size,
                       "mmap arguments");
@@ -96,25 +103,43 @@ class FakeDumbBufferApi final : public glasswyrm::drm::DumbBufferApi {
     return additional_mappings.back().data();
   }
 
-  void remove_framebuffer(const std::uint32_t framebuffer_id) noexcept override {
+  bool remove_framebuffer(const std::uint32_t framebuffer_id,
+                          std::string &error) noexcept override {
     calls.push_back("rmfb:" + std::to_string(framebuffer_id));
+    if (failure == Failure::RemoveFramebuffer) {
+      error = "injected RMFB failure";
+      return false;
+    }
+    return true;
   }
-  void unmap_memory(std::byte*, const std::size_t size) noexcept override {
+  bool unmap_memory(std::byte *, const std::size_t size,
+                    std::string &error) noexcept override {
     calls.push_back("unmap:" + std::to_string(size));
+    if (failure == Failure::UnmapMemory) {
+      error = "injected munmap failure";
+      return false;
+    }
+    return true;
   }
-  void destroy_dumb(const std::uint32_t handle) noexcept override {
+  bool destroy_dumb(const std::uint32_t handle,
+                    std::string &error) noexcept override {
     calls.push_back("destroy:" + std::to_string(handle));
+    if (failure == Failure::DestroyDumb) {
+      error = "injected DESTROY_DUMB failure";
+      return false;
+    }
+    return true;
   }
 };
 
-bool ends_with(const std::vector<std::string>& values,
+bool ends_with(const std::vector<std::string> &values,
                const std::span<const std::string> suffix) {
   return values.size() >= suffix.size() &&
          std::equal(suffix.begin(), suffix.end(),
                     values.end() - static_cast<std::ptrdiff_t>(suffix.size()));
 }
 
-}  // namespace
+} // namespace
 
 int main() {
   using namespace glasswyrm::drm;
@@ -128,33 +153,33 @@ int main() {
                         buffer.framebuffer_id() == 70 && buffer.pitch() == 12 &&
                         buffer.size() == 24,
                     "validated dumb-buffer metadata retained");
-  gw::test::require(std::all_of(api.mapping.begin(), api.mapping.end(),
-                               [](const std::byte byte) {
-                                 return byte == std::byte{0};
-                               }),
-                    "complete mapping deterministically cleared");
+  gw::test::require(
+      std::all_of(api.mapping.begin(), api.mapping.end(),
+                  [](const std::byte byte) { return byte == std::byte{0}; }),
+      "complete mapping deterministically cleared");
 
-  const std::vector<std::uint32_t> pixels{
-      0xff112233U, 0x00445566U, 0xff778899U, 0xffaabbccU};
+  const std::vector<std::uint32_t> pixels{0xff112233U, 0x00445566U, 0xff778899U,
+                                          0xffaabbccU};
   std::fill(api.mapping.begin(), api.mapping.end(), std::byte{0xa5});
-  gw::test::require(buffer.copy_from(pixels, error), "full frame copy succeeds");
+  gw::test::require(buffer.copy_from(pixels, error),
+                    "full frame copy succeeds");
   for (std::size_t row = 0; row < 2; ++row) {
     const auto visible_begin = row * 12;
-    gw::test::require(std::equal(
-                          api.mapping.begin() + visible_begin,
-                          api.mapping.begin() + visible_begin + 8,
-                          reinterpret_cast<const std::byte*>(pixels.data()) +
-                              row * 8),
-                      "visible row copied completely");
-    gw::test::require(std::all_of(api.mapping.begin() + visible_begin + 8,
-                                 api.mapping.begin() + visible_begin + 12,
-                                 [](const std::byte byte) {
-                                   return byte == std::byte{0};
-                                 }),
-                      "pitch padding remains zero");
+    gw::test::require(
+        std::equal(api.mapping.begin() + visible_begin,
+                   api.mapping.begin() + visible_begin + 8,
+                   reinterpret_cast<const std::byte *>(pixels.data()) +
+                       row * 8),
+        "visible row copied completely");
+    gw::test::require(
+        std::all_of(api.mapping.begin() + visible_begin + 8,
+                    api.mapping.begin() + visible_begin + 12,
+                    [](const std::byte byte) { return byte == std::byte{0}; }),
+        "pitch padding remains zero");
   }
   gw::test::require(
-      buffer.visible_hash() == glasswyrm::output::hash_visible_xrgb8888(pixels) &&
+      buffer.visible_hash() ==
+              glasswyrm::output::hash_visible_xrgb8888(pixels) &&
           buffer.visible_hash() == 0x4d1416c2755838b5ULL,
       "scanout visible RGB hash equals canonical software-frame hash");
   const std::vector<std::uint32_t> wrong_pixels{0xff000000U};
@@ -174,16 +199,18 @@ int main() {
   invalid = FakeDumbBufferApi{};
   invalid.allocation.pitch = 7;
   invalid.allocation.size = 14;
-  gw::test::require(!DumbBuffer::create(invalid, 2, 2, rejected, error) &&
-                        ends_with(invalid.calls,
-                                  std::array<std::string, 2>{"create", "destroy:7"}),
-                    "undersized pitch rejected and handle destroyed");
+  gw::test::require(
+      !DumbBuffer::create(invalid, 2, 2, rejected, error) &&
+          ends_with(invalid.calls,
+                    std::array<std::string, 2>{"create", "destroy:7"}),
+      "undersized pitch rejected and handle destroyed");
   invalid = FakeDumbBufferApi{};
   invalid.zero_framebuffer_id = true;
-  gw::test::require(!DumbBuffer::create(invalid, 2, 2, rejected, error) &&
-                        ends_with(invalid.calls,
-                                  std::array<std::string, 2>{"addfb2", "destroy:7"}),
-                    "zero AddFB2 framebuffer ID rejected");
+  gw::test::require(
+      !DumbBuffer::create(invalid, 2, 2, rejected, error) &&
+          ends_with(invalid.calls,
+                    std::array<std::string, 2>{"addfb2", "destroy:7"}),
+      "zero AddFB2 framebuffer ID rejected");
   invalid = FakeDumbBufferApi{};
   invalid.allocation.size = 23;
   gw::test::require(!DumbBuffer::create(invalid, 2, 2, rejected, error),
@@ -205,22 +232,20 @@ int main() {
     gw::test::require(!DumbBuffer::create(failing, 2, 2, partial, error),
                       "injected construction failure propagates");
     if (failure == Failure::AddFramebuffer)
-      gw::test::require(ends_with(
-                            failing.calls,
-                            std::array<std::string, 2>{"addfb2", "destroy:7"}),
-                        "AddFB2 failure destroys created handle");
+      gw::test::require(
+          ends_with(failing.calls,
+                    std::array<std::string, 2>{"addfb2", "destroy:7"}),
+          "AddFB2 failure destroys created handle");
     if (failure == Failure::MapDumb)
-      gw::test::require(ends_with(
-                            failing.calls,
-                            std::array<std::string, 3>{"map_dumb", "rmfb:70",
-                                                       "destroy:7"}),
+      gw::test::require(ends_with(failing.calls,
+                                  std::array<std::string, 3>{
+                                      "map_dumb", "rmfb:70", "destroy:7"}),
                         "MAP_DUMB failure removes FB before handle");
     if (failure == Failure::MapMemory)
-      gw::test::require(ends_with(
-                            failing.calls,
-                            std::array<std::string, 3>{"mmap", "rmfb:70",
-                                                       "destroy:7"}),
-                        "mmap failure removes FB before handle");
+      gw::test::require(
+          ends_with(failing.calls,
+                    std::array<std::string, 3>{"mmap", "rmfb:70", "destroy:7"}),
+          "mmap failure removes FB before handle");
   }
 
   FakeDumbBufferApi pair_api;
@@ -233,6 +258,19 @@ int main() {
   pair.promote_back();
   gw::test::require(pair.front().handle() == old_back,
                     "completed back buffer becomes front buffer");
+
+  FakeDumbBufferApi cleanup_api;
+  DumbBuffer cleanup_failure;
+  gw::test::require(
+      DumbBuffer::create(cleanup_api, 2, 2, cleanup_failure, error),
+      "prepare explicit cleanup failure");
+  cleanup_api.failure = Failure::RemoveFramebuffer;
+  gw::test::require(!cleanup_failure.release(error) &&
+                        error == "injected RMFB failure" &&
+                        ends_with(cleanup_api.calls,
+                                  std::array<std::string, 3>{
+                                      "rmfb:70", "unmap:24", "destroy:7"}),
+                    "cleanup failure is reported after all resources unwind");
 
   FakeDumbBufferApi partial_pair_api;
   partial_pair_api.fail_create_call = 2;

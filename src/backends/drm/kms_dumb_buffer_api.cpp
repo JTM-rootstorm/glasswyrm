@@ -20,13 +20,16 @@ std::byte *KmsDumbBufferApi::map_memory(std::uint64_t offset, std::size_t size,
                                         std::string &error) {
   return api_.map_memory(fd_, offset, size, error);
 }
-void KmsDumbBufferApi::remove_framebuffer(std::uint32_t fb) noexcept {
-  api_.remove_framebuffer(fd_, fb);
+bool KmsDumbBufferApi::remove_framebuffer(std::uint32_t fb,
+                                          std::string &error) noexcept {
+  return api_.remove_framebuffer(fd_, fb, error);
 }
-void KmsDumbBufferApi::unmap_memory(std::byte *map, std::size_t size) noexcept {
-  api_.unmap_memory(map, size);
+bool KmsDumbBufferApi::unmap_memory(std::byte *map, std::size_t size,
+                                    std::string &error) noexcept {
+  return api_.unmap_memory(map, size, error);
 }
-void KmsDumbBufferApi::destroy_dumb(std::uint32_t handle) noexcept {
-  api_.destroy_dumb(fd_, handle);
+bool KmsDumbBufferApi::destroy_dumb(std::uint32_t handle,
+                                    std::string &error) noexcept {
+  return api_.destroy_dumb(fd_, handle, error);
 }
 } // namespace glasswyrm::drm

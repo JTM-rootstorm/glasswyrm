@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace glasswyrm::output {
 
@@ -43,13 +44,16 @@ class PresentationBackend {
     error.clear();
     return true;
   }
-  virtual void abort_pending(std::uint64_t token) noexcept {
+  virtual void abort_pending(std::uint64_t token,
+                             std::string_view reason = {}) noexcept {
     static_cast<void>(token);
+    static_cast<void>(reason);
   }
   [[nodiscard]] virtual BackendStateResult suspend(std::string& error) = 0;
   [[nodiscard]] virtual PresentResult resume(
       const SoftwareFrameView& committed) = 0;
-  virtual void shutdown() noexcept = 0;
+  [[nodiscard]] virtual BackendStateResult shutdown(
+      std::string& error) noexcept = 0;
 };
 
 }  // namespace glasswyrm::output

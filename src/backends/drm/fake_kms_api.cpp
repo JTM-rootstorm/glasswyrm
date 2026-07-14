@@ -60,19 +60,27 @@ std::byte *FakeKmsApi::map_memory(int, std::uint64_t off, std::size_t size,
   mappings.emplace_back(size, std::byte{0xa5});
   return mappings.back().data();
 }
-void FakeKmsApi::remove_framebuffer(int, std::uint32_t fb) noexcept {
+bool FakeKmsApi::remove_framebuffer(int, std::uint32_t fb,
+                                    std::string &error) noexcept {
   calls.push_back("rmfb:" + std::to_string(fb));
+  return !reject(KmsOperation::RemoveFramebuffer, error);
 }
-void FakeKmsApi::unmap_memory(std::byte *mapping, std::size_t s) noexcept {
+bool FakeKmsApi::unmap_memory(std::byte *mapping, std::size_t s,
+                              std::string &error) noexcept {
   calls.push_back("unmap:" + std::to_string(s));
+  if (reject(KmsOperation::UnmapMemory, error))
+    return false;
   const auto found =
       std::find_if(mappings.begin(), mappings.end(),
                    [mapping](const auto &m) { return m.data() == mapping; });
   if (found != mappings.end())
     mappings.erase(found);
+  return true;
 }
-void FakeKmsApi::destroy_dumb(int, std::uint32_t h) noexcept {
+bool FakeKmsApi::destroy_dumb(int, std::uint32_t h,
+                              std::string &error) noexcept {
   calls.push_back("destroy_dumb:" + std::to_string(h));
+  return !reject(KmsOperation::DestroyDumb, error);
 }
 bool FakeKmsApi::object_properties(int, KmsObjectType t, std::uint32_t id,
                                    std::vector<ObjectProperty> &out,

@@ -399,10 +399,11 @@ int PresentationTransaction::timeout_ms(const Compositor& compositor) {
   return static_cast<int>(milliseconds.count());
 }
 
-void PresentationTransaction::abort(Compositor& compositor) noexcept {
+void PresentationTransaction::abort(Compositor& compositor,
+                                    const std::string_view reason) noexcept {
   if (!compositor.pending_presentation_) return;
   compositor.presenter_->abort_pending(
-      compositor.pending_presentation_->token_);
+      compositor.pending_presentation_->token_, reason);
   compositor.pending_presentation_.reset();
 }
 
@@ -415,8 +416,7 @@ PresentationCompletion PresentationTransaction::service(
     completion.commit = compositor.pending_presentation_->commit_;
     completion.frame = compositor.pending_presentation_->presented_;
     completion.frame.disposition = PresentedFrame::Disposition::Fatal;
-    abort(compositor);
-    compositor.presenter_->shutdown();
+    abort(compositor, message);
     error = std::move(message);
     return completion;
   };

@@ -21,7 +21,11 @@ class Presenter final : public output::PresentationBackend {
   [[nodiscard]] output::BackendStateResult suspend(std::string& error) override;
   [[nodiscard]] output::PresentResult resume(
       const output::SoftwareFrameView& committed) override;
-  void shutdown() noexcept override {}
+  [[nodiscard]] output::BackendStateResult shutdown(
+      std::string& error) noexcept override {
+    error.clear();
+    return output::BackendStateResult::Complete;
+  }
 
  private:
   FrameDumper dumper_;
