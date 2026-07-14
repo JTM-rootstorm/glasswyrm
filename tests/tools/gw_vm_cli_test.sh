@@ -599,6 +599,11 @@ FACTS
 fi
 
 printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
+if [[ ${GW_VM_TEST_M10_MISSING_SCENE:-0} == 1 &&
+      $script == *'M10 scene manifest is missing or empty:'* ]]; then
+  printf '%s\n' 'M10 scene manifest is missing or empty: /var/tmp/glasswyrm-m10-scenes/scene.jsonl' >&2
+  exit 1
+fi
 if [[ -n ${GW_VM_TEST_FAIL_MATCH:-} && $script == *"$GW_VM_TEST_FAIL_MATCH"* ]]; then
   printf 'injected guest failure for %s\n' "$GW_VM_TEST_FAIL_MATCH" >&2
   exit 42
@@ -681,6 +686,10 @@ if [[ "$*" == *milestone9-acceptance.tar* ]]; then
   rm -rf "$scratch"
 fi
 if [[ "$*" == *milestone10-drm-evidence.tar* ]]; then
+  if [[ ${GW_VM_TEST_M10_MISSING_SCENE:-0} == 1 ]]; then
+    printf '%s\n' 'M10 evidence archive is unavailable after the scene-manifest guard failed.' >&2
+    exit 1
+  fi
   destination=${!#}; scratch=$(mktemp -d)
   printf 'P6\n1 1\n255\n000' >"$scratch/canonical.ppm"
   cp "$scratch/canonical.ppm" "$scratch/milestone10-screen.ppm"
@@ -1450,8 +1459,12 @@ assert_contains "$command_log" 'mask --runtime --now'
 assert_contains "$command_log" 'unmask --runtime'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
 assert_contains "$command_log" 'magick <'
+assert_contains "$command_log" 'M10 scene manifest is missing or empty:'
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
   '>"$control/screenshot-after-vt-ready"' 'touch "$control/post-vt-input"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  'M10 scene manifest is missing or empty:' \
+  'tar -cf "$artifact_dir/milestone10-drm-evidence.tar"'
 scenario_source=$(sed -n '/name == "m10-xeyes-repaint"/,/^  }/p' \
   "$repo_root/tests/integration/gwinput_m8.cpp")
 [[ $(grep -c 'add(K::motion' <<<"$scenario_source") -eq 1 &&
@@ -1472,6 +1485,15 @@ run_failure "$work_dir/milestone10-bad-getty.out" \
   env GW_VM_TEST_BAD_M10_GETTY=1 "$gw_vm" milestone10-runtime-test --yes
 assert_contains "$artifact_dir/milestone10-summary.json" \
   'getty active state was not captured and restored'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-missing-scene.out" \
+  env GW_VM_TEST_M10_MISSING_SCENE=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$artifact_dir/milestone10-runtime-test.log" \
+  'M10 scene manifest is missing or empty: /var/tmp/glasswyrm-m10-scenes/scene.jsonl'
+assert_contains "$work_dir/milestone10-missing-scene.out" 'failed during: guest-runtime'
+[[ ! -e $artifact_dir/milestone10-drm-evidence.tar ]] ||
+  fail 'M10 missing-scene failure unexpectedly produced an evidence archive'
 
 : >"$command_log"
 run_failure "$work_dir/milestone10-bad-archive.out" \

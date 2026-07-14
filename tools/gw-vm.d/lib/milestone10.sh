@@ -702,6 +702,11 @@ result[kms_restore]=passed result[kd_restore]=passed result[vt_mode_restore]=pas
 systemctl stop gwm-m10.service
 verify_service_success; result[service_results]=passed
 restore_getty_state; result[getty_restore]=passed
+failure_stage=evidence-archive
+[[ -s $scenes/scene.jsonl ]] || {
+  printf 'M10 scene manifest is missing or empty: %s\n' "$scenes/scene.jsonl" >&2
+  exit 1
+}
 evidence=$drm_dir/evidence; mkdir -p "$evidence"; cp "$mirror" "$evidence/canonical.ppm"; cp "$artifact_dir/milestone10-screen.ppm" "$artifact_dir/milestone10-screen-after-vt.ppm" "$evidence/"
 cp "$scenes/scene.jsonl" "$evidence/"; find "$dumps" -name frames.jsonl -exec cp {} "$evidence/frames.jsonl" \;
 cp "$artifact_dir"/milestone10-{drm-report.jsonl,kms-before.json,kms-active.json,kms-after.json,vt-before.json,vt-active.json,vt-after.json} "$evidence/"
