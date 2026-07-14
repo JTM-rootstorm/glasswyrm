@@ -18,3 +18,4 @@ Current decisions:
 - [0009: Bridge Server-Rendered Drawables to the Compositor](0009-server-rendered-drawable-bridge.md)
 - [0010: Route Synthetic Input Through the Protocol Server](0010-synthetic-input-routing.md)
 - [0011: Pin Simple Clients and Flatten Child Subtrees](0011-pinned-simple-client-compatibility.md)
+- [0012: Present the Canonical Software Frame Through DRM/KMS](0012-drm-kms-software-scanout.md)

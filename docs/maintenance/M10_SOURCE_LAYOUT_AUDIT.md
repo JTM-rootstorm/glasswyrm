@@ -1,7 +1,8 @@
 # M10 source-layout audit
 
-Status: Phase 1 final snapshot
+Status: Final M10 implementation snapshot
 Required baseline: `fe0faab39f7a6d28157ee6b96a4f6292a0b7984e`
+Final source commit: `fe2ddde19562825e88de8bae31ac6db47f0ff3c1`
 Inventory date: 2026-07-13
 
 ## Method and exact counts
@@ -9,19 +10,96 @@ Inventory date: 2026-07-13
 This inventory covers every non-generated C/C++ source or header under `src/`
 (`.c`, `.cc`, `.cpp`, `.cxx`, `.h`, `.hh`, `.hpp`, and
 `.hxx`). Physical lines are counted as records, including blank and comment
-lines, with `awk 'END { print NR }'`. “Before” is the required baseline commit;
-“after” is the complete Phase 1 semantic-decomposition worktree. A dash in
-“before” means the file was introduced by Phase 1.
+lines, with `awk 'END { print NR }'`. “Before” is the required baseline commit.
+The original per-file inventory below preserves the Phase 1 decomposition
+snapshot at `b03cd37`; the final M10 delta inventory then records every source
+or header added or changed between that snapshot and `fe2ddde`. Together the
+two tables cover every final `src/` C/C++ file. A dash means the file did not
+exist at the earlier snapshot.
 
 | Snapshot | Files | Physical lines |
 |---|---:|---:|
 | Before (`fe0faab`) | 148 | 20970 |
 | After Phase 1 | 190 | 21891 |
+| Final M10 (`fe2ddde`) | 240 | 29340 |
 
-The largest new Phase 1 file is `src/glasswyrmd/request_handlers/lifecycle.cpp` at 390 lines,
-below the 600-line M10 limit. Later M10 output/DRM files extend this inventory's
-“after” tree but are independently guarded as new files by
-`tests/tools/source_layout_test.sh`.
+The largest new Phase 1 file is
+`src/glasswyrmd/request_handlers/lifecycle.cpp` at 390 lines. The largest final
+M10 file is `src/tools/drm_probe.cpp` at 549 lines, followed by
+`src/backends/drm/presenter.cpp` at 544 lines. Both remain below the 600-line
+M10 limit and neither is allowlisted.
+
+## Final M10 delta inventory
+
+This table supersedes the Phase 1 “after” count and description for every path
+listed here. Files not listed here are unchanged from the complete Phase 1
+inventory below. “Dependencies” are direct project-local quoted includes.
+
+| Path | Phase 1 | Final | Primary responsibility and major symbols | Direct internal dependencies | Final disposition |
+|---|---:|---:|---|---|---|
+| `src/backends/drm/connector_name.cpp` | - | 53 | Stable connector type, status, and instance naming; `connector_type_name`, `connection_status_name`, `connector_name` | `connector_name.hpp`, `resources.hpp` | new final DRM model |
+| `src/backends/drm/connector_name.hpp` | - | 18 | Connector naming declarations | - | new narrow interface |
+| `src/backends/drm/connector_selector.cpp` | - | 73 | Connected desktop connector eligibility and ambiguity rejection; `select_connector` | `connector_selector.hpp`, `connector_name.hpp` | new final selector |
+| `src/backends/drm/connector_selector.hpp` | - | 37 | Connector selection status/result contract | `resources.hpp` | new narrow interface |
+| `src/backends/drm/device.cpp` | - | 113 | Sole-owned DRM FD, direct/adopted session identity, and event-cookie lifetime; `Device` | `device.hpp` | new final device owner |
+| `src/backends/drm/device.hpp` | - | 67 | RAII DRM device and session declaration | `drm_api.hpp` | new narrow interface |
+| `src/backends/drm/drm_api.hpp` | - | 101 | Injectable device discovery and page-flip event boundary; `DrmApi`, `DeviceSnapshot`, `PageFlipCookie` | `resources.hpp` | new narrow interface |
+| `src/backends/drm/drm_report.cpp` | - | 481 | Race-resistant staged JSON-lines evidence publication and serialization; `DrmReport`, `serialize_report_record` | `drm_report.hpp` | new final evidence module |
+| `src/backends/drm/drm_report.hpp` | - | 171 | Typed discovery, selection, modeset, flip, VT, restore, and fatal report records | - | new narrow evidence interface |
+| `src/backends/drm/dumb_buffer.cpp` | - | 242 | Checked XRGB8888 dumb-buffer allocation, full copy, hash, promotion, and cleanup; `DumbBuffer`, `DumbBufferPair` | `dumb_buffer.hpp`, `resources.hpp` | new final buffer owner |
+| `src/backends/drm/dumb_buffer.hpp` | - | 88 | RAII scanout-buffer declarations | `dumb_buffer_api.hpp` | new narrow interface |
+| `src/backends/drm/dumb_buffer_api.hpp` | - | 42 | Injectable dumb-buffer syscall boundary; `DumbBufferApi`, `DumbAllocation` | - | new narrow interface |
+| `src/backends/drm/fake_drm_api.cpp` | - | 180 | Deterministic device discovery and page-flip event fake; `FakeDrmApi` | `fake_drm_api.hpp` | new test seam implementation |
+| `src/backends/drm/fake_drm_api.hpp` | - | 70 | Configurable fake DRM device/event contract | `drm_api.hpp` | new test seam interface |
+| `src/backends/drm/fake_kms_api.cpp` | - | 192 | Deterministic KMS state, operation log, and failure injection; `FakeKmsApi` | `fake_kms_api.hpp` | new test seam implementation |
+| `src/backends/drm/fake_kms_api.hpp` | - | 87 | Configurable fake KMS contract and operation model | `kms_api.hpp` | new test seam interface |
+| `src/backends/drm/kms_api.hpp` | - | 158 | Injectable master, dumb-buffer, property, state, atomic, legacy, and readback boundary; `KmsApi`, `KmsMode` | `drm_api.hpp`, `dumb_buffer_api.hpp`, `property_cache.hpp` | new narrow platform interface |
+| `src/backends/drm/kms_dumb_buffer_api.cpp` | - | 35 | Borrowed-FD adapter from `KmsApi` to `DumbBufferApi`; `KmsDumbBufferApi` | `kms_api.hpp` | new final adapter |
+| `src/backends/drm/kms_state.cpp` | - | 199 | Exact KMS capture, atomic request construction, restore, and readback; `ModeBlob`, `capture_saved_state`, `restore_saved_state` | `kms_state.hpp` | new final state module |
+| `src/backends/drm/kms_state.hpp` | - | 62 | Saved route/state and atomic-request declarations | `kms_api.hpp` | new narrow interface |
+| `src/backends/drm/mode_selector.cpp` | - | 60 | Exact-dimension and bounded-refresh mode ranking; `select_mode` | `mode_selector.hpp` | new final selector |
+| `src/backends/drm/mode_selector.hpp` | - | 36 | Mode selection request/status contract | `resources.hpp` | new narrow interface |
+| `src/backends/drm/pipeline_selector.cpp` | - | 83 | Compatible CRTC and XRGB8888 primary-plane selection; `select_crtc`, `select_primary_plane` | `pipeline_selector.hpp` | new final selector |
+| `src/backends/drm/pipeline_selector.hpp` | - | 36 | CRTC/plane selection result contract | `resources.hpp` | new narrow interface |
+| `src/backends/drm/presenter.cpp` | - | 544 | Initial modeset, asynchronous flip state, hashes/evidence, VT transitions, and ordered shutdown; `DrmPresenter` | `presenter.hpp`, connector/mode/pipeline selectors | new final presentation owner |
+| `src/backends/drm/presenter.hpp` | - | 143 | DRM presentation and display-session control contract | device, report, dumb-buffer, KMS, headless-dump, output-presentation, and VT interfaces | new narrow coordinator interface |
+| `src/backends/drm/presenter_pipeline.cpp` | - | 149 | Pipeline choice, atomic TEST_ONLY negotiation, legacy fallback, and initial reports; `select_pipeline`, `configure_api`, `try_atomic` | `presenter.hpp`, connector/mode/pipeline selectors | new final pipeline module |
+| `src/backends/drm/property_cache.cpp` | - | 89 | Exact required atomic-property binding and validation; `build_atomic_property_cache` | `property_cache.hpp` | new final property model |
+| `src/backends/drm/property_cache.hpp` | - | 72 | Typed connector/CRTC/primary-plane property cache | - | new narrow interface |
+| `src/backends/drm/real_drm_api.cpp` | - | 500 | libdrm primary-node open/adopt, canonical discovery, resource enumeration, and `drmHandleEvent`; `RealDrmApi` | `drm_api.hpp` | new final platform boundary |
+| `src/backends/drm/real_kms_api.cpp` | - | 336 | libdrm/ioctl master, dumb-buffer, atomic, legacy, property, and readback calls; `RealKmsApi` | `kms_api.hpp` | new final platform boundary |
+| `src/backends/drm/resources.hpp` | - | 106 | Component-neutral discovered connector, mode, CRTC, plane, and XRGB8888 models | - | new narrow model |
+| `src/backends/headless/frame_dump.cpp` | 132 | 213 | Staged PPM/manifest evidence publication with abort/finalize lifecycle; `FrameDumper`, `StagedFrameDump` | `frame_dump.hpp` | materially extended for async parity |
+| `src/backends/headless/frame_dump.hpp` | 40 | 79 | Staged frame-dump declarations | - | materially extended interface |
+| `src/backends/headless/output.cpp` | 51 | 1 | Compatibility translation unit for the moved software frame | `output.hpp` | reduced compatibility shell |
+| `src/backends/headless/output.hpp` | 39 | 9 | Compatibility aliases to component-neutral `SoftwareFrame` | `software_frame.hpp` | reduced compatibility interface |
+| `src/backends/headless/presenter.cpp` | - | 64 | Immediate headless presentation, staged dump finalization, suspend/resume, and shutdown; `headless::Presenter` | `presenter.hpp` | new final presenter |
+| `src/backends/headless/presenter.hpp` | - | 34 | Headless `PresentationBackend` declaration | `frame_dump.hpp`, `presentation_backend.hpp` | new narrow interface |
+| `src/backends/output/presentation_backend.hpp` | - | 59 | Internal synchronous/asynchronous presentation, service, suspend/resume, and shutdown contract; `PresentationBackend` | `software_frame.hpp` | new component-neutral interface |
+| `src/backends/output/software_frame.cpp` | - | 75 | Bounded canonical XRGB8888 allocation, clear, and visible hashing; `SoftwareFrame` | `software_frame.hpp` | new final canonical frame |
+| `src/backends/output/software_frame.hpp` | - | 65 | Canonical frame/view/spec model and unchanged limits | `compositor/rectangle.hpp` | new narrow interface |
+| `src/backends/session/external_session.cpp` | - | 55 | Close-on-exec inherited-FD duplication and sole-owned cleanup; `ExternalDeviceSession` | `external_session.hpp` | new future broker seam |
+| `src/backends/session/external_session.hpp` | - | 45 | Injectable inherited-FD ownership contract | - | new narrow interface |
+| `src/backends/session/vt_api.cpp` | - | 181 | Linux VT/KD ioctl and exact tty identity implementation; `LinuxVirtualTerminalApi` | `vt_api.hpp` | new final platform boundary |
+| `src/backends/session/vt_api.hpp` | - | 84 | Injectable VT/KD operation and saved-state contract | - | new narrow interface |
+| `src/backends/session/vt_session.cpp` | - | 295 | Direct acquire, release, reacquire, unwind, and ordered restoration state machine; `DirectVirtualTerminalSession` | `vt_session.hpp` | new final session owner |
+| `src/backends/session/vt_session.hpp` | - | 77 | Direct-session and display-control contracts | `vt_api.hpp` | new narrow interface |
+| `src/gwcomp/compositor.cpp` | 176 | 295 | Scene mutation validation plus injected presentation delegation and lifecycle | `compositor.hpp`, `presentation_transaction.hpp`, headless presenter | extended coordinator, below cap |
+| `src/gwcomp/compositor.hpp` | 92 | 137 | Compositor ownership, presentation timing/state, and process-facing completion API | output presentation/frame, scene/buffer, manifest, configuration | extended narrow coordinator interface |
+| `src/gwcomp/contract_dispatch.cpp` | 204 | 246 | GWIPC decoding plus delayed acknowledgement/release finalization | `contract_dispatch.hpp` | extended contract boundary |
+| `src/gwcomp/contract_dispatch.hpp` | 23 | 32 | Dispatch result with pending-frame/reply correlation | `compositor.hpp` | extended narrow interface |
+| `src/gwcomp/drm_runtime.cpp` | - | 217 | CLI-to-device/presenter construction, deterministic automatic device/default-mode choice, and resource lifetime; `create_drm_presenter` | DRM model/device/presenter, headless dump, VT API, options | new final DRM factory |
+| `src/gwcomp/drm_runtime.hpp` | - | 43 | Opaque runtime owners for real DRM/KMS/report/mirror/VT objects | `options.hpp` | new narrow interface |
+| `src/gwcomp/options.cpp` | 91 | 270 | Headless/DRM CLI parsing and direct/external option validation; `parse_options` | `options.hpp`, `config.hpp` | extended CLI module |
+| `src/gwcomp/options.hpp` | 23 | 42 | Backend, KMS API, mode, device, session, mirror, and report options | - | extended narrow model |
+| `src/gwcomp/presentation_transaction.cpp` | 314 | 457 | Candidate render/present state, pending deadline, completion validation, promotion, acknowledgement inputs, and rollback; `PresentationTransaction` | `presentation_transaction.hpp`, `compositor.hpp`, software renderer | extended transaction owner |
+| `src/gwcomp/presentation_transaction.hpp` | 24 | 60 | Owned pending scene/attachment/release/frame transaction | frame, buffer, scene, compositor contracts | extended narrow interface |
+| `src/gwcomp/runtime.cpp` | 236 | 357 | Listener/producer/signal/presentation poll reactor, VT coordination, and ordered shutdown; `run` | dispatch/runtime/signal, output presentation, optional headless/DRM factories | extended top-level coordinator |
+| `src/gwcomp/signal_runtime.cpp` | - | 143 | Tagged self-pipe handlers for stop and VT release/acquire; `SignalRuntime` | `signal_runtime.hpp` | new final signal boundary |
+| `src/gwcomp/signal_runtime.hpp` | - | 37 | Tagged compositor signal event contract | - | new narrow interface |
+| `src/tools/drm_probe.cpp` | - | 549 | Read-only deterministic device/route discovery, KMS snapshot, active, and restored validation; `run_drm_probe` | probe interface plus DRM selectors/device | new final diagnostic tool |
+| `src/tools/drm_probe.hpp` | - | 37 | Probe options and injected-run entry point | `drm_api.hpp` | new narrow interface |
+| `src/tools/drm_probe_main.cpp` | - | 13 | Real-DRM probe process entry | `drm_probe.hpp` | new top-level main |
 
 ## Decomposition result
 
@@ -36,7 +114,7 @@ below the 600-line M10 limit. Later M10 output/DRM files extend this inventory's
 | Input coordination | `server.cpp` | `input_runtime.cpp` using `EventRouter`, `InputRouter`, `InputState`, and `SyntheticInputPeer`. | complete |
 | Lifecycle completion | `server.cpp` | `lifecycle_runtime.cpp`. | complete |
 | Compositor contract dispatch | `gwcomp/main.cpp` | `gwcomp/contract_dispatch.cpp`. | complete |
-| Scene/presentation transaction | `gwcomp/compositor.cpp` | `Compositor` validates mutations; `presentation_transaction.cpp` stages, renders, dumps, promotes, retires buffers, and completes synchronously. | complete |
+| Scene/presentation transaction | `gwcomp/compositor.cpp` | `Compositor` validates mutations; `presentation_transaction.cpp` owns candidate render/submit state and promotes/releases only after synchronous or verified asynchronous completion. | complete |
 | WM contract dispatch | `gwm/main.cpp` | `gwm/contract_dispatch.cpp`. | complete |
 | Process CLI and signals | process mains | 13–17-line mains, existing option parsers, and process-specific signal runtime modules. | complete |
 
@@ -50,11 +128,12 @@ below the 600-line M10 limit. Later M10 output/DRM files extend this inventory's
 | other new server runtime files `<= 500` | maximum 379 | pass |
 | `resource_table.cpp <= 500` | 103 | pass |
 | `gwcomp/main.cpp <= 250` | 13 | pass |
-| `gwcomp/runtime.cpp <= 600` | 236 | pass |
-| `gwcomp/compositor.cpp <= 600` | 176 | pass |
-| `presentation_transaction.cpp <= 600` | 314 | pass |
+| `gwcomp/runtime.cpp <= 500` | 357 | pass |
+| `gwcomp/compositor.cpp <= 600` | 295 | pass |
+| `presentation_transaction.cpp <= 600` | 457 | pass |
 | `gwm/main.cpp <= 250` | 13 | pass |
-| all new/materially rewritten M10 files `<= 600` | maximum 390 | pass |
+| new DRM presenter/runtime/probe files `<= 600` | maximum 549 | pass |
+| all new/materially rewritten M10 files `<= 600` | maximum 549 | pass |
 | all `src` C/C++ files `<= 1,000` or reviewed | only `ipc/connection.cpp` at 1,361 | pass via reviewed allowlist |
 
 ## Reviewed function spans
@@ -68,8 +147,8 @@ hard-file allowlist entries.
 |---|---:|---|---|
 | `CompositorPeer::submit` in `compositor_peer.cpp:115` | 152 | Keep the serialized snapshot/content submission and acknowledgement state transition together; splitting would duplicate peer transaction invariants. | M11 peer-state review |
 | `ServerRuntime::service_input` in `input_runtime.cpp:12` | 163 | Keep record ordering, state transition, event delivery, focus deferral, and acknowledgement in one single-threaded input turn. | M11 input-routing review |
-| `PresentationTransaction::commit` in `presentation_transaction.cpp:70` | 243 | Keep validate/render/dump/promote rollback points visible as one atomic synchronous transaction until asynchronous backend completion is introduced. | M10 presentation-backend phase |
-| `run` in `gwcomp/runtime.cpp:83` | 152 | Keep the single listener/producer/signal reactor explicit; contract semantics are already extracted and the function is only two lines above review threshold. | M10 DRM event integration |
+| `PresentationTransaction::commit` in `presentation_transaction.cpp:111` | 277 | Keep candidate validation/rendering, backend submit, synchronous completion, and owned asynchronous rollback points in one atomic transaction; event service/finalization is already separate. | M11 transaction-state review |
+| `run` in `gwcomp/runtime.cpp:85` | 271 | Keep one explicit single-threaded listener/producer/signal/presentation reactor so pending-frame and VT gating remain visible; CLI construction, contract semantics, signal plumbing, and DRM initialization are separate modules. | M11 reactor review |
 | `validate_application` in `ipc/connection.cpp:249` | 183 | Keep the exhaustive wire-type/capability/FD validation switch centralized at the transport trust boundary. | M11 IPC-internals review |
 | `receive_one` in `ipc/connection.cpp:647` | 365 | Keep one recvmsg transaction responsible for credentials, ancillary FDs, envelope validation, and queue admission cleanup. | M11 IPC-internals review |
 | `gwipc_connection_enqueue_with_sequence` in `ipc/connection.cpp:1189` | 151 | Keep public C-ABI validation and atomic sequence/queue admission together. | M11 IPC-internals review |
@@ -285,5 +364,6 @@ ordinary-function target and explicit review findings over 150 lines. It also
 rejects stale, missing, malformed, duplicate, or newly introduced
 DRM/VT/presentation/runtime allowlist entries.
 
-At this Phase 1 snapshot the guard passes. The sole hard-default exception is
-`src/ipc/connection.cpp`; no new M10 file is allowlisted.
+At final source commit `fe2ddde` the guard passes with eight reviewed function
+spans. The sole hard-default exception is `src/ipc/connection.cpp`; no new M10
+file is allowlisted.
