@@ -555,11 +555,17 @@ canonical_hash=0123456789abcdef
 scanout_hash=0123456789abcdef
 mirror_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 screenshot_hash=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+getty_unit=getty@tty2.service
+getty_active_before=active
+getty_enabled_before=enabled
+getty_active_after=active
+getty_enabled_after=enabled
 FACTS
-      for result in strict_tests source_layout_audit source_layout_budget refactor_parity sanitizer clang headless_no_libdrm dual_backend drm_only historical_components m4_m9_regressions initial_modeset page_flip delayed_ack delayed_release hash_parity screenshot_equal vt_release vt_acquire remodeset post_vt_screenshot_equal kms_restore kd_restore vt_mode_restore active_vt_restore getty_restore device_exclusivity service_results socket_cleanup archive_validation journal_evidence; do
+      for result in strict_tests source_layout_audit source_layout_budget refactor_parity sanitizer clang headless_no_libdrm dual_backend drm_only historical_components m4_m9_regressions m9_golden_mirror initial_modeset page_flip delayed_ack delayed_release hash_parity screenshot_equal vt_release vt_acquire remodeset post_vt_repaint post_vt_screenshot_equal kms_restore kd_restore vt_mode_restore active_vt_restore getty_restore device_exclusivity service_hardening service_results socket_cleanup archive_validation journal_evidence; do
         printf '%s=passed\n' "$result"
       done
       if [[ ${GW_VM_TEST_BAD_M10_FACTS:-0} == 1 ]]; then printf 'page_flip=failed\nscenario_exit=1\n'; fi
+      if [[ ${GW_VM_TEST_BAD_M10_GETTY:-0} == 1 ]]; then printf 'getty_active_after=inactive\n'; fi
       ;;
     milestone10-drm-probe.json) printf '{"device":"/dev/dri/card0","driver":"virtio_gpu","connector":"Virtual-1","mode":"1024x768"}\n' ;;
     milestone10-drm-report.jsonl) printf '{"record":"selection","api":"atomic"}\n' ;;
@@ -1406,7 +1412,7 @@ assert_contains "$work_dir/milestone10.out" 'reset; milestone9-runtime-test; res
 assert_contains "$artifact_dir/milestone10-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone10-summary.json" \
   '"required_base_commit": "fe0faab39f7a6d28157ee6b96a4f6292a0b7984e"'
-for expected in /var/tmp/glasswyrm-build-m10 /var/tmp/glasswyrm-build-m10-asan /var/tmp/glasswyrm-build-m10-runtime /var/tmp/glasswyrm-build-m10-drm-only /var/tmp/glasswyrm-build-m10-headless /var/tmp/glasswyrm-build-m10-server /var/tmp/glasswyrm-build-m10-gwm /var/tmp/glasswyrm-build-m10-ipc-only /var/tmp/glasswyrm-m10-dumps /var/tmp/glasswyrm-m10-scenes /var/tmp/glasswyrm-m10-drm /var/tmp/glasswyrm-m10-control /var/tmp/glasswyrm-m10-artifacts x11-libs/libdrm -Ddrm_backend=false -Ddrm_backend=true -Dheadless_backend=false -Dasan=true -Dubsan=true source_layout_test.sh gw_drm_probe '--require-mode 1024x768' '--snapshot-state' '--expect-active' '--expect-restored' getty@tty2.service gwm-m10 gwcomp-m10 glasswyrmd-m10 '--backend drm' '--mirror-dump-dir' '--drm-report' screenshot-ready screen-captured screenshot-after-vt-ready screen-after-vt-captured 'chvt 1' 'chvt 2' milestone10-kms-before.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-after.json; do
+for expected in /var/tmp/glasswyrm-build-m10 /var/tmp/glasswyrm-build-m10-asan /var/tmp/glasswyrm-build-m10-runtime /var/tmp/glasswyrm-build-m10-drm-only /var/tmp/glasswyrm-build-m10-headless /var/tmp/glasswyrm-build-m10-server /var/tmp/glasswyrm-build-m10-gwm /var/tmp/glasswyrm-build-m10-ipc-only /var/tmp/glasswyrm-m10-dumps /var/tmp/glasswyrm-m10-scenes /var/tmp/glasswyrm-m10-drm /var/tmp/glasswyrm-m10-control /var/tmp/glasswyrm-m10-artifacts x11-libs/libdrm 'qlist -IC x11-libs/libdrm' 'ldd "$headless/src/gwcomp"' -Ddrm_backend=false -Ddrm_backend=true -Dheadless_backend=false -Dasan=true -Dubsan=true source_layout_test.sh 'drm-ipc-integration.*OK' gw_drm_probe '--device auto' '--require-mode 1024x768' '--snapshot-state' '--expect-active' '--expect-restored' 'getty_unit=getty@${target_vt##*/}.service' gwm-m10 gwcomp-m10 glasswyrmd-m10 '--backend drm' '--mirror-dump-dir' '--drm-report' 'DevicePolicy=closed' 'DeviceAllow=$drm_device rw' 'DeviceAllow=$target_vt rw' 'StandardInput=tty-force' 'TTYReset=yes' 'TTYVHangup=yes' 'TTYVTDisallocate=no' 'VT_GETSTATE=0x5603' 'KDGETMODE=0x4B3B' 'ExecMainStatus 0' 'tests/fixtures/m9/combined.ppm' 'm10_live_combined.sh' 'post-vt-input-complete' 'post-VT xeyes repaint' '/sys/kernel/debug/dri/' screenshot-ready screen-captured screenshot-after-vt-ready screen-after-vt-captured 'chvt 1' 'chvt 2' milestone10-kms-before.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-after.json; do
   assert_contains "$command_log" "$expected"
 done
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
@@ -1419,6 +1425,12 @@ done
 run_failure "$work_dir/milestone10-bad-facts.out" \
   env GW_VM_TEST_BAD_M10_FACTS=1 "$gw_vm" milestone10-runtime-test --yes
 assert_contains "$artifact_dir/milestone10-summary.json" 'page_flip must be passed'
+
+: >"$command_log"
+run_failure "$work_dir/milestone10-bad-getty.out" \
+  env GW_VM_TEST_BAD_M10_GETTY=1 "$gw_vm" milestone10-runtime-test --yes
+assert_contains "$artifact_dir/milestone10-summary.json" \
+  'getty active state was not captured and restored'
 
 : >"$command_log"
 run_failure "$work_dir/milestone10-bad-archive.out" \
