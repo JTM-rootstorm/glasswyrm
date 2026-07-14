@@ -955,7 +955,7 @@ M6  Three-process mapped-window lifecycle       complete
 M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
-M10 DRM/KMS software scanout                    implementation complete; hardware acceptance pending
+M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
@@ -1023,11 +1023,11 @@ uses two linear XRGB8888 dumb buffers, exact-size single-output selection,
 verified atomic modesetting with a documented legacy fallback, delayed frame
 acknowledgement/release, direct and inherited session boundaries, process-mode
 VT switching, and ordered KMS/KD/VT restoration. DRM and VT behavior has
-deterministic fake-backed host coverage and a fixed Gentoo VM harness. Live
-graphical-console acceptance remains pending because the configured guest did
-not expose `/dev/dri` or a usable DRM kernel driver on 2026-07-13; the project
-does not claim screenshot, VT-switch, or live restoration acceptance until
-that prerequisite is provided and the evidence archive passes.
+deterministic fake-backed host coverage and a fixed Gentoo VM acceptance route.
+The configured QXL guest validates the real primary node, atomic KMS
+presentation, exact graphical-console screenshots, VT release/acquire,
+post-acquire repaint, ordered restoration, and the checksum-protected evidence
+archive.
 
 ## 26. Definition of done
 

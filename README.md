@@ -4,9 +4,9 @@ Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 modern Linux, focused on clean internals, explicit display policy, HDR, VRR,
 and per-output scaling.
 
-The Milestone 10 DRM/KMS software-scanout implementation is complete; live M10
-hardware acceptance remains pending because the configured Gentoo VM currently
-has no DRM primary node.
+Milestone 10 DRM/KMS software scanout is complete and validated on the
+configured Gentoo QXL VM through its real DRM primary node, graphical console,
+and VT lifecycle.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -221,6 +221,7 @@ and primary DRM node:
   --mode 1024x768 \
   --drm-api auto \
   --mirror-dump-dir /var/tmp/glasswyrm-mirror \
+  --scene-manifest /var/tmp/glasswyrm-scenes.jsonl \
   --drm-report /var/tmp/glasswyrm-drm.jsonl
 ./build-drm/src/glasswyrmd --display 99 \
   --wm-socket /run/glasswyrm/gwm.sock \
@@ -245,10 +246,12 @@ The fixed hardware acceptance route is:
 ./tools/gw-vm milestone10-runtime-test --yes
 ```
 
-That route is currently blocked by the configured guest lacking `/dev/dri` and
-a matching kernel DRM driver. Mocked host coverage is not a substitute for the
-required graphical-console, VT-switch, and restoration evidence; no live M10
-acceptance pass is claimed yet.
+The accepted route starts from the single internal `base` snapshot, proves the
+historical M9 gate before libdrm is installed, resets to `base`, then validates
+QXL atomic KMS scanout, exact screenshots, VT release/acquire, a later
+input-driven repaint, ordered restoration, and the checksum-protected evidence
+archive. Mocked host coverage remains an additional regression layer rather
+than a substitute for this graphical-console proof.
 
 ## Setup probes
 
@@ -441,9 +444,10 @@ The Milestone 9 pinned-client and Milestone 10 DRM acceptance commands are:
 ```
 
 M10 starts from the accepted M9-clean guest, installs libdrm without Mesa or an
-X server, and requires a pre-existing kernel DRM primary node. The current
-configured guest does not meet that last prerequisite, so the M10 command has
-not produced an accepted runtime result.
+X server, and requires a pre-existing kernel DRM primary node. The configured
+QXL guest meets that boundary and the command validates atomic scanout,
+graphical-console screenshots, VT switching, input-driven repaint, restoration,
+and the required binary evidence archive.
 
 ## Compatibility
 
