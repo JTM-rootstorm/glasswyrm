@@ -39,6 +39,10 @@ The fixed harness command is:
 ./tools/gw-vm milestone10-runtime-test --yes
 ```
 
+The host requires ImageMagick's `magick` command. Libvirt may emit a PNG even
+when the requested filename ends in `.ppm`; the harness therefore converts the
+native capture explicitly to an 8-bit binary P6 PPM before exact comparison.
+
 It must be preceded by the separate M9-clean gate and snapshot reset described
 below. The M10 command verifies source identity, proves the default headless
 build while libdrm is still absent, installs the narrow DRM dependency, builds

@@ -44,8 +44,10 @@ the fixed guest destination used by Milestone 1 source validation.
 
 ## Host Requirements
 
-The host needs Bash, OpenSSH (`ssh`), `rsync`, `virsh`, and Python 3 for JSON
-report generation. Run the preflight check before a packaging test:
+The host needs Bash, OpenSSH (`ssh`), `rsync`, `virsh`, ImageMagick (`magick`),
+and Python 3 for JSON report generation. ImageMagick normalizes libvirt's
+display-native screenshot format to the exact P6 PPM consumed by the M10
+equality proof. Run the preflight check before a packaging test:
 
 ```sh
 ./tools/gw-vm doctor
