@@ -52,7 +52,7 @@ void usage(FILE* output) {
       "Usage: gwinput_m8 --socket PATH --scenario NAME --output PATH\n"
       "Scenarios: barrier, motion, crossing, buttons, button-motion, "
       "modifiers, keyboard, click-focus, invalid-transition, malformed, "
-      "queue-limit, reconnect, m9-xeyes\n");
+      "queue-limit, reconnect, m9-xeyes, m10-xeyes-repaint\n");
 }
 
 bool known_scenario(std::string_view name) {
@@ -61,7 +61,8 @@ bool known_scenario(std::string_view name) {
          name == "modifiers" || name == "keyboard" ||
          name == "click-focus" || name == "invalid-transition" ||
          name == "malformed" || name == "queue-limit" ||
-         name == "reconnect" || name == "m9-xeyes";
+         name == "reconnect" || name == "m9-xeyes" ||
+         name == "m10-xeyes-repaint";
 }
 
 bool pump(gwipc_connection* connection, int timeout_ms) {
@@ -235,6 +236,11 @@ std::vector<Record> scenario(std::string_view name) {
     add(K::barrier, 0);
     add(K::motion, 5, 700, 500);
     add(K::barrier, 0);
+  } else if (name == "m10-xeyes-repaint") {
+    add(K::motion, 2, 35, 55);
+    add(K::barrier, 0);
+    add(K::motion, 3, 0, 0);
+    add(K::barrier, 0);
   }
   return result;
 }
@@ -284,7 +290,8 @@ int main(int argc, char** argv) {
     gwipc_synthetic_input_acknowledged ack{};
     if (!receive_ack(connection.get(), ack) || ack.input_id != record.id) return 1;
     acknowledgements.push_back(ack);
-    if (name == "m9-xeyes" && record.kind == Record::Kind::barrier)
+    if ((name == "m9-xeyes" || name == "m10-xeyes-repaint") &&
+        record.kind == Record::Kind::barrier)
       std::this_thread::sleep_for(std::chrono::milliseconds(350));
   }
   std::ofstream stream(output);
