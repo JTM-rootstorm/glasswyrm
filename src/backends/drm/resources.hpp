@@ -39,6 +39,17 @@ struct Mode {
   std::uint32_t refresh_millihz{};
   std::uint32_t clock_khz{};
   bool preferred{false};
+  std::uint16_t hsync_start{};
+  std::uint16_t hsync_end{};
+  std::uint16_t htotal{};
+  std::uint16_t hskew{};
+  std::uint16_t vsync_start{};
+  std::uint16_t vsync_end{};
+  std::uint16_t vtotal{};
+  std::uint16_t vscan{};
+  std::uint32_t flags{};
+  std::uint32_t type{};
+  std::uint32_t vrefresh_hz{};
 };
 
 struct Connector {
@@ -56,6 +67,11 @@ struct Crtc {
   std::uint32_t id{};
   std::uint32_t index{};
   std::vector<std::uint32_t> connector_ids;
+  std::uint32_t framebuffer_id{};
+  std::uint32_t x{};
+  std::uint32_t y{};
+  bool active{};
+  Mode mode{};
 };
 
 enum class PlaneType { Unknown, Primary, Cursor, Overlay };
@@ -76,6 +92,15 @@ struct Plane {
   std::uint32_t possible_crtc_mask{};
   std::vector<std::uint32_t> formats;
   std::uint32_t current_crtc_id{};
+  std::uint32_t framebuffer_id{};
+  std::int32_t crtc_x{};
+  std::int32_t crtc_y{};
+  std::uint32_t crtc_width{};
+  std::uint32_t crtc_height{};
+  std::uint32_t source_x{};
+  std::uint32_t source_y{};
+  std::uint32_t source_width{};
+  std::uint32_t source_height{};
 };
 
-}  // namespace glasswyrm::drm
+} // namespace glasswyrm::drm
