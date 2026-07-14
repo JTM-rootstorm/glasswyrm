@@ -7,6 +7,7 @@ GW_VM_MILESTONE10_LOADED=1
 M10_REQUIRED_BASE_COMMIT=fe0faab39f7a6d28157ee6b96a4f6292a0b7984e
 M10_GUEST_ARTIFACT_DIR=/var/tmp/glasswyrm-m10-artifacts
 M10_GUEST_CONTROL_DIR=/var/tmp/glasswyrm-m10-control
+M10_SCREENSHOT_WAIT_SECONDS=1800
 M10_TESTED_COMMIT=
 M10_TEXT_ARTIFACTS=(milestone10-runtime-test.log milestone10-meson-test.log
   milestone10-drm-probe.json milestone10-drm-report.jsonl
@@ -618,7 +619,8 @@ GUEST_SCRIPT
 
 milestone10_poll_marker() {
   local marker=$1 guest_pid=$2 output='' canonical scanout
-  for _ in {1..600}; do
+  local deadline=$((SECONDS + M10_SCREENSHOT_WAIT_SECONDS))
+  while ((SECONDS < deadline)); do
     if output=$(guest_run_script 'set -euo pipefail; test -f "$1"; cat "$1"' "$M10_GUEST_CONTROL_DIR/$marker" 2>/dev/null); then
       canonical=$(sed -n 's/^canonical_hash=//p' <<<"$output")
       scanout=$(sed -n 's/^scanout_hash=//p' <<<"$output")
