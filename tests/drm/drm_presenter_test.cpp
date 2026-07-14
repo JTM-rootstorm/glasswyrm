@@ -134,8 +134,9 @@ struct Rig {
 };
 
 output::SoftwareFrameView frame(std::span<const std::uint32_t> pixels,
-                                std::uint64_t ordinal) {
-  return {{1, 2, 2, 60'000}, pixels, {}, ordinal, ordinal, ordinal};
+                                std::uint64_t ordinal,
+                                std::uint32_t refresh = 60'000) {
+  return {{1, 2, 2, refresh}, pixels, {}, ordinal, ordinal, ordinal};
 }
 
 std::string contents(const std::filesystem::path& path) {
@@ -192,6 +193,19 @@ void atomic_lifecycle_and_delayed_evidence() {
                         std::filesystem::exists(rig.directory / "mirror" /
                             "frame-000002-output-0000000000000001.ppm"),
                     "finalize publishes report, mirror, and swaps buffers");
+}
+
+void presentation_refresh_tolerance() {
+  Rig rig(DrmPresentationApi::Atomic);
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U, 0xff404040U};
+  gw::test::require(
+      rig.presenter->present(frame(pixels, 1, 60'003)).disposition ==
+          output::PresentDisposition::Complete,
+      "presentation accepts the selected mode refresh tolerance");
+  gw::test::require(
+      rig.presenter->present(frame(pixels, 2, 61'001)).disposition ==
+          output::PresentDisposition::Rejected,
+      "presentation rejects refresh outside the selected mode tolerance");
 }
 
 void policy_and_legacy_requests() {
@@ -342,6 +356,7 @@ void external_session_never_manages_master() {
 
 int main() {
   atomic_lifecycle_and_delayed_evidence();
+  presentation_refresh_tolerance();
   policy_and_legacy_requests();
   mismatch_resume_and_shutdown_order();
   fatal_abort_and_shutdown_failure_are_observable();
