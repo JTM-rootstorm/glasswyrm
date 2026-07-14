@@ -137,6 +137,8 @@ facts=$artifact_dir/milestone10-facts.env runtime_log=$artifact_dir/milestone10-
 failure_stage=kernel-prerequisite scenario_exit=1 getty_was_active=false clients_pid=
 getty_unit=getty@${target_vt##*/}.service getty_state_captured=false
 getty_active_before=unknown getty_enabled_before=unknown
+logind_unit=systemd-logind.service logind_state_captured=false
+logind_active_before=unknown logind_active_after=unknown
 getty_active_after=unknown getty_enabled_after=unknown
 results=(strict_tests source_layout_audit source_layout_budget refactor_parity sanitizer clang
  headless_no_libdrm dual_backend drm_only historical_components m4_m9_regressions
@@ -198,6 +200,22 @@ restore_getty_state() {
   [[ $getty_active_after == "$getty_active_before" &&
      $getty_enabled_after == "$getty_enabled_before" ]]
 }
+capture_logind_state() {
+  logind_active_before=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
+  [[ $logind_active_before == active || $logind_active_before == inactive ]]
+  logind_state_captured=true
+}
+restore_logind_state() {
+  [[ $logind_state_captured == true ]] || return 0
+  if [[ $logind_active_before == active ]]; then
+    systemctl start "$logind_unit" >/dev/null 2>&1 || return 1
+  else
+    systemctl stop "$logind_unit" >/dev/null 2>&1 || return 1
+  fi
+  logind_active_after=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
+  printf 'logind_restore unit=%s active=%s\n' "$logind_unit" "$logind_active_after"
+  [[ $logind_active_after == "$logind_active_before" ]]
+}
 unit_property_equals() {
   local unit=$1 property=$2 expected=$3 actual
   actual=$(systemctl show "$unit" --property="$property" --value)
@@ -231,6 +249,10 @@ record_facts() {
     wait "$clients_pid" >/dev/null 2>&1 || true
   fi
   systemctl stop glasswyrmd-m10.service gwcomp-m10.service gwm-m10.service >/dev/null 2>&1
+  if ! restore_logind_state; then
+    [[ $status != 0 ]] || { status=1; scenario_exit=1; failure_stage=logind-restore; }
+    result[device_exclusivity]=failed
+  fi
   if restore_getty_state; then
     [[ $getty_state_captured == false ]] || result[getty_restore]=passed
   else
@@ -252,6 +274,8 @@ record_facts() {
     printf 'drm_crtc=%s\ndrm_primary_plane=%s\ndumb_buffer=%s\natomic_capability=%s\ndrm_api=%s\natomic_test_only=%s\n' "${drm_crtc:-unknown}" "${drm_plane:-unknown}" "${dumb_buffer:-unknown}" "${atomic_capability:-unknown}" "${drm_api:-unknown}" "${atomic_test_only:-unknown}"
     printf 'canonical_hash=%s\nscanout_hash=%s\nmirror_hash=%s\nscreenshot_hash=%s\n' "${canonical_hash:-unknown}" "${scanout_hash:-unknown}" "${mirror_hash:-unknown}" "${screenshot_hash:-unknown}"
     printf 'getty_unit=%s\ngetty_active_before=%s\ngetty_enabled_before=%s\ngetty_active_after=%s\ngetty_enabled_after=%s\n' "$getty_unit" "$getty_active_before" "$getty_enabled_before" "$getty_active_after" "$getty_enabled_after"
+    printf 'logind_unit=%s\nlogind_active_before=%s\nlogind_active_after=%s\n' \
+      "$logind_unit" "$logind_active_before" "$logind_active_after"
     for key in "${results[@]}"; do printf '%s=%s\n' "$key" "${result[$key]}"; done
   } >"$facts"
   exit "$status"
@@ -362,6 +386,9 @@ drm_device=$probed_device connector=$probed_connector
 capture_vt_state "$artifact_dir/milestone10-vt-before.json"
 capture_getty_state
 [[ $getty_was_active == false ]] || systemctl stop "$getty_unit"
+capture_logind_state
+[[ $logind_active_before != active ]] || systemctl stop "$logind_unit"
+[[ $(systemctl is-active "$logind_unit" 2>/dev/null || true) == inactive ]]
 
 failure_stage=drm-runtime
 gwm_socket=/run/glasswyrm-m10-gwm/gwm.sock comp_socket=/run/glasswyrm-m10-gwcomp/gwcomp.sock input_socket=/run/glasswyrm-m10-input/input.sock
