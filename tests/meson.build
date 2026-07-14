@@ -597,6 +597,7 @@ if get_option('drm_backend')
   foreach drm_api_test : [
     ['drm-device-api', 'device_api_test.cpp'],
     ['drm-fake-events', 'fake_drm_event_test.cpp'],
+    ['drm-kms-api', 'kms_api_test.cpp'],
   ]
     drm_api_test_executable = executable(
       drm_api_test[0].underscorify(),

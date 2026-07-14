@@ -117,7 +117,11 @@ if get_option('drm_backend')
     files(
       'backends/drm/device.cpp',
       'backends/drm/fake_drm_api.cpp',
+      'backends/drm/fake_kms_api.cpp',
+      'backends/drm/kms_dumb_buffer_api.cpp',
+      'backends/drm/kms_state.cpp',
       'backends/drm/real_drm_api.cpp',
+      'backends/drm/real_kms_api.cpp',
     ),
     dependencies: [gw_drm_model_dep, libdrm_dep],
     include_directories: include_directories('.'),
