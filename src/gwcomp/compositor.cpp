@@ -221,6 +221,45 @@ PresentationCompletion Compositor::service_presentation(
   return PresentationTransaction::service(*this, revents, error);
 }
 
+bool Compositor::suspend_presentation(std::string& error) {
+  if (pending_presentation_) {
+    error = "cannot suspend while a presentation is pending";
+    return false;
+  }
+  if (presentation_suspended_) {
+    error = "presentation backend is already suspended";
+    return false;
+  }
+  if (presenter_->suspend(error) !=
+      glasswyrm::output::BackendStateResult::Complete)
+    return false;
+  presentation_suspended_ = true;
+  error.clear();
+  return true;
+}
+
+bool Compositor::resume_presentation(std::string& error) {
+  if (!presentation_suspended_) {
+    error = "presentation backend is not suspended";
+    return false;
+  }
+  const glasswyrm::output::SoftwareFrameView committed{
+      output_.spec(), output_.pixels(), {}, 0, last_generation_,
+      frame_ordinal_};
+  const auto resumed = presenter_->resume(committed);
+  if (resumed.disposition !=
+          glasswyrm::output::PresentDisposition::Complete ||
+      resumed.visible_hash != output_.visible_hash()) {
+    error = resumed.error.empty()
+                ? "presentation backend did not restore the committed frame"
+                : resumed.error;
+    return false;
+  }
+  presentation_suspended_ = false;
+  error.clear();
+  return true;
+}
+
 void Compositor::disconnect() {
   PresentationTransaction::abort(*this);
   scene_.disconnect();

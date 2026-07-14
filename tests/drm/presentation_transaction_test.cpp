@@ -362,5 +362,21 @@ int main() {
               Disposition::Fatal &&
           immediate_fatal.accepted_frames() == 0,
       "fatal submission result never promotes or counts a frame");
+
+  auto vt_state = std::make_shared<FakeState>();
+  vt_state->dispositions = {PresentDisposition::Complete,
+                            PresentDisposition::Complete};
+  gw::compositor::Compositor vt_compositor(
+      std::make_unique<FakePresenter>(vt_state));
+  gw::test::require(snapshot(vt_compositor, 61, 0xffabcdefU, error) &&
+                        vt_compositor.commit(frame(1), error).disposition ==
+                            Disposition::Complete &&
+                        vt_compositor.suspend_presentation(error) &&
+                        vt_compositor.presentation_suspended(),
+                    "completed presentation may enter suspended state");
+  gw::test::require(vt_compositor.resume_presentation(error) &&
+                        !vt_compositor.presentation_suspended() &&
+                        vt_compositor.accepted_frames() == 1,
+                    "resume re-presents without a new producer frame count");
   return 0;
 }
