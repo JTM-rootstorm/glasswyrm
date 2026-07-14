@@ -193,6 +193,19 @@ void write_modes(std::ostream& output, const drm::Connector& connector) {
   output << ']';
 }
 
+void write_current_mode(std::ostream& output, const drm::Crtc& crtc) {
+  if (!crtc.active) {
+    output << "null";
+    return;
+  }
+  output << "{\"name\":";
+  json_string(output, crtc.mode.name);
+  output << ",\"width\":" << crtc.mode.width << ",\"height\":"
+         << crtc.mode.height << ",\"refresh_millihz\":"
+         << crtc.mode.refresh_millihz << ",\"clock_khz\":"
+         << crtc.mode.clock_khz << '}';
+}
+
 std::string snapshot_json(const drm::DeviceSnapshot& snapshot,
                           const std::optional<SelectedCandidate>& selected) {
   std::ostringstream output;
@@ -238,7 +251,11 @@ std::string snapshot_json(const drm::DeviceSnapshot& snapshot,
     if (index != 0) output << ',';
     const auto& crtc = snapshot.crtcs[index];
     output << "{\"id\":" << crtc.id << ",\"index\":" << crtc.index
-           << ",\"current_mode\":null,\"current_framebuffer_id\":null"
+           << ",\"current_mode\":";
+    write_current_mode(output, crtc);
+    output << ",\"current_framebuffer_id\":" << crtc.framebuffer_id
+           << ",\"x\":" << crtc.x << ",\"y\":" << crtc.y
+           << ",\"active\":" << (crtc.active ? "true" : "false")
            << ",\"connector_ids\":[";
     for (std::size_t route = 0; route < crtc.connector_ids.size(); ++route) {
       if (route != 0) output << ',';
@@ -259,6 +276,15 @@ std::string snapshot_json(const drm::DeviceSnapshot& snapshot,
     }
     output << ",\"possible_crtc_mask\":" << plane.possible_crtc_mask
            << ",\"current_crtc_id\":" << plane.current_crtc_id
+           << ",\"framebuffer_id\":" << plane.framebuffer_id
+           << ",\"crtc_x\":" << plane.crtc_x
+           << ",\"crtc_y\":" << plane.crtc_y
+           << ",\"crtc_width\":" << plane.crtc_width
+           << ",\"crtc_height\":" << plane.crtc_height
+           << ",\"source_x\":" << plane.source_x
+           << ",\"source_y\":" << plane.source_y
+           << ",\"source_width\":" << plane.source_width
+           << ",\"source_height\":" << plane.source_height
            << ",\"formats\":[";
     for (std::size_t format = 0; format < plane.formats.size(); ++format) {
       if (format != 0) output << ',';
@@ -286,8 +312,7 @@ std::string snapshot_json(const drm::DeviceSnapshot& snapshot,
     else output << "null";
     output << '}';
   }
-  output << ",\n  \"snapshot_limitations\":[\"current_crtc_mode\","
-            "\"current_framebuffer_id\"]\n}\n";
+  output << "\n}\n";
   return output.str();
 }
 

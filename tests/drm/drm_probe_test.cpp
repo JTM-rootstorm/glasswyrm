@@ -33,10 +33,9 @@ constexpr std::string_view kExpectedJson = R"json({
   "driver":{"name":"virtio_\"gpu","version":"1.2.3","date":"2024\n01","description":"Virtio GPU","bus_info":"pci:0000:00:02.0"},
   "capabilities":{"dumb_buffer":true,"universal_planes":true,"atomic":true},
   "connectors":[{"id":11,"name":"HDMI-A-2","status":"disconnected","non_desktop":false,"possible_crtc_mask":2,"current_crtc_id":0,"modes":[]},{"id":10,"name":"Virtual-1","status":"connected","non_desktop":false,"possible_crtc_mask":1,"current_crtc_id":40,"modes":[{"name":"1024x768","width":1024,"height":768,"refresh_millihz":60000,"clock_khz":65000,"preferred":true},{"name":"1280x720","width":1280,"height":720,"refresh_millihz":60000,"clock_khz":74250,"preferred":false}]}],
-  "crtcs":[{"id":40,"index":0,"current_mode":null,"current_framebuffer_id":null,"connector_ids":[10]},{"id":60,"index":1,"current_mode":null,"current_framebuffer_id":null,"connector_ids":[11]}],
-  "planes":[{"id":50,"type":"primary","possible_crtc_mask":1,"current_crtc_id":40,"formats":[842094158,875713112]},{"id":70,"type":"cursor","possible_crtc_mask":2,"current_crtc_id":0,"formats":[875713112]}],
-  "selected_candidate":{"connector":"Virtual-1","connector_id":10,"mode":"1024x768","width":1024,"height":768,"refresh_millihz":60000,"crtc_id":40,"plane_id":50},
-  "snapshot_limitations":["current_crtc_mode","current_framebuffer_id"]
+  "crtcs":[{"id":40,"index":0,"current_mode":{"name":"1024x768","width":1024,"height":768,"refresh_millihz":60000,"clock_khz":65000},"current_framebuffer_id":81,"x":0,"y":0,"active":true,"connector_ids":[10]},{"id":60,"index":1,"current_mode":null,"current_framebuffer_id":0,"x":0,"y":0,"active":false,"connector_ids":[11]}],
+  "planes":[{"id":50,"type":"primary","possible_crtc_mask":1,"current_crtc_id":40,"framebuffer_id":81,"crtc_x":0,"crtc_y":0,"crtc_width":1024,"crtc_height":768,"source_x":0,"source_y":0,"source_width":67108864,"source_height":50331648,"formats":[842094158,875713112]},{"id":70,"type":"cursor","possible_crtc_mask":2,"current_crtc_id":0,"framebuffer_id":0,"crtc_x":0,"crtc_y":0,"crtc_width":0,"crtc_height":0,"source_x":0,"source_y":0,"source_width":0,"source_height":0,"formats":[875713112]}],
+  "selected_candidate":{"connector":"Virtual-1","connector_id":10,"mode":"1024x768","width":1024,"height":768,"refresh_millihz":60000,"crtc_id":40,"plane_id":50}
 }
 )json";
 
@@ -93,12 +92,14 @@ DeviceSnapshot valid_snapshot() {
   disconnected.status = ConnectionStatus::Disconnected;
   disconnected.possible_crtc_mask = 2;
   snapshot.connectors = {std::move(selected), std::move(disconnected)};
-  snapshot.crtcs = {Crtc{60, 1, {11}}, Crtc{40, 0, {10}}};
+  const Mode active_mode{"1024x768", 1024, 768, 60'000, 65'000, true};
+  snapshot.crtcs = {Crtc{60, 1, {11}},
+                    Crtc{40, 0, {10}, 81, 0, 0, true, active_mode}};
   snapshot.planes = {
       Plane{70, PlaneType::Cursor, 2, {kFormatXrgb8888}, 0},
       Plane{50, PlaneType::Primary, 1,
             {kFormatXrgb8888, glasswyrm::drm::fourcc('N', 'V', '1', '2')},
-            40},
+            40, 81, 0, 0, 1024, 768, 0, 0, 1024U << 16U, 768U << 16U},
   };
   return snapshot;
 }
@@ -303,7 +304,8 @@ void test_restoration(const TemporaryDirectory& directory) {
   }
   {
     auto snapshot = valid_snapshot();
-    snapshot.driver.description = "Changed GPU";
+    snapshot.crtcs[1].framebuffer_id = 999;
+    snapshot.planes[1].framebuffer_id = 999;
     auto api = fake_api(std::move(snapshot));
     auto options = explicit_options(directory.file("mismatch.json"));
     options.expected_restored_path = baseline_path.string();
@@ -311,9 +313,10 @@ void test_restoration(const TemporaryDirectory& directory) {
     gw::test::require(
         glasswyrm::tools::run_drm_probe(api, options, error) == 1 &&
             error.str().find("differs from baseline") != std::string::npos &&
-            read_file(options.output_path).find("Changed GPU") !=
+            read_file(options.output_path).find(
+                "\"current_framebuffer_id\":999") !=
                 std::string::npos,
-        "report restoration mismatch and retain current snapshot");
+        "report KMS restoration mismatch and retain current snapshot");
   }
   {
     auto api = fake_api();
