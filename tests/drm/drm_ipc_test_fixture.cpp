@@ -223,7 +223,8 @@ bool FakeVirtualTerminal::acknowledge_acquire(int) {
 void FakeVirtualTerminal::close_terminal(int) noexcept { calls.push_back("close"); }
 std::string FakeVirtualTerminal::last_error() const { return "fake VT failure"; }
 
-PresenterHarness::PresenterHarness(gw::compositor::PresentationTiming timing)
+PresenterHarness::PresenterHarness(gw::compositor::PresentationTiming timing,
+                                   const bool enable_scene_manifest)
     : root(temporary_directory()),
       drm({"/dev/dri/card0", glasswyrm::drm::DeviceOpenStatus::Success,
            snapshot(), {}}),
@@ -246,8 +247,12 @@ PresenterHarness::PresenterHarness(gw::compositor::PresentationTiming timing)
   std::string error;
   require(presenter->initialize(config, &vt, error),
           "initialize fake DRM integration presenter");
+  const auto scene_manifest = enable_scene_manifest
+                                  ? std::optional<std::filesystem::path>(
+                                        scene_manifest_path())
+                                  : std::nullopt;
   compositor = std::make_unique<gw::compositor::Compositor>(
-      std::move(backend), std::nullopt, std::move(timing));
+      std::move(backend), scene_manifest, std::move(timing));
 }
 
 PresenterHarness::~PresenterHarness() {
@@ -267,6 +272,15 @@ std::filesystem::path PresenterHarness::mirror_frame(
 
 std::string PresenterHarness::report_contents() const {
   std::ifstream input(report.path());
+  return {std::istreambuf_iterator<char>(input), {}};
+}
+
+std::filesystem::path PresenterHarness::scene_manifest_path() const {
+  return root / "scene.jsonl";
+}
+
+std::string PresenterHarness::scene_manifest_contents() const {
+  std::ifstream input(scene_manifest_path());
   return {std::istreambuf_iterator<char>(input), {}};
 }
 

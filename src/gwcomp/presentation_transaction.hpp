@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -38,6 +39,7 @@ private:
                           ReleaseMap releases,
                           glasswyrm::output::SoftwareFrame frame,
                           gwipc_frame_commit commit, PresentedFrame presented,
+                          std::optional<PreparedSceneManifest> manifest,
                           std::uint64_t token,
                           std::chrono::steady_clock::time_point deadline);
   [[nodiscard]] static ReleaseMap calculate_retired_buffers(
@@ -46,6 +48,8 @@ private:
                                       const Scene& staged);
   [[nodiscard]] PresentedFrame promote(Compositor& compositor,
                                        std::uint64_t visible_hash);
+  [[nodiscard]] bool publish_manifest(Compositor& compositor,
+                                      std::string& error);
 
   SceneModel candidate_;
   AttachmentMap attachments_;
@@ -53,6 +57,7 @@ private:
   glasswyrm::output::SoftwareFrame frame_;
   gwipc_frame_commit commit_{};
   PresentedFrame presented_;
+  std::optional<PreparedSceneManifest> manifest_;
   std::uint64_t token_{};
   std::chrono::steady_clock::time_point deadline_;
 };

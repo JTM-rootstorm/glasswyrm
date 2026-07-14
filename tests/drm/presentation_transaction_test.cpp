@@ -10,8 +10,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -157,6 +161,7 @@ gwipc_surface_upsert surface() {
   gwipc_surface_upsert value{};
   value.struct_size = sizeof(value);
   value.surface_id = 1;
+  value.x11_window_id = 1001;
   value.output_id = 1;
   value.logical_width = value.logical_height = 2;
   value.visible = 1;
@@ -164,6 +169,21 @@ gwipc_surface_upsert surface() {
   value.opacity = GWIPC_OPACITY_ONE;
   value.scale_numerator = value.scale_denominator = 1;
   value.color = srgb();
+  return value;
+}
+
+gwipc_surface_policy_upsert policy() {
+  gwipc_surface_policy_upsert value{};
+  value.struct_size = sizeof(value);
+  value.surface_id = 1;
+  value.x11_window_id = 1001;
+  value.workspace_id = 1;
+  value.window_type = GWIPC_POLICY_WINDOW_NORMAL;
+  value.applied_state = GWIPC_POLICY_APPLIED_NORMAL;
+  value.managed = 1;
+  value.decoration_eligible = 1;
+  value.fullscreen_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  value.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
   return value;
 }
 
@@ -193,7 +213,7 @@ int buffer_fd(const std::uint32_t pixel) {
 
 bool snapshot(gw::compositor::Compositor& compositor,
               const std::uint64_t buffer_id, const std::uint32_t pixel,
-              std::string& error) {
+              std::string& error, const bool protocol_server = false) {
   const auto staged_surface = surface();
   gwipc_buffer_attach attach{};
   attach.struct_size = sizeof(attach);
@@ -207,8 +227,154 @@ bool snapshot(gw::compositor::Compositor& compositor,
   attach.color = srgb();
   return compositor.begin_snapshot() && compositor.apply(output()) &&
          compositor.apply(staged_surface) &&
+         (!protocol_server || compositor.apply(policy())) &&
          compositor.attach(attach, buffer_fd(pixel), error) &&
          compositor.end_snapshot();
+}
+
+std::filesystem::path temporary_directory() {
+  std::string pattern = "/tmp/glasswyrm-presentation-manifest-XXXXXX";
+  gw::test::require(::mkdtemp(pattern.data()) != nullptr,
+                    "create presentation manifest directory");
+  return pattern;
+}
+
+std::string read_file(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(input), {}};
+}
+
+std::size_t line_count(const std::string& value) {
+  return static_cast<std::size_t>(
+      std::count(value.begin(), value.end(), '\n'));
+}
+
+short ready_events(const FakeState& state);
+
+void protocol_manifest_transactions() {
+  using gw::compositor::PeerProfile;
+  using gw::compositor::PresentationCompletionKind;
+  using Disposition = gw::compositor::PresentedFrame::Disposition;
+
+  const auto root = temporary_directory();
+  std::string error;
+  {
+    const auto manifest = root / "scene.jsonl";
+    auto state = std::make_shared<FakeState>();
+    state->dispositions = {PresentDisposition::Complete,
+                           PresentDisposition::Pending,
+                           PresentDisposition::Rejected};
+    gw::compositor::Compositor compositor(
+        std::make_unique<FakePresenter>(state), manifest);
+    compositor.set_peer_profile(PeerProfile::M7BufferedProtocolServer);
+
+    gw::test::require(
+        snapshot(compositor, 101, 0xff102030U, error, true) &&
+            compositor.commit(frame(1), error).disposition ==
+                Disposition::Complete,
+        "buffered ProtocolServer immediate presentation completes");
+    const auto first = read_file(manifest);
+    gw::test::require(
+        line_count(first) == 1 &&
+            first.find("\"commit_id\":1") != std::string::npos &&
+            first.find("\"generation\":1") != std::string::npos &&
+            first.find("\"scene_hash\":\"") != std::string::npos &&
+            first.find("\"metadata_only\":false") != std::string::npos,
+        "immediate protocol presentation publishes one truthful scene record");
+
+    gw::test::require(
+        snapshot(compositor, 102, 0xff405060U, error, true) &&
+            compositor.commit(frame(2), error).disposition ==
+                Disposition::Pending &&
+            read_file(manifest) == first,
+        "pending protocol presentation does not publish early");
+    state->signal();
+    const auto completion =
+        compositor.service_presentation(ready_events(*state), error);
+    const auto second = read_file(manifest);
+    gw::test::require(
+        completion.kind == PresentationCompletionKind::Complete &&
+            completion.frame.ordinal == 2 &&
+            line_count(second) == 2 &&
+            second.find("\"commit_id\":2") != std::string::npos &&
+            second.find("\"generation\":2") != std::string::npos &&
+            compositor.service_presentation(0, error).kind ==
+                PresentationCompletionKind::None &&
+            read_file(manifest) == second,
+        "pending protocol completion publishes exactly once");
+    compositor.clear_releases();
+
+    gw::test::require(
+        snapshot(compositor, 103, 0xff708090U, error, true) &&
+            compositor.commit(frame(3), error).disposition ==
+                Disposition::Rejected &&
+            compositor.accepted_frames() == 2 &&
+            compositor.releases().empty() && read_file(manifest) == second,
+        "rejected protocol presentation publishes no scene record");
+  }
+
+  {
+    const auto manifest = root / "timeout.jsonl";
+    auto now = gw::compositor::PresentationTiming::Clock::time_point{};
+    auto state = std::make_shared<FakeState>();
+    state->dispositions = {PresentDisposition::Pending};
+    gw::compositor::PresentationTiming timing;
+    timing.timeout = std::chrono::milliseconds(5);
+    timing.now = [&now] { return now; };
+    gw::compositor::Compositor compositor(
+        std::make_unique<FakePresenter>(state), manifest, timing);
+    compositor.set_peer_profile(PeerProfile::M7BufferedProtocolServer);
+    gw::test::require(
+        snapshot(compositor, 201, 0xff102030U, error, true) &&
+            compositor.commit(frame(1), error).disposition ==
+                Disposition::Pending &&
+            !std::filesystem::exists(manifest),
+        "timed protocol presentation remains unpublished while pending");
+    now += std::chrono::milliseconds(5);
+    gw::test::require(
+        compositor.service_presentation(0, error).kind ==
+                PresentationCompletionKind::Fatal &&
+            compositor.accepted_frames() == 0 &&
+            compositor.releases().empty() &&
+            !std::filesystem::exists(manifest),
+        "timed-out protocol presentation never publishes or releases buffers");
+  }
+
+  {
+    const auto manifest = root / "failed.jsonl";
+    auto state = std::make_shared<FakeState>();
+    state->dispositions = {PresentDisposition::Complete,
+                           PresentDisposition::Pending};
+    gw::compositor::Compositor compositor(
+        std::make_unique<FakePresenter>(state), manifest);
+    compositor.set_peer_profile(PeerProfile::M7BufferedProtocolServer);
+    gw::test::require(
+        snapshot(compositor, 301, 0xff102030U, error, true) &&
+            compositor.commit(frame(1), error).disposition ==
+                Disposition::Complete,
+        "manifest failure fixture commits its initial owner");
+    compositor.clear_releases();
+    std::filesystem::remove(manifest);
+    std::filesystem::create_directory(manifest);
+    gw::test::require(
+        snapshot(compositor, 302, 0xff405060U, error, true) &&
+            compositor.commit(frame(2), error).disposition ==
+                Disposition::Pending,
+        "manifest failure replacement reaches pending presentation");
+    state->signal();
+    const auto failed =
+        compositor.service_presentation(ready_events(*state), error);
+    gw::test::require(
+        failed.kind == PresentationCompletionKind::Fatal &&
+            failed.frame.result ==
+                GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA &&
+            compositor.accepted_frames() == 1 &&
+            compositor.releases().empty() &&
+            std::filesystem::is_directory(manifest),
+        "manifest publication failure preserves logical ownership and frame count");
+  }
+  std::error_code ignored;
+  std::filesystem::remove_all(root, ignored);
 }
 
 short ready_events(const FakeState& state) {
@@ -385,5 +551,6 @@ int main() {
                         !vt_compositor.presentation_suspended() &&
                         vt_compositor.accepted_frames() == 1,
                     "resume re-presents without a new producer frame count");
+  protocol_manifest_transactions();
   return 0;
 }

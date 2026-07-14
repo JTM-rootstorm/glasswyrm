@@ -142,15 +142,31 @@ void m4_async_ipc_ordering_and_vt() {
 }
 
 void protocol_server_buffered_scene() {
-  PresenterHarness rig;
+  PresenterHarness rig({}, true);
   IpcHarness ipc(rig.root / "protocol.sock", ProducerKind::ProtocolServer);
   const auto pending = start_pending(rig, ipc, 21, 22);
+  const auto pending_manifest = rig.scene_manifest_contents();
+  gw::test::require(
+      std::ranges::count(pending_manifest, '\n') == 1 &&
+          pending_manifest.find("\"commit_id\":1") != std::string::npos &&
+          pending_manifest.find("\"commit_id\":2") == std::string::npos,
+      "pending ProtocolServer flip does not publish its scene manifest early");
   publish_completion(rig, ipc, pending, 91);
   const auto events = ipc.drain_client();
+  const auto completed_manifest = rig.scene_manifest_contents();
   gw::test::require(gw::test::drm_ipc::has_ack(events, 2) &&
                         gw::test::drm_ipc::has_release(events, 21) &&
-                        std::filesystem::exists(rig.mirror_frame(2)),
-                    "buffered ProtocolServer scene uses the asynchronous DRM path");
+                        std::filesystem::exists(rig.mirror_frame(2)) &&
+                        std::ranges::count(completed_manifest, '\n') == 2 &&
+                        completed_manifest.find("\"commit_id\":2") !=
+                            std::string::npos,
+                    "buffered ProtocolServer scene and manifest use the asynchronous DRM path");
+  std::string error;
+  gw::test::require(
+      rig.compositor->service_presentation(0, error).kind ==
+              PresentationCompletionKind::None &&
+          rig.scene_manifest_contents() == completed_manifest,
+      "completed ProtocolServer flip appends its scene manifest exactly once");
   require_clean_restore(rig);
 }
 
