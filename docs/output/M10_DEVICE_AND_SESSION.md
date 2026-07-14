@@ -54,8 +54,10 @@ does not link either library and does not prescribe their protocol.
 | Close caller's inherited FD | not applicable | external owner |
 
 In both modes, `Device` is the sole owner of its internal FD and KMS helpers
-only borrow it. Page-flip cookies remain live until the event is serviced or
-the pending presentation is explicitly aborted.
+only borrow it. Submitted page-flip callback records remain live until the
+event is serviced or the DRM FD closes. Aborting a pending presentation marks
+its callback abandoned so a late kernel event is consumed without publishing
+completion; it does not free storage still referenced by kernel user data.
 
 ## Security boundary
 

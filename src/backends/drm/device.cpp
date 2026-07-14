@@ -82,7 +82,8 @@ int Device::duplicate_fd(std::string &error) const {
   return api_->duplicate_fd(handle_, error);
 }
 
-bool Device::arm_page_flip(PageFlipCookie &cookie, std::string &error) {
+bool Device::arm_page_flip(const std::shared_ptr<PageFlipCookie> &cookie,
+                           std::string &error) {
   if (!valid()) {
     error = "DRM device is not open";
     return false;
@@ -90,9 +91,16 @@ bool Device::arm_page_flip(PageFlipCookie &cookie, std::string &error) {
   return api_->arm_page_flip(handle_, cookie, error);
 }
 
-void Device::disarm_page_flip(PageFlipCookie &cookie) noexcept {
+void Device::cancel_page_flip(
+    const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
   if (valid())
-    api_->disarm_page_flip(handle_, cookie);
+    api_->cancel_page_flip(handle_, cookie);
+}
+
+void Device::abandon_page_flip(
+    const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
+  if (valid())
+    api_->abandon_page_flip(handle_, cookie);
 }
 
 DrmEvent Device::service_events(const short revents) {

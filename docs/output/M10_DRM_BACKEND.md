@@ -108,6 +108,10 @@ or missing completion is fatal. The kernel page-flip sequence is diagnostic:
 drivers without usable vblank accounting may deliver zero with a valid matching
 completion. Connector loss is fatal in M10; hotplug recovery is not implemented.
 
+A timeout cannot cancel an already submitted kernel flip. Glasswyrm therefore
+keeps the abandoned callback record alive until a late event is consumed or
+the DRM FD closes, while discarding all staged compositor and evidence state.
+
 ## Diagnostics and reports
 
 `--mirror-dump-dir` publishes the same PPM/manifest shape used by headless

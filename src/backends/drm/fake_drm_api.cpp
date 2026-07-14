@@ -80,7 +80,8 @@ DeviceOpenResult FakeDrmApi::adopt_device(const int inherited_fd,
 void FakeDrmApi::close_device(const int handle) noexcept {
   if (handle != active_handle_ || !open_)
     return;
-  armed_cookie_ = nullptr;
+  event_cookie_.reset();
+  event_cookie_armed_ = false;
   if (owns_active_handle_)
     (void)::close(active_handle_);
   last_closed_handle_ = active_handle_;
@@ -109,28 +110,38 @@ int FakeDrmApi::duplicate_fd(const int handle, std::string &error) {
   return duplicate;
 }
 
-bool FakeDrmApi::arm_page_flip(const int handle, PageFlipCookie &cookie,
+bool FakeDrmApi::arm_page_flip(const int handle,
+                               const std::shared_ptr<PageFlipCookie> &cookie,
                                std::string &error) {
   if (handle != active_handle_ || !open_) {
     error = "fake DRM device is not open";
     return false;
   }
-  if (armed_cookie_) {
+  if (!cookie || event_cookie_) {
     error = "fake DRM page flip is already armed";
     return false;
   }
-  cookie.completed = false;
-  cookie.completed_crtc_id = 0;
-  cookie.completed_sequence = 0;
-  armed_cookie_ = &cookie;
+  cookie->completed = false;
+  cookie->completed_crtc_id = 0;
+  cookie->completed_sequence = 0;
+  event_cookie_ = cookie;
+  event_cookie_armed_ = true;
   error.clear();
   return true;
 }
 
-void FakeDrmApi::disarm_page_flip(const int handle,
-                                  PageFlipCookie &cookie) noexcept {
-  if (handle == active_handle_ && armed_cookie_ == &cookie)
-    armed_cookie_ = nullptr;
+void FakeDrmApi::cancel_page_flip(
+    const int handle, const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
+  if (handle == active_handle_ && event_cookie_ == cookie) {
+    event_cookie_.reset();
+    event_cookie_armed_ = false;
+  }
+}
+
+void FakeDrmApi::abandon_page_flip(
+    const int handle, const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
+  if (handle == active_handle_ && event_cookie_ == cookie)
+    event_cookie_armed_ = false;
 }
 
 DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
@@ -148,12 +159,16 @@ DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
             std::string("fake DRM event read failed: ") + std::strerror(errno)};
   auto event = std::move(events_.front());
   events_.pop_front();
-  if (event.kind == DrmEventKind::PageFlip && armed_cookie_) {
-    armed_cookie_->completed_crtc_id = event.crtc_id;
-    armed_cookie_->completed_sequence = event.sequence;
-    armed_cookie_->completed = true;
-    event.token = armed_cookie_->token;
-    armed_cookie_ = nullptr;
+  if (event.kind == DrmEventKind::PageFlip && event_cookie_) {
+    event_cookie_->completed_crtc_id = event.crtc_id;
+    event_cookie_->completed_sequence = event.sequence;
+    event_cookie_->completed = true;
+    if (event_cookie_armed_)
+      event.token = event_cookie_->token;
+    else
+      event = {};
+    event_cookie_.reset();
+    event_cookie_armed_ = false;
   }
   return event;
 }

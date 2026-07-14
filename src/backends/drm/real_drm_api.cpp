@@ -376,13 +376,22 @@ public:
   void close_device(int handle) noexcept override;
   int poll_fd(int handle) const noexcept override;
   int duplicate_fd(int handle, std::string &error) override;
-  bool arm_page_flip(int handle, PageFlipCookie &cookie,
+  bool arm_page_flip(int handle, const std::shared_ptr<PageFlipCookie> &cookie,
                      std::string &error) override;
-  void disarm_page_flip(int handle, PageFlipCookie &cookie) noexcept override;
+  void cancel_page_flip(
+      int handle,
+      const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
+  void abandon_page_flip(
+      int handle,
+      const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
   DrmEvent service_events(int handle, short revents) override;
 
 private:
-  std::unordered_map<int, PageFlipCookie *> armed_cookies_;
+  struct EventCookie {
+    std::shared_ptr<PageFlipCookie> cookie;
+    bool armed{};
+  };
+  std::unordered_map<int, EventCookie> event_cookies_;
 };
 
 DeviceOpenResult RealDrmApi::open_device(const std::string_view path,
@@ -423,9 +432,9 @@ DeviceOpenResult RealDrmApi::adopt_device(const int inherited_fd,
 }
 
 void RealDrmApi::close_device(const int handle) noexcept {
-  armed_cookies_.erase(handle);
   if (handle >= 0)
     (void)::close(handle);
+  event_cookies_.erase(handle);
 }
 
 int RealDrmApi::poll_fd(const int handle) const noexcept { return handle; }
@@ -440,29 +449,37 @@ int RealDrmApi::duplicate_fd(const int handle, std::string &error) {
   return duplicate;
 }
 
-bool RealDrmApi::arm_page_flip(const int handle, PageFlipCookie &cookie,
+bool RealDrmApi::arm_page_flip(const int handle,
+                               const std::shared_ptr<PageFlipCookie> &cookie,
                                std::string &error) {
   if (handle < 0) {
     error = "DRM device is not open";
     return false;
   }
-  if (armed_cookies_.contains(handle)) {
+  if (!cookie || event_cookies_.contains(handle)) {
     error = "DRM page flip is already armed";
     return false;
   }
-  cookie.completed = false;
-  cookie.completed_crtc_id = 0;
-  cookie.completed_sequence = 0;
-  armed_cookies_.emplace(handle, &cookie);
+  cookie->completed = false;
+  cookie->completed_crtc_id = 0;
+  cookie->completed_sequence = 0;
+  event_cookies_.emplace(handle, EventCookie{cookie, true});
   error.clear();
   return true;
 }
 
-void RealDrmApi::disarm_page_flip(const int handle,
-                                  PageFlipCookie &cookie) noexcept {
-  const auto armed = armed_cookies_.find(handle);
-  if (armed != armed_cookies_.end() && armed->second == &cookie)
-    armed_cookies_.erase(armed);
+void RealDrmApi::cancel_page_flip(
+    const int handle, const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
+  const auto event = event_cookies_.find(handle);
+  if (event != event_cookies_.end() && event->second.cookie == cookie)
+    event_cookies_.erase(event);
+}
+
+void RealDrmApi::abandon_page_flip(
+    const int handle, const std::shared_ptr<PageFlipCookie> &cookie) noexcept {
+  const auto event = event_cookies_.find(handle);
+  if (event != event_cookies_.end() && event->second.cookie == cookie)
+    event->second.armed = false;
 }
 
 DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
@@ -470,9 +487,10 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
     return {DrmEventKind::Error, 0, 0, 0, "DRM event FD reported an error"};
   if ((revents & POLLIN) == 0)
     return {};
-  const auto armed = armed_cookies_.find(handle);
-  PageFlipCookie *const cookie =
-      armed == armed_cookies_.end() ? nullptr : armed->second;
+  const auto registered = event_cookies_.find(handle);
+  PageFlipCookie *const cookie = registered == event_cookies_.end()
+                                     ? nullptr
+                                     : registered->second.cookie.get();
   drmEventContext context{};
   context.version = DRM_EVENT_CONTEXT_VERSION;
   context.page_flip_handler2 = page_flip_complete;
@@ -480,13 +498,14 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
     return {DrmEventKind::Error, 0, 0, 0,
             std::string("DRM event handling failed: ") + std::strerror(errno)};
   if (cookie && cookie->completed) {
+    const bool armed = registered->second.armed;
     const DrmEvent event{DrmEventKind::PageFlip,
                          cookie->token,
                          cookie->completed_crtc_id,
                          cookie->completed_sequence,
                          {}};
-    armed_cookies_.erase(handle);
-    return event;
+    event_cookies_.erase(registered);
+    return armed ? event : DrmEvent{};
   }
   return {};
 }
