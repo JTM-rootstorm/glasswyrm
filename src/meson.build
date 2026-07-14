@@ -145,6 +145,21 @@ if get_option('drm_backend')
     link_with: gw_session_lib,
     include_directories: include_directories('.'),
   )
+
+  gw_drm_presenter_lib = static_library(
+    'gw-drm-presenter',
+    files(
+      'backends/drm/presenter.cpp',
+      'backends/drm/presenter_pipeline.cpp',
+    ),
+    dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
+    include_directories: include_directories('.'),
+  )
+  gw_drm_presenter_dep = declare_dependency(
+    link_with: gw_drm_presenter_lib,
+    dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
+    include_directories: include_directories('.'),
+  )
 endif
 endif
 
@@ -376,15 +391,23 @@ if get_option('gwcomp')
     gwcomp_backend_dependencies += gw_headless_dep
   endif
   if get_option('drm_backend')
-    gwcomp_backend_dependencies += [gw_drm_api_dep, gw_session_dep]
+    gwcomp_backend_dependencies += gw_drm_presenter_dep
+  endif
+  gwcomp_options_sources = files(
+    'gwcomp/options.cpp',
+    'gwcomp/compositor.cpp',
+    'gwcomp/scene_manifest.cpp',
+    'gwcomp/runtime.cpp',
+    'gwcomp/signal_runtime.cpp',
+    'gwcomp/contract_dispatch.cpp',
+    'gwcomp/presentation_transaction.cpp',
+  )
+  if get_option('drm_backend')
+    gwcomp_options_sources += files('gwcomp/drm_runtime.cpp')
   endif
   gwcomp_options_lib = static_library(
     'gwcomp-options',
-    files('gwcomp/options.cpp', 'gwcomp/compositor.cpp',
-          'gwcomp/scene_manifest.cpp', 'gwcomp/runtime.cpp',
-          'gwcomp/signal_runtime.cpp',
-          'gwcomp/contract_dispatch.cpp',
-          'gwcomp/presentation_transaction.cpp'),
+    gwcomp_options_sources,
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep,
                    gw_render_software_dep] + gwcomp_backend_dependencies,

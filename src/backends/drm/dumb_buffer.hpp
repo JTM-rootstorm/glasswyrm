@@ -28,6 +28,7 @@ public:
                                std::string &error);
   [[nodiscard]] std::uint64_t visible_hash() const noexcept;
   [[nodiscard]] bool release(std::string &error) noexcept;
+  void abandon() noexcept;
   void reset() noexcept;
 
   [[nodiscard]] bool valid() const noexcept { return mapping_ != nullptr; }
@@ -77,6 +78,7 @@ public:
   }
   void promote_back() noexcept { front_index_ = 1 - front_index_; }
   [[nodiscard]] bool release(std::string &error) noexcept;
+  void abandon() noexcept;
 
 private:
   std::array<DumbBuffer, 2> buffers_;

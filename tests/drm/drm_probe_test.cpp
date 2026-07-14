@@ -281,6 +281,22 @@ void test_rejections(const TemporaryDirectory& directory) {
                 std::string::npos,
         "reject a stale current CRTC identifier as inactive");
   }
+  for (const std::string_view failure : {"framebuffer", "mode", "plane"}) {
+    auto snapshot = valid_snapshot();
+    if (failure == "framebuffer") snapshot.crtcs[1].framebuffer_id = 0;
+    if (failure == "mode") snapshot.crtcs[1].mode.width = 800;
+    if (failure == "plane") snapshot.planes[1].framebuffer_id = 0;
+    auto api = fake_api(std::move(snapshot));
+    auto options = explicit_options(
+        directory.file(std::string(failure) + "-inactive.json"));
+    options.expect_active = true;
+    std::ostringstream error;
+    gw::test::require(
+        glasswyrm::tools::run_drm_probe(api, options, error) == 1 &&
+            error.str().find("expected an active connector route") !=
+                std::string::npos,
+        "active validation requires exact mode and nonzero CRTC/plane FBs");
+  }
 }
 
 void test_restoration(const TemporaryDirectory& directory) {

@@ -73,6 +73,8 @@ class KmsApi {
 public:
   virtual ~KmsApi() = default;
   // Every fd is borrowed from Device; KmsApi never duplicates or closes it.
+  [[nodiscard]] virtual bool is_master(int fd, bool &master,
+                                       std::string &error) = 0;
   [[nodiscard]] virtual bool acquire_master(int fd, std::string &error) = 0;
   [[nodiscard]] virtual bool drop_master(int fd, std::string &error) = 0;
 

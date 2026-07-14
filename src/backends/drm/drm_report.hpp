@@ -38,6 +38,7 @@ struct SelectionReport {
 };
 
 struct ModesetReport {
+  std::uint64_t ordinal{};
   std::uint64_t commit_id{};
   std::uint64_t generation{};
   std::uint32_t front_buffer_index{};

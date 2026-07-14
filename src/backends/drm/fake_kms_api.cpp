@@ -8,6 +8,14 @@ bool FakeKmsApi::reject(KmsOperation op, std::string &error) {
   error = "injected KMS operation failure";
   return true;
 }
+bool FakeKmsApi::is_master(int, bool &value, std::string &error) {
+  calls.push_back("is_master");
+  if (reject(KmsOperation::CheckMaster, error))
+    return false;
+  value = master;
+  error.clear();
+  return true;
+}
 bool FakeKmsApi::acquire_master(int, std::string &e) {
   calls.push_back("set_master");
   if (reject(KmsOperation::AcquireMaster, e))

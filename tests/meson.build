@@ -594,6 +594,25 @@ if get_option('drm_backend')
   test('drm-presentation-transaction', drm_presentation_transaction_test,
        timeout: 10)
 
+  drm_presenter_test = executable(
+    'drm_presenter_test',
+    files('drm/drm_presenter_test.cpp'),
+    dependencies: gw_drm_presenter_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drm-presenter', drm_presenter_test, timeout: 10)
+
+  drm_ipc_integration_test = executable(
+    'drm_ipc_integration_test',
+    files(
+      'drm/drm_ipc_integration_test.cpp',
+      'drm/drm_ipc_test_fixture.cpp',
+    ),
+    dependencies: [gwcomp_options_dep, gwipc_dep, gw_drm_presenter_dep],
+    include_directories: test_source_root_include,
+  )
+  test('drm-ipc-integration', drm_ipc_integration_test, timeout: 15)
+
   foreach drm_api_test : [
     ['drm-device-api', 'device_api_test.cpp'],
     ['drm-fake-events', 'fake_drm_event_test.cpp'],

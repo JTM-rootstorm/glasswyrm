@@ -364,6 +364,23 @@ bool connector_route_is_active(const drm::DeviceSnapshot& snapshot,
   });
 }
 
+bool selected_route_is_active(const drm::DeviceSnapshot& snapshot,
+                              const SelectedCandidate& selected,
+                              const std::uint32_t width,
+                              const std::uint32_t height) {
+  const auto& connector = snapshot.connectors[selected.connector];
+  if (!selected.crtc || !connector_route_is_active(snapshot, connector))
+    return false;
+  const auto& crtc = snapshot.crtcs[*selected.crtc];
+  if (!crtc.active || crtc.framebuffer_id == 0 || crtc.mode.width != width ||
+      crtc.mode.height != height)
+    return false;
+  if (!selected.plane) return true;
+  const auto& plane = snapshot.planes[*selected.plane];
+  return plane.current_crtc_id == crtc.id && plane.framebuffer_id != 0 &&
+         plane.crtc_width == width && plane.crtc_height == height;
+}
+
 }  // namespace
 
 DrmProbeParseResult parse_drm_probe_options(
@@ -494,9 +511,10 @@ int run_drm_probe(drm::DrmApi& api, const DrmProbeOptions& options,
   }
   if (options.expect_active) {
     const bool active = selected
-                            ? connector_route_is_active(
-                                  snapshot,
-                                  snapshot.connectors[selected->connector])
+                            ? selected_route_is_active(
+                                  snapshot, *selected,
+                                  *options.required_width,
+                                  *options.required_height)
                             : std::ranges::any_of(
                                   snapshot.connectors,
                                   [&](const drm::Connector& connector) {

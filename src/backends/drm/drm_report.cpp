@@ -99,7 +99,8 @@ std::string serialize(const SelectionReport& value) {
 
 std::string serialize(const ModesetReport& value) {
   std::ostringstream stream;
-  stream << "{\"record\":\"modeset\",\"commit_id\":" << value.commit_id
+  stream << "{\"record\":\"modeset\",\"ordinal\":" << value.ordinal
+         << ",\"commit_id\":" << value.commit_id
          << ",\"generation\":" << value.generation
          << ",\"front_buffer\":" << value.front_buffer_index
          << ",\"framebuffer_id\":" << value.framebuffer_id
@@ -184,7 +185,7 @@ bool valid(const SelectionReport& value) {
 }
 
 bool valid(const ModesetReport& value) {
-  return value.commit_id != 0 && value.generation != 0 &&
+  return value.ordinal != 0 && value.commit_id != 0 && value.generation != 0 &&
          value.framebuffer_id != 0 &&
          value.canonical_hash == value.scanout_hash;
 }
