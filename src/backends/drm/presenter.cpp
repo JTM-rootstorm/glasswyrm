@@ -279,8 +279,7 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     return fatal_event("page-flip-event", event.error);
   if (!pending_ || !pending_->cookie || event.token != pending_->token ||
       event.crtc_id != pipeline_.crtc || !pending_->cookie->completed ||
-      pending_->cookie->completed_crtc_id != pipeline_.crtc ||
-      event.sequence == 0) {
+      pending_->cookie->completed_crtc_id != pipeline_.crtc) {
     return fatal_event("page-flip-event",
                        "DRM page-flip completion did not match the pending frame");
   }
