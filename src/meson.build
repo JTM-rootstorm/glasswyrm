@@ -259,6 +259,20 @@ if get_option('libgwipc')
 endif
 
 if get_option('glasswyrmd')
+  if get_option('libinput_backend')
+    gw_xkb_keymap_lib = static_library(
+      'gw-xkb-keymap',
+      files('input/xkb_keymap.cpp'),
+      dependencies: xkbcommon_dep,
+      include_directories: include_directories('.'),
+    )
+    gw_xkb_keymap_dep = declare_dependency(
+      link_with: gw_xkb_keymap_lib,
+      dependencies: xkbcommon_dep,
+      include_directories: include_directories('.'),
+    )
+  endif
+
   gw_server_state_lib = static_library(
     'gw-server-state',
     files(
