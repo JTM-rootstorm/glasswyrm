@@ -550,12 +550,14 @@ systemctl is-active --quiet xterm-m11-b.service
 result[close]=passed
 frames=$(find "$dumps" -type f -name frames.jsonl -print -quit)
 journalctl -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
+journalctl -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
 "$source_dir/tests/apps/m11_xterm_acceptance" \
   --xterm-pid "$first_xterm_pid" --xterm-pid "$second_xterm_pid" \
   --scenario-dir "$input" --transcript "$transcript" \
   --trace "$artifact_dir/milestone11-xterm-trace.json" \
   --selection "$artifact_dir/milestone11-selection-probe.json" \
   --wm-evidence "$artifact_dir/milestone11-interactive-wm.log" \
+  --server-journal "$artifact_dir/milestone11-glasswyrmd-journal.log" \
   --frames "$frames" --scene "$scenes/scene.jsonl" \
   --drm-report "$artifact_dir/milestone11-drm-report.jsonl" \
   --mirror "$mirror" --screenshot "$artifact_dir/milestone11-desktop-after-restart.ppm" \
@@ -563,6 +565,10 @@ journalctl -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive
 for field in typed edited repeated scrolled wheel primary pasted moved resized relative_motion wm_bindings grabs cursor_resources cursor_scanout; do
   grep -F "\"$field\": true" "$artifact_dir/milestone11-xterm-result.json"
 done
+for kind in left-pointer xterm-text fleur-move bottom-right-resize; do
+  grep -F "\"$kind\"" "$artifact_dir/milestone11-xterm-result.json"
+done
+grep -F '"buffer_reused": true' "$artifact_dir/milestone11-xterm-result.json"
 result[pty_typing]=passed result[editing]=passed result[key_repeat]=passed
 result[wheel]=passed result[scrolling]=passed result[primary_selection]=passed
 result[selection_paste]=passed result[move]=passed result[resize]=passed
@@ -591,6 +597,7 @@ evidence=$artifact_dir/evidence; rm -rf "$evidence"; mkdir -p "$evidence"
 cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl} "$evidence/"
+cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
 cp "$scenes/scene.jsonl" "$evidence/scene.jsonl"
 find "$dumps" -name frames.jsonl -exec cp {} "$evidence/frames.jsonl" \;
@@ -663,7 +670,8 @@ validate_milestone11_archive() {
     milestone11-libinput-devices.json \
     milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
-    milestone11-drm-report.jsonl milestone11-selection-probe.json \
+    milestone11-drm-report.jsonl milestone11-glasswyrmd-journal.log \
+    milestone11-selection-probe.json \
     milestone11-xterm-result.json milestone11-kms-before.json \
     milestone11-kms-after.json milestone11-vt-before.json \
     milestone11-vt-after.json scene.jsonl frames.jsonl SHA256SUMS; do
