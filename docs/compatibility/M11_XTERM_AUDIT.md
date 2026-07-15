@@ -85,10 +85,16 @@ added to the manifest.
 
 The launch contract is the exact environment and argv array in
 `tests/compat/m11/clients.toml`. It selects the `fixed` core normal and bold
-fonts, disables UTF-8 mode and cursor blinking, and starts Bash with
+fonts, keeps the compile-time non-wide-character mode, disables cursor
+blinking, and starts Bash with
 `tests/compat/m11/m11-bashrc`. The Bash profile fixes the locale and prompts,
 disables command history and bracketed-paste negotiation, and emits no title
 escape sequence.
+
+The non-wide-character binary does not expose xterm's `-u8` runtime option.
+Passing `-u8 0` to that build is therefore invalid and redundant: Unicode
+support is already absent at compile time. The fixed argv intentionally omits
+that option while retaining the plan's ASCII-only compatibility boundary.
 
 The draft plan combined Bash's `--norc` and `--rcfile` options. Direct
 validation showed that `--norc` also suppresses the explicitly named rcfile,

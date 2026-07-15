@@ -399,7 +399,7 @@ launcher=("$runtime/src/glasswyrm-session" --runtime-dir /run/glasswyrm-m11 --di
   --mirror-dump-dir "$dumps" --scene-manifest "$scenes/scene.jsonl"
   --drm-report "$artifact_dir/milestone11-drm-report.jsonl"
   --x11-trace "$artifact_dir/milestone11-xterm-trace.json"
-  --client xterm -geometry 80x24+96+96 -fn fixed -fb fixed -u8 0
+  --client xterm -geometry 80x24+96+96 -fn fixed -fb fixed
   -xrm '*cursorBlink:false' -xrm '*toolBar:false' -title Glasswyrm-M11
   -e /bin/bash --noprofile --rcfile "$source_dir/tests/compat/m11/m11-bashrc")
 printf 'launcher'; printf ' <%s>' "${launcher[@]}"; printf '\n'
@@ -446,7 +446,7 @@ systemd-run --unit=xterm-m11-a.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv=LANG=C --setenv=XMODIFIERS=@im=none --setenv=SESSION_MANAGER= \
   --setenv=XAUTHORITY=/dev/null --setenv=TERM=xterm \
   --setenv="GW_M11_TRANSCRIPT=$transcript" "$xterm_bin" \
-  -geometry 80x24+96+96 -fn fixed -fb fixed -u8 0 -xrm '*cursorBlink:false' \
+  -geometry 80x24+96+96 -fn fixed -fb fixed -xrm '*cursorBlink:false' \
   -xrm '*toolBar:false' -title Glasswyrm-M11-A -e /bin/bash --noprofile \
   --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-a.service && break; sleep .05; done
@@ -493,7 +493,7 @@ systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv=LANG=C --setenv=XMODIFIERS=@im=none --setenv=SESSION_MANAGER= \
   --setenv=XAUTHORITY=/dev/null --setenv=TERM=xterm \
   --setenv="GW_M11_TRANSCRIPT=$transcript" "$xterm_bin" \
-  -geometry 80x24+480+160 -fn fixed -fb fixed -u8 0 -xrm '*cursorBlink:false' \
+  -geometry 80x24+480+160 -fn fixed -fb fixed -xrm '*cursorBlink:false' \
   -xrm '*toolBar:false' -title Glasswyrm-M11-B -e /bin/bash --noprofile \
   --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-b.service && break; sleep .05; done
