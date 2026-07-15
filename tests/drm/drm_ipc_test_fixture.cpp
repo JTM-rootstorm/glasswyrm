@@ -23,7 +23,8 @@ constexpr std::uint64_t kBufferedCapabilities =
     GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS;
 constexpr std::uint64_t kServerCapabilities =
-    kCommonCapabilities | kBufferedCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
+    kCommonCapabilities | kBufferedCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE |
+    GWIPC_CAP_CURSOR_SURFACE;
 
 struct ContractPayloadDeleter {
   void operator()(gwipc_contract_payload* value) const {
@@ -323,7 +324,9 @@ IpcHarness::IpcHarness(const std::filesystem::path& socket_path,
 
   const auto client_capabilities =
       kCommonCapabilities | kBufferedCapabilities |
-      (kind == ProducerKind::ProtocolServer ? GWIPC_CAP_WINDOW_LIFECYCLE : 0);
+      (kind == ProducerKind::ProtocolServer
+           ? GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_CURSOR_SURFACE
+           : 0);
   gwipc_connection_options connection_options{};
   connection_options.struct_size = sizeof(connection_options);
   connection_options.path = socket_path_.c_str();
@@ -475,6 +478,43 @@ void IpcHarness::enqueue_buffer(const std::uint64_t buffer_id,
   (void)::close(fd);
 }
 
+void IpcHarness::enqueue_cursor(const std::uint32_t flags) {
+  gwipc_surface_upsert value{};
+  value.struct_size = sizeof(value);
+  value.surface_id = 2;
+  value.output_id = 1;
+  value.logical_width = value.logical_height = 2;
+  value.visible = 1;
+  value.transform = GWIPC_TRANSFORM_NORMAL;
+  value.opacity = GWIPC_OPACITY_ONE;
+  value.scale_numerator = value.scale_denominator = 1;
+  value.color = srgb();
+  value.presentation_flags = GWIPC_SURFACE_PRESENTATION_CURSOR;
+  value.fullscreen_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  value.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  enqueue_contract(client_.get(), GWIPC_MESSAGE_SURFACE_UPSERT, flags, value,
+                   gwipc_contract_encode_surface_upsert);
+}
+
+void IpcHarness::enqueue_cursor_buffer(const std::uint64_t buffer_id,
+                                       const std::uint32_t pixel,
+                                       const std::uint32_t flags) {
+  gwipc_buffer_attach value{};
+  value.struct_size = sizeof(value);
+  value.buffer_id = buffer_id;
+  value.surface_id = 2;
+  value.width = value.height = 2;
+  value.stride = 8;
+  value.storage_size = 16;
+  value.pixel_format = GWIPC_PIXEL_FORMAT_ARGB8888;
+  value.alpha_semantics = GWIPC_ALPHA_PREMULTIPLIED;
+  value.color = srgb();
+  const int fd = buffer_fd(pixel);
+  enqueue_contract(client_.get(), GWIPC_MESSAGE_BUFFER_ATTACH, flags, value,
+                   gwipc_contract_encode_buffer_attach, &fd, 1);
+  (void)::close(fd);
+}
+
 void IpcHarness::enqueue_commit(const std::uint64_t commit_id) {
   gwipc_frame_commit value{};
   value.struct_size = sizeof(value);
@@ -496,6 +536,26 @@ void IpcHarness::send_snapshot(const std::uint64_t buffer_id,
   if (kind_ == ProducerKind::ProtocolServer)
     enqueue_policy(GWIPC_FLAG_SNAPSHOT_ITEM);
   enqueue_buffer(buffer_id, pixel, GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_snapshot_end(items);
+  enqueue_commit(commit_id);
+}
+
+void IpcHarness::send_cursor_snapshot(const std::uint64_t normal_buffer_id,
+                                      const std::uint32_t normal_pixel,
+                                      const std::uint64_t cursor_buffer_id,
+                                      const std::uint32_t cursor_pixel,
+                                      const std::uint64_t commit_id) {
+  require(kind_ == ProducerKind::ProtocolServer,
+          "cursor snapshots require a ProtocolServer producer");
+  constexpr std::uint64_t items = 6;
+  enqueue_snapshot_begin(items);
+  enqueue_output(GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_surface(GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_policy(GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_buffer(normal_buffer_id, normal_pixel, GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_cursor(GWIPC_FLAG_SNAPSHOT_ITEM);
+  enqueue_cursor_buffer(cursor_buffer_id, cursor_pixel,
+                        GWIPC_FLAG_SNAPSHOT_ITEM);
   enqueue_snapshot_end(items);
   enqueue_commit(commit_id);
 }

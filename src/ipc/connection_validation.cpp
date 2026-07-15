@@ -187,9 +187,14 @@ gwipc_status validate_compositor(gwipc_connection& connection,
           (connection.peer.capabilities & GWIPC_CAP_WINDOW_LIFECYCLE) == 0)
         return GWIPC_STATUS_CAPABILITY_MISMATCH;
       if (codec == wire::CodecStatus::Ok &&
-          (v.presentation_flags & GWIPC_SURFACE_PRESENTATION_CURSOR) != 0 &&
-          (connection.peer.capabilities & GWIPC_CAP_CURSOR_SURFACE) == 0)
-        return GWIPC_STATUS_CAPABILITY_MISMATCH;
+          (v.presentation_flags & GWIPC_SURFACE_PRESENTATION_CURSOR) != 0) {
+        constexpr std::uint64_t required =
+            GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_FD_PASSING |
+            GWIPC_CAP_MEMFD_BUFFERS | GWIPC_CAP_DAMAGE_REGIONS |
+            GWIPC_CAP_WINDOW_LIFECYCLE;
+        if ((connection.peer.capabilities & required) != required)
+          return GWIPC_STATUS_CAPABILITY_MISMATCH;
+      }
       break;
     }
     case GWIPC_MESSAGE_SURFACE_REMOVE: { wire::SurfaceRemove v; codec=wire::decode(payload,v); break; }

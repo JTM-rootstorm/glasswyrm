@@ -14,6 +14,11 @@ using SurfaceUpsert = gwipc_surface_upsert;
 constexpr std::uint32_t kMaximumOutputExtent = 4096;
 constexpr std::uint64_t kMaximumOutputPixels = 16'777'216;
 constexpr std::size_t kMaximumSurfaces = 4096;
+constexpr std::uint32_t kMaximumCursorExtent = 64;
+
+bool cursor_surface(const SurfaceUpsert& surface) {
+  return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+}
 
 bool srgb(const SdrColorMetadata& color) {
   return color.color_space == GWIPC_SDR_COLOR_SPACE_SRGB &&
@@ -48,16 +53,24 @@ bool checked_extent(std::int32_t origin, std::uint32_t extent) {
 bool valid_surface(const SurfaceUpsert& surface) {
   const bool metadata_only =
       surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  const bool cursor = cursor_surface(surface);
   if (surface.surface_id == 0 ||
       (metadata_only && surface.x11_window_id == 0) ||
       surface.parent_surface_id != 0 || surface.output_id == 0 ||
       surface.transform != GWIPC_TRANSFORM_NORMAL ||
       surface.scale_numerator != 1 || surface.scale_denominator != 1 ||
       !srgb(surface.color) ||
-      (surface.presentation_flags != 0 && !metadata_only) ||
+      (surface.presentation_flags != 0 && !metadata_only && !cursor) ||
       surface.opacity > GWIPC_OPACITY_ONE ||
       !checked_extent(surface.logical_x, surface.logical_width) ||
       !checked_extent(surface.logical_y, surface.logical_height)) return false;
+  if (cursor &&
+      (surface.x11_window_id != 0 || surface.logical_width > kMaximumCursorExtent ||
+       surface.logical_height > kMaximumCursorExtent || surface.clipping ||
+       surface.opacity != GWIPC_OPACITY_ONE ||
+       surface.fullscreen_eligible != GWIPC_TRI_STATE_UNKNOWN ||
+       surface.direct_scanout_eligible != GWIPC_TRI_STATE_UNKNOWN))
+    return false;
   if (!surface.clipping)
     return surface.clip_x == 0 && surface.clip_y == 0 &&
            surface.clip_width == 0 && surface.clip_height == 0;
@@ -139,6 +152,12 @@ bool SceneModel::apply(const gwipc_output_remove& output) {
 
 bool SceneModel::apply(const SurfaceUpsert& surface) {
   if (!mutations_allowed() || !valid_surface(surface)) return false;
+  if (cursor_surface(surface)) {
+    for (const auto& [id, current] : pending_.surfaces)
+      if (id != surface.surface_id && cursor_surface(current) &&
+          current.output_id == surface.output_id)
+        return false;
+  }
   if (!pending_.surfaces.contains(surface.surface_id) &&
       pending_.surfaces.size() == kMaximumSurfaces) return false;
   pending_.surfaces[surface.surface_id] = surface;
@@ -147,6 +166,9 @@ bool SceneModel::apply(const SurfaceUpsert& surface) {
 
 bool SceneModel::apply(const gwipc_surface_policy_upsert& policy) {
   if (!mutations_allowed() || policy.surface_id == 0) return false;
+  const auto surface = pending_.surfaces.find(policy.surface_id);
+  if (surface != pending_.surfaces.end() && cursor_surface(surface->second))
+    return false;
   pending_.surface_policies[policy.surface_id] = policy;
   return true;
 }
@@ -201,6 +223,13 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
     const bool metadata_only =
         surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
     const auto policy = pending_.surface_policies.find(id);
+    if (cursor_surface(surface)) {
+      if (policy != pending_.surface_policies.end()) {
+        result.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+        return result;
+      }
+      continue;
+    }
     if (metadata_only) {
       if (policy == pending_.surface_policies.end() ||
           policy->second.x11_window_id != surface.x11_window_id) {
@@ -291,6 +320,9 @@ std::vector<std::uint64_t> SceneModel::stacking_order() const {
   surfaces.reserve(committed_.surfaces.size());
   for (const auto& [id, surface] : committed_.surfaces) { (void)id; surfaces.push_back(&surface); }
   std::ranges::sort(surfaces, [](const auto* left, const auto* right) {
+    const bool left_cursor = cursor_surface(*left);
+    const bool right_cursor = cursor_surface(*right);
+    if (left_cursor != right_cursor) return !left_cursor;
     return left->stacking < right->stacking ||
            (left->stacking == right->stacking && left->surface_id < right->surface_id);
   });

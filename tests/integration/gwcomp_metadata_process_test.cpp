@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace {
 [[noreturn]] void fail(const char *message) {
@@ -70,7 +72,8 @@ Connection connect_to(const std::string &path, bool buffered) {
       GWIPC_CAP_WINDOW_LIFECYCLE;
   if (buffered)
     o.offered_capabilities |= GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
-                              GWIPC_CAP_DAMAGE_REGIONS;
+                              GWIPC_CAP_DAMAGE_REGIONS |
+                              GWIPC_CAP_CURSOR_SURFACE;
   o.required_peer_capabilities = o.offered_capabilities;
   o.instance_label = "metadata-process-test";
   gwipc_connection *raw = nullptr;
@@ -153,7 +156,7 @@ void send_scene(gwipc_connection *c, bool buffered) {
   b.snapshot_id = 1;
   b.domain = GWIPC_SNAPSHOT_COMPLETE_SESSION;
   b.generation = 1;
-  b.expected_item_count = buffered ? 4 : 3;
+  b.expected_item_count = buffered ? 6 : 3;
   control(c, GWIPC_MESSAGE_SNAPSHOT_BEGIN, b,
           gwipc_control_encode_snapshot_begin);
   gwipc_output_upsert o{};
@@ -224,12 +227,53 @@ void send_scene(gwipc_connection *c, bool buffered) {
             "seal buffered scene memfd");
     contract_fd(c, GWIPC_MESSAGE_BUFFER_ATTACH, GWIPC_FLAG_SNAPSHOT_ITEM, a,
                 gwipc_contract_encode_buffer_attach, fd);
+
+    gwipc_surface_upsert cursor{};
+    cursor.struct_size = sizeof(cursor);
+    cursor.surface_id = UINT64_C(0xc000000000000001);
+    cursor.output_id = 1;
+    cursor.logical_width = cursor.logical_height = 2;
+    cursor.visible = 1;
+    cursor.transform = GWIPC_TRANSFORM_NORMAL;
+    cursor.opacity = GWIPC_OPACITY_ONE;
+    cursor.scale_numerator = cursor.scale_denominator = 1;
+    cursor.color = srgb();
+    cursor.presentation_flags = GWIPC_SURFACE_PRESENTATION_CURSOR;
+    cursor.fullscreen_eligible = GWIPC_TRI_STATE_UNKNOWN;
+    cursor.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
+    contract(c, GWIPC_MESSAGE_SURFACE_UPSERT, GWIPC_FLAG_SNAPSHOT_ITEM,
+             cursor, gwipc_contract_encode_surface_upsert);
+    auto cursor_buffer = a;
+    cursor_buffer.buffer_id = 12;
+    cursor_buffer.surface_id = cursor.surface_id;
+    cursor_buffer.width = cursor.logical_width;
+    cursor_buffer.height = cursor.logical_height;
+    cursor_buffer.stride = cursor.logical_width * 4U;
+    cursor_buffer.storage_size =
+        static_cast<std::uint64_t>(cursor_buffer.stride) * cursor_buffer.height;
+    cursor_buffer.pixel_format = GWIPC_PIXEL_FORMAT_ARGB8888;
+    cursor_buffer.alpha_semantics = GWIPC_ALPHA_PREMULTIPLIED;
+    const int cursor_fd = ::memfd_create(
+        "gwcomp-m11-cursor-process", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    require(cursor_fd >= 0 &&
+                ::ftruncate(cursor_fd,
+                            static_cast<off_t>(cursor_buffer.storage_size)) == 0,
+            "create cursor memfd");
+    const std::array<std::uint32_t, 4> red_cursor{
+        0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000};
+    require(::pwrite(cursor_fd, red_cursor.data(), sizeof(red_cursor), 0) ==
+                sizeof(red_cursor) &&
+                ::fcntl(cursor_fd, F_ADD_SEALS,
+                        F_SEAL_SHRINK | F_SEAL_GROW) == 0,
+            "populate cursor memfd");
+    contract_fd(c, GWIPC_MESSAGE_BUFFER_ATTACH, GWIPC_FLAG_SNAPSHOT_ITEM,
+                cursor_buffer, gwipc_contract_encode_buffer_attach, cursor_fd);
   }
   gwipc_snapshot_end e{};
   e.struct_size = sizeof(e);
   e.snapshot_id = 1;
   e.generation = 1;
-  e.actual_item_count = buffered ? 4 : 3;
+  e.actual_item_count = buffered ? 6 : 3;
   control(c, GWIPC_MESSAGE_SNAPSHOT_END, e, gwipc_control_encode_snapshot_end);
   gwipc_frame_commit f{};
   f.struct_size = sizeof(f);
@@ -314,6 +358,21 @@ int main(int argc, char **argv) {
               "buffered scene creates PPM");
       require(json.find("\"metadata_only\":false") != std::string::npos,
               "buffered scene manifest records drawable surface metadata");
+      require(json.find("\"surface_count\":1") != std::string::npos &&
+                  json.find("\"cursor_surface\":{") != std::string::npos &&
+                  json.find("\"format\":\"ARGB8888Premultiplied\"") !=
+                      std::string::npos,
+              "buffered scene manifest separates deterministic cursor metadata");
+      const auto ppm_path = std::filesystem::path(dumps) /
+                            "frame-000001-output-0000000000000001.ppm";
+      std::ifstream ppm_stream(ppm_path, std::ios::binary);
+      const std::string ppm{std::istreambuf_iterator<char>(ppm_stream), {}};
+      constexpr std::string_view ppm_header = "P6\n1024 768\n255\n";
+      require(ppm.starts_with(ppm_header) && ppm.size() > ppm_header.size() + 2 &&
+                  static_cast<std::uint8_t>(ppm[ppm_header.size()]) == 0xff &&
+                  static_cast<std::uint8_t>(ppm[ppm_header.size() + 1]) == 0 &&
+                  static_cast<std::uint8_t>(ppm[ppm_header.size() + 2]) == 0,
+              "headless canonical frame contains the software cursor overlay");
     } else {
       require(json.find("\"metadata_only\":true") != std::string::npos,
               "metadata scene manifest records metadata-only surface");
