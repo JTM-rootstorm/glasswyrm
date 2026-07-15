@@ -33,6 +33,49 @@ std::uint32_t hit_test_top_level(const server::ResourceTable& resources,
   return root;
 }
 
+std::uint32_t hit_test_deepest_viewable(
+    const server::ResourceTable& resources, const std::int32_t x,
+    const std::int32_t y) noexcept {
+  const auto root = resources.screen().root_window;
+  auto current = hit_test_top_level(resources, x, y);
+  if (current == root) return root;
+  const auto* window = resources.find_window(current);
+  if (!window) return root;
+  std::int64_t origin_x = window->x;
+  std::int64_t origin_y = window->y;
+  const auto maximum_depth =
+      resources.resource_count(server::ResourceType::Window);
+  for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+    const auto* parent = resources.find_window(current);
+    if (!parent) return root;
+    std::uint32_t selected = 0;
+    std::int64_t selected_x = 0;
+    std::int64_t selected_y = 0;
+    for (auto child_id = parent->children.rbegin();
+         child_id != parent->children.rend(); ++child_id) {
+      const auto* child = resources.find_window(*child_id);
+      if (!child || child->map_state != server::MapState::Viewable ||
+          child->cleanup_pending)
+        continue;
+      const auto child_x = origin_x + child->x + child->border_width;
+      const auto child_y = origin_y + child->y + child->border_width;
+      const auto right = child_x + child->width;
+      const auto bottom = child_y + child->height;
+      if (x >= child_x && y >= child_y && x < right && y < bottom) {
+        selected = *child_id;
+        selected_x = child_x;
+        selected_y = child_y;
+        break;
+      }
+    }
+    if (selected == 0) return current;
+    current = selected;
+    origin_x = selected_x;
+    origin_y = selected_y;
+  }
+  return current;
+}
+
 std::uint32_t motion_delivery_mask(const InputState& state) noexcept {
   std::uint32_t mask = em::PointerMotion;
   if (state.any_button_down()) mask |= em::ButtonMotion;

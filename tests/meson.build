@@ -492,6 +492,13 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('content-presenter', content_presenter_test, timeout: 10)
+  cursor_presenter_test = executable(
+    'cursor_presenter_test',
+    files('unit/cursor_presenter_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-presenter', cursor_presenter_test, timeout: 10)
   lifecycle_projection_test = executable(
     'lifecycle_projection_test',
     files('unit/lifecycle_projection_test.cpp'),

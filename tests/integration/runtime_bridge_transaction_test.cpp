@@ -1,4 +1,5 @@
 #include "glasswyrmd/runtime_bridge.hpp"
+#include "glasswyrmd/cursor_presenter.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <chrono>
@@ -130,5 +131,40 @@ int main(int argc, char** argv) {
           "start resets transaction stage before peers synchronize");
   stop(compositor_process);
   stop(policy_process);
+
+  const std::string cursor_policy_socket = root + "/gwm-cursor.sock";
+  const std::string cursor_compositor_socket = root + "/gwcomp-cursor.sock";
+  const auto cursor_policy_process = launch(argv[1], cursor_policy_socket);
+  const auto cursor_compositor_process =
+      launch(argv[2], cursor_compositor_socket, root + "/cursor-dump");
+  RuntimeBridge cursor_bridge(cursor_policy_socket, cursor_compositor_socket,
+                              gw::protocol::x11::kScreenModel,
+                              std::chrono::seconds(10), true);
+  cursor_bridge.start();
+  drive_until(cursor_bridge, [&] { return cursor_bridge.ready(); },
+              "buffered cursor bridge bootstrap timed out");
+  glasswyrm::server::CursorPresenter presenter;
+  auto image = glasswyrm::input::make_glyph_cursor(
+      {glasswyrm::input::CursorFontIdentity::Cursor,
+       glasswyrm::input::CursorFontIdentity::Cursor,
+       glasswyrm::input::kCursorGlyphLeftPointer,
+       static_cast<std::uint16_t>(
+           glasswyrm::input::kCursorGlyphLeftPointer + 1U),
+       {0xffff, 0xffff, 0xffff}, {0, 0, 0}},
+      error);
+  require(image != nullptr, error.c_str());
+  glasswyrm::server::CompositorCursorSubmission cursor;
+  require(presenter.prepare(image, 7, 9, true, cursor, error) &&
+              cursor_bridge.submit_cursor(cursor, 2, 2, error) &&
+              !cursor_bridge.submit_cursor(cursor, 3, 3, error),
+          "cursor update serializes behind the active compositor frame");
+  drive_until(cursor_bridge, [&] { return cursor_bridge.cursor_result_ready(); },
+              "cursor frame result timed out");
+  presenter.accept();
+  cursor_bridge.clear_transaction_result();
+  require(cursor_bridge.transaction_idle(),
+          "accepted cursor frame returns the bridge to idle");
+  stop(cursor_compositor_process);
+  stop(cursor_policy_process);
   return 0;
 }
