@@ -431,6 +431,7 @@ if get_option('gwcomp')
     'gwcomp/scene_manifest.cpp',
     'gwcomp/runtime.cpp',
     'gwcomp/signal_runtime.cpp',
+    'gwcomp/session_state_coordinator.cpp',
     'gwcomp/contract_dispatch.cpp',
     'gwcomp/presentation_transaction.cpp',
   )

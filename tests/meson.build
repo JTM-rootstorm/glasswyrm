@@ -559,6 +559,14 @@ if get_option('gwcomp') and get_option('headless_backend')
 endif
 
 if get_option('gwcomp')
+gwcomp_session_state_test = executable(
+  'gwcomp_session_state_test',
+  files('unit/gwcomp_session_state_test.cpp'),
+  dependencies: gwcomp_options_dep,
+  include_directories: test_source_root_include,
+)
+test('gwcomp-session-state', gwcomp_session_state_test, timeout: 10)
+
 gwcomp_signal_runtime_test = executable(
   'gwcomp_signal_runtime_test',
   files('unit/gwcomp_signal_runtime_test.cpp'),
