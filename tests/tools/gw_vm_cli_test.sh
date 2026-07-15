@@ -1642,6 +1642,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   milestone11-drm-report.jsonl; do
   assert_contains "$command_log" "$expected"
 done
+assert_contains "$command_log" 'rm -rf "$gpg_home"'
 assert_not_contains "$command_log" '<-u8>'
 assert_not_contains "$repo_root/tests/compat/m11/clients.toml" '"-u8"'
 for staged_consumer in \
