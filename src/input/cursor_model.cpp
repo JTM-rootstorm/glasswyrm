@@ -135,6 +135,19 @@ void draw_bottom_right(std::vector<std::uint8_t>& source) {
   }
 }
 
+void draw_vertical_resize(std::vector<std::uint8_t>& source) {
+  for (int y = 2; y <= 13; ++y) {
+    set_pixel(source, 7, y);
+    set_pixel(source, 8, y);
+  }
+  for (int offset = 0; offset < 5; ++offset) {
+    set_pixel(source, 7 - offset, 2 + offset);
+    set_pixel(source, 8 + offset, 2 + offset);
+    set_pixel(source, 7 - offset, 13 - offset);
+    set_pixel(source, 8 + offset, 13 - offset);
+  }
+}
+
 void draw_watch(std::vector<std::uint8_t>& source) {
   for (int x = 5; x <= 10; ++x) {
     set_pixel(source, x, 3);
@@ -161,6 +174,9 @@ bool builtin_kind(const std::uint16_t source_character,
     case kCursorGlyphBottomRightCorner:
       kind = CursorKind::BottomRightResize;
       return true;
+    case kCursorGlyphVerticalDoubleArrow:
+      kind = CursorKind::VerticalResize;
+      return true;
     case kCursorGlyphWatch: kind = CursorKind::Watch; return true;
     default: return false;
   }
@@ -172,6 +188,7 @@ void draw_builtin(const CursorKind kind, std::vector<std::uint8_t>& source) {
     case CursorKind::XtermText: draw_xterm(source); break;
     case CursorKind::FleurMove: draw_fleur(source); break;
     case CursorKind::BottomRightResize: draw_bottom_right(source); break;
+    case CursorKind::VerticalResize: draw_vertical_resize(source); break;
     case CursorKind::Watch: draw_watch(source); break;
     default: break;
   }
