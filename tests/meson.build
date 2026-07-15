@@ -257,6 +257,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('cursor-model', cursor_model_test, timeout: 10)
+  cursor_dispatch_test = executable(
+    'cursor_dispatch_test',
+    files('unit/cursor_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-dispatch', cursor_dispatch_test, timeout: 10)
   selection_store_test = executable(
     'selection_store_test',
     files('unit/selection_store_test.cpp'),

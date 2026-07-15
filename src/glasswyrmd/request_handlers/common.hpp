@@ -124,5 +124,15 @@ namespace x11 = gw::protocol::x11;
 [[nodiscard]] DispatchResult query_colors(const ServerState&,
                                           const DispatchContext&,
                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_cursor(ServerState&, const DispatchContext&,
+                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_glyph_cursor(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult free_cursor(ServerState&, const DispatchContext&,
+                                         const x11::FramedRequest&);
+[[nodiscard]] DispatchResult recolor_cursor(ServerState&, const DispatchContext&,
+                                            const x11::FramedRequest&);
+[[nodiscard]] DispatchResult query_best_size(
+    const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 
 }  // namespace glasswyrm::server::request_handlers

@@ -20,7 +20,8 @@ constexpr auto kResizeRedirectMask = x11::event_mask::ResizeRedirect;
 constexpr auto kSubstructureRedirectMask = x11::event_mask::SubstructureRedirect;
 DecodedWindowAttributes decode_window_attributes(
     x11::ByteReader& reader, const std::uint32_t value_mask,
-    WindowAttributes attributes, const std::uint32_t default_colormap) {
+    WindowAttributes attributes, const std::uint32_t default_colormap,
+    const ResourceTable& resources) {
   DecodedWindowAttributes result;
   result.attributes = attributes;
   for (std::uint32_t bit = 0; bit < 15; ++bit) {
@@ -79,9 +80,20 @@ DecodedWindowAttributes decode_window_attributes(
         result.attributes.colormap = value;
         break;
       case 14:
-        if (value != 0) { result.error = x11::CoreErrorCode::BadCursor; return result; }
-        result.attributes.cursor = value;
-        break;
+        if (value == 0) {
+          result.attributes.cursor = 0;
+          result.attributes.cursor_inherit = true;
+          result.attributes.cursor_image.reset();
+          break;
+        }
+        if (const auto* cursor = resources.find_cursor(value)) {
+          result.attributes.cursor = value;
+          result.attributes.cursor_inherit = false;
+          result.attributes.cursor_image = cursor->image;
+          break;
+        }
+        result.error = x11::CoreErrorCode::BadCursor;
+        return result;
       default: break;
     }
   }
@@ -117,7 +129,8 @@ DispatchResult change_window_attributes(
     return error(context, request, x11::CoreErrorCode::BadWindow, window_id);
   auto decoded = decode_window_attributes(reader, value_mask,
                                           window->attributes,
-                                          state.screen().default_colormap);
+                                          state.screen().default_colormap,
+                                          state.resources());
   if (!decoded.success) {
     return error(context, request, decoded.error, decoded.bad_value);
   }

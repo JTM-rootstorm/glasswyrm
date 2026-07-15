@@ -35,6 +35,19 @@ bool matches_fixed_font(const std::string_view name) noexcept {
          (normalized.starts_with("-misc-fixed-") && normalized.ends_with('*'));
 }
 
+std::optional<FontIdentity> font_identity(const std::string_view name) noexcept {
+  if (name.size() > 255) return std::nullopt;
+  std::array<char, 256> lower{};
+  std::transform(name.begin(), name.end(), lower.begin(), [](const char value) {
+    return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
+  });
+  const std::string_view normalized(lower.data(), name.size());
+  if (normalized == "cursor") return FontIdentity::Cursor;
+  if (normalized == "nil2") return FontIdentity::Nil2;
+  return matches_fixed_font(name) ? std::optional{FontIdentity::Fixed}
+                                  : std::nullopt;
+}
+
 std::array<std::uint8_t, 7> fixed_glyph(std::uint8_t character) noexcept {
   if (character >= 'a' && character <= 'z') character -= 'a' - 'A';
   switch (character) {

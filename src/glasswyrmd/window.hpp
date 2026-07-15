@@ -8,6 +8,10 @@
 #include <memory>
 #include <vector>
 
+namespace glasswyrm::input {
+struct CursorImage;
+}
+
 namespace glasswyrm::server {
 
 enum class WindowClass : std::uint16_t {
@@ -40,6 +44,8 @@ struct WindowAttributes {
   std::uint32_t do_not_propagate_mask{0};
   std::uint32_t colormap{0};
   std::uint32_t cursor{0};
+  bool cursor_inherit{true};
+  std::shared_ptr<const input::CursorImage> cursor_image;
 };
 
 struct WindowResource {

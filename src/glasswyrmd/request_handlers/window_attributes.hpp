@@ -18,6 +18,7 @@ struct DecodedWindowAttributes {
 
 [[nodiscard]] DecodedWindowAttributes decode_window_attributes(
     x11::ByteReader& reader, std::uint32_t value_mask,
-    WindowAttributes attributes, std::uint32_t default_colormap);
+    WindowAttributes attributes, std::uint32_t default_colormap,
+    const ResourceTable& resources);
 
 }  // namespace glasswyrm::server::request_handlers
