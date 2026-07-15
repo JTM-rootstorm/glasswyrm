@@ -6,6 +6,32 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+if host_machine.system() == 'linux'
+  uinput_m11_protocol_lib = static_library(
+    'uinput_m11_protocol',
+    files('helpers/uinput_m11_protocol.cpp'),
+    include_directories: include_directories('..'),
+  )
+  uinput_m11_protocol_dep = declare_dependency(
+    link_with: uinput_m11_protocol_lib,
+    include_directories: include_directories('..'),
+  )
+  gw_uinput_m11_program = executable(
+    'gw_uinput_m11',
+    files('integration/gw_uinput_m11.cpp'),
+    dependencies: uinput_m11_protocol_dep,
+    install: false,
+  )
+  test('gw-uinput-m11-help', gw_uinput_m11_program, args: ['--help'],
+       timeout: 10)
+  uinput_m11_protocol_test = executable(
+    'uinput_m11_protocol_test',
+    files('unit/uinput_m11_protocol_test.cpp'),
+    dependencies: uinput_m11_protocol_dep,
+  )
+  test('gw-uinput-m11-protocol', uinput_m11_protocol_test, timeout: 10)
+endif
+
 x11_event_test = executable(
   'x11_event_test',
   files('protocol/x11_event_test.cpp'),
