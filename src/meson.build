@@ -262,7 +262,10 @@ if get_option('glasswyrmd')
   if get_option('libinput_backend')
     gw_xkb_keymap_lib = static_library(
       'gw-xkb-keymap',
-      files('input/xkb_keymap.cpp'),
+      files(
+        'input/repeat_timer.cpp',
+        'input/xkb_keymap.cpp',
+      ),
       dependencies: xkbcommon_dep,
       include_directories: include_directories('.'),
     )

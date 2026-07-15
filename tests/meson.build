@@ -213,6 +213,13 @@ if get_option('glasswyrmd')
       include_directories: test_source_root_include,
     )
     test('xkb-keymap', xkb_keymap_test, timeout: 10)
+    repeat_timer_test = executable(
+      'repeat_timer_test',
+      files('unit/repeat_timer_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('repeat-timer', repeat_timer_test, timeout: 10)
   endif
 
   input_foundation_test = executable(
