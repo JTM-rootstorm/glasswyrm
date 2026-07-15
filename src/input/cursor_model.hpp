@@ -14,6 +14,7 @@ namespace glasswyrm::input {
 inline constexpr std::uint16_t kCursorGlyphBottomRightCorner = 14;
 inline constexpr std::uint16_t kCursorGlyphFleur = 52;
 inline constexpr std::uint16_t kCursorGlyphLeftPointer = 68;
+inline constexpr std::uint16_t kCursorGlyphHorizontalDoubleArrow = 108;
 inline constexpr std::uint16_t kCursorGlyphVerticalDoubleArrow = 116;
 inline constexpr std::uint16_t kCursorGlyphWatch = 150;
 inline constexpr std::uint16_t kCursorGlyphXterm = 152;
@@ -32,6 +33,7 @@ enum class CursorKind {
   XtermText,
   FleurMove,
   BottomRightResize,
+  HorizontalResize,
   VerticalResize,
   Watch,
   HiddenGlyph,
@@ -50,6 +52,8 @@ cursor_kind_name(const CursorKind kind) noexcept {
       return "fleur-move";
     case CursorKind::BottomRightResize:
       return "bottom-right-resize";
+    case CursorKind::HorizontalResize:
+      return "horizontal-resize";
     case CursorKind::VerticalResize:
       return "vertical-resize";
     case CursorKind::Watch:

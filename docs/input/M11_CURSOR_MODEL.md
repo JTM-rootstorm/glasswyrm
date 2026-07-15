@@ -9,8 +9,8 @@ The core subset implements `CreateCursor` from depth-1 source/mask pixmaps,
 `CreateGlyphCursor`, `FreeCursor`, `RecolorCursor`, cursor-class
 `QueryBestSize`, and `CWCursor`. The built-in glyph subset covers the root
 pointer, xterm text pointer, move, bottom-right resize, watch, the xterm
-vertical-scrollbar pointer, and the audited fixed-font hidden-cursor path. It
-is not a complete X cursor-font implementation.
+horizontal- and vertical-scrollbar pointers, and the audited fixed-font
+hidden-cursor path. It is not a complete X cursor-font implementation.
 
 `None` in `CWCursor` means inheritance. Effective selection walks from the
 deepest viewable pointer target through its ancestors and falls back to the
