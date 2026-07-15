@@ -1622,7 +1622,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   -Dasan=true -Dubsan=true 'CC=clang CXX=clang++' source_layout_test.sh \
   gwipc_staged_consumers_test.sh \
   'keyboard-mapping-dispatch' 'grab-state' 'grab-dispatch' \
-  '[[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]' \
+  "grep -Eq '^[[:space:]]*[^#[:space:]]'" \
   gw_uinput_m11 'serve' 'basic-typing' 'repeat' 'scroll' 'primary-selection' \
   'clipboard-probe' 'move' 'resize' 'close' 'post-vt' 'post-restart' \
   'DeviceAllow=/dev/uinput rw' 'DeviceAllow=$drm_device rw' \
