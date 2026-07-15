@@ -190,6 +190,14 @@ bool builtin_kind(const std::uint16_t source_character,
     case kCursorGlyphHorizontalDoubleArrow:
       kind = CursorKind::HorizontalResize;
       return true;
+    case kCursorGlyphScrollLeft:
+    case kCursorGlyphScrollRight:
+      kind = CursorKind::HorizontalResize;
+      return true;
+    case kCursorGlyphScrollDown:
+    case kCursorGlyphScrollUp:
+      kind = CursorKind::VerticalResize;
+      return true;
     case kCursorGlyphVerticalDoubleArrow:
       kind = CursorKind::VerticalResize;
       return true;

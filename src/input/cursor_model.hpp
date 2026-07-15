@@ -14,7 +14,11 @@ namespace glasswyrm::input {
 inline constexpr std::uint16_t kCursorGlyphBottomRightCorner = 14;
 inline constexpr std::uint16_t kCursorGlyphFleur = 52;
 inline constexpr std::uint16_t kCursorGlyphLeftPointer = 68;
+inline constexpr std::uint16_t kCursorGlyphScrollDown = 106;
 inline constexpr std::uint16_t kCursorGlyphHorizontalDoubleArrow = 108;
+inline constexpr std::uint16_t kCursorGlyphScrollLeft = 110;
+inline constexpr std::uint16_t kCursorGlyphScrollRight = 112;
+inline constexpr std::uint16_t kCursorGlyphScrollUp = 114;
 inline constexpr std::uint16_t kCursorGlyphVerticalDoubleArrow = 116;
 inline constexpr std::uint16_t kCursorGlyphWatch = 150;
 inline constexpr std::uint16_t kCursorGlyphXterm = 152;
