@@ -257,6 +257,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('selection-store', selection_store_test, timeout: 10)
+  grab_state_test = executable(
+    'grab_state_test',
+    files('unit/grab_state_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('grab-state', grab_state_test, timeout: 10)
   drawable_core_test = executable(
     'drawable_core_test',
     files('unit/drawable_core_test.cpp'),
