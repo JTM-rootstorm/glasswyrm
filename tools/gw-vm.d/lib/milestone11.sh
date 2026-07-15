@@ -347,7 +347,8 @@ result[core_mapping]=passed
 meson test -C "$build" --print-errorlogs grab-state grab-dispatch
 result[active_grab]=passed result[automatic_grab]=passed
 "$source_dir/tests/tools/source_layout_test.sh" | tee "$artifact_dir/milestone11-source-layout.log"
-[[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]
+! grep -Eq '^[[:space:]]*[^#[:space:]]' \
+  "$source_dir/docs/maintenance/source_size_allowlist.txt"
 result[source_layout]=passed
 
 failure_stage=uinput-startup
@@ -782,7 +783,7 @@ milestone11_runtime_test() {
     if [[ -z $failure ]]; then
       if milestone11_capture_screen screenshot-after-restart-ready screen-after-restart-captured milestone11-desktop-after-restart.ppm "$guest_pid"; then :; else status=$?; failure=post-restart-screenshot; milestone11_release_guest_waits; fi
     fi
-    if wait "$guest_pid"; then :; else guest_status=$?; if [[ -z $failure ]]; then status=$guest_status; failure=guest-runtime; fi; fi
+    if wait "$guest_pid"; then :; else guest_status=$?; status=$guest_status; failure=guest-runtime; fi
   fi
   collect_milestone11_artifacts || collection=$?
   if ((collection)) && [[ -z $failure ]]; then status=$collection; failure=artifact-collection; fi
