@@ -249,6 +249,22 @@ PREFLIGHT
   exit 0
 fi
 
+if [[ $script == *'M11 prerequisite failed before package installation: /dev/uinput is unavailable'* && $script != *'build=/var/tmp/glasswyrm-build-m11'* ]]; then
+  printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
+  if [[ ${GW_VM_TEST_M11_NO_UINPUT:-0} == 1 ]]; then
+    printf '%s\n' 'M11 prerequisite failed before package installation: /dev/uinput is unavailable; the base snapshot kernel must provide CONFIG_INPUT_UINPUT.' >&2
+    exit 30
+  fi
+  cat <<'PREFLIGHT'
+drm_primary_node=/dev/dri/card0
+drm_connector=Virtual-1
+drm_mode=1024x768
+target_vt=/dev/tty2
+uinput_device=/dev/uinput
+PREFLIGHT
+  exit 0
+fi
+
 if [[ $script == *'test -f "$1"; cat "$1"'* ]]; then
   marker=${guest_args[0]:-}
   printf 'ready\ncommit_id=%s\ngeneration=1\ncanonical_hash=0123456789abcdef\nscanout_hash=0123456789abcdef\nmode=1024x768\nconnector=Virtual-1\n' "${marker##*/}"
@@ -593,6 +609,43 @@ FACTS
     milestone10-drm-report.jsonl) printf '{"record":"selection","api":"atomic"}\n' ;;
     milestone10-kms-*.json|milestone10-vt-*.json) printf '{}\n' ;;
     milestone10-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone11-facts.env)
+      cat <<'FACTS'
+failure_stage=
+scenario_exit=0
+api_version=0.6.0
+soversion=0
+wire_version=1.0
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.11.1
+ninja_version=1.13.2
+systemd_version=systemd 257
+libinput_version=1.31.3
+libxkbcommon_version=1.13.1
+xkeyboard_config_version=x11-misc/xkeyboard-config-2.47
+xterm_version=XTerm(410)
+xterm_sha256=7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f
+x_servers_absent=true
+mesa_absent=true
+drm_mode=1024x768
+keyboard_device=/dev/input/event11
+pointer_device=/dev/input/event12
+canonical_hash=0123456789abcdef
+scanout_hash=0123456789abcdef
+mirror_sha256=aaaaaaaaaaaaaaaa
+screenshot_sha256=aaaaaaaaaaaaaaaa
+FACTS
+      for result in strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap relative_motion wheel key_repeat cursor_resources cursor_scanout grabs primary_selection clipboard_selection property_notify wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence; do
+        printf '%s=passed\n' "$result"
+      done
+      if [[ ${GW_VM_TEST_BAD_M11_FACTS:-0} == 1 ]]; then printf 'selection_paste=failed\nscenario_exit=1\n'; fi
+      ;;
+    milestone11-libinput-devices.json) printf '{"keyboard":{"event_path":"/dev/input/event11"},"pointer":{"event_path":"/dev/input/event12"}}\n' ;;
+    milestone11-keymap.json) printf '{"model":"pc105","layout":"us"}\n' ;;
+    milestone11-xterm-trace.json) printf '{"gwm_replay":true,"compositor_replay":true}\n' ;;
+    milestone11-drm-report.jsonl) printf '{"state":"active"}\n' ;;
+    milestone11-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -699,6 +752,16 @@ if [[ "$*" == *milestone10-drm-evidence.tar* ]]; then
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
 fi
+if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
+  destination=${!#}; scratch=$(mktemp -d)
+  for name in milestone11-desktop.ppm milestone11-desktop-after-vt.ppm milestone11-desktop-after-restart.ppm milestone11-canonical.ppm milestone11-canonical-after-vt.ppm milestone11-canonical-after-restart.ppm; do
+    printf 'P6\n1 1\n255\n000' >"$scratch/$name"
+  done
+  for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log milestone11-interactive-wm.log milestone11-session-state.log milestone11-drm-report.jsonl milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl frames.jsonl; do printf '{}\n' >"$scratch/$name"; done
+  if [[ ${GW_VM_TEST_BAD_M11_ARCHIVE:-0} == 1 ]]; then rm -f "$scratch/scene.jsonl"; fi
+  (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -733,7 +796,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -786,6 +849,7 @@ assert_contains "$work_dir/scenario-m5-injection.out" 'Scenario names are fixed'
 
 run_failure "$work_dir/scenario-m6-injection.out" "$gw_vm" scenario 'milestone6-runtime-test;touch'
 run_failure "$work_dir/scenario-m7-injection.out" "$gw_vm" scenario 'milestone7-runtime-test;touch'
+run_failure "$work_dir/scenario-m11-injection.out" "$gw_vm" scenario 'milestone11-runtime-test;touch'
 assert_contains "$work_dir/scenario-m6-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
@@ -1505,6 +1569,100 @@ run_failure "$work_dir/milestone10-source-layout-error.out" \
   env GW_VM_TEST_FAIL_MATCH=source_layout_test.sh "$gw_vm" milestone10-runtime-test --yes
 assert_contains "$work_dir/milestone10-source-layout-error.out" 'failed during: guest-runtime'
 assert_contains "$command_log" 'milestone10-gwcomp-journal.log'
+
+run_failure "$work_dir/milestone11-gate.out" "$gw_vm" milestone11-runtime-test
+assert_contains "$work_dir/milestone11-gate.out" '--yes'
+run_failure "$work_dir/milestone11-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone11-runtime-test.sh"
+assert_contains "$work_dir/milestone11-wrapper-gate.out" '--yes'
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-bad-base.out" \
+  env GW_VM_TEST_BAD_BASE=1 "$gw_vm" milestone11-runtime-test --yes
+assert_contains "$work_dir/milestone11-bad-base.out" \
+  'HEAD is not based on required Milestone 11 commit 9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0'
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-dirty.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone11-runtime-test --yes
+assert_contains "$work_dir/milestone11-dirty.out" 'requires committed source outside Plans/'
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-no-uinput.out" \
+  env GW_VM_TEST_M11_NO_UINPUT=1 "$gw_vm" milestone11-runtime-test --yes
+assert_contains "$work_dir/milestone11-no-uinput.out" '/dev/uinput is unavailable'
+assert_contains "$work_dir/milestone11-no-uinput.out" 'CONFIG_INPUT_UINPUT'
+assert_not_contains "$command_log" 'dev-libs/libinput'
+
+: >"$command_log"
+run_success "$work_dir/milestone11.out" "$gw_vm" scenario milestone11-runtime-test --yes
+assert_contains "$work_dir/milestone11.out" \
+  'reset; milestone10-runtime-test; reset; milestone11-runtime-test'
+assert_contains "$artifact_dir/milestone11-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone11-summary.json" \
+  '"required_base_commit": "9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0"'
+for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
+  /var/tmp/glasswyrm-build-m11-runtime /var/tmp/glasswyrm-build-m11-default \
+  /var/tmp/glasswyrm-build-m11-server /var/tmp/glasswyrm-build-m11-gwm \
+  /var/tmp/glasswyrm-build-m11-gwcomp /var/tmp/glasswyrm-build-m11-ipc-only \
+  /var/tmp/glasswyrm-build-m11-session /var/tmp/glasswyrm-m11-clients \
+  /var/tmp/glasswyrm-m11-dumps /var/tmp/glasswyrm-m11-scenes \
+  /var/tmp/glasswyrm-m11-input /var/tmp/glasswyrm-m11-control \
+  /var/tmp/glasswyrm-m11-artifacts dev-libs/libinput x11-libs/libxkbcommon \
+  x11-misc/xkeyboard-config '=x11-terms/xterm-410' 'XTerm(410)' \
+  7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f \
+  -Dlibinput_backend=false -Dlibinput_backend=true -Ddrm_backend=true \
+  -Dasan=true -Dubsan=true 'CC=clang CXX=clang++' source_layout_test.sh \
+  '[[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]' \
+  gw_uinput_m11 'serve' 'basic-typing' 'repeat' 'scroll' 'primary-selection' \
+  'clipboard-probe' 'move' 'resize' 'close' 'post-vt' 'post-restart' \
+  'DeviceAllow=/dev/uinput rw' 'DeviceAllow=$drm_device rw' \
+  'DeviceAllow=$target_vt rw' 'DeviceAllow=$keyboard r' \
+  'DeviceAllow=$pointer r' glasswyrm-session '--runtime-dir' \
+  '/run/glasswyrm-m11' '--input-device' '--xkb-layout' '--xkb-model' \
+  '--drm-api atomic' '--mirror-dump-dir' '--scene-manifest' \
+  '--drm-report' '--x11-trace' '-geometry' '80x24+96+96' '-fn' 'fixed' \
+  'm11-bashrc' 'chvt 1' 'systemctl restart gwm-m11.service' \
+  'systemctl restart gwcomp-m11.service' m11_selection_probe \
+  m11_xterm_acceptance '--wm-evidence' \
+  screenshot-ready screenshot-after-vt-ready screenshot-after-restart-ready \
+  milestone11-libinput-devices.json milestone11-keymap.json \
+  milestone11-xterm-trace.json milestone11-selection.log \
+  milestone11-interactive-wm.log milestone11-session-state.log \
+  milestone11-drm-report.jsonl; do
+  assert_contains "$command_log" "$expected"
+done
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  '[[ -c /dev/uinput ]]' 'emerge --oneshot'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'run_input primary-selection' 'run_input clipboard-probe'
+assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
+assert_contains "$command_log" 'magick <'
+assert_file_glob "$artifact_dir/milestone11-interactive-evidence.tar"
+for artifact in milestone11-runtime-test.log milestone11-meson-test.log \
+  milestone11-source-layout.log milestone11-libinput-devices.json \
+  milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.json \
+  milestone11-selection.log milestone11-interactive-wm.log \
+  milestone11-session-state.log milestone11-drm-report.jsonl \
+  milestone11-glasswyrmd-journal.log milestone11-gwm-journal.log \
+  milestone11-gwcomp-journal.log milestone11-session-journal.log \
+  milestone11-facts.env milestone11-summary.json milestone11-desktop.ppm \
+  milestone11-desktop-after-vt.ppm milestone11-desktop-after-restart.ppm \
+  milestone11-interactive-evidence.tar; do
+  [[ -f $artifact_dir/$artifact ]] || fail "milestone11 scenario did not create $artifact"
+done
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-bad-facts.out" \
+  env GW_VM_TEST_BAD_M11_FACTS=1 "$gw_vm" milestone11-runtime-test --yes
+assert_contains "$artifact_dir/milestone11-summary.json" 'selection_paste must be passed'
+assert_contains "$command_log" 'milestone11-session-journal.log'
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-bad-archive.out" \
+  env GW_VM_TEST_BAD_M11_ARCHIVE=1 "$gw_vm" milestone11-runtime-test --yes
+assert_contains "$work_dir/milestone11-bad-archive.out" 'failed during: artifact-validation'
+
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
 printf 'gw-vm CLI tests passed\n'
