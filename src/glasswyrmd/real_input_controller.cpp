@@ -96,7 +96,7 @@ RealInputServiceResult RealInputController::convert(
         record.kind == glasswyrm::input::RealInputKind::MotionRelative) {
       const auto state = state_mask();
       events_.push_back({RealInputEventKind::Motion, record.time_ms,
-                         record.root_x, record.root_y, 0, 0, false, state,
+                         record.root_x, record.root_y, 0, 0, 0, false, state,
                          state});
       continue;
     }
@@ -109,7 +109,7 @@ RealInputServiceResult RealInputController::convert(
         button_mask_ &= static_cast<std::uint16_t>(~bit);
       events_.push_back({RealInputEventKind::Button, record.time_ms,
                          record.root_x, record.root_y, 0,
-                         static_cast<std::uint8_t>(record.code), record.pressed,
+                         static_cast<std::uint8_t>(record.code), 0, record.pressed,
                          state_before, state_mask()});
       continue;
     }
@@ -132,7 +132,8 @@ RealInputServiceResult RealInputController::convert(
       return {false, false, std::move(transition_error)};
     events_.push_back({RealInputEventKind::Key, record.time_ms, record.root_x,
                        record.root_y, focus_window, transition.x11_keycode,
-                       record.pressed, state_before, state_mask()});
+                       transition.keysym_before, record.pressed, state_before,
+                       state_mask()});
   }
   return {};
 }
@@ -156,6 +157,7 @@ RealInputServiceResult RealInputController::service_repeat() {
     events_.push_back(
         {RealInputEventKind::Key, event_time, backend_.pointer_x(),
          backend_.pointer_y(), repeat_event.key.focus, repeat_event.key.keycode,
+         keymap_->core_keysyms(repeat_event.key.keycode)[0],
          repeat_event.kind == glasswyrm::input::RepeatEventKind::KeyPress,
          state, state});
   }

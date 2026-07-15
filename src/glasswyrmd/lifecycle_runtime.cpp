@@ -91,8 +91,10 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   } else if (active && mutation != pending_mutations_.end() &&
              mutation->second.destroy) {
     auto staged = server_.state_;
-    for (const auto& item : mutation->second.destroy->postorder)
+    for (const auto& item : mutation->second.destroy->postorder) {
       (void)staged.selections().clear_window(item.xid);
+      (void)staged.grabs().cleanup_window(item.xid);
+    }
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
     committed = committed && staged.commit_lifecycle(snapshot);
@@ -258,6 +260,10 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
   pending_mutations_.erase(token);
   if (cleanup_base) server_.pending_resource_bases_.erase(*cleanup_base);
   bridge_->clear_transaction_result();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (operation)
+    complete_interactive_lifecycle(*operation, success);
+#endif
 }
 
 bool ServerRuntime::defer_lifecycle(ClientConnection& client,

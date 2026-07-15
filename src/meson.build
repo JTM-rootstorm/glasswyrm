@@ -370,6 +370,8 @@ if get_option('glasswyrmd')
     gw_server_core_sources += files(
       'glasswyrmd/real_input_controller.cpp',
       'glasswyrmd/real_input_runtime.cpp',
+      'glasswyrmd/interactive_wm.cpp',
+      'wm/interactive_policy.cpp',
     )
     gw_server_core_dependencies += gw_xkb_keymap_dep
   endif

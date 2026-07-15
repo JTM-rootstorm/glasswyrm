@@ -93,8 +93,11 @@ bool ServerRuntime::service_session_changes() {
     return true;
   for (const auto &request : bridge_->take_session_state_changes()) {
     const auto applied = real_input_->apply_session_state(request.change.state);
-    if (applied.reset_server_state)
+    if (applied.reset_server_state) {
       input_state_.reset_provider_state();
+      abort_interactive();
+      (void)server_.state_.grabs().suspend();
+    }
     std::string error;
     if (!bridge_->acknowledge_session_state(request, applied.result, error)) {
       std::fprintf(stderr,
@@ -124,6 +127,8 @@ bool ServerRuntime::suspend_real_input_for_compositor_reset(const bool reset) {
       real_input_->apply_session_state(GWIPC_SESSION_INACTIVE);
   if (suspended.reset_server_state)
     input_state_.reset_provider_state();
+  abort_interactive();
+  (void)server_.state_.grabs().suspend();
   if (suspended.result == GWIPC_SESSION_STATE_ACCEPTED ||
       suspended.result == GWIPC_SESSION_STATE_ALREADY_APPLIED)
     return true;
@@ -153,6 +158,8 @@ void ServerRuntime::deliver_real_input() {
       break;
     const auto event = *next;
     if (event.kind == RealInputEventKind::StateReset) {
+      abort_interactive();
+      (void)server_.state_.grabs().suspend();
       input_state_.reset_provider_state();
       continue;
     }
@@ -164,10 +171,18 @@ void ServerRuntime::deliver_real_input() {
           server_.state_.resources(), event.root_x, event.root_y);
       (void)input_state_.accept_wrapping_time(event.time_ms);
       input_state_.set_pointer(event.root_x, event.root_y, new_target);
+      if (interactive_policy_ &&
+          interactive_policy_->kind() !=
+              glasswyrm::wm::InteractionKind::None) {
+        interactive_policy_->motion({event.root_x, event.root_y});
+        (void)update_interactive_geometry();
+        continue;
+      }
       (void)router.route_crossing(old_target, new_target,
                                   server_.state_.focused_window(), input_state_,
                                   clients);
-      (void)router.route_input(
+      (void)router.route_input_grabbed(
+          server_.state_.grabs(),
           gw::protocol::x11::CoreEventType::MotionNotify, 0, event.time_ms,
           new_target, event.state_before,
           glasswyrm::input::motion_delivery_mask(input_state_), event.root_x,
@@ -180,15 +195,52 @@ void ServerRuntime::deliver_real_input() {
       if (staged.transition_button(event.detail, event.pressed) !=
           glasswyrm::input::TransitionStatus::Accepted)
         continue;
-      (void)router.route_input(
-          event.pressed ? gw::protocol::x11::CoreEventType::ButtonPress
-                        : gw::protocol::x11::CoreEventType::ButtonRelease,
-          event.detail, event.time_ms, input_state_.pointer_target(),
-          event.state_before,
-          event.pressed ? gw::protocol::x11::event_mask::ButtonPress
-                        : gw::protocol::x11::event_mask::ButtonRelease,
-          event.root_x, event.root_y, input_state_.pointer_target(), clients);
+      bool consumed = false;
+      if (interactive_policy_ &&
+          interactive_policy_->kind() !=
+              glasswyrm::wm::InteractionKind::None) {
+        consumed = true;
+        if (!event.pressed && interactive_policy_->release(
+                                  event.detail, {event.root_x, event.root_y})) {
+          (void)update_interactive_geometry();
+          if (interactive_policy_->finish_ready())
+            (void)interactive_policy_->finish();
+        }
+      } else if (event.pressed) {
+        consumed = begin_interactive_pointer(event);
+      }
+      if (!consumed && event.pressed && !server_.state_.grabs().pointer_grab()) {
+        if (!server_.state_.grabs().activate_passive_button(
+                event.detail, static_cast<std::uint16_t>(event.state_before & 0xffU),
+                event.time_ms)) {
+          const auto recipient = router.input_recipient(
+              input_state_.pointer_target(),
+              gw::protocol::x11::event_mask::ButtonPress);
+          if (recipient)
+            (void)server_.state_.grabs().begin_automatic_button_grab(
+                recipient->first, recipient->second, event.detail,
+                event.time_ms);
+        }
+      }
+      if (!consumed)
+        (void)router.route_input_grabbed(
+            server_.state_.grabs(),
+            event.pressed ? gw::protocol::x11::CoreEventType::ButtonPress
+                          : gw::protocol::x11::CoreEventType::ButtonRelease,
+            event.detail, event.time_ms, input_state_.pointer_target(),
+            event.state_before,
+            event.pressed ? gw::protocol::x11::event_mask::ButtonPress
+                          : gw::protocol::x11::event_mask::ButtonRelease,
+            event.root_x, event.root_y, input_state_.pointer_target(), clients);
       input_state_ = staged;
+      if (!consumed) {
+        if (event.pressed)
+          server_.state_.grabs().note_button_press(event.detail);
+        else
+          (void)server_.state_.grabs().note_button_release(event.detail);
+      }
+      if (consumed)
+        continue;
       const auto target = input_state_.pointer_target();
       const auto *window = server_.state_.resources().find_window(target);
       const bool requests_focus =
@@ -226,13 +278,15 @@ void ServerRuntime::deliver_real_input() {
         server_.state_.resources().find_window(event.focus_window)
             ? event.focus_window
             : server_.state_.screen().root_window;
-    (void)router.route_input(
-        event.pressed ? gw::protocol::x11::CoreEventType::KeyPress
-                      : gw::protocol::x11::CoreEventType::KeyRelease,
-        event.detail, event.time_ms, focus, event.state_before,
-        event.pressed ? gw::protocol::x11::event_mask::KeyPress
-                      : gw::protocol::x11::event_mask::KeyRelease,
-        event.root_x, event.root_y, input_state_.pointer_target(), clients);
+    if (!handle_interactive_close(event))
+      (void)router.route_input_grabbed(
+          server_.state_.grabs(),
+          event.pressed ? gw::protocol::x11::CoreEventType::KeyPress
+                        : gw::protocol::x11::CoreEventType::KeyRelease,
+          event.detail, event.time_ms, focus, event.state_before,
+          event.pressed ? gw::protocol::x11::event_mask::KeyPress
+                        : gw::protocol::x11::event_mask::KeyRelease,
+          event.root_x, event.root_y, input_state_.pointer_target(), clients);
     input_state_ = staged;
   }
 }

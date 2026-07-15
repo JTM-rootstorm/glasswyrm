@@ -210,6 +210,14 @@ int main(int argc, char **argv) {
   drive(policy);
   results.push_back(policy.result());
   stop(wm);
+  const std::string legacy_wm_socket = root + "/gwm-legacy.sock";
+  const auto legacy_wm = launch(argv[1], legacy_wm_socket);
+  glasswyrm::server::PolicyPeer legacy_policy(
+      legacy_wm_socket, gw::protocol::x11::kScreenModel, false);
+  synchronize(legacy_policy);
+  require(!legacy_policy.result().bindings && legacy_policy.policy_hash() != 0,
+          "historical policy profile retains a bindings-free v1 snapshot");
+  stop(legacy_wm);
   const auto compositor =
       launch(argv[2], comp_socket, "--dump-dir", root + "/dump");
   glasswyrm::server::CompositorPeer display(comp_socket,
