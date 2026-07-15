@@ -146,29 +146,34 @@ bool ServerRuntime::update_interactive_geometry() {
 }
 
 bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
-  if (!interactive_bindings_ || !event.pressed ||
-      event.keysym != interactive_bindings_->close_keysym ||
-      (event.state_before & 0xffU) != interactive_bindings_->close_modifiers)
+  if (!interactive_bindings_ || !event.pressed)
     return false;
   const auto target = server_.state_.focused_window();
   const auto *window = server_.state_.resources().find_window(target);
   const auto found = lifecycle_->committed().windows.find(target);
-  if (!window || found == lifecycle_->committed().windows.end() ||
-      !found->second.managed || window->attributes.override_redirect ||
-      target == server_.state_.screen().root_window)
-    return false;
 
   const auto protocols = server_.state_.atoms().find("WM_PROTOCOLS");
   const auto delete_window = server_.state_.atoms().find("WM_DELETE_WINDOW");
   bool supports_delete = false;
-  if (protocols && delete_window) {
+  if (window && protocols && delete_window) {
     const auto property = window->properties.find(*protocols);
     if (property != window->properties.end())
       if (const auto *atoms = std::get_if<std::vector<std::uint32_t>>(
               &property->second.data))
         supports_delete = std::ranges::find(*atoms, *delete_window) != atoms->end();
   }
-  if (supports_delete) {
+  const auto decision = glasswyrm::wm::evaluate_close_binding(
+      *interactive_bindings_,
+      static_cast<std::uint16_t>(event.state_before & 0xffU), event.keysym,
+      target,
+      window && found != lifecycle_->committed().windows.end() &&
+          found->second.managed &&
+          target != server_.state_.screen().root_window,
+      window && window->attributes.override_redirect, supports_delete,
+      event.time_ms);
+  if (decision.action == glasswyrm::wm::CloseAction::None)
+    return false;
+  if (decision.action == glasswyrm::wm::CloseAction::SendDeleteWindow) {
     const auto *record = server_.state_.resources().find(target);
     if (record && record->owner) {
       for (const auto &client : server_.clients_)
@@ -182,7 +187,7 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
           break;
         }
     }
-  } else {
+  } else if (decision.action == glasswyrm::wm::CloseAction::DestroyTopLevel) {
     auto proposed = server_.state_.propose_destroy_lifecycle(target);
     auto plan = server_.state_.resources().capture_destroy_plan(target);
     if (proposed && plan) {
@@ -205,7 +210,7 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
         pending_mutations_.erase(token);
     }
   }
-  return interactive_bindings_->consume_wm_bindings;
+  return decision.consume_event;
 }
 
 void ServerRuntime::complete_interactive_lifecycle(
