@@ -1,0 +1,86 @@
+schema = 1
+status = "official source and launch profile pinned; Glasswyrm live traces pending"
+source_hash_status = "computed from the official archive and verified by its detached upstream signature"
+
+[[client]]
+application = "xterm"
+version = "patch 410"
+release_date = "2026-05-01"
+source_url = "https://invisible-island.net/archives/xterm/xterm-410.tgz"
+source_sha256 = "7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f"
+source_size_bytes = 1627227
+source_signature_url = "https://invisible-island.net/archives/xterm/xterm-410.tgz.asc"
+source_signature_sha256 = "f1acdd6a4516417b3a5149609ac6bd9b36aff6cc4b965dea95cd780d64ec98ce"
+signature_key_url = "https://invisible-island.net/public/dickey%40invisible-island.net-rsa3072.asc"
+signature_key_sha256 = "eec7eccb51a27ae633784d1b1ef42eb775130c782ea51a6c47fa7a901484d6db"
+signature_key_fingerprint = "19882D92DDA4C400C22C0D56CC2AF4472167BE03"
+signature_key_id = "CC2AF4472167BE03"
+signature_algorithm = "RSA3072/SHA-512"
+signature_created_utc = "2026-05-01T23:56:20Z"
+signature_verification = "GnuPG GOODSIG and VALIDSIG against the key published by the official upstream HTTPS key page"
+source_snapshot_commit = "not available from the upstream CVS-derived release archive"
+build_source = "unmodified verified upstream release archive"
+configure_arguments = [
+  "--enable-openpty",
+  "--disable-freetype",
+  "--disable-wide-chars",
+  "--disable-luit",
+  "--disable-toolbar",
+  "--disable-sixel-graphics",
+  "--disable-regis-graphics",
+  "--without-xinerama",
+  "--disable-xcursor",
+  "--disable-tek4014",
+  "--disable-session-mgt",
+  "--disable-input-method",
+  "--disable-active-icon",
+  "--disable-desktop",
+  "--disable-print-graphics",
+  "--disable-screen-dumps",
+]
+verified_configure_profile = [
+  "openpty through libutil",
+  "core Xaw, Xmu, Xt, and Xlib",
+  "core bitmap fonts",
+  "FreeType and Xft disabled",
+  "wide characters and luit disabled",
+  "toolbar, ReGIS, sixel, Xinerama, and Xcursor disabled",
+]
+expected_binary_version = "XTerm(410)"
+environment = [
+  "LC_ALL=C",
+  "LANG=C",
+  "XMODIFIERS=@im=none",
+  "SESSION_MANAGER=",
+  "XAUTHORITY=/dev/null",
+  "DISPLAY=:99",
+  "TERM=xterm",
+]
+argv = [
+  "xterm",
+  "-geometry", "80x24+96+96",
+  "-fn", "fixed",
+  "-fb", "fixed",
+  "-u8", "0",
+  "-xrm", "*cursorBlink:false",
+  "-xrm", "*toolBar:false",
+  "-title", "Glasswyrm-M11",
+  "-e", "/bin/bash", "--noprofile", "--rcfile", "tests/compat/m11/m11-bashrc",
+]
+bashrc = "tests/compat/m11/m11-bashrc"
+compatibility_claim = "xterm patch 410, core-font ASCII profile, exact command and build options only"
+expected_trace_status = "pending live Glasswyrm capture and review; no M11 trace fixture is accepted yet"
+expected_screenshot_status = "pending live DRM acceptance; no M11 screenshot fixture is accepted yet"
+disabled_optional_features = [
+  "Xft and FreeType",
+  "wide-character and Unicode mode",
+  "luit",
+  "toolbar",
+  "ReGIS",
+  "sixel",
+  "Xinerama",
+  "Xcursor themes",
+  "Tektronix 4014",
+  "session management",
+  "input methods",
+]

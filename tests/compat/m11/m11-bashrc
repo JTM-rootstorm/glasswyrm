@@ -1,0 +1,21 @@
+# Deterministic interactive shell profile for the Milestone 11 xterm target.
+export LC_ALL=C
+export LANG=C
+export TERM=xterm
+
+unset PROMPT_COMMAND
+unset PROMPT_DIRTRIM
+export PS1='gw-m11$ '
+export PS2='> '
+export PS4='+ '
+
+export HISTFILE=/dev/null
+export HISTSIZE=0
+export HISTFILESIZE=0
+set +o history
+
+# Readline bracketed-paste negotiation would add terminal output unrelated to
+# the fixed typing and selection scenarios.
+bind 'set enable-bracketed-paste off' 2>/dev/null || :
+
+umask 077
