@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.hpp"
 #include "glasswyrmd/server.hpp"
 
 #ifdef GW_SERVER_HAS_IPC
@@ -9,6 +10,9 @@
 #include "glasswyrmd/runtime_bridge.hpp"
 #include "glasswyrmd/synthetic_input_peer.hpp"
 #include "input/input_state.hpp"
+#if GW_HAS_LIBINPUT_BACKEND
+#include "glasswyrmd/real_input_controller.hpp"
+#endif
 #endif
 
 #include <cstdint>
@@ -80,6 +84,15 @@ class ServerRuntime {
   [[nodiscard]] bool service_integrated(short policy_events,
                                         short compositor_events);
   void service_input(short listener_events, short connection_events);
+#if GW_HAS_LIBINPUT_BACKEND
+  [[nodiscard]] bool initialize_real_input();
+  [[nodiscard]] bool service_real_input(short input_events,
+                                        short repeat_events);
+  [[nodiscard]] bool service_session_changes();
+  [[nodiscard]] bool suspend_real_input_for_compositor_reset(bool reset);
+  void deliver_real_input();
+  void complete_real_focus(bool success);
+#endif
 
   std::unique_ptr<RuntimeBridge> bridge_;
   std::unique_ptr<LifecycleCoordinator> lifecycle_;
@@ -88,6 +101,13 @@ class ServerRuntime {
   glasswyrm::input::InputState input_state_;
   std::uint64_t expected_input_id_{1};
   std::optional<PendingFocusInput> pending_focus_input_;
+#if GW_HAS_LIBINPUT_BACKEND
+  struct PendingRealFocus {
+    std::uint32_t old_focus{};
+  };
+  std::unique_ptr<RealInputController> real_input_;
+  std::optional<PendingRealFocus> pending_real_focus_;
+#endif
   std::uint64_t next_lifecycle_token_{1};
   // Runtime bootstrap owns commit/generation 1.
   std::uint64_t next_policy_commit_{2};

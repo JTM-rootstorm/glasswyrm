@@ -15,7 +15,8 @@ public:
   RuntimeBridge(std::string policy_path, std::string compositor_path,
                 gw::protocol::x11::ScreenModel screen,
                 std::chrono::milliseconds deadline = std::chrono::seconds(10),
-                bool software_content = false);
+                bool software_content = false,
+                bool session_state = false);
 
   void start(Clock::time_point now = Clock::now()) noexcept;
   [[nodiscard]] bool service(short policy_revents, short compositor_revents,
@@ -45,6 +46,15 @@ public:
       const CompositorSnapshotSubmission& submission, std::string& error);
   [[nodiscard]] std::vector<CompositorBufferRelease> take_buffer_releases() {
     return compositor_.take_releases();
+  }
+  [[nodiscard]] std::vector<CompositorSessionStateChange>
+  take_session_state_changes() {
+    return compositor_.take_session_state_changes();
+  }
+  [[nodiscard]] bool acknowledge_session_state(
+      const CompositorSessionStateChange& request,
+      gwipc_session_state_result result, std::string& error) {
+    return compositor_.acknowledge_session_state(request, result, error);
   }
   [[nodiscard]] bool compositor_result_ready() const noexcept;
   [[nodiscard]] bool compositor_rejected_ready() const noexcept;

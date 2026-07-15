@@ -241,6 +241,13 @@ if get_option('glasswyrmd')
       include_directories: test_source_root_include,
     )
     test('libinput-backend', libinput_backend_test, timeout: 10)
+    real_input_controller_test = executable(
+      'real_input_controller_test',
+      files('unit/real_input_controller_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('real-input-controller', real_input_controller_test, timeout: 10)
   endif
 
   input_foundation_test = executable(

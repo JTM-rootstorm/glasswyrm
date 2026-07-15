@@ -46,6 +46,7 @@ struct InputServiceResult {
   std::size_t consumed_events{};
   std::size_t ignored_events{};
   std::string error;
+  bool provider_state_reset{};
 };
 
 class LibinputTimestampConverter {

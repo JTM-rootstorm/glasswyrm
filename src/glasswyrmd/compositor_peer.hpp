@@ -34,10 +34,16 @@ struct CompositorBufferRelease {
   gwipc_buffer_release_reason reason{GWIPC_BUFFER_RELEASE_INVALID};
 };
 
+struct CompositorSessionStateChange {
+  gwipc_session_state_change change{};
+  std::uint64_t sequence{};
+};
+
 class CompositorPeer {
 public:
   CompositorPeer(std::string path, gw::protocol::x11::ScreenModel screen,
-                 bool software_content = false);
+                 bool software_content = false,
+                 bool session_state = false);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -50,6 +56,11 @@ public:
   [[nodiscard]] bool submit_content(
       const CompositorContentSubmission& submission, std::string& error);
   [[nodiscard]] std::vector<CompositorBufferRelease> take_releases();
+  [[nodiscard]] std::vector<CompositorSessionStateChange>
+  take_session_state_changes();
+  [[nodiscard]] bool acknowledge_session_state(
+      const CompositorSessionStateChange& request,
+      gwipc_session_state_result result, std::string& error);
   [[nodiscard]] const CompositorSnapshotSubmission &
   replay_input() const noexcept {
     return replay_input_;
@@ -70,7 +81,9 @@ private:
   CompositorContentSubmission pending_content_;
   std::vector<CompositorBufferRelease> releases_;
   bool software_content_{};
+  bool session_state_{};
   bool content_submission_{};
+  std::vector<CompositorSessionStateChange> session_state_changes_;
 };
 
 } // namespace glasswyrm::server

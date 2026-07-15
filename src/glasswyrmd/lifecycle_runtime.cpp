@@ -71,7 +71,11 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   if (active) {
     EventRouter router(server_.state_.resources());
     transition_before_ = router.capture(active->window);
-    if (input_peer_)
+    if (input_peer_
+#if GW_HAS_LIBINPUT_BACKEND
+        || real_input_
+#endif
+    )
       input_transition_before_ = router.capture_input_transition(
           server_.state_.focused_window(), input_state_.pointer_target());
   }
@@ -189,7 +193,11 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
         }
       }
     }
-    if (input_peer_ && input_transition_before_ &&
+    if ((input_peer_
+#if GW_HAS_LIBINPUT_BACKEND
+         || real_input_
+#endif
+         ) && input_transition_before_ &&
         operation->kind != LifecycleOperationKind::Focus) {
       const auto new_target = glasswyrm::input::hit_test_top_level(
           server_.state_.resources(), input_state_.pointer_x(),
@@ -200,6 +208,11 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
           *input_transition_before_, server_.state_.focused_window(), new_target,
           input_state_, recipients);
     }
+#if GW_HAS_LIBINPUT_BACKEND
+    if (real_input_ && input_transition_before_ &&
+        input_transition_before_->focus != server_.state_.focused_window())
+      real_input_->focus_changed(server_.state_.focused_window());
+#endif
   }
   if (operation && operation->kind == LifecycleOperationKind::Focus &&
       pending_focus_input_) {
@@ -234,6 +247,11 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     }
     pending_focus_input_.reset();
   }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (operation && operation->kind == LifecycleOperationKind::Focus &&
+      pending_real_focus_)
+    complete_real_focus(success);
+#endif
   (void)requester;
   transition_before_.reset();
   input_transition_before_.reset();
@@ -341,6 +359,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
 
 void ServerRuntime::cancel_client_lifecycle(
     const std::uint64_t client, const std::uint32_t resource_base) {
+#if GW_HAS_LIBINPUT_BACKEND
+  if (real_input_)
+    real_input_->client_cleanup();
+#endif
   lifecycle_->cancel_client(client);
   (void)server_.state_.selections().clear_client(client);
   auto plan = server_.state_.resources().prepare_client_cleanup(client);

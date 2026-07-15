@@ -31,8 +31,11 @@ int main() {
           state.mask() == sm::Button1 &&
           state.transition_button(1, true) == input::TransitionStatus::InvalidTransition,
           "button transition and precondition");
-  require(state.transition_button(6, true) == input::TransitionStatus::InvalidValue,
-          "button range");
+  require(state.transition_button(8, true) == input::TransitionStatus::Accepted &&
+          (state.mask() & sm::Button5) == 0 && state.any_button_down() &&
+          state.transition_button(8, false) == input::TransitionStatus::Accepted &&
+          state.transition_button(10, true) == input::TransitionStatus::InvalidValue,
+          "extended buttons have no core state bit and remain bounded");
   require(state.transition_key(37, true) == input::TransitionStatus::Accepted &&
           state.transition_key(105, true) == input::TransitionStatus::Accepted &&
           (state.mask() & sm::Control) != 0 &&
@@ -42,6 +45,12 @@ int main() {
           (state.mask() & sm::Control) == 0, "paired modifiers remain active");
   state.reset_provider_state();
   require(state.mask() == 0, "provider reset clears buttons keys and modifiers");
+  state.set_core_modifier_mask(sm::Lock | sm::Mod4);
+  require(state.mask() == (sm::Lock | sm::Mod4) &&
+              state.accept_wrapping_time(0xffffffffU) &&
+              state.accept_wrapping_time(1) && state.time() == 1,
+          "real input accepts externally derived modifiers and timestamp wrap");
+  state.reset_provider_state();
 
   const std::vector<input::RouteWindow> windows{
       {1, 0, 0, {{1, em::KeyPress, true}}},

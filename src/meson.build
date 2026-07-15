@@ -363,6 +363,13 @@ if get_option('glasswyrmd')
     )
     gw_server_core_dependencies += gwipc_dep
   endif
+  if get_option('libinput_backend')
+    gw_server_core_sources += files(
+      'glasswyrmd/real_input_controller.cpp',
+      'glasswyrmd/real_input_runtime.cpp',
+    )
+    gw_server_core_dependencies += gw_xkb_keymap_dep
+  endif
   gw_server_core_lib = static_library(
     'gw-server-core',
     gw_server_core_sources,
