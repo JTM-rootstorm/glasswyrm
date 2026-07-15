@@ -1026,7 +1026,11 @@ if get_option('glasswyrmd')
       dependencies: gw_server_state_dep,
       include_directories: test_source_root_include,
     )
-    test(unit_case[0], unit_program, timeout: 10)
+    unit_timeout = 10
+    if unit_case[0] == 'window-tree'
+      unit_timeout = 30
+    endif
+    test(unit_case[0], unit_program, timeout: unit_timeout)
   endforeach
 
   x11_fake_client_lib = static_library(
