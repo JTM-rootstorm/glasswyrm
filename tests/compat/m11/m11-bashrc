@@ -19,4 +19,11 @@ set +o history
 bind 'set enable-bracketed-paste off' 2>/dev/null || :
 
 umask 077
+
+# The VM acceptance harness may request a byte-for-byte PTY transcript while
+# retaining this exact rcfile and xterm argv profile. Normal launches leave it
+# unset and take no logging path.
+if [[ -n ${GW_M11_TRANSCRIPT:-} ]]; then
+  exec > >(tee -a -- "$GW_M11_TRANSCRIPT" >/dev/tty) 2>&1
+fi
 printf 'M11_READY\n'

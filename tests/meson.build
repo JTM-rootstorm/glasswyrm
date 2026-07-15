@@ -1142,6 +1142,15 @@ if get_option('glasswyrmd')
   endif
 endif
 
+m11_xterm_acceptance = find_program('apps/m11_xterm_acceptance')
+m11_xterm_acceptance_test = find_program('apps/m11_xterm_acceptance_test.sh')
+test(
+  'm11-xterm-acceptance',
+  m11_xterm_acceptance_test,
+  args: [m11_xterm_acceptance],
+  timeout: 10,
+)
+
 gw_vm_cli_test = find_program('tools/gw_vm_cli_test.sh')
 test(
   'gw-vm-cli',

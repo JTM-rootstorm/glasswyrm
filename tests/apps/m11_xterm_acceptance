@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+pids=()
+scenario_dir='' transcript='' trace='' selection='' wm_evidence=''
+frames='' scene='' drm_report='' mirror='' screenshot='' output=''
+while (($#)); do
+  case "$1" in
+    --xterm-pid) pids+=("$2"); shift 2 ;;
+    --scenario-dir) scenario_dir=$2; shift 2 ;;
+    --transcript) transcript=$2; shift 2 ;;
+    --trace) trace=$2; shift 2 ;;
+    --selection) selection=$2; shift 2 ;;
+    --wm-evidence) wm_evidence=$2; shift 2 ;;
+    --frames) frames=$2; shift 2 ;;
+    --scene) scene=$2; shift 2 ;;
+    --drm-report) drm_report=$2; shift 2 ;;
+    --mirror) mirror=$2; shift 2 ;;
+    --screenshot) screenshot=$2; shift 2 ;;
+    --output) output=$2; shift 2 ;;
+    *) printf 'm11_xterm_acceptance: unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+[[ ${#pids[@]} -eq 2 && -n $scenario_dir && -n $transcript && -n $trace &&
+   -n $selection && -n $wm_evidence && -n $frames && -n $scene && -n $drm_report &&
+   -n $mirror && -n $screenshot && -n $output ]] || {
+  printf '%s\n' 'usage: m11_xterm_acceptance --xterm-pid PID --xterm-pid PID --scenario-dir DIR --transcript PATH --trace PATH --selection PATH --wm-evidence PATH --frames PATH --scene PATH --drm-report PATH --mirror PATH --screenshot PATH --output PATH' >&2
+  exit 2
+}
+for path in "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" "$frames" \
+  "$scene" "$drm_report" "$mirror" "$screenshot"; do
+  [[ -e $path ]] || { printf 'm11_xterm_acceptance: missing evidence: %s\n' "$path" >&2; exit 1; }
+done
+for pid in "${pids[@]}"; do [[ $pid =~ ^[1-9][0-9]*$ ]] || exit 1; done
+[[ -d /proc/${pids[1]} ]] || {
+  printf 'm11_xterm_acceptance: surviving xterm PID is not alive: %s\n' "${pids[1]}" >&2
+  exit 1
+}
+
+python3 - "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" "$frames" \
+  "$scene" "$drm_report" "$mirror" "$screenshot" "$output" "${pids[@]}" <<'PY'
+import hashlib,json,os,pathlib,sys
+scenario_dir,transcript,trace,selection,wm_evidence,frames,scene,drm,mirror,screenshot,out,*pids=sys.argv[1:]
+
+def documents(path):
+    text=pathlib.Path(path).read_text(errors='strict')
+    if not text.strip(): raise SystemExit(f'empty JSON evidence: {path}')
+    try: return [json.loads(text)]
+    except json.JSONDecodeError:
+        result=[]
+        for number,line in enumerate(text.splitlines(),1):
+            if line.strip():
+                try: result.append(json.loads(line))
+                except json.JSONDecodeError as error: raise SystemExit(f'{path}:{number}: {error}')
+        return result
+
+required_scenarios=('basic-typing','repeat','scroll','primary-selection',
+                    'clipboard-probe','move','resize','close','post-vt','post-restart')
+scenario_counts={}
+for name in required_scenarios:
+    path=pathlib.Path(scenario_dir,f'{name}.json')
+    if not path.is_file(): raise SystemExit(f'missing uinput scenario result: {name}')
+    value=json.loads(path.read_text())
+    if value.get('status')!='completed' or not isinstance(value.get('emitted'),int) or value['emitted']<=0:
+        raise SystemExit(f'uinput scenario did not complete with events: {name}')
+    scenario_counts[name]=value['emitted']
+
+transcript_text=pathlib.Path(transcript).read_text(errors='replace')
+for token in ('M11_VT','M11_RESTART'):
+    if token not in transcript_text: raise SystemExit(f'PTY transcript lacks {token}')
+if transcript_text.count('M11_TYPED')<3:
+    raise SystemExit('PTY transcript does not prove edit, repeat, and PRIMARY paste')
+
+selection_value=documents(selection)[0]
+if selection_value.get('status')!='passed' or selection_value.get('selection')!='CLIPBOARD':
+    raise SystemExit('selection probe did not pass CLIPBOARD exchange')
+if selection_value.get('token')!='M11_CLIPBOARD_TOKEN' or set(selection_value.get('targets',()))!={'TARGETS','UTF8_STRING'}:
+    raise SystemExit('selection probe payload or targets mismatch')
+wm_text=pathlib.Path(wm_evidence).read_text(errors='replace').lower()
+for marker in ('move_button=1','resize_button=3','close_keysym=0xffc1',
+               'minimum_width=96','minimum_height=64'):
+    if marker not in wm_text: raise SystemExit(f'GWM evidence lacks {marker}')
+
+trace_docs=documents(trace); trace_text=json.dumps(trace_docs,separators=(',',':')).lower()
+event_types=set(); event_records=[]
+def trace_visit(value):
+    if isinstance(value,dict):
+        if isinstance(value.get('event_type'),int):
+            event_types.add(value['event_type']); event_records.append(value)
+        for child in value.values(): trace_visit(child)
+    elif isinstance(value,list):
+        for child in value: trace_visit(child)
+for doc in trace_docs: trace_visit(doc)
+required_types={2,3,4,5,6,22,28,29,30,31,33}
+if not required_types <= event_types:
+    raise SystemExit(f'normalized trace lacks event types {sorted(required_types-event_types)}')
+for request in ('changewindowattributes','createglyphcursor','freecursor',
+                'recolorcursor','getselectionowner','setselectionowner',
+                'convertselection','sendevent'):
+    if request not in trace_text: raise SystemExit(f'normalized trace lacks {request} request evidence')
+button_presses=sum(item.get('event_type')==4 for item in event_records)
+button_releases=sum(item.get('event_type')==5 for item in event_records)
+if button_presses<4 or button_releases<4:
+    raise SystemExit('trace lacks the button delivery volume required by selection and wheel scenarios')
+if sum(item.get('event_type')==2 for item in event_records)<3:
+    raise SystemExit('trace lacks repeated keyboard delivery')
+
+frame_docs=documents(frames)
+if not frame_docs: raise SystemExit('frame manifest has no records')
+scene_docs=documents(scene); scene_text=json.dumps(scene_docs,separators=(',',':')).lower()
+if 'cursor' not in scene_text: raise SystemExit('scene manifest lacks cursor surface evidence')
+
+geometries={}
+def visit(value):
+    if isinstance(value,dict):
+        keys=set(value)
+        if {'x','y','width','height'} <= keys:
+            identity=next((value.get(k) for k in ('window_id','window','xid','surface_id','surface') if value.get(k) is not None),None)
+            if identity is not None:
+                geometries.setdefault(str(identity),set()).add(tuple(value[k] for k in ('x','y','width','height')))
+        for child in value.values(): visit(child)
+    elif isinstance(value,list):
+        for child in value: visit(child)
+for doc in scene_docs: visit(doc)
+if len(geometries)<2: raise SystemExit('scene manifest does not prove two xterm windows')
+moved=any(len({(x,y) for x,y,_,_ in values})>1 for values in geometries.values())
+resized=any(len({(w,h) for _,_,w,h in values})>1 for values in geometries.values())
+if not moved: raise SystemExit('scene manifest does not prove a window move')
+if not resized: raise SystemExit('scene manifest does not prove a window resize')
+
+drm_docs=documents(drm)
+present=[item for item in drm_docs if isinstance(item,dict) and item.get('canonical_hash') and item.get('scanout_hash')]
+if not present or any(item['canonical_hash']!=item['scanout_hash'] for item in present):
+    raise SystemExit('DRM report does not prove canonical/scanout hash parity')
+
+def sha(path): return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+mirror_hash=sha(mirror); screenshot_hash=sha(screenshot)
+if mirror_hash!=screenshot_hash: raise SystemExit('canonical mirror and DRM screenshot differ')
+
+payload={'status':'passed','xterm_pids':[int(x) for x in pids],
+         'pty_transcript':True,'typed':True,'edited':True,'repeated':True,
+         'scrolled':True,'wheel':True,'primary':True,'pasted':True,
+         'moved':True,'resized':True,'relative_motion':True,
+         'wm_bindings':True,'grabs':True,'cursor_resources':True,
+         'cursor_scanout':True,'scenario_events':scenario_counts,
+         'windows':len(geometries),'canonical_hash':present[-1]['canonical_hash'],
+         'scanout_hash':present[-1]['scanout_hash'],
+         'mirror_sha256':mirror_hash,'screenshot_sha256':screenshot_hash}
+pathlib.Path(out).write_text(json.dumps(payload,sort_keys=True,indent=2)+'\n')
+PY
