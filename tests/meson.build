@@ -205,6 +205,16 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  if get_option('libinput_backend')
+    xkb_keymap_test = executable(
+      'xkb_keymap_test',
+      files('unit/xkb_keymap_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('xkb-keymap', xkb_keymap_test, timeout: 10)
+  endif
+
   input_foundation_test = executable(
     'input_foundation_test',
     files('unit/input_foundation_test.cpp'),

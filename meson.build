@@ -37,6 +37,100 @@ if get_option('drm_backend')
     error('the DRM backend requires -Drender_software=true')
   endif
 endif
+
+libinput_dep = declare_dependency()
+xkbcommon_dep = declare_dependency()
+if get_option('libinput_backend')
+  if host_machine.system() != 'linux'
+    error('the libinput backend requires Linux')
+  endif
+  if not get_option('glasswyrmd')
+    error('the libinput backend requires -Dglasswyrmd=true')
+  endif
+  if not get_option('libgwipc')
+    error('the libinput backend requires -Dlibgwipc=true')
+  endif
+
+  libinput_dep = dependency('libinput', required: true)
+  xkbcommon_dep = dependency('xkbcommon', required: true)
+  dependency('xkeyboard-config', required: true)
+
+  libinput_api_probe = '''
+    #define _GNU_SOURCE
+    #include <fcntl.h>
+    #include <libinput.h>
+    #include <stdint.h>
+    #include <sys/timerfd.h>
+    #include <time.h>
+    static int open_restricted(const char *path, int flags, void *data) {
+      (void)path; (void)flags; (void)data; return -1;
+    }
+    static void close_restricted(int fd, void *data) {
+      (void)fd; (void)data;
+    }
+    int main(void) {
+      const struct libinput_interface interface = {
+        open_restricted, close_restricted
+      };
+      struct libinput *context = libinput_path_create_context(&interface, 0);
+      struct libinput_device *device = libinput_path_add_device(context, "/dev/null");
+      struct libinput_event *event = libinput_get_event(context);
+      struct libinput_event_keyboard *keyboard = libinput_event_get_keyboard_event(event);
+      struct libinput_event_pointer *pointer = libinput_event_get_pointer_event(event);
+      (void)libinput_get_fd(context);
+      (void)libinput_dispatch(context);
+      (void)libinput_suspend(context);
+      (void)libinput_resume(context);
+      (void)libinput_event_keyboard_get_key(keyboard);
+      (void)libinput_event_keyboard_get_key_state(keyboard);
+      (void)libinput_event_keyboard_get_time_usec(keyboard);
+      (void)libinput_event_pointer_get_dx(pointer);
+      (void)libinput_event_pointer_get_dy(pointer);
+      (void)libinput_event_pointer_get_absolute_x_transformed(pointer, 1);
+      (void)libinput_event_pointer_get_absolute_y_transformed(pointer, 1);
+      (void)libinput_event_pointer_get_button(pointer);
+      (void)libinput_event_pointer_get_button_state(pointer);
+      (void)libinput_event_pointer_has_axis(pointer, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+      (void)libinput_event_pointer_get_scroll_value_v120(pointer, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+      (void)libinput_device_has_capability(device, LIBINPUT_DEVICE_CAP_KEYBOARD);
+      libinput_event_destroy(event);
+      libinput_unref(context);
+      return timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC) < 0;
+    }
+  '''
+  if not meson.get_compiler('c').links(
+      libinput_api_probe,
+      dependencies: libinput_dep,
+      name: 'required libinput path, event, suspend, wheel, and timerfd APIs',
+    )
+    error('libinput or libc lacks APIs required by the Glasswyrm real-input backend')
+  endif
+
+  xkb_api_probe = '''
+    #include <xkbcommon/xkbcommon.h>
+    int main(void) {
+      struct xkb_rule_names names = {"evdev", "pc105", "us", "", ""};
+      struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+      struct xkb_keymap *keymap = xkb_keymap_new_from_names(
+          context, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
+      struct xkb_state *state = xkb_state_new(keymap);
+      (void)xkb_keymap_key_repeats(keymap, 38);
+      (void)xkb_state_serialize_mods(state, XKB_STATE_MODS_EFFECTIVE);
+      (void)xkb_state_key_get_one_sym(state, 38);
+      xkb_state_unref(state);
+      xkb_keymap_unref(keymap);
+      xkb_context_unref(context);
+      return 0;
+    }
+  '''
+  if not meson.get_compiler('c').links(
+      xkb_api_probe,
+      dependencies: xkbcommon_dep,
+      name: 'required libxkbcommon keymap, state, repeat, modifier, and keysym APIs',
+    )
+    error('libxkbcommon lacks APIs required by the Glasswyrm keyboard engine')
+  endif
+endif
 if get_option('render_gl')
   error('the OpenGL renderer is not implemented')
 endif
@@ -109,6 +203,7 @@ config_data = configuration_data()
 config_data.set_quoted('GW_PROJECT_VERSION', meson.project_version())
 config_data.set10('GW_HAS_DRM_BACKEND', get_option('drm_backend'))
 config_data.set10('GW_HAS_HEADLESS_BACKEND', get_option('headless_backend'))
+config_data.set10('GW_HAS_LIBINPUT_BACKEND', get_option('libinput_backend'))
 
 configure_file(
   output: 'config.hpp',
