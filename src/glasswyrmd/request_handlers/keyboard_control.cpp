@@ -93,6 +93,11 @@ DispatchResult change_keyboard_control(ServerState &state,
         staged.global_auto_repeat = static_cast<std::uint8_t>(value);
     }
   }
+  if (staged.global_auto_repeat !=
+          state.keyboard_control().global_auto_repeat &&
+      context.input.set_global_auto_repeat &&
+      !context.input.set_global_auto_repeat(staged.global_auto_repeat != 0))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   state.keyboard_control() = staged;
   return {};
 }

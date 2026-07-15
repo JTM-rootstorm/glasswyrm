@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glasswyrmd/server_state.hpp"
+#include "glasswyrmd/keyboard_mapping.hpp"
 #include "protocol/x11/byte_order.hpp"
 #include "protocol/x11/request.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
@@ -9,6 +10,8 @@
 
 #include <cstdint>
 #include <array>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -17,12 +20,21 @@
 namespace glasswyrm::server {
 
 struct InputSnapshot {
+  InputSnapshot() = default;
+  InputSnapshot(std::int32_t x, std::int32_t y, std::uint16_t mask,
+                std::uint32_t target, std::uint32_t time,
+                std::array<std::uint8_t, 32> keys = {}) noexcept
+      : root_x(x), root_y(y), state_mask(mask), pointer_target(target),
+        logical_time(time), keymap(keys) {}
+
   std::int32_t root_x{0};
   std::int32_t root_y{0};
   std::uint16_t state_mask{0};
   std::uint32_t pointer_target{1};
   std::uint32_t logical_time{1};
   std::array<std::uint8_t, 32> keymap{};
+  std::shared_ptr<const KeyboardMappingSnapshot> keyboard_mapping;
+  std::function<bool(bool)> set_global_auto_repeat;
 };
 
 struct DispatchContext {

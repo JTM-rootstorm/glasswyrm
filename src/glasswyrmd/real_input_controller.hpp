@@ -3,6 +3,7 @@
 #include "input/libinput_backend.hpp"
 #include "input/repeat_timer.hpp"
 #include "input/xkb_keymap.hpp"
+#include "glasswyrmd/keyboard_mapping.hpp"
 
 #include <glasswyrm/ipc/session.h>
 
@@ -68,6 +69,17 @@ public:
   [[nodiscard]] bool backend_work_pending() const noexcept {
     return backend_work_pending_;
   }
+  [[nodiscard]] const std::shared_ptr<const KeyboardMappingSnapshot>&
+  keyboard_mapping() const noexcept {
+    return keyboard_mapping_;
+  }
+  [[nodiscard]] bool set_global_auto_repeat(bool enabled) noexcept;
+  [[nodiscard]] bool global_auto_repeat() const noexcept {
+    return global_auto_repeat_;
+  }
+  [[nodiscard]] bool repeat_active() const noexcept {
+    return repeat_->active_key().has_value();
+  }
   [[nodiscard]] std::size_t queued_event_count() const noexcept {
     return events_.size();
   }
@@ -84,6 +96,7 @@ public:
 private:
   RealInputController(std::unique_ptr<glasswyrm::input::LibinputApi> api,
                       std::unique_ptr<glasswyrm::input::XkbKeymap> keymap,
+                      std::shared_ptr<const KeyboardMappingSnapshot> mapping,
                       std::unique_ptr<glasswyrm::input::RepeatState> repeat,
                       std::unique_ptr<glasswyrm::input::RepeatTimer> timer);
 
@@ -102,6 +115,7 @@ private:
   std::unique_ptr<glasswyrm::input::LibinputApi> api_;
   glasswyrm::input::LibinputBackend backend_;
   std::unique_ptr<glasswyrm::input::XkbKeymap> keymap_;
+  std::shared_ptr<const KeyboardMappingSnapshot> keyboard_mapping_;
   std::unique_ptr<glasswyrm::input::RepeatState> repeat_;
   std::unique_ptr<glasswyrm::input::RepeatTimer> repeat_timer_;
   std::deque<RealInputEvent> events_;
@@ -109,6 +123,7 @@ private:
   std::uint32_t last_time_ms_{1};
   bool backend_work_pending_{};
   bool availability_reported_{true};
+  bool global_auto_repeat_{true};
 };
 
 } // namespace glasswyrm::server

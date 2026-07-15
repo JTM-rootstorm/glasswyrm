@@ -8,6 +8,26 @@
 namespace glasswyrm::server {
 namespace {
 
+std::shared_ptr<const KeyboardMappingSnapshot> mapping_snapshot(
+    const glasswyrm::input::XkbKeymap& keymap) {
+  auto result = std::make_shared<KeyboardMappingSnapshot>();
+  result->minimum_keycode = keymap.config().minimum_x11_keycode;
+  result->maximum_keycode = keymap.config().maximum_x11_keycode;
+  result->keysyms_per_keycode =
+      glasswyrm::input::XkbKeymap::keysyms_per_keycode;
+  const auto count = static_cast<std::size_t>(result->maximum_keycode) + 1U;
+  result->keysyms.reserve(count * result->keysyms_per_keycode);
+  for (std::size_t keycode = 0; keycode < count; ++keycode) {
+    const auto keysyms = keymap.core_keysyms(static_cast<std::uint8_t>(keycode));
+    result->keysyms.insert(result->keysyms.end(), keysyms.begin(),
+                           keysyms.end());
+  }
+  auto modifiers = keymap.core_modifier_map();
+  result->keycodes_per_modifier = modifiers.keycodes_per_modifier;
+  result->modifier_keycodes = std::move(modifiers.keycodes);
+  return result;
+}
+
 std::uint16_t button_state_bit(const std::uint8_t button) noexcept {
   namespace state = gw::protocol::x11::state_mask;
   switch (button) {
@@ -31,9 +51,11 @@ std::uint16_t button_state_bit(const std::uint8_t button) noexcept {
 RealInputController::RealInputController(
     std::unique_ptr<glasswyrm::input::LibinputApi> api,
     std::unique_ptr<glasswyrm::input::XkbKeymap> keymap,
+    std::shared_ptr<const KeyboardMappingSnapshot> mapping,
     std::unique_ptr<glasswyrm::input::RepeatState> repeat,
     std::unique_ptr<glasswyrm::input::RepeatTimer> timer)
     : api_(std::move(api)), backend_(*api_), keymap_(std::move(keymap)),
+      keyboard_mapping_(std::move(mapping)),
       repeat_(std::move(repeat)), repeat_timer_(std::move(timer)) {}
 
 std::unique_ptr<RealInputController>
@@ -54,8 +76,10 @@ RealInputController::create(std::unique_ptr<glasswyrm::input::LibinputApi> api,
   auto timer = glasswyrm::input::RepeatTimer::create(error);
   if (!timer)
     return nullptr;
+  auto mapping = mapping_snapshot(*keymap);
   auto result = std::unique_ptr<RealInputController>(new RealInputController(
-      std::move(api), std::move(keymap), std::move(repeat), std::move(timer)));
+      std::move(api), std::move(keymap), std::move(mapping),
+      std::move(repeat), std::move(timer)));
   if (!result->backend_.initialize(config.device_paths, config.root_width,
                                    config.root_height, error))
     return nullptr;
@@ -126,7 +150,8 @@ RealInputServiceResult RealInputController::convert(
       return {false, false, std::move(transition_error)};
     const auto action =
         record.pressed ? repeat_->press(transition.x11_keycode, focus_window,
-                                        transition.repeatable)
+                                        transition.repeatable &&
+                                            global_auto_repeat_)
                        : repeat_->release(transition.x11_keycode);
     if (!apply_repeat_action(action, transition_error))
       return {false, false, std::move(transition_error)};
@@ -209,6 +234,18 @@ void RealInputController::focus_changed(
 void RealInputController::client_cleanup() noexcept {
   std::string ignored;
   (void)apply_repeat_action(repeat_->cancel_on_client_cleanup(), ignored);
+}
+
+bool RealInputController::set_global_auto_repeat(const bool enabled) noexcept {
+  if (enabled == global_auto_repeat_)
+    return true;
+  if (!enabled) {
+    std::string error;
+    if (!apply_repeat_action(repeat_->cancel_on_client_cleanup(), error))
+      return false;
+  }
+  global_auto_repeat_ = enabled;
+  return true;
 }
 
 bool RealInputController::apply_repeat_action(

@@ -15,9 +15,22 @@ namespace glasswyrm::server {
 int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
 #ifdef GW_SERVER_HAS_IPC
   server_.input_snapshot_provider_ = [this] {
-    return InputSnapshot{input_state_.pointer_x(), input_state_.pointer_y(),
-                         input_state_.mask(), input_state_.pointer_target(),
-                         input_state_.time(), input_state_.query_keymap()};
+    InputSnapshot snapshot;
+    snapshot.root_x = input_state_.pointer_x();
+    snapshot.root_y = input_state_.pointer_y();
+    snapshot.state_mask = input_state_.mask();
+    snapshot.pointer_target = input_state_.pointer_target();
+    snapshot.logical_time = input_state_.time();
+    snapshot.keymap = input_state_.query_keymap();
+#if GW_HAS_LIBINPUT_BACKEND
+    if (real_input_) {
+      snapshot.keyboard_mapping = real_input_->keyboard_mapping();
+      snapshot.set_global_auto_repeat = [this](const bool enabled) {
+        return real_input_ && real_input_->set_global_auto_repeat(enabled);
+      };
+    }
+#endif
+    return snapshot;
   };
   if (!server_.options_.integrated()) return 0;
 
