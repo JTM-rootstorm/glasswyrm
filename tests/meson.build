@@ -1094,6 +1094,12 @@ if get_option('glasswyrmd')
       files('xcb/xcb_milestone7_probe.c'),
       dependencies: xcb_test_dependency,
     )
+    m11_selection_probe = executable(
+      'm11_selection_probe',
+      files('xcb/m11_selection_probe.cpp'),
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
     if get_option('libgwipc')
       xcb_milestone8_probe = executable(
         'xcb_milestone8_probe',
