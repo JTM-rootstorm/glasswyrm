@@ -87,12 +87,15 @@ void test_output_and_surface() {
   require(decode(encode(surface), decoded_surface) == CodecStatus::InvalidValue,
           "opacity greater than one is rejected");
   surface.opacity = kOpacityOne;
-  surface.presentation_flags = 2;
+  surface.presentation_flags = 4;
   require(decode(encode(surface), decoded_surface) == CodecStatus::InvalidValue,
           "unknown presentation flags are rejected");
   surface.presentation_flags = 1;
   require(decode(encode(surface), decoded_surface) == CodecStatus::Ok,
           "metadata-only presentation flag is wire-valid");
+  surface.presentation_flags = 2;
+  require(decode(encode(surface), decoded_surface) == CodecStatus::Ok,
+          "cursor presentation flag is wire-valid");
   surface.presentation_flags = 0;
   surface.clip_x = 0x7fffffff;
   surface.clip_width = 2;

@@ -8,6 +8,8 @@
 
 namespace gw::ipc {
 
+enum class MessageDirection { Incoming, Outgoing };
+
 void set_closed(gwipc_connection& connection) noexcept;
 
 gwipc_status protocol_failure(
@@ -20,7 +22,8 @@ gwipc_status validate_application(gwipc_connection& connection,
                                   std::uint16_t type, std::uint32_t flags,
                                   std::span<const std::uint8_t> payload,
                                   std::span<const int> fds,
-                                  SnapshotState& snapshot);
+                                  SnapshotState& snapshot,
+                                  MessageDirection direction);
 
 gwipc_status queue_hello(gwipc_connection& connection);
 gwipc_status handle_hello(gwipc_connection& connection,
@@ -51,6 +54,9 @@ gwipc_status track_incoming_request(
     std::span<const std::uint8_t> payload);
 void rollback_incoming_request(gwipc_connection& connection,
                                const wire::Envelope& envelope) noexcept;
+void commit_incoming_request(gwipc_connection& connection,
+                             const wire::Envelope& envelope,
+                             std::span<const std::uint8_t> payload) noexcept;
 
 }  // namespace gw::ipc
 

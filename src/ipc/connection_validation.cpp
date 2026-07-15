@@ -5,9 +5,12 @@
 #include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
+#include "ipc/wire/session_contract.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
+
+#include <utility>
 
 namespace gw::ipc {
 namespace {
@@ -47,6 +50,11 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_SYNTHETIC_BARRIER:
     case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED:
       return GWIPC_CAP_SYNTHETIC_INPUT;
+    case GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT:
+      return GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_INTERACTIVE_POLICY;
+    case GWIPC_MESSAGE_SESSION_STATE_CHANGE:
+    case GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED:
+      return GWIPC_CAP_SESSION_STATE;
     default:
       return 0;
   }
@@ -54,7 +62,8 @@ std::uint64_t required_capability(std::uint16_t type) noexcept {
 
 gwipc_status validate_snapshot(SnapshotState& state, std::uint16_t type,
                                std::uint32_t flags,
-                               std::span<const std::uint8_t> payload) {
+                               std::span<const std::uint8_t> payload,
+                               bool require_policy_bindings) {
   const bool item = (flags & GWIPC_FLAG_SNAPSHOT_ITEM) != 0;
   if (snapshot_control(type) && item) return GWIPC_STATUS_PROTOCOL_ERROR;
   if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN) {
@@ -62,7 +71,8 @@ gwipc_status validate_snapshot(SnapshotState& state, std::uint16_t type,
     if (state.active || wire::decode(payload, begin) != wire::CodecStatus::Ok)
       return GWIPC_STATUS_PROTOCOL_ERROR;
     state = {true, begin.snapshot_id, begin.generation,
-             begin.expected_item_count, 0};
+             begin.expected_item_count, 0,
+             static_cast<std::uint16_t>(begin.domain), 0};
     return GWIPC_STATUS_OK;
   }
   if (type == GWIPC_MESSAGE_SNAPSHOT_END) {
@@ -71,10 +81,22 @@ gwipc_status validate_snapshot(SnapshotState& state, std::uint16_t type,
         end.snapshot_id != state.id || end.generation != state.generation ||
         end.actual_item_count != state.item_count ||
         (state.expected_count != UINT32_MAX &&
-         state.expected_count != state.item_count))
+         state.expected_count != state.item_count) ||
+        (require_policy_bindings &&
+         state.domain ==
+             static_cast<std::uint16_t>(wire::SnapshotDomain::WindowPolicy) &&
+         state.policy_bindings_count != 1))
       return GWIPC_STATUS_PROTOCOL_ERROR;
     state = {};
     return GWIPC_STATUS_OK;
+  }
+  if (type == GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT) {
+    if (!state.active ||
+        state.domain !=
+            static_cast<std::uint16_t>(wire::SnapshotDomain::WindowPolicy) ||
+        state.policy_bindings_count != 0)
+      return GWIPC_STATUS_PROTOCOL_ERROR;
+    ++state.policy_bindings_count;
   }
   if (type == GWIPC_MESSAGE_SNAPSHOT_ABORT) {
     wire::SnapshotAbort abort;
@@ -160,8 +182,13 @@ gwipc_status validate_compositor(gwipc_connection& connection,
     case GWIPC_MESSAGE_OUTPUT_REMOVE: { wire::OutputRemove v; codec=wire::decode(payload,v); break; }
     case GWIPC_MESSAGE_SURFACE_UPSERT: {
       wire::SurfaceUpsert v; codec=wire::decode(payload,v);
-      if (codec == wire::CodecStatus::Ok && v.presentation_flags != 0 &&
+      if (codec == wire::CodecStatus::Ok &&
+          (v.presentation_flags & GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) != 0 &&
           (connection.peer.capabilities & GWIPC_CAP_WINDOW_LIFECYCLE) == 0)
+        return GWIPC_STATUS_CAPABILITY_MISMATCH;
+      if (codec == wire::CodecStatus::Ok &&
+          (v.presentation_flags & GWIPC_SURFACE_PRESENTATION_CURSOR) != 0 &&
+          (connection.peer.capabilities & GWIPC_CAP_CURSOR_SURFACE) == 0)
         return GWIPC_STATUS_CAPABILITY_MISMATCH;
       break;
     }
@@ -196,9 +223,53 @@ gwipc_status validate_policy(std::uint16_t type, std::uint32_t flags,
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE: { wire::PolicyWindowState v; codec=wire::decode(payload,v); if(flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED: { wire::PolicyAcknowledged v; codec=wire::decode(payload,v); if(flags!=GWIPC_FLAG_REPLY)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
     case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT: { wire::PolicyLifecycleWindowUpsert v; codec=wire::decode(payload,v); if(flags!=0&&flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
+    case GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT: { wire::PolicyBindingsUpsert v; codec=wire::decode(payload,v); if(flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; break; }
     default: { wire::SurfacePolicyUpsert v; codec=wire::decode(payload,v); if(flags!=GWIPC_FLAG_SNAPSHOT_ITEM)return GWIPC_STATUS_PROTOCOL_ERROR; }
   }
   return GWIPC_STATUS_OK;
+}
+
+gwipc_status validate_session(std::uint16_t type, std::uint32_t flags,
+                              std::span<const std::uint8_t> payload,
+                              wire::CodecStatus& codec) {
+  if (type == GWIPC_MESSAGE_SESSION_STATE_CHANGE) {
+    wire::SessionStateChange value;
+    codec = wire::decode(payload, value);
+    return flags == GWIPC_FLAG_ACK_REQUIRED ? GWIPC_STATUS_OK
+                                             : GWIPC_STATUS_PROTOCOL_ERROR;
+  }
+  wire::SessionStateAcknowledged value;
+  codec = wire::decode(payload, value);
+  return flags == GWIPC_FLAG_REPLY ? GWIPC_STATUS_OK
+                                   : GWIPC_STATUS_PROTOCOL_ERROR;
+}
+
+bool valid_direction(const gwipc_connection& connection, std::uint16_t type,
+                     MessageDirection direction) noexcept {
+  gwipc_role sender = connection.config.local_role;
+  gwipc_role receiver = connection.peer.role;
+  if (direction == MessageDirection::Incoming)
+    std::swap(sender, receiver);
+  if (type == GWIPC_MESSAGE_SESSION_STATE_CHANGE)
+    return sender == GWIPC_ROLE_COMPOSITOR &&
+           receiver == GWIPC_ROLE_PROTOCOL_SERVER;
+  if (type == GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED)
+    return sender == GWIPC_ROLE_PROTOCOL_SERVER &&
+           receiver == GWIPC_ROLE_COMPOSITOR;
+  if (type == GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT)
+    return sender == GWIPC_ROLE_WINDOW_MANAGER &&
+           receiver == GWIPC_ROLE_PROTOCOL_SERVER;
+  return true;
+}
+
+bool policy_output_direction(const gwipc_connection& connection,
+                             MessageDirection direction) noexcept {
+  gwipc_role sender = connection.config.local_role;
+  gwipc_role receiver = connection.peer.role;
+  if (direction == MessageDirection::Incoming)
+    std::swap(sender, receiver);
+  return sender == GWIPC_ROLE_WINDOW_MANAGER &&
+         receiver == GWIPC_ROLE_PROTOCOL_SERVER;
 }
 
 gwipc_status validate_input(std::uint16_t type, std::uint32_t flags,
@@ -226,10 +297,13 @@ gwipc_status validate_application(gwipc_connection& connection,
                                   std::uint16_t type, std::uint32_t flags,
                                   std::span<const std::uint8_t> payload,
                                   std::span<const int> fds,
-                                  SnapshotState& snapshot) {
+                                  SnapshotState& snapshot,
+                                  MessageDirection direction) {
   const auto required = required_capability(type);
   if ((required & connection.peer.capabilities) != required)
     return GWIPC_STATUS_CAPABILITY_MISMATCH;
+  if (!valid_direction(connection, type, direction))
+    return GWIPC_STATUS_PROTOCOL_ERROR;
   wire::CodecStatus codec = wire::CodecStatus::InvalidValue;
   gwipc_status status = GWIPC_STATUS_PROTOCOL_ERROR;
   if ((type >= GWIPC_MESSAGE_PING && type <= GWIPC_MESSAGE_PROTOCOL_ERROR) ||
@@ -237,7 +311,7 @@ gwipc_status validate_application(gwipc_connection& connection,
     status = validate_control(type, flags, payload, codec);
   else if (type == GWIPC_MESSAGE_SURFACE_POLICY_UPSERT ||
            (type >= GWIPC_MESSAGE_POLICY_CONTEXT_UPSERT &&
-            type <= GWIPC_MESSAGE_POLICY_ACKNOWLEDGED))
+            type <= GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT))
     status = validate_policy(type, flags, payload, snapshot, codec);
   else if (type >= GWIPC_MESSAGE_OUTPUT_UPSERT &&
            type <= GWIPC_MESSAGE_FRAME_ACKNOWLEDGED)
@@ -245,6 +319,9 @@ gwipc_status validate_application(gwipc_connection& connection,
   else if (type >= GWIPC_MESSAGE_SYNTHETIC_MOTION &&
            type <= GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED)
     status = validate_input(type, flags, payload, codec);
+  else if (type >= GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
+           type <= GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED)
+    status = validate_session(type, flags, payload, codec);
   if (status != GWIPC_STATUS_OK) return status;
   if (codec != wire::CodecStatus::Ok) return GWIPC_STATUS_PROTOCOL_ERROR;
   if (type == GWIPC_MESSAGE_BUFFER_ATTACH) {
@@ -252,7 +329,10 @@ gwipc_status validate_application(gwipc_connection& connection,
   } else if (!fds.empty()) {
     return GWIPC_STATUS_PROTOCOL_ERROR;
   }
-  return validate_snapshot(snapshot, type, flags, payload);
+  return validate_snapshot(
+      snapshot, type, flags, payload,
+      (connection.peer.capabilities & GWIPC_CAP_INTERACTIVE_POLICY) != 0 &&
+          policy_output_direction(connection, direction));
 }
 
 }  // namespace gw::ipc

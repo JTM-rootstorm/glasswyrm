@@ -22,7 +22,9 @@ inline constexpr std::uint32_t kKnownCapabilities =
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_SCALE_METADATA |
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT |
     GWIPC_CAP_TRACE_METADATA | GWIPC_CAP_WINDOW_POLICY |
-    GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SYNTHETIC_INPUT;
+    GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SYNTHETIC_INPUT |
+    GWIPC_CAP_SESSION_STATE | GWIPC_CAP_INTERACTIVE_POLICY |
+    GWIPC_CAP_CURSOR_SURFACE;
 
 struct Config {
   std::string path;
@@ -58,6 +60,13 @@ struct SnapshotState {
   std::uint64_t generation{};
   std::uint32_t expected_count{};
   std::uint32_t item_count{};
+  std::uint16_t domain{};
+  std::uint16_t policy_bindings_count{};
+};
+
+struct SessionCorrelation {
+  std::uint64_t generation{};
+  std::uint16_t state{};
 };
 
 bool fill_instance_id(std::array<std::uint8_t, 16>& id) noexcept;
@@ -112,6 +121,12 @@ struct gwipc_connection {
   std::unordered_map<std::uint64_t, std::uint64_t> incoming_policy_commits;
   std::unordered_map<std::uint64_t, std::uint64_t> pending_synthetic_inputs;
   std::unordered_map<std::uint64_t, std::uint64_t> incoming_synthetic_inputs;
+  std::unordered_map<std::uint64_t, gw::ipc::SessionCorrelation>
+      pending_session_states;
+  std::unordered_map<std::uint64_t, gw::ipc::SessionCorrelation>
+      incoming_session_states;
+  std::uint64_t last_outgoing_session_generation{};
+  std::uint64_t last_incoming_session_generation{};
   gw::ipc::SnapshotState outgoing_snapshot;
   gw::ipc::SnapshotState incoming_snapshot;
 

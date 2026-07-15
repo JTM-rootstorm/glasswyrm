@@ -681,6 +681,23 @@ if get_option('drm_backend')
 endif
 
 if get_option('libgwipc')
+  gwipc_session_c_consumer = executable(
+    'gwipc_session_c_consumer',
+    files('install/gwipc_session_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.6-session-c-consumer', gwipc_session_c_consumer,
+       timeout: 10)
+  gwipc_session_cpp_consumer = executable(
+    'gwipc_session_cpp_consumer',
+    files('install/gwipc_session_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.6-session-cpp-consumer', gwipc_session_cpp_consumer,
+       timeout: 10)
+
   public_control_api_test = executable(
     'public_control_api_test',
     files('unit/ipc/public_control_api_test.cpp'),

@@ -7,6 +7,7 @@
 #include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
+#include "ipc/wire/session_contract.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <fcntl.h>
@@ -274,6 +275,171 @@ void test_synthetic_input_correlation_and_rollback() {
           "failed synthetic input queue rolls correlation state back");
 }
 
+void test_session_direction_generation_and_correlation() {
+  const auto change = gw::ipc::wire::encode(
+      gw::ipc::wire::SessionStateChange{
+          1, gw::ipc::wire::SessionState::Inactive, 0});
+  const auto acknowledged = gw::ipc::wire::encode(
+      gw::ipc::wire::SessionStateAcknowledged{
+          1, gw::ipc::wire::SessionState::Inactive,
+          gw::ipc::wire::SessionStateResult::Accepted, 0});
+
+  RawPair outgoing;
+  outgoing.connection->config.local_role = GWIPC_ROLE_COMPOSITOR;
+  outgoing.connection->peer.role = GWIPC_ROLE_PROTOCOL_SERVER;
+  outgoing.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  require(enqueue(outgoing.connection, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+                  GWIPC_FLAG_ACK_REQUIRED, change) == GWIPC_STATUS_OK &&
+              outgoing.connection->pending_session_states.at(1).generation ==
+                  1 &&
+              outgoing.connection->last_outgoing_session_generation == 1,
+          "outgoing session change records generation correlation");
+  require(enqueue(outgoing.connection, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+                  GWIPC_FLAG_ACK_REQUIRED, change) ==
+              GWIPC_STATUS_INVALID_STATE,
+          "outgoing session generations must strictly increase");
+  send_record(outgoing.peer, 1,
+              GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, acknowledged, 1);
+  require(gwipc_connection_process_poll_events(outgoing.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              outgoing.connection->pending_session_states.empty(),
+          "matching session acknowledgement clears correlation state");
+
+  RawPair incoming;
+  incoming.connection->config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  incoming.connection->peer.role = GWIPC_ROLE_COMPOSITOR;
+  incoming.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  send_record(incoming.peer, 1, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+              GWIPC_FLAG_ACK_REQUIRED, change);
+  require(gwipc_connection_process_poll_events(incoming.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              incoming.connection->incoming_session_states.at(1).generation ==
+                  1 &&
+              incoming.connection->last_incoming_session_generation == 1,
+          "incoming session change records monotonic generation");
+  require(enqueue(incoming.connection,
+                  GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,
+                  GWIPC_FLAG_REPLY, acknowledged, 1) == GWIPC_STATUS_OK &&
+              incoming.connection->incoming_session_states.empty(),
+          "server acknowledgement matches an incoming session change");
+
+  RawPair wrong_direction;
+  wrong_direction.connection->config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  wrong_direction.connection->peer.role = GWIPC_ROLE_COMPOSITOR;
+  wrong_direction.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  require(enqueue(wrong_direction.connection,
+                  GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+                  GWIPC_FLAG_ACK_REQUIRED, change) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "session changes reject the reverse role direction");
+
+  RawPair descriptor_pair;
+  descriptor_pair.connection->config.local_role = GWIPC_ROLE_COMPOSITOR;
+  descriptor_pair.connection->peer.role = GWIPC_ROLE_PROTOCOL_SERVER;
+  descriptor_pair.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  const int descriptor = ::memfd_create("gwipc-session", MFD_CLOEXEC);
+  require(descriptor >= 0 &&
+              enqueue(descriptor_pair.connection,
+                      GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+                      GWIPC_FLAG_ACK_REQUIRED, change, 0, &descriptor, 1) ==
+                  GWIPC_STATUS_PROTOCOL_ERROR,
+          "session contracts reject descriptors");
+  (void)::close(descriptor);
+
+  RawPair mismatch;
+  mismatch.connection->config.local_role = GWIPC_ROLE_COMPOSITOR;
+  mismatch.connection->peer.role = GWIPC_ROLE_PROTOCOL_SERVER;
+  mismatch.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  require(enqueue(mismatch.connection, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+                  GWIPC_FLAG_ACK_REQUIRED, change) == GWIPC_STATUS_OK,
+          "queue session change before mismatched acknowledgement");
+  const auto wrong_ack = gw::ipc::wire::encode(
+      gw::ipc::wire::SessionStateAcknowledged{
+          2, gw::ipc::wire::SessionState::Inactive,
+          gw::ipc::wire::SessionStateResult::Accepted, 0});
+  send_record(mismatch.peer, 1,
+              GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, wrong_ack, 1);
+  require(gwipc_connection_process_poll_events(mismatch.connection, POLLIN) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "session acknowledgement generation must match its request");
+
+  RawPair repeated;
+  repeated.connection->config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  repeated.connection->peer.role = GWIPC_ROLE_COMPOSITOR;
+  repeated.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  send_record(repeated.peer, 1, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+              GWIPC_FLAG_ACK_REQUIRED, change);
+  require(gwipc_connection_process_poll_events(repeated.connection, POLLIN) ==
+              GWIPC_STATUS_OK,
+          "first incoming session generation is accepted");
+  send_record(repeated.peer, 2, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+              GWIPC_FLAG_ACK_REQUIRED, change);
+  require(gwipc_connection_process_poll_events(repeated.connection, POLLIN) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "repeated incoming session generation is rejected");
+}
+
+void test_interactive_bindings_snapshot_rules() {
+  const auto bindings = gw::ipc::wire::encode(
+      gw::ipc::wire::PolicyBindingsUpsert{
+          8, 8, 8, 1, 3, 0xffc1, 96, 64, true, true});
+  const auto begin = gw::ipc::wire::encode(gw::ipc::wire::SnapshotBegin{
+      90, gw::ipc::wire::SnapshotDomain::WindowPolicy, 0, 7, 1});
+  const auto end =
+      gw::ipc::wire::encode(gw::ipc::wire::SnapshotEnd{90, 7, 1});
+
+  RawPair pair;
+  pair.connection->config.local_role = GWIPC_ROLE_WINDOW_MANAGER;
+  pair.connection->peer.role = GWIPC_ROLE_PROTOCOL_SERVER;
+  pair.connection->peer.capabilities |= GWIPC_CAP_INTERACTIVE_POLICY;
+  require(enqueue(pair.connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0, begin) ==
+              GWIPC_STATUS_OK,
+          "begin interactive policy snapshot");
+  const auto bindings_status = enqueue(
+      pair.connection, GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,
+      GWIPC_FLAG_SNAPSHOT_ITEM, bindings);
+  require(bindings_status == GWIPC_STATUS_OK,
+          "interactive bindings are accepted once in a policy snapshot");
+  require(enqueue(pair.connection, GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,
+                  GWIPC_FLAG_SNAPSHOT_ITEM, bindings) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "duplicate interactive bindings are rejected atomically");
+  require(enqueue(pair.connection, GWIPC_MESSAGE_SNAPSHOT_END, 0, end) ==
+              GWIPC_STATUS_OK,
+          "policy snapshot closes after exactly one bindings record");
+
+  RawPair missing;
+  missing.connection->config.local_role = GWIPC_ROLE_WINDOW_MANAGER;
+  missing.connection->peer.role = GWIPC_ROLE_PROTOCOL_SERVER;
+  missing.connection->peer.capabilities |= GWIPC_CAP_INTERACTIVE_POLICY;
+  const auto empty_begin = gw::ipc::wire::encode(gw::ipc::wire::SnapshotBegin{
+      91, gw::ipc::wire::SnapshotDomain::WindowPolicy, 0, 8, 0});
+  const auto empty_end =
+      gw::ipc::wire::encode(gw::ipc::wire::SnapshotEnd{91, 8, 0});
+  require(enqueue(missing.connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0,
+                  empty_begin) == GWIPC_STATUS_OK &&
+              enqueue(missing.connection, GWIPC_MESSAGE_SNAPSHOT_END, 0,
+                      empty_end) == GWIPC_STATUS_PROTOCOL_ERROR,
+          "negotiated policy snapshots require one bindings record");
+
+  RawPair wrong_role;
+  wrong_role.connection->config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  wrong_role.connection->peer.role = GWIPC_ROLE_WINDOW_MANAGER;
+  wrong_role.connection->peer.capabilities |= GWIPC_CAP_INTERACTIVE_POLICY;
+  wrong_role.connection->outgoing_snapshot = {
+      true, 92, 9, 1, 0,
+      static_cast<std::uint16_t>(
+          gw::ipc::wire::SnapshotDomain::WindowPolicy),
+      0};
+  require(enqueue(wrong_role.connection,
+                  GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,
+                  GWIPC_FLAG_SNAPSHOT_ITEM, bindings) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "interactive bindings reject the reverse policy direction");
+}
+
 void test_lifecycle_capabilities_flags_and_descriptors() {
   RawPair pair;
   const gw::ipc::wire::PolicyWindowUpsert base{
@@ -332,6 +498,15 @@ void test_lifecycle_capabilities_flags_and_descriptors() {
   require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
                   surface_bytes) == GWIPC_STATUS_OK,
           "metadata-only surface accepts negotiated lifecycle capability");
+  surface.presentation_flags = GWIPC_SURFACE_PRESENTATION_CURSOR;
+  require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
+                  gw::ipc::wire::encode(surface)) ==
+              GWIPC_STATUS_CAPABILITY_MISMATCH,
+          "cursor surfaces require their dedicated capability");
+  metadata.connection->peer.capabilities |= GWIPC_CAP_CURSOR_SURFACE;
+  require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
+                  gw::ipc::wire::encode(surface)) == GWIPC_STATUS_OK,
+          "cursor presentation flag accepts its negotiated capability");
 }
 
 void test_outgoing_snapshot_violations_are_atomic() {
@@ -527,6 +702,8 @@ int main() {
   test_lifecycle_capabilities_flags_and_descriptors();
   test_policy_commit_correlation();
   test_synthetic_input_correlation_and_rollback();
+  test_session_direction_generation_and_correlation();
+  test_interactive_bindings_snapshot_rules();
   test_outgoing_snapshot_violations_are_atomic();
   test_incoming_snapshot_violation_closes_after_error();
   test_disconnect_marks_both_snapshot_directions_aborted();

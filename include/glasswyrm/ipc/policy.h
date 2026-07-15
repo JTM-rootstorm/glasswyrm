@@ -58,6 +58,23 @@ typedef struct gwipc_policy_acknowledged {
   size_t struct_size; uint64_t commit_id, producer_generation, applied_generation, policy_hash;
   uint32_t window_count; gwipc_policy_result result; uint64_t reserved[4];
 } gwipc_policy_acknowledged;
+typedef struct gwipc_policy_bindings_upsert {
+  size_t struct_size;
+  uint16_t move_modifiers;
+  uint16_t resize_modifiers;
+  uint16_t close_modifiers;
+  uint16_t reserved16;
+  uint8_t move_button;
+  uint8_t resize_button;
+  uint16_t reserved_buttons;
+  uint32_t close_keysym;
+  uint32_t minimum_width;
+  uint32_t minimum_height;
+  uint8_t raise_on_focus;
+  uint8_t consume_wm_bindings;
+  uint16_t reserved_flags;
+  uint64_t reserved[4];
+} gwipc_policy_bindings_upsert;
 
 #define GWIPC_DECLARE_POLICY_CONTRACT(Type, name) \
   GWIPC_API gwipc_status gwipc_contract_encode_##name(const Type *, gwipc_contract_payload **); \
@@ -68,6 +85,7 @@ GWIPC_DECLARE_POLICY_CONTRACT(gwipc_policy_window_remove, policy_window_remove);
 GWIPC_DECLARE_POLICY_CONTRACT(gwipc_policy_commit, policy_commit);
 GWIPC_DECLARE_POLICY_CONTRACT(gwipc_policy_window_state, policy_window_state);
 GWIPC_DECLARE_POLICY_CONTRACT(gwipc_policy_acknowledged, policy_acknowledged);
+GWIPC_DECLARE_POLICY_CONTRACT(gwipc_policy_bindings_upsert, policy_bindings_upsert);
 #undef GWIPC_DECLARE_POLICY_CONTRACT
 
 #ifdef __cplusplus
