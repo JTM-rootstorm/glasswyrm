@@ -60,7 +60,7 @@ GrabStatus GrabState::validate_pointer_fields(
     const GrabMode keyboard_mode, const std::uint32_t confine_to,
     const std::uint32_t cursor, const bool cursor_valid) noexcept {
   if (!mode_is_async(pointer_mode) || !mode_is_async(keyboard_mode))
-    return GrabStatus::InvalidMode;
+    return GrabStatus::BadImplementation;
   if ((event_mask & ~kPointerGrabMask) != 0)
     return GrabStatus::InvalidEventMask;
   if (confine_to != 0) return GrabStatus::UnsupportedConfine;
@@ -124,7 +124,7 @@ GrabStatus GrabState::grab_keyboard(
     const KeyboardGrabRequest& request) noexcept {
   if (!mode_is_async(request.pointer_mode) ||
       !mode_is_async(request.keyboard_mode))
-    return GrabStatus::InvalidMode;
+    return GrabStatus::BadImplementation;
   if (!request.window_viewable) return GrabStatus::NotViewable;
   std::uint32_t activation_time = 0;
   if (!valid_time(request.request_time, request.current_time,

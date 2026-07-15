@@ -120,7 +120,9 @@ int main() {
   require(state.resources().set_event_selection(
               spec.xid, 1,
               (1U << 17U) | gw::protocol::x11::event_mask::FocusChange |
-                  gw::protocol::x11::event_mask::LeaveWindow) &&
+                  gw::protocol::x11::event_mask::LeaveWindow |
+                  gw::protocol::x11::event_mask::ButtonPress |
+                  gw::protocol::x11::event_mask::ButtonRelease) &&
               state.resources().set_event_selection(state.screen().root_window,
                   2, (1U << 19U) |
                          gw::protocol::x11::event_mask::FocusChange |
@@ -216,6 +218,24 @@ int main() {
           parent_event[2] == 0 && parent_event[3] == 2 &&
           parent_event[4] == 0 && parent_event[7] == 1,
       "events use recipient sequence, byte order, and selected event field");
+
+  const auto grab_recipient = router.input_recipient(
+      spec.xid, gw::protocol::x11::event_mask::ButtonPress);
+  require(grab_recipient && grab_recipient->first == 1 &&
+              state.grabs().begin_automatic_button_grab(
+                  grab_recipient->first, grab_recipient->second, 1, 50),
+          "automatic grab captures the ButtonPress recipient");
+  state.grabs().note_button_press(1);
+  require(router.route_input_grabbed(
+              state.grabs(), gw::protocol::x11::CoreEventType::ButtonRelease,
+              1, 51, state.screen().root_window, 0,
+              gw::protocol::x11::event_mask::ButtonRelease, 5, 6,
+              state.screen().root_window, clients) == 1,
+          "automatic grab redirects release away from the natural target");
+  const auto grabbed_release = receive_event(target_client);
+  require(grabbed_release[0] == 5 && grabbed_release[4] == 51 &&
+              state.grabs().note_button_release(1),
+          "redirected release is encoded and ends the automatic grab");
 
   glasswyrm::input::InputState input;
   input.set_pointer(52, 33, spec.xid);

@@ -311,6 +311,8 @@ if get_option('glasswyrmd')
       'glasswyrmd/request_handlers/atom.cpp',
       'glasswyrmd/request_handlers/property.cpp',
       'glasswyrmd/request_handlers/selection.cpp',
+      'glasswyrmd/request_handlers/grab.cpp',
+      'glasswyrmd/request_handlers/keyboard_control.cpp',
       'glasswyrmd/request_handlers/color.cpp',
       'glasswyrmd/request_handlers/cursor.cpp',
       'core/geometry/rectangle.cpp',

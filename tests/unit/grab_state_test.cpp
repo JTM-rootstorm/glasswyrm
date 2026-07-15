@@ -63,8 +63,8 @@ int main() {
 
   auto pointer = pointer_request();
   pointer.pointer_mode = GrabMode::Synchronous;
-  require(grabs.grab_pointer(pointer) == GrabStatus::InvalidMode,
-          "synchronous pointer mode is rejected");
+  require(grabs.grab_pointer(pointer) == GrabStatus::BadImplementation,
+          "valid synchronous pointer mode is explicitly unsupported");
   pointer = pointer_request();
   pointer.event_mask = em::KeyPress;
   require(grabs.grab_pointer(pointer) == GrabStatus::InvalidEventMask,
