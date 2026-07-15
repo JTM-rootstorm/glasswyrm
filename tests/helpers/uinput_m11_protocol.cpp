@@ -51,11 +51,13 @@ bool key_stroke(char character, KeyStroke &stroke) {
       {' ', {KEY_SPACE, false}},       {'\'', {KEY_APOSTROPHE, false}},
       {'%', {KEY_5, true}},            {'\\', {KEY_BACKSLASH, false}},
       {'_', {KEY_MINUS, true}},        {'1', {KEY_1, false}},
+      {'0', {KEY_0, false}},           {'4', {KEY_4, false}},
       {'a', {KEY_A, false}},           {'d', {KEY_D, false}},
       {'e', {KEY_E, false}},           {'f', {KEY_F, false}},
       {'i', {KEY_I, false}},           {'n', {KEY_N, false}},
       {'p', {KEY_P, false}},           {'r', {KEY_R, false}},
-      {'s', {KEY_S, false}},           {'t', {KEY_T, false}},
+      {'q', {KEY_Q, false}},           {'s', {KEY_S, false}},
+      {'t', {KEY_T, false}},
       {'y', {KEY_Y, false}},           {'A', {KEY_A, true}},
       {'D', {KEY_D, true}},            {'E', {KEY_E, true}},
       {'M', {KEY_M, true}},            {'P', {KEY_P, true}},
@@ -151,22 +153,42 @@ std::vector<Event> scenario_events(std::string_view name) {
     key(events, KEY_A, false);
     chord(events, KEY_LEFTCTRL, KEY_U);
   } else if (name == "scroll") {
+    text(events, "seq 40");
+    tap(events, KEY_ENTER);
+    // Enter xterm A at a stable cell before delivering wheel detents.  Its
+    // fixed geometry is 80x24+96+96 and the input state begins at (0, 0).
+    relative(events, REL_X, 120);
+    relative(events, REL_Y, 128);
     relative(events, REL_WHEEL, -4);
-    relative(events, REL_WHEEL, 2);
+    relative(events, REL_WHEEL, 4);
 #ifdef REL_HWHEEL
     relative(events, REL_HWHEEL, 1);
     relative(events, REL_HWHEEL, -1);
 #endif
+    // Return to the bottom and print the token again so the next scenario
+    // selects a stable visible row after the viewport exercise.
+    text(events, "printf 'M11_TYPED\\n'");
+    tap(events, KEY_ENTER);
   } else if (name == "primary-selection") {
-    relative(events, REL_X, 120);
-    relative(events, REL_Y, 80);
+    // Select the repeated M11_TYPED output from xterm A.  The preceding
+    // scroll scenario leaves the pointer at (120, 128) and returns to the
+    // original vertical scroll position.
+    relative(events, REL_Y, 264);
+    relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
-    relative(events, REL_X, 180);
+    relative(events, REL_X, 70);
     button(events, BTN_LEFT, false);
   } else if (name == "clipboard-probe") {
-    text(events, "printf '%s\\n' ");
+    // Move from xterm A to the non-overlapping interior of xterm B
+    // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
+    relative(events, REL_X, 328);
+    relative(events, REL_Y, -152);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false);
+    // Prefix the pasted token without replacing it, then print it through
+    // the PTY so the acceptance transcript proves the cross-client paste.
+    chord(events, KEY_LEFTCTRL, KEY_A);
+    text(events, "printf '%s\\n' ");
     tap(events, KEY_ENTER);
   } else if (name == "move" || name == "resize") {
     key(events, KEY_LEFTALT, true);
@@ -176,6 +198,12 @@ std::vector<Event> scenario_events(std::string_view name) {
     button(events, name == "move" ? BTN_LEFT : BTN_RIGHT, false);
     key(events, KEY_LEFTALT, false);
   } else if (name == "close") {
+    // Move from the post-resize pointer location back into xterm A, focus it,
+    // and close A while xterm B remains alive.
+    relative(events, REL_X, -548);
+    relative(events, REL_Y, -232);
+    button(events, BTN_LEFT, true);
+    button(events, BTN_LEFT, false);
     chord(events, KEY_LEFTALT, KEY_F4);
   } else if (name == "post-vt") {
     text(events, "printf 'M11_VT\\n'");
