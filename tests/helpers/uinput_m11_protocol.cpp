@@ -147,6 +147,9 @@ std::vector<Event> scenario_events(std::string_view name) {
     text(events, "D\\n'");
     tap(events, KEY_ENTER);
     tap(events, KEY_UP);
+    tap(events, KEY_END);
+    tap(events, KEY_X);
+    tap(events, KEY_BACKSPACE);
     tap(events, KEY_ENTER);
   } else if (name == "repeat") {
     key(events, KEY_A, true, 700);
@@ -165,18 +168,18 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_HWHEEL, 1);
     relative(events, REL_HWHEEL, -1);
 #endif
-    // Return to the bottom and print the token again so the next scenario
+    // Return to the bottom and print the selection token so the next scenario
     // selects a stable visible row after the viewport exercise.
-    text(events, "printf 'M11_TYPED\\n'");
+    text(events, "printf 'M11_SELECTION_TOKEN\\n'");
     tap(events, KEY_ENTER);
   } else if (name == "primary-selection") {
-    // Select the repeated M11_TYPED output from xterm A.  The preceding
+    // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
     // scroll scenario leaves the pointer at (120, 128) and returns to the
     // original vertical scroll position.
     relative(events, REL_Y, 264);
     relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
-    relative(events, REL_X, 70);
+    relative(events, REL_X, 130);
     button(events, BTN_LEFT, false);
   } else if (name == "clipboard-probe") {
     // Move from xterm A to the non-overlapping interior of xterm B
@@ -200,7 +203,7 @@ std::vector<Event> scenario_events(std::string_view name) {
   } else if (name == "close") {
     // Move from the post-resize pointer location back into xterm A, focus it,
     // and close A while xterm B remains alive.
-    relative(events, REL_X, -548);
+    relative(events, REL_X, -608);
     relative(events, REL_Y, -232);
     button(events, BTN_LEFT, true);
     button(events, BTN_LEFT, false);

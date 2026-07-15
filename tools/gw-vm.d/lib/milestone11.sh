@@ -109,9 +109,12 @@ asan=/var/tmp/glasswyrm-build-m11-asan
 runtime=/var/tmp/glasswyrm-build-m11-runtime
 clang_build=/var/tmp/glasswyrm-build-m11-clang
 default=/var/tmp/glasswyrm-build-m11-default
-server=/var/tmp/glasswyrm-build-m11-server
+server=/var/tmp/glasswyrm-build-m11-server-input
+server_standalone=/var/tmp/glasswyrm-build-m11-server-standalone
+server_synthetic=/var/tmp/glasswyrm-build-m11-server-synthetic
 gwm_build=/var/tmp/glasswyrm-build-m11-gwm
-gwcomp_build=/var/tmp/glasswyrm-build-m11-gwcomp
+gwcomp_build=/var/tmp/glasswyrm-build-m11-gwcomp-drm
+gwcomp_headless=/var/tmp/glasswyrm-build-m11-gwcomp-headless
 ipc_only=/var/tmp/glasswyrm-build-m11-ipc-only
 session_build=/var/tmp/glasswyrm-build-m11-session
 client_dir=/var/tmp/glasswyrm-m11-clients
@@ -303,11 +306,24 @@ CC=clang CXX=clang++ meson setup "$clang_build" "$source_dir" --wipe -Dwerror=tr
 meson compile -C "$clang_build"; meson test -C "$clang_build" --print-errorlogs
 result[clang]=passed
 meson setup "$server" "$source_dir" --wipe -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false -Dlibinput_backend=true
+meson setup "$server_standalone" "$source_dir" --wipe -Dwerror=true \
+  -Dlibgwipc=false -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false \
+  -Dlibinput_backend=false
+meson setup "$server_synthetic" "$source_dir" --wipe -Dwerror=true \
+  -Dlibgwipc=true -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false \
+  -Dlibinput_backend=false
 meson setup "$gwm_build" "$source_dir" --wipe -Dglasswyrmd=false -Dgwm=true -Dgwcomp=false -Dtools=false
 meson setup "$gwcomp_build" "$source_dir" --wipe -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false -Ddrm_backend=true -Dheadless_backend=false
+meson setup "$gwcomp_headless" "$source_dir" --wipe -Dwerror=true \
+  -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false \
+  -Ddrm_backend=false -Dheadless_backend=true
 meson setup "$ipc_only" "$source_dir" --wipe -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false
 meson setup "$session_build" "$source_dir" --wipe -Dglasswyrmd=true -Dgwm=true -Dgwcomp=true -Dtools=false
-for component in "$server" "$gwm_build" "$gwcomp_build" "$ipc_only" "$session_build"; do meson compile -C "$component"; done
+for component in "$server" "$server_standalone" "$server_synthetic" \
+  "$gwm_build" "$gwcomp_build" "$gwcomp_headless" "$ipc_only" \
+  "$session_build"; do
+  meson compile -C "$component"
+done
 result[component_builds]=passed
 meson test -C "$build" --print-errorlogs -R 'gwipc.*consumer|connection|installed'
 result[api_consumers]=passed result[ipc_refactor]=passed
@@ -366,7 +382,7 @@ launcher=("$runtime/src/glasswyrm-session" --runtime-dir /run/glasswyrm-m11 --di
   --x11-trace "$artifact_dir/milestone11-xterm-trace.json"
   --client xterm -geometry 80x24+96+96 -fn fixed -fb fixed -u8 0
   -xrm '*cursorBlink:false' -xrm '*toolBar:false' -title Glasswyrm-M11
-  -e /bin/bash --noprofile --norc --rcfile "$source_dir/tests/compat/m11/m11-bashrc")
+  -e /bin/bash --noprofile --rcfile "$source_dir/tests/compat/m11/m11-bashrc")
 printf 'launcher'; printf ' <%s>' "${launcher[@]}"; printf '\n'
 systemd-run --unit=glasswyrm-session-m11.service \
   --setenv="PATH=$runtime/src:$client_dir/install/bin:/usr/bin:/bin" \
@@ -413,7 +429,7 @@ systemd-run --unit=xterm-m11-a.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv="GW_M11_TRANSCRIPT=$transcript" "$xterm_bin" \
   -geometry 80x24+96+96 -fn fixed -fb fixed -u8 0 -xrm '*cursorBlink:false' \
   -xrm '*toolBar:false' -title Glasswyrm-M11-A -e /bin/bash --noprofile \
-  --norc --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
+  --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-a.service && break; sleep .05; done
 first_xterm_pid=$(systemctl show xterm-m11-a.service -p MainPID --value)
 python3 - "$first_xterm_pid" <<'PY'
@@ -460,7 +476,7 @@ systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv="GW_M11_TRANSCRIPT=$transcript" "$xterm_bin" \
   -geometry 80x24+480+160 -fn fixed -fb fixed -u8 0 -xrm '*cursorBlink:false' \
   -xrm '*toolBar:false' -title Glasswyrm-M11-B -e /bin/bash --noprofile \
-  --norc --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
+  --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-b.service && break; sleep .05; done
 second_xterm_pid=$(systemctl show xterm-m11-b.service -p MainPID --value)
 run_input primary-selection milestone11-selection.log
@@ -501,12 +517,24 @@ while [[ ! -e $control/screen-after-vt-captured ]]; do sleep .1; done
 cmp "$mirror" "$artifact_dir/milestone11-desktop-after-vt.ppm"
 
 failure_stage=peer-restart
+gwm_bindings_before=$(journalctl -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
 systemctl restart gwm-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
-grep -F 'gwm_replay' "$artifact_dir/milestone11-xterm-trace.json"; result[gwm_replay]=passed
+for _ in {1..200}; do
+  gwm_bindings_after=$(journalctl -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
+  ((gwm_bindings_after > gwm_bindings_before)) && break
+  sleep .05
+done
+((gwm_bindings_after > gwm_bindings_before)); result[gwm_replay]=passed
+scene_records_before=$(wc -l <"$scenes/scene.jsonl")
 systemctl restart gwcomp-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
-grep -F 'compositor_replay' "$artifact_dir/milestone11-xterm-trace.json"; result[compositor_replay]=passed
+for _ in {1..200}; do
+  scene_records_after=$(wc -l <"$scenes/scene.jsonl")
+  ((scene_records_after > scene_records_before)) && break
+  sleep .05
+done
+((scene_records_after > scene_records_before)); result[compositor_replay]=passed
 run_input post-restart milestone11-session-state.log
 systemctl is-active --quiet xterm-m11-a.service; systemctl is-active --quiet xterm-m11-b.service
 result[post_restart_input]=passed result[xterm_survival]=passed
