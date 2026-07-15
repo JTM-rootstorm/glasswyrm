@@ -16,5 +16,9 @@ or GWIPC authority.
 - [Hardware validation](M10_HARDWARE_VALIDATION.md): VM and spare-VT
   procedures, evidence, recovery, and current acceptance status.
 
+The VT lifecycle also documents the capability-gated M11 coordination which
+suspends server-owned libinput before display release and resumes it after
+reacquisition.
+
 Headless remains the default build and test path. Enabling DRM is explicit
 with `-Ddrm_backend=true`; a default build neither discovers nor links libdrm.

@@ -21,6 +21,18 @@ VT, allocation, logging, or compositor work.
 
 ## Release and acquire
 
+When SessionState is negotiated for an M11 real-input session, release first
+quiesces presentation and requests Inactive from `glasswyrmd`. DRM master is
+dropped and the VT release acknowledged only after the correlated reply
+confirms that libinput is suspended. Acquire acknowledges the VT, reacquires
+DRM master, restores the committed frame by complete modeset, then requests
+Active. Producer processing resumes only after real input acknowledges a
+successful resume. Timeout, rejection, or malformed correlation is fatal and
+enters restoration.
+
+When SessionState is not negotiated, the exact M10 sequence below remains in
+effect.
+
 On a release notification, the runtime stops producer consumption, waits for
 the pending presentation boundary to quiesce, drops DRM master, acknowledges
 the release with `VT_RELDISP`, and marks presentation suspended.

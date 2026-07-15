@@ -10,6 +10,10 @@ that an external application works.
 - [xclock profiles](M9_XCLOCK.md) record the analog and digital invocations.
 - [M9 request profile](M9_REQUEST_PROFILE.md) summarizes implemented protocol
   scope and acceptance status.
+- [M11 xterm source audit](M11_XTERM_AUDIT.md) records the verified patch 410
+  source/build paths and explicitly pending live evidence.
+- [M11 xterm profile](M11_XTERM.md) states the narrow intended claim and its
+  current unvalidated status.
 
 Milestone 9 is complete for only the pinned commands. The Gentoo VM builds the
 verified sources and validates reviewed normalized traces, exact frames,

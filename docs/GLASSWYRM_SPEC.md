@@ -956,7 +956,7 @@ M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
-M11 Interactive desktop baseline
+M11 Interactive desktop baseline                implementation in progress; live acceptance pending
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
 M14 Variable refresh rate
@@ -1028,6 +1028,16 @@ The configured QXL guest validates the real primary node, atomic KMS
 presentation, exact graphical-console screenshots, VT release/acquire,
 post-acquire repaint, ordered restoration, and the checksum-protected evidence
 archive.
+
+Milestone 11 adds an opt-in libinput path backend and libxkbcommon US pc105
+engine inside `glasswyrmd`, preserving the M8 synthetic profile. It adds
+bounded core cursor, grab, selection, keyboard-control, and client-event
+behavior; capability-gated session-state and GWM interactive bindings through
+GWIPC API 0.6; a software cursor composed by `gwcomp`; and the unprivileged
+`glasswyrm-session` orchestrator. The intended external target is only xterm
+patch 410 under the pinned core-font ASCII profile. Host implementation does
+not establish that compatibility claim: live trace, interaction, VT/restart,
+DRM screenshot, restoration, and evidence-archive validation remain pending.
 
 ## 26. Definition of done
 

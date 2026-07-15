@@ -86,6 +86,7 @@ actions:
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
 ./tools/gw-vm milestone4-runtime-test --yes
+./tools/gw-vm milestone11-runtime-test --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -179,6 +180,19 @@ exercise basic and damage frames, stacking, visibility, clipping, opacity,
 buffer release, invalid metadata and buffers, malformed-peer isolation, and a
 reconnecting snapshot. Exact hashes are checked against repository fixtures.
 No arbitrary scenario names are accepted.
+
+Milestone 11 has a fixed interactive desktop command:
+
+```sh
+./tools/gw-vm milestone11-runtime-test --yes
+```
+
+It is intended to reset from the single configured `base` snapshot, build the
+libinput/DRM profile, create fixed uinput keyboard and pointer devices, run the
+pinned xterm 410 profile through `glasswyrm-session`, and collect trace,
+selection, interaction, VT/restart, frame, console, restoration, and summary
+evidence. The existence of the command is not an acceptance result; its
+summary and archive must be reviewed before M11 is declared complete.
 
 ## Safety
 
