@@ -4,6 +4,7 @@
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
+#include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "tests/helpers/test_support.hpp"
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <array>
 #include <cstdio>
 #include <cstdint>
 #include <span>
@@ -156,6 +158,120 @@ void test_policy_commit_correlation() {
   require(gwipc_connection_process_poll_events(mismatch.connection, POLLIN) ==
               GWIPC_STATUS_PROTOCOL_ERROR,
           "mismatched policy acknowledgement is rejected");
+}
+
+void test_handshake_rejection_invariants() {
+  RawPair invalid_hello;
+  invalid_hello.connection->state = GWIPC_CONNECTION_AWAITING_HELLO;
+  invalid_hello.connection->server_side = true;
+  send_record(invalid_hello.peer, 1, GWIPC_MESSAGE_HELLO, 0);
+  const auto invalid_status = gwipc_connection_process_poll_events(
+      invalid_hello.connection, POLLIN);
+  std::array<std::uint8_t, 256> rejection_record{};
+  const auto rejection_size = ::recv(invalid_hello.peer,
+                                     rejection_record.data(),
+                                     rejection_record.size(), 0);
+  gw::ipc::wire::Envelope rejection_envelope;
+  require(invalid_status == GWIPC_STATUS_PROTOCOL_ERROR &&
+              invalid_hello.connection->state == GWIPC_CONNECTION_CLOSED &&
+              rejection_size > 0 &&
+              gw::ipc::wire::decode_envelope(
+                  std::span(rejection_record).first(rejection_size), 0,
+                  GWIPC_DEFAULT_MAXIMUM_PAYLOAD, rejection_envelope) ==
+                  gw::ipc::wire::CodecStatus::Ok &&
+              rejection_envelope.type == gw::ipc::wire::MessageType::Reject,
+          "invalid hello flushes a rejection before closing");
+
+  struct RejectionCase {
+    gw::ipc::wire::RejectReason reason;
+    gwipc_status status;
+  };
+  constexpr RejectionCase cases[] = {
+      {gw::ipc::wire::RejectReason::IncompatibleVersion,
+       GWIPC_STATUS_VERSION_MISMATCH},
+      {gw::ipc::wire::RejectReason::RoleNotAllowed,
+       GWIPC_STATUS_ROLE_REJECTED},
+      {gw::ipc::wire::RejectReason::CapabilityMismatch,
+       GWIPC_STATUS_CAPABILITY_MISMATCH},
+      {gw::ipc::wire::RejectReason::CredentialRejected,
+       GWIPC_STATUS_CREDENTIAL_REJECTED},
+  };
+  for (const auto& test : cases) {
+    RawPair pair;
+    pair.connection->state = GWIPC_CONNECTION_AWAITING_WELCOME;
+    gw::ipc::wire::Reject value;
+    value.reason = test.reason;
+    value.detail = "expected rejection";
+    const auto rejection = gw::ipc::wire::encode(value);
+    send_record(pair.peer, 1, GWIPC_MESSAGE_REJECT, GWIPC_FLAG_REPLY,
+                rejection, 1);
+    require(gwipc_connection_process_poll_events(pair.connection, POLLIN) ==
+                    test.status &&
+                pair.connection->state == GWIPC_CONNECTION_CLOSED,
+            "client maps a valid handshake rejection to its public status");
+  }
+}
+
+void test_synthetic_input_correlation_and_rollback() {
+  const auto barrier =
+      gw::ipc::wire::encode(gw::ipc::wire::SyntheticBarrier{71, 0});
+  const auto acknowledged = gw::ipc::wire::encode(
+      gw::ipc::wire::SyntheticInputAcknowledged{
+          71, 12, gw::ipc::wire::SyntheticInputResult::Accepted,
+          10, 20, 30, 40, 0, 0, 1, 0});
+
+  RawPair outgoing;
+  outgoing.connection->peer.capabilities |= GWIPC_CAP_SYNTHETIC_INPUT;
+  require(enqueue(outgoing.connection, GWIPC_MESSAGE_SYNTHETIC_BARRIER,
+                  GWIPC_FLAG_ACK_REQUIRED, barrier) == GWIPC_STATUS_OK &&
+              outgoing.connection->pending_synthetic_inputs.at(1) == 71,
+          "outgoing synthetic input records correlation identity");
+  send_record(outgoing.peer, 1, GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, acknowledged, 1);
+  require(gwipc_connection_process_poll_events(outgoing.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              outgoing.connection->pending_synthetic_inputs.empty(),
+          "matching synthetic input acknowledgement clears correlation state");
+
+  RawPair incoming;
+  incoming.connection->peer.capabilities |= GWIPC_CAP_SYNTHETIC_INPUT;
+  send_record(incoming.peer, 1, GWIPC_MESSAGE_SYNTHETIC_BARRIER,
+              GWIPC_FLAG_ACK_REQUIRED, barrier);
+  require(gwipc_connection_process_poll_events(incoming.connection, POLLIN) ==
+                  GWIPC_STATUS_OK &&
+              incoming.connection->incoming_synthetic_inputs.at(1) == 71,
+          "incoming synthetic input records reply identity");
+  require(enqueue(incoming.connection,
+                  GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,
+                  GWIPC_FLAG_REPLY, acknowledged, 1) == GWIPC_STATUS_OK &&
+              incoming.connection->incoming_synthetic_inputs.empty(),
+          "outgoing synthetic acknowledgement matches incoming input");
+
+  RawPair mismatch;
+  mismatch.connection->peer.capabilities |= GWIPC_CAP_SYNTHETIC_INPUT;
+  require(enqueue(mismatch.connection, GWIPC_MESSAGE_SYNTHETIC_BARRIER,
+                  GWIPC_FLAG_ACK_REQUIRED, barrier) == GWIPC_STATUS_OK,
+          "queue synthetic input before mismatched reply");
+  const auto wrong = gw::ipc::wire::encode(
+      gw::ipc::wire::SyntheticInputAcknowledged{
+          72, 12, gw::ipc::wire::SyntheticInputResult::Accepted,
+          10, 20, 30, 40, 0, 0, 1, 0});
+  send_record(mismatch.peer, 1,
+              GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,
+              GWIPC_FLAG_REPLY, wrong, 1);
+  require(gwipc_connection_process_poll_events(mismatch.connection, POLLIN) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "mismatched synthetic input acknowledgement is rejected");
+
+  RawPair rollback;
+  rollback.connection->peer.capabilities |= GWIPC_CAP_SYNTHETIC_INPUT;
+  rollback.connection->config.maximum_queued_bytes =
+      gw::ipc::wire::kEnvelopeSize;
+  require(enqueue(rollback.connection, GWIPC_MESSAGE_SYNTHETIC_BARRIER,
+                  GWIPC_FLAG_ACK_REQUIRED, barrier) ==
+                  GWIPC_STATUS_LIMIT_EXCEEDED &&
+              rollback.connection->pending_synthetic_inputs.empty(),
+          "failed synthetic input queue rolls correlation state back");
 }
 
 void test_lifecycle_capabilities_flags_and_descriptors() {
@@ -407,8 +523,10 @@ void test_message_descriptor_ownership() {
 }  // namespace
 
 int main() {
+  test_handshake_rejection_invariants();
   test_lifecycle_capabilities_flags_and_descriptors();
   test_policy_commit_correlation();
+  test_synthetic_input_correlation_and_rollback();
   test_outgoing_snapshot_violations_are_atomic();
   test_incoming_snapshot_violation_closes_after_error();
   test_disconnect_marks_both_snapshot_directions_aborted();

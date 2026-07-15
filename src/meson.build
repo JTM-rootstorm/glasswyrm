@@ -200,6 +200,12 @@ if get_option('libgwipc')
       'ipc/message.cpp',
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
+      'ipc/connection_correlation.cpp',
+      'ipc/connection_handshake.cpp',
+      'ipc/connection_poll.cpp',
+      'ipc/connection_queue.cpp',
+      'ipc/connection_transport.cpp',
+      'ipc/connection_validation.cpp',
     ),
     link_whole: gwipc_wire_lib,
     include_directories: [
