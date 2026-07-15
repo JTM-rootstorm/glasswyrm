@@ -263,15 +263,19 @@ if get_option('glasswyrmd')
     gw_xkb_keymap_lib = static_library(
       'gw-xkb-keymap',
       files(
+        'input/device_path_allowlist.cpp',
+        'input/fake_libinput_api.cpp',
+        'input/libinput_backend.cpp',
+        'input/real_libinput_api.cpp',
         'input/repeat_timer.cpp',
         'input/xkb_keymap.cpp',
       ),
-      dependencies: xkbcommon_dep,
+      dependencies: [libinput_dep, xkbcommon_dep],
       include_directories: include_directories('.'),
     )
     gw_xkb_keymap_dep = declare_dependency(
       link_with: gw_xkb_keymap_lib,
-      dependencies: xkbcommon_dep,
+      dependencies: [libinput_dep, xkbcommon_dep],
       include_directories: include_directories('.'),
     )
   endif
