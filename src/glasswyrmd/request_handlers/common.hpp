@@ -92,6 +92,14 @@ namespace x11 = gw::protocol::x11;
                                           const x11::FramedRequest&);
 [[nodiscard]] DispatchResult list_properties(ServerState&, const DispatchContext&,
                                              const x11::FramedRequest&);
+[[nodiscard]] DispatchResult set_selection_owner(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult get_selection_owner(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult convert_selection(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult send_event(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
 
 [[nodiscard]] DispatchResult get_input_focus(const ServerState&,
                                              const DispatchContext&,

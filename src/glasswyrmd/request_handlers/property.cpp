@@ -1,6 +1,7 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 
 #include "protocol/x11/byte_cursor.hpp"
+#include "protocol/x11/event_mask.hpp"
 #include "protocol/x11/reply.hpp"
 
 #include <algorithm>
@@ -14,6 +15,24 @@
 
 namespace glasswyrm::server::request_handlers {
 namespace x11 = gw::protocol::x11;
+
+namespace {
+
+DispatchResult property_result(const DispatchContext& context,
+                               const std::uint32_t window,
+                               const std::uint32_t atom,
+                               const x11::PropertyNotifyState state,
+                               std::vector<std::uint8_t> output = {}) {
+  DispatchResult result(std::move(output));
+  result.protocol_events.push_back(
+      {ProtocolEventDelivery::WindowMask, 0, window,
+       x11::event_mask::PropertyChange, false,
+       x11::PropertyNotifyEvent{window, atom, context.input.logical_time,
+                                state}});
+  return result;
+}
+
+}  // namespace
 
 std::uint32_t property_bad_atom(const ServerState& state,
                                 const std::uint32_t property,
@@ -111,7 +130,9 @@ DispatchResult change_property(ServerState& state,
       window, property_atom, Property{type_atom, std::move(*data)},
       static_cast<PropertyMode>(request.data));
   switch (status) {
-    case PropertyMutationStatus::Success: return {};
+    case PropertyMutationStatus::Success:
+      return property_result(context, window, property_atom,
+                             x11::PropertyNotifyState::NewValue);
     case PropertyMutationStatus::BadWindow:
       return error(context, request, x11::CoreErrorCode::BadWindow, window);
     case PropertyMutationStatus::BadMatch:
@@ -139,8 +160,12 @@ DispatchResult delete_property(ServerState& state,
   if (!state.atoms().valid(property_atom)) {
     return error(context, request, x11::CoreErrorCode::BadAtom, property_atom);
   }
+  const bool existed =
+      state.resources().find_window(window)->properties.contains(property_atom);
   (void)state.resources().delete_property(window, property_atom);
-  return {};
+  return existed ? property_result(context, window, property_atom,
+                                   x11::PropertyNotifyState::Deleted)
+                 : DispatchResult{};
 }
 
 template <typename Values>
@@ -206,7 +231,12 @@ DispatchResult get_property(ServerState& state, const DispatchContext& context,
       write_property_payload(reply, values);
     }, result.value.data);
   }
-  return {std::move(reply).finish()};
+  auto output = std::move(reply).finish();
+  return result.deleted
+             ? property_result(context, window, property_atom,
+                               x11::PropertyNotifyState::Deleted,
+                               std::move(output))
+             : DispatchResult(std::move(output));
 }
 
 DispatchResult list_properties(ServerState& state,

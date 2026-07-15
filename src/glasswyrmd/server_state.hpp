@@ -3,6 +3,7 @@
 #include "glasswyrmd/atom_table.hpp"
 #include "glasswyrmd/resource_table.hpp"
 #include "glasswyrmd/lifecycle_snapshot.hpp"
+#include "glasswyrmd/selection_store.hpp"
 
 #include <limits>
 #include <optional>
@@ -37,6 +38,10 @@ class ServerState {
   }
   [[nodiscard]] AtomTable& atoms() noexcept { return atoms_; }
   [[nodiscard]] const AtomTable& atoms() const noexcept { return atoms_; }
+  [[nodiscard]] SelectionStore& selections() noexcept { return selections_; }
+  [[nodiscard]] const SelectionStore& selections() const noexcept {
+    return selections_;
+  }
   [[nodiscard]] std::optional<std::uint64_t> next_lifecycle_serial() noexcept {
     return lifecycle_serials_.take();
   }
@@ -133,7 +138,11 @@ class ServerState {
   [[nodiscard]] bool commit_destroy_lifecycle(
       const std::uint32_t xid, const LifecycleSnapshot& evaluated) {
     ServerState staged = *this;
-    if (staged.resources_.destroy_window(xid) != DestroyWindowStatus::Success)
+    const auto plan = staged.resources_.capture_destroy_plan(xid);
+    if (!plan) return false;
+    for (const auto& entry : plan->postorder)
+      (void)staged.selections_.clear_window(entry.xid);
+    if (staged.resources_.commit_destroy_plan(*plan) != DestroyWindowStatus::Success)
       return false;
     if (!staged.commit_lifecycle(evaluated)) return false;
     *this = std::move(staged);
@@ -141,6 +150,7 @@ class ServerState {
   }
 
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner) {
+    (void)selections_.clear_client(owner);
     return resources_.cleanup_client(owner);
   }
   [[nodiscard]] bool invariants_hold() const noexcept {
@@ -151,6 +161,7 @@ class ServerState {
   ScreenModel screen_;
   ResourceTable resources_;
   AtomTable atoms_;
+  SelectionStore selections_;
   LifecycleSerialSource lifecycle_serials_;
   std::uint32_t focused_window_{screen_.root_window};
 };

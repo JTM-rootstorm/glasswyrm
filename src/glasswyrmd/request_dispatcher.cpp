@@ -48,6 +48,14 @@ DispatchResult dispatch_request(ServerState& state,
         return get_property(state, context, request);
       case x11::CoreOpcode::ListProperties:
         return list_properties(state, context, request);
+      case x11::CoreOpcode::SetSelectionOwner:
+        return set_selection_owner(state, context, request);
+      case x11::CoreOpcode::GetSelectionOwner:
+        return get_selection_owner(state, context, request);
+      case x11::CoreOpcode::ConvertSelection:
+        return convert_selection(state, context, request);
+      case x11::CoreOpcode::SendEvent:
+        return send_event(state, context, request);
       case x11::CoreOpcode::QueryPointer:
         return query_pointer(state, context, request);
       case x11::CoreOpcode::TranslateCoordinates:

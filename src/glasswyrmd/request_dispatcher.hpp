@@ -4,11 +4,13 @@
 #include "protocol/x11/byte_order.hpp"
 #include "protocol/x11/request.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
+#include "protocol/x11/event.hpp"
 #include "core/geometry/rectangle.hpp"
 
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace glasswyrm::server {
@@ -58,6 +60,24 @@ struct ExposeIntent {
   glasswyrm::geometry::Rectangle rectangle{};
 };
 
+using ProtocolEvent = std::variant<
+    gw::protocol::x11::PropertyNotifyEvent,
+    gw::protocol::x11::SelectionClearEvent,
+    gw::protocol::x11::SelectionRequestEvent,
+    gw::protocol::x11::SelectionNotifyEvent,
+    gw::protocol::x11::ClientMessageEvent>;
+
+enum class ProtocolEventDelivery { DirectClient, WindowOwner, WindowMask };
+
+struct ProtocolEventIntent {
+  ProtocolEventDelivery delivery{ProtocolEventDelivery::DirectClient};
+  ClientId client{0};
+  std::uint32_t window{0};
+  std::uint32_t mask{0};
+  bool propagate{false};
+  ProtocolEvent event;
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -71,6 +91,7 @@ struct DispatchResult {
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
+  std::vector<ProtocolEventIntent> protocol_events;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

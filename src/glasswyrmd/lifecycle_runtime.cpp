@@ -87,6 +87,8 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   } else if (active && mutation != pending_mutations_.end() &&
              mutation->second.destroy) {
     auto staged = server_.state_;
+    for (const auto& item : mutation->second.destroy->postorder)
+      (void)staged.selections().clear_window(item.xid);
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
     committed = committed && staged.commit_lifecycle(snapshot);
@@ -94,6 +96,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   } else if (active && mutation != pending_mutations_.end() &&
              mutation->second.cleanup) {
     auto staged = server_.state_;
+    (void)staged.selections().clear_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
     committed = staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
@@ -339,6 +342,7 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
 void ServerRuntime::cancel_client_lifecycle(
     const std::uint64_t client, const std::uint32_t resource_base) {
   lifecycle_->cancel_client(client);
+  (void)server_.state_.selections().clear_client(client);
   auto plan = server_.state_.resources().prepare_client_cleanup(client);
   if (!plan.affects_policy) {
     (void)server_.state_.resources().commit_client_cleanup(plan);

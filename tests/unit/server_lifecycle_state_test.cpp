@@ -32,7 +32,9 @@ int main(){
  auto proposed=staged_state.propose_create_lifecycle(2,base,mask,create_spec,41);
  require(proposed&&proposed->windows.contains(base+10)&&!staged_state.resources().find_window(base+10),"create proposal is visible to policy without early resource mutation");
  require(staged_state.commit_create_lifecycle(2,base,mask,create_spec,41,*proposed)&&staged_state.resources().find_window(base+10)->creation_serial==41,"accepted create commits resource and serial atomically");
+ const auto primary=staged_state.atoms().intern("PRIMARY_M11",false).atom;
+ require(staged_state.selections().set_owner(2,primary,base+10,true,0,50).status==SelectionOwnershipStatus::Applied,"lifecycle window can own a selection");
  auto destroyed=staged_state.propose_destroy_lifecycle(base+10);
  require(destroyed&&!destroyed->windows.contains(base+10)&&staged_state.resources().find_window(base+10),"destroy proposal removes policy window without early resource mutation");
- require(staged_state.commit_destroy_lifecycle(base+10,*destroyed)&&!staged_state.resources().find_window(base+10),"accepted destroy commits resource removal atomically");
+ require(staged_state.commit_destroy_lifecycle(base+10,*destroyed)&&!staged_state.resources().find_window(base+10)&&!staged_state.selections().owner(primary),"accepted destroy commits resource and selection cleanup atomically");
 }

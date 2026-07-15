@@ -239,6 +239,8 @@ DispatchResult destroy_window(ServerState& state,
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
+  for (const auto& item : destroyed->postorder)
+    (void)state.selections().clear_window(item.xid);
   return result;
 }
 
