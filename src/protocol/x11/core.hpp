@@ -75,6 +75,11 @@ enum class CoreEventType : std::uint8_t {
   UnmapNotify = 18,
   MapNotify = 19,
   ConfigureNotify = 22,
+  PropertyNotify = 28,
+  SelectionClear = 29,
+  SelectionRequest = 30,
+  SelectionNotify = 31,
+  ClientMessage = 33,
 };
 
 enum class CoreMapState : std::uint8_t {
