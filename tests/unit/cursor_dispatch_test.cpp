@@ -4,6 +4,7 @@
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/core.hpp"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -257,6 +258,37 @@ int main() {
                     glasswyrm::input::CursorKind::HorizontalResize,
             "CreateGlyphCursor recognizes xterm horizontal scrollbar cursor");
 
+    const std::array<std::pair<std::uint16_t,
+                               glasswyrm::input::CursorKind>, 4>
+        scrollbar_arrows{{
+            {glasswyrm::input::kCursorGlyphScrollUp,
+             glasswyrm::input::CursorKind::VerticalResize},
+            {glasswyrm::input::kCursorGlyphScrollDown,
+             glasswyrm::input::CursorKind::VerticalResize},
+            {glasswyrm::input::kCursorGlyphScrollLeft,
+             glasswyrm::input::CursorKind::HorizontalResize},
+            {glasswyrm::input::kCursorGlyphScrollRight,
+             glasswyrm::input::CursorKind::HorizontalResize},
+        }};
+    for (std::size_t index = 0; index < scrollbar_arrows.size(); ++index) {
+      const auto [character, kind] = scrollbar_arrows[index];
+      auto arrow = header(order, x11::CoreOpcode::CreateGlyphCursor, 0, 8);
+      arrow.write_u32(base + 11U + static_cast<std::uint32_t>(index));
+      arrow.write_u32(base + 4U);
+      arrow.write_u32(base + 4U);
+      arrow.write_u16(character);
+      arrow.write_u16(character + 1U);
+      write_colors(arrow, {}, {0xffff, 0xffff, 0xffff});
+      result = dispatch(state, context, std::move(arrow),
+                        x11::CoreOpcode::CreateGlyphCursor);
+      require(result.output.empty() &&
+                  state.resources()
+                          .find_cursor(base + 11U +
+                                       static_cast<std::uint32_t>(index))
+                          ->image->kind == kind,
+              "CreateGlyphCursor recognizes every xterm scrollbar arrow");
+    }
+
     auto hidden = header(order, x11::CoreOpcode::CreateGlyphCursor, 0, 8);
     hidden.write_u32(base + 8U);
     hidden.write_u32(base + 5U);
@@ -318,7 +350,7 @@ int main() {
         state.resources().find_window(window.xid)->attributes.cursor_image;
     const auto cleanup = state.resources().cleanup_client(1);
     target = state.resources().find_window(window.xid);
-    require(result.output.empty() && cleanup.resources_destroyed == 9 && target &&
+    require(result.output.empty() && cleanup.resources_destroyed == 13 && target &&
                 !target->attributes.cursor_inherit &&
                 target->attributes.cursor == 0 &&
                 target->attributes.cursor_image == cleanup_image &&

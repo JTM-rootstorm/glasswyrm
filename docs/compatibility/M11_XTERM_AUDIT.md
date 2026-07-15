@@ -142,9 +142,10 @@ The normal pointer is not a pixmap cursor in this profile:
 - `util.c:2941` calls `XRecolorCursor`, and `misc.c:1021` applies the cursor
   with `XDefineCursor`.
 - Patch 410 also creates the cursor-font `XC_sb_h_double_arrow` and
-  `XC_sb_v_double_arrow` pairs during widget startup, even with the fixed
-  no-toolbar profile. The accepted bounded glyph subset therefore includes
-  source/mask pairs 108/109 and 116/117.
+  `XC_sb_v_double_arrow` pairs plus the up, down, left, and right scrollbar
+  arrow pairs during Xaw widget startup, even with the fixed no-toolbar
+  profile. The accepted bounded glyph subset therefore includes source/mask
+  pairs 106/107, 108/109, 110/111, 112/113, 114/115, and 116/117.
 
 There is a second, easy-to-miss cursor path. The documented default
 `pointerMode` is 1, so typing may hide the pointer. `misc.c:700`

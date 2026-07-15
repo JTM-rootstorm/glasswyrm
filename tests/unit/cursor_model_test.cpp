@@ -46,12 +46,16 @@ int main() {
   require(!make_pixmap_cursor(pixmap, error) && !error.empty(),
           "source and mask dimensions are checked");
 
-  const std::array<std::pair<std::uint16_t, CursorKind>, 7> builtins{{
+  const std::array<std::pair<std::uint16_t, CursorKind>, 11> builtins{{
       {kCursorGlyphLeftPointer, CursorKind::LeftPointer},
       {kCursorGlyphXterm, CursorKind::XtermText},
       {kCursorGlyphFleur, CursorKind::FleurMove},
       {kCursorGlyphBottomRightCorner, CursorKind::BottomRightResize},
       {kCursorGlyphHorizontalDoubleArrow, CursorKind::HorizontalResize},
+      {kCursorGlyphScrollDown, CursorKind::VerticalResize},
+      {kCursorGlyphScrollLeft, CursorKind::HorizontalResize},
+      {kCursorGlyphScrollRight, CursorKind::HorizontalResize},
+      {kCursorGlyphScrollUp, CursorKind::VerticalResize},
       {kCursorGlyphVerticalDoubleArrow, CursorKind::VerticalResize},
       {kCursorGlyphWatch, CursorKind::Watch},
   }};
