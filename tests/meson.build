@@ -175,6 +175,13 @@ if get_option('gwm')
     include_directories: test_source_root_include,
   )
   test('interactive-policy', interactive_policy_test, timeout: 10)
+  interactive_close_test = executable(
+    'interactive_close_test',
+    files('wm/interactive_close_test.cpp'),
+    dependencies: [gw_wm_policy_dep, gw_server_state_dep],
+    include_directories: test_source_root_include,
+  )
+  test('interactive-close', interactive_close_test, timeout: 10)
 
   gwm_process_test = executable(
     'gwm_process_test',
