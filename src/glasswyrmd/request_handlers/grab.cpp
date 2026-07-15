@@ -41,6 +41,14 @@ bool cursor_valid(const ServerState &state, const std::uint32_t cursor) {
   return cursor == 0 || state.resources().find_cursor(cursor) != nullptr;
 }
 
+std::shared_ptr<const input::CursorImage>
+cursor_image(const ServerState &state, const std::uint32_t cursor) {
+  if (cursor == 0)
+    return {};
+  const auto *resource = state.resources().find_cursor(cursor);
+  return resource ? resource->image : nullptr;
+}
+
 } // namespace
 
 DispatchResult grab_pointer(ServerState &state, const DispatchContext &context,
@@ -70,7 +78,8 @@ DispatchResult grab_pointer(ServerState &state, const DispatchContext &context,
   const auto status = state.grabs().grab_pointer(
       {context.client_id, window, request.data != 0, event_mask,
        mode(pointer_mode), mode(keyboard_mode), confine, cursor,
-       cursor_valid(state, cursor), time, context.input.logical_time,
+       cursor_valid(state, cursor), cursor_image(state, cursor), time,
+       context.input.logical_time,
        resource->map_state == MapState::Viewable});
   if (status == GrabStatus::Success || status == GrabStatus::AlreadyGrabbed ||
       status == GrabStatus::InvalidTime || status == GrabStatus::NotViewable)
@@ -122,7 +131,7 @@ DispatchResult grab_button(ServerState &state, const DispatchContext &context,
   const auto status = state.grabs().grab_button(
       {context.client_id, window, button, modifiers, request.data != 0,
        event_mask, mode(pointer_mode), mode(keyboard_mode), confine, cursor,
-       cursor_valid(state, cursor)});
+       cursor_valid(state, cursor), cursor_image(state, cursor)});
   return status == GrabStatus::Success
              ? DispatchResult{}
              : field_error(context, request, status, cursor);
@@ -161,8 +170,8 @@ DispatchResult change_active_pointer_grab(
       !reader.read_u16(event_mask))
     return error(context, request, x11::CoreErrorCode::BadLength);
   const auto status = state.grabs().change_active_pointer_grab(
-      context.client_id, event_mask, cursor, cursor_valid(state, cursor), time,
-      context.input.logical_time);
+      context.client_id, event_mask, cursor, cursor_valid(state, cursor),
+      cursor_image(state, cursor), time, context.input.logical_time);
   if (status == GrabStatus::Success || status == GrabStatus::NotFound ||
       status == GrabStatus::NotOwner || status == GrabStatus::InvalidTime)
     return {};

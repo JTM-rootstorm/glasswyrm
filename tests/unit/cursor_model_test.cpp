@@ -53,6 +53,15 @@ int main() {
       {kCursorGlyphBottomRightCorner, CursorKind::BottomRightResize},
       {kCursorGlyphWatch, CursorKind::Watch},
   }};
+  require(cursor_kind_name(CursorKind::Pixmap) == "pixmap" &&
+              cursor_kind_name(CursorKind::LeftPointer) == "left-pointer" &&
+              cursor_kind_name(CursorKind::XtermText) == "xterm-text" &&
+              cursor_kind_name(CursorKind::FleurMove) == "fleur-move" &&
+              cursor_kind_name(CursorKind::BottomRightResize) ==
+                  "bottom-right-resize" &&
+              cursor_kind_name(CursorKind::Watch) == "watch" &&
+              cursor_kind_name(CursorKind::HiddenGlyph) == "hidden-glyph",
+          "cursor diagnostics use stable professional kind labels");
   for (const auto [code, kind] : builtins) {
     auto builtin = make_glyph_cursor(glyph(code), error);
     require(builtin && builtin->kind == kind && builtin->width == 16 &&

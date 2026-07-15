@@ -115,6 +115,9 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   if (content_presenter_)
     content_presenter_->accept_lifecycle(snapshot, server_.state_.resources());
+#if GW_HAS_LIBINPUT_BACKEND
+  if (cursor_presenter_) mark_cursor_dirty();
+#endif
   return true;
 }
 
@@ -333,7 +336,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
   operation.proposed = std::move(proposed);
   const auto token = operation.token;
   pending_mutations_.emplace(token, std::move(mutation));
-  const auto status = content_presenter_ && content_presenter_->frame_in_flight()
+  const auto status =
+      content_presenter_ &&
+              (content_presenter_->frame_in_flight() ||
+               (cursor_presenter_ && !bridge_->transaction_idle()))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status == EnqueueStatus::Queued) {
@@ -396,7 +402,9 @@ void ServerRuntime::cancel_client_lifecycle(
   mutation.cleanup = std::move(plan);
   pending_mutations_.emplace(token, std::move(mutation));
   const auto cleanup_status =
-      content_presenter_ && content_presenter_->frame_in_flight()
+      content_presenter_ &&
+              (content_presenter_->frame_in_flight() ||
+               (cursor_presenter_ && !bridge_->transaction_idle()))
           ? lifecycle_->enqueue_priority_paused(std::move(operation))
           : lifecycle_->enqueue_priority(std::move(operation));
   if (cleanup_status != EnqueueStatus::Queued) {

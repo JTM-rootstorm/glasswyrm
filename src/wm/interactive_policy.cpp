@@ -46,6 +46,7 @@ InteractivePolicy::begin(const InteractionBegin &request) noexcept {
   last_committed_ = request.applied_geometry;
   transaction_in_flight_ = false;
   ending_ = false;
+  cursor_published_ = false;
   cursor_ = kind_ == InteractionKind::Move
                 ? InteractionCursor::FleurMove
                 : InteractionCursor::BottomRightResize;
@@ -105,8 +106,15 @@ bool InteractivePolicy::release(const std::uint8_t button,
   return true;
 }
 
+bool InteractivePolicy::confirm_cursor_published() noexcept {
+  if (kind_ == InteractionKind::None)
+    return false;
+  cursor_published_ = true;
+  return true;
+}
+
 bool InteractivePolicy::finish_ready() const noexcept {
-  if (!ending_ || transaction_in_flight_)
+  if (!ending_ || transaction_in_flight_ || !cursor_published_)
     return false;
   return latest_pointer_ == initial_pointer_ ||
          (dispatched_pointer_ && *dispatched_pointer_ == latest_pointer_);
@@ -128,6 +136,7 @@ bool InteractivePolicy::abort() noexcept {
   dispatched_pointer_.reset();
   transaction_in_flight_ = false;
   ending_ = false;
+  cursor_published_ = false;
   return true;
 }
 

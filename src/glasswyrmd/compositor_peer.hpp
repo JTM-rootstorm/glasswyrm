@@ -75,6 +75,7 @@ public:
   replay_input() const noexcept {
     return replay_input_;
   }
+  void forget_cursor_replay() noexcept;
   void disconnect() noexcept;
 
 private:

@@ -5,6 +5,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -33,6 +34,27 @@ enum class CursorKind {
   Watch,
   HiddenGlyph,
 };
+
+[[nodiscard]] constexpr std::string_view
+cursor_kind_name(const CursorKind kind) noexcept {
+  switch (kind) {
+    case CursorKind::Pixmap:
+      return "pixmap";
+    case CursorKind::LeftPointer:
+      return "left-pointer";
+    case CursorKind::XtermText:
+      return "xterm-text";
+    case CursorKind::FleurMove:
+      return "fleur-move";
+    case CursorKind::BottomRightResize:
+      return "bottom-right-resize";
+    case CursorKind::Watch:
+      return "watch";
+    case CursorKind::HiddenGlyph:
+      return "hidden-glyph";
+  }
+  return "unknown";
+}
 
 enum class CursorFontIdentity { Cursor, Fixed, Nil2 };
 

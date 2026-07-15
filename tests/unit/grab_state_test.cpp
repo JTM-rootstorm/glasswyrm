@@ -1,9 +1,11 @@
 #include "glasswyrmd/grab_state.hpp"
 
 #include "helpers/test_support.hpp"
+#include "input/cursor_model.hpp"
 #include "protocol/x11/event_mask.hpp"
 
 #include <cstdint>
+#include <memory>
 
 using namespace glasswyrm::server;
 using gw::test::require;
@@ -90,22 +92,33 @@ int main() {
   pointer = pointer_request();
   pointer.owner_events = false;
   pointer.cursor = 7;
+  auto retained_cursor = std::make_shared<glasswyrm::input::CursorImage>();
+  pointer.cursor_image = retained_cursor;
   require(grabs.grab_pointer(pointer) == GrabStatus::Success &&
               grabs.grab_pointer(pointer_request(2)) == GrabStatus::AlreadyGrabbed,
           "one active pointer grab returns AlreadyGrabbed to another request");
+  pointer.cursor_image.reset();
+  retained_cursor.reset();
+  require(grabs.pointer_grab()->cursor_image != nullptr &&
+              grabs.pointer_grab()->cursor_image.use_count() == 1,
+          "active pointer grab retains its resolved cursor after resource free");
   route = grabs.route_pointer({1, 11, em::PointerMotion, 77});
   require(route.kind == GrabRouteKind::GrabWindow && route.window == 10,
           "owner-events false always routes selected events to grab window");
   route = grabs.route_pointer({1, 11, em::EnterWindow, 77});
   require(route.kind == GrabRouteKind::Suppressed && route.crossing_target == 77,
           "events outside active mask are suppressed without losing target truth");
-  require(grabs.change_active_pointer_grab(2, em::PointerMotion, 0, true, 0, 100) ==
+  require(grabs.change_active_pointer_grab(2, em::PointerMotion, 0, true,
+                                            nullptr, 0, 100) ==
               GrabStatus::NotOwner &&
-              grabs.change_active_pointer_grab(1, em::PointerMotion, 9, false, 0, 100) ==
+              grabs.change_active_pointer_grab(1, em::PointerMotion, 9, false,
+                                                nullptr, 0, 100) ==
                   GrabStatus::InvalidCursor &&
-              grabs.change_active_pointer_grab(1, em::PointerMotion, 0, true, 0, 100) ==
+              grabs.change_active_pointer_grab(1, em::PointerMotion, 0, true,
+                                                nullptr, 0, 100) ==
                   GrabStatus::Success &&
-              grabs.pointer_grab()->event_mask == em::PointerMotion,
+              grabs.pointer_grab()->event_mask == em::PointerMotion &&
+              !grabs.pointer_grab()->cursor_image,
           "active pointer mask/cursor changes validate ownership atomically");
   require(!grabs.ungrab_pointer(2, 0, 100) &&
               !grabs.ungrab_pointer(1, 99, 100) &&

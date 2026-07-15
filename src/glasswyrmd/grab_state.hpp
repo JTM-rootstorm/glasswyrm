@@ -2,8 +2,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <vector>
+
+namespace glasswyrm::input {
+struct CursorImage;
+}
 
 namespace glasswyrm::server {
 
@@ -43,6 +48,7 @@ struct PointerGrabRequest {
   std::uint32_t confine_to{0};
   std::uint32_t cursor{0};
   bool cursor_valid{true};
+  std::shared_ptr<const input::CursorImage> cursor_image;
   std::uint32_t request_time{0};
   std::uint32_t current_time{0};
   bool window_viewable{true};
@@ -71,6 +77,7 @@ struct PassiveButtonGrabRequest {
   std::uint32_t confine_to{0};
   std::uint32_t cursor{0};
   bool cursor_valid{true};
+  std::shared_ptr<const input::CursorImage> cursor_image;
 };
 
 struct PointerGrab {
@@ -80,6 +87,7 @@ struct PointerGrab {
   bool owner_events{false};
   std::uint32_t event_mask{0};
   std::uint32_t cursor{0};
+  std::shared_ptr<const input::CursorImage> cursor_image;
   std::uint32_t activation_time{0};
   std::uint16_t held_buttons{0};
 };
@@ -142,7 +150,8 @@ class GrabState {
                                     std::uint32_t current_time) noexcept;
   [[nodiscard]] GrabStatus change_active_pointer_grab(
       GrabClientId client, std::uint32_t event_mask, std::uint32_t cursor,
-      bool cursor_valid, std::uint32_t request_time,
+      bool cursor_valid, std::shared_ptr<const input::CursorImage> cursor_image,
+      std::uint32_t request_time,
       std::uint32_t current_time) noexcept;
 
   [[nodiscard]] GrabStatus grab_keyboard(

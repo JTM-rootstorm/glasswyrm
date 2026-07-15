@@ -114,7 +114,8 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
                    (real_input_ &&
                     (real_input_->has_events() ||
                      real_input_->backend_work_pending()) &&
-                    !pending_real_focus_);
+                    !pending_real_focus_) ||
+                   (cursor_presenter_ && cursor_dirty_);
 #endif
 #endif
     int poll_timeout = pending_work ? 0 : -1;
@@ -132,8 +133,17 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
     }
     const std::size_t polled_client_count = server_.clients_.size();
     for (std::size_t index = 0; index < polled_client_count; ++index) {
+#if GW_HAS_LIBINPUT_BACKEND
+      const auto request_sequence =
+          server_.clients_[index]->last_request_sequence();
+#endif
       server_.clients_[index]->handle_events(
           descriptors[index + client_offset].revents);
+#if GW_HAS_LIBINPUT_BACKEND
+      if (cursor_presenter_ &&
+          server_.clients_[index]->last_request_sequence() != request_sequence)
+        mark_cursor_dirty();
+#endif
     }
 #ifdef GW_SERVER_HAS_IPC
     if (bridge_ &&
@@ -150,7 +160,14 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
       return 1;
 #endif
 #endif
+#if GW_HAS_LIBINPUT_BACKEND
+    const auto client_count = server_.clients_.size();
+#endif
     server_.remove_closed_clients();
+#if GW_HAS_LIBINPUT_BACKEND
+    if (cursor_presenter_ && server_.clients_.size() != client_count)
+      mark_cursor_dirty();
+#endif
     bool accepts_ready = true;
 #ifdef GW_SERVER_HAS_IPC
     accepts_ready = !bridge_ || bridge_->ready();

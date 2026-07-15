@@ -204,6 +204,10 @@ bool CursorPresenter::release(
 void CursorPresenter::peer_disconnected() noexcept {
   reject();
   retired_.clear();
+  current_.reset();
+  accepted_image_.reset();
+  accepted_ = {};
+  accepted_valid_ = false;
 }
 
 }  // namespace glasswyrm::server

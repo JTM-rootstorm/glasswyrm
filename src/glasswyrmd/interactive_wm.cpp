@@ -131,7 +131,10 @@ bool ServerRuntime::update_interactive_geometry() {
   operation.window = interactive_policy_->target();
   operation.proposed = std::move(proposed);
   interactive_geometry_token_ = operation.token;
-  const auto status = content_presenter_ && content_presenter_->frame_in_flight()
+  const auto status =
+      content_presenter_ &&
+              (content_presenter_->frame_in_flight() ||
+               (cursor_presenter_ && !bridge_->transaction_idle()))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status != EnqueueStatus::Queued) {
@@ -192,7 +195,13 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
       mutation.destroy = std::move(*plan);
       pending_mutations_.emplace(operation.token, std::move(mutation));
       const auto token = operation.token;
-      if (lifecycle_->enqueue(std::move(operation)) != EnqueueStatus::Queued)
+      const auto status =
+          content_presenter_ &&
+                  (content_presenter_->frame_in_flight() ||
+                   (cursor_presenter_ && !bridge_->transaction_idle()))
+              ? lifecycle_->enqueue_paused(std::move(operation))
+              : lifecycle_->enqueue(std::move(operation));
+      if (status != EnqueueStatus::Queued)
         pending_mutations_.erase(token);
     }
   }
@@ -232,10 +241,20 @@ void ServerRuntime::complete_interactive_lifecycle(
     (void)update_interactive_geometry();
 }
 
+void ServerRuntime::complete_interactive_cursor_publication() {
+  if (!interactive_policy_ ||
+      interactive_policy_->kind() == glasswyrm::wm::InteractionKind::None ||
+      !interactive_policy_->confirm_cursor_published())
+    return;
+  if (interactive_policy_->finish_ready() && interactive_policy_->finish())
+    mark_cursor_dirty();
+}
+
 void ServerRuntime::abort_interactive() noexcept {
   if (interactive_policy_)
     (void)interactive_policy_->abort();
   interactive_geometry_token_.reset();
+  mark_cursor_dirty();
 }
 
 std::shared_ptr<const glasswyrm::input::CursorImage>
@@ -248,10 +267,14 @@ ServerRuntime::current_cursor_image() const noexcept {
         glasswyrm::wm::InteractionCursor::BottomRightResize)
       return resize_cursor_;
   }
-  if (const auto& grab = server_.state_.grabs().pointer_grab();
-      grab && grab->cursor != 0)
-    if (const auto* cursor = server_.state_.resources().find_cursor(grab->cursor))
-      return cursor->image;
+  if (const auto& grab = server_.state_.grabs().pointer_grab(); grab) {
+    if (grab->cursor != 0)
+      if (const auto* cursor =
+              server_.state_.resources().find_cursor(grab->cursor))
+        return cursor->image;
+    if (grab->cursor_image)
+      return grab->cursor_image;
+  }
   const auto target = glasswyrm::input::hit_test_deepest_viewable(
       server_.state_.resources(), input_state_.pointer_x(),
       input_state_.pointer_y());
