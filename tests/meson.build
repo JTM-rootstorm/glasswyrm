@@ -220,6 +220,20 @@ if get_option('glasswyrmd')
       include_directories: test_source_root_include,
     )
     test('repeat-timer', repeat_timer_test, timeout: 10)
+    libinput_path_allowlist_test = executable(
+      'libinput_path_allowlist_test',
+      files('unit/libinput_path_allowlist_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('libinput-path-allowlist', libinput_path_allowlist_test, timeout: 10)
+    libinput_backend_test = executable(
+      'libinput_backend_test',
+      files('unit/libinput_backend_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('libinput-backend', libinput_backend_test, timeout: 10)
   endif
 
   input_foundation_test = executable(
