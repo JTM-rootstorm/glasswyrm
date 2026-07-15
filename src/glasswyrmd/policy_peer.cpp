@@ -35,7 +35,7 @@ void hash_byte(std::uint64_t &hash, std::uint8_t value) {
 }
 template <class T> void hash_little(std::uint64_t &hash, T value) {
   using U = std::make_unsigned_t<T>;
-  auto bits = static_cast<U>(value);
+  auto bits = static_cast<std::uint64_t>(static_cast<U>(value));
   for (std::size_t i = 0; i < sizeof(T); ++i) {
     hash_byte(hash, static_cast<std::uint8_t>(bits));
     bits >>= 8U;
