@@ -286,7 +286,7 @@ gpg --batch --homedir "$gpg_home" --verify "$client_dir/xterm-410.tgz.asc" "$xte
 rm -rf "$client_dir/xterm-410" "$client_dir/install"
 tar -xzf "$xterm_archive" -C "$client_dir"
 cd "$client_dir/xterm-410"
-./configure --prefix="$client_dir/install" --enable-openpty --disable-freetype \
+LIBS=-ltinfo ./configure --prefix="$client_dir/install" --enable-openpty --disable-freetype \
   --disable-wide-chars --disable-luit --disable-toolbar --disable-sixel-graphics \
   --disable-regis-graphics --without-xinerama --disable-xcursor --disable-tek4014 \
   --disable-session-mgt --disable-input-method --disable-active-icon \

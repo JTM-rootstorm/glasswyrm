@@ -65,6 +65,11 @@ The following configure arguments were accepted by the patch 410 release:
 --disable-screen-dumps
 ```
 
+Gentoo's ncurses installation splits the termcap compatibility symbols into
+`libtinfo`. The VM therefore invokes this unchanged configure profile as
+`LIBS=-ltinfo ./configure ...`; the explicit library fixes platform linkage
+only and does not enable another xterm feature.
+
 The configure result uses `openpty` from libutil and retains core Xaw, Xmu,
 Xt, Xlib, and bitmap-font rendering. It omits FreeType/Xft, wide characters,
 luit, the toolbar, ReGIS, sixel, Xinerama, Xcursor themes, Tektronix emulation,
