@@ -290,6 +290,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/font_store.cpp',
       'glasswyrmd/property_store.cpp',
       'glasswyrmd/selection_store.cpp',
+      'glasswyrmd/grab_state.cpp',
       'glasswyrmd/resource_cleanup.cpp',
       'glasswyrmd/resource_invariants.cpp',
       'glasswyrmd/atom_table.cpp',
