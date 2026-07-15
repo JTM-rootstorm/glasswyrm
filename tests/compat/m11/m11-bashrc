@@ -5,7 +5,7 @@ export TERM=xterm
 
 unset PROMPT_COMMAND
 unset PROMPT_DIRTRIM
-export PS1='gw-m11$ '
+export PS1='gw$ '
 export PS2='> '
 export PS4='+ '
 
@@ -19,3 +19,4 @@ set +o history
 bind 'set enable-bracketed-paste off' 2>/dev/null || :
 
 umask 077
+printf 'M11_READY\n'
