@@ -39,6 +39,9 @@ run_acceptance() {
 run_acceptance "$work/result.json"
 grep -F '"status": "passed"' "$work/result.json"
 grep -F '"positions": 6' "$work/result.json"
+grep -F '"client_message": true' "$work/result.json"
+grep -F '"replay_verified": true' "$work/result.json"
+grep -F '"ClientMessage": 33' "$work/result.json"
 printf 'different\n' >"$work/screen.ppm"
 if run_acceptance "$work/bad-screenshot.json" >/dev/null 2>&1; then
   printf '%s\n' 'acceptance helper accepted mismatched screenshot' >&2
@@ -57,6 +60,13 @@ if run_acceptance "$work/bad-cursor-reuse.json" >/dev/null 2>&1; then
   printf '%s\n' 'acceptance helper accepted cursor evidence without reuse' >&2
   exit 1
 fi
+cp "$work/server-good.log" "$work/server.log"
+printf '%s\n' 'move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=95 minimum_height=64' >"$work/wm.log"
+if run_acceptance "$work/bad-bindings.json" >/dev/null 2>&1; then
+  printf '%s\n' 'acceptance helper accepted incorrect GWM binding evidence' >&2
+  exit 1
+fi
+printf '%s\n' 'move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64' >"$work/wm.log"
 sed -E 's/x=-?[0-9]+ y=-?[0-9]+/x=0 y=0/g' \
   "$work/server-good.log" >"$work/server.log"
 if run_acceptance "$work/bad-cursor-position.json" >/dev/null 2>&1; then
