@@ -124,7 +124,7 @@ void hash_byte(std::uint64_t& hash, const std::uint8_t value) {
 template <class Value>
 void hash_little(std::uint64_t& hash, Value value) {
   using Unsigned = std::make_unsigned_t<Value>;
-  auto bits = static_cast<Unsigned>(value);
+  auto bits = static_cast<std::uint64_t>(static_cast<Unsigned>(value));
   for (std::size_t index = 0; index < sizeof(Value); ++index) {
     hash_byte(hash, static_cast<std::uint8_t>(bits));
     bits >>= 8U;
