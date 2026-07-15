@@ -4,6 +4,7 @@
 #include "protocol/x11/screen_model.hpp"
 
 #include <string>
+#include <optional>
 #include <vector>
 
 namespace glasswyrm::server {
@@ -27,6 +28,12 @@ struct CompositorSnapshotSubmission {
 struct CompositorContentSubmission {
   std::uint64_t commit_id{}, generation{};
   std::vector<CompositorSnapshotSubmission::Damage> damages;
+};
+
+struct CompositorCursorSubmission {
+  gwipc_surface_upsert surface{};
+  std::optional<CompositorSnapshotSubmission::Buffer> buffer;
+  std::optional<CompositorSnapshotSubmission::Damage> damage;
 };
 
 struct CompositorBufferRelease {
@@ -55,6 +62,9 @@ public:
                             std::string &error);
   [[nodiscard]] bool submit_content(
       const CompositorContentSubmission& submission, std::string& error);
+  [[nodiscard]] bool submit_cursor(
+      const CompositorCursorSubmission& submission, std::uint64_t commit_id,
+      std::uint64_t generation, std::string& error);
   [[nodiscard]] std::vector<CompositorBufferRelease> take_releases();
   [[nodiscard]] std::vector<CompositorSessionStateChange>
   take_session_state_changes();

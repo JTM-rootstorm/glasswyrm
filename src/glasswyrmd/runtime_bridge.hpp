@@ -42,6 +42,9 @@ public:
       const CompositorSnapshotSubmission& submission, std::string& error);
   [[nodiscard]] bool submit_content(
       const CompositorContentSubmission& submission, std::string& error);
+  [[nodiscard]] bool submit_cursor(
+      const CompositorCursorSubmission& submission, std::uint64_t commit_id,
+      std::uint64_t generation, std::string& error);
   [[nodiscard]] bool submit_replay(
       const CompositorSnapshotSubmission& submission, std::string& error);
   [[nodiscard]] std::vector<CompositorBufferRelease> take_buffer_releases() {
@@ -60,6 +63,8 @@ public:
   [[nodiscard]] bool compositor_rejected_ready() const noexcept;
   [[nodiscard]] bool content_result_ready() const noexcept;
   [[nodiscard]] bool content_rejected_ready() const noexcept;
+  [[nodiscard]] bool cursor_result_ready() const noexcept;
+  [[nodiscard]] bool cursor_rejected_ready() const noexcept;
   [[nodiscard]] bool replay_result_ready() const noexcept;
   [[nodiscard]] bool replay_rejected_ready() const noexcept;
   [[nodiscard]] bool transaction_idle() const noexcept;
@@ -83,8 +88,10 @@ private:
   std::chrono::milliseconds deadline_duration_;
   unsigned retry_index_{};
   enum class TransactionStage { None, Policy, PolicyReady, PolicyRejected,
-                                Compositor, Content, Complete, ContentComplete,
-                                CompositorRejected, ContentRejected, Replay,
+                                Compositor, Content, Cursor, Complete,
+                                ContentComplete, CursorComplete,
+                                CompositorRejected, ContentRejected,
+                                CursorRejected, Replay,
                                 ReplayComplete, ReplayRejected };
   TransactionStage transaction_stage_{TransactionStage::None};
   TransactionStage resume_transaction_stage_{TransactionStage::None};

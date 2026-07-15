@@ -108,6 +108,15 @@ int main() {
           input::hit_test_top_level(resources, 9, 10) == root &&
           input::hit_test_top_level(resources, 60, 10) == root,
           "override redirect included and borders excluded");
+  auto* child = resources.find_window(base + 4);
+  child->map_state = server::MapState::Viewable;
+  child->x = 5;
+  child->y = 6;
+  child->border_width = 2;
+  require(input::hit_test_top_level(resources, 18, 19) == base + 1 &&
+              input::hit_test_deepest_viewable(resources, 18, 19) == base + 4 &&
+              input::hit_test_deepest_viewable(resources, 14, 15) == base + 1,
+          "deep cursor hit-test descends into viewable children without changing top-level targeting");
   auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
   require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
           "top-level signed event coordinates");

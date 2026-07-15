@@ -34,6 +34,9 @@ struct EventCoordinates {
     std::int32_t x, std::int32_t y, std::uint32_t width, std::uint32_t height) noexcept;
 [[nodiscard]] std::uint32_t hit_test_top_level(const server::ResourceTable& resources,
                                                std::int32_t x, std::int32_t y) noexcept;
+[[nodiscard]] std::uint32_t hit_test_deepest_viewable(
+    const server::ResourceTable& resources, std::int32_t x,
+    std::int32_t y) noexcept;
 [[nodiscard]] std::uint32_t motion_delivery_mask(const InputState& state) noexcept;
 [[nodiscard]] DeliveryTarget propagate_event(std::span<const RouteWindow> windows,
                                              std::uint32_t source,
