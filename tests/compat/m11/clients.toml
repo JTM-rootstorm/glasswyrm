@@ -60,12 +60,12 @@ acceptance_environment = [
   "GW_M11_TRANSCRIPT=/var/tmp/glasswyrm-m11-artifacts/milestone11-pty-transcript.log",
 ]
 acceptance_environment_note = "VM-only evidence hook implemented by the exact rcfile; ordinary launches leave it unset"
+argv_note = "The non-wide-character build omits xterm's unavailable and redundant -u8 runtime option"
 argv = [
   "xterm",
   "-geometry", "80x24+96+96",
   "-fn", "fixed",
   "-fb", "fixed",
-  "-u8", "0",
   "-xrm", "*cursorBlink:false",
   "-xrm", "*toolBar:false",
   "-title", "Glasswyrm-M11",
