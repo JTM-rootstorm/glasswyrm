@@ -70,7 +70,7 @@ transcript_text=pathlib.Path(transcript).read_text(errors='replace')
 for token in ('M11_VT','M11_RESTART'):
     if token not in transcript_text: raise SystemExit(f'PTY transcript lacks {token}')
 if transcript_text.count('M11_TYPED')<3:
-    raise SystemExit('PTY transcript does not prove edit, repeat, and PRIMARY paste')
+    raise SystemExit('PTY transcript does not prove corrected typing, post-scroll input, and PRIMARY paste')
 
 selection_value=documents(selection)[0]
 if selection_value.get('status')!='passed' or selection_value.get('selection')!='CLIPBOARD':

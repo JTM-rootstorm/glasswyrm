@@ -453,6 +453,7 @@ PY
 failure_stage=interactive-scenarios
 run_input basic-typing milestone11-xterm.log
 run_input repeat milestone11-xterm.log
+run_input scroll milestone11-interactive-wm.log
 systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv=LANG=C --setenv=XMODIFIERS=@im=none --setenv=SESSION_MANAGER= \
   --setenv=XAUTHORITY=/dev/null --setenv=TERM=xterm \
@@ -464,7 +465,6 @@ for _ in {1..200}; do systemctl is-active --quiet xterm-m11-b.service && break; 
 second_xterm_pid=$(systemctl show xterm-m11-b.service -p MainPID --value)
 run_input primary-selection milestone11-selection.log
 run_input clipboard-probe milestone11-selection.log
-run_input scroll milestone11-interactive-wm.log
 run_input move milestone11-interactive-wm.log
 run_input resize milestone11-interactive-wm.log
 [[ -x $runtime/tests/m11_selection_probe && -x $source_dir/tests/apps/m11_xterm_acceptance ]] || {

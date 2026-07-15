@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <iterator>
 #include <set>
 #include <string_view>
 
@@ -32,6 +33,12 @@ bool balanced(const std::vector<protocol::Event> &events) {
     }
   }
   return pressed.empty();
+}
+
+bool is_event(const protocol::Event &event, protocol::Device device,
+              std::uint16_t type, std::uint16_t code, std::int32_t value) {
+  return event.device == device && event.type == type && event.code == code &&
+         event.value == value;
 }
 
 }  // namespace
@@ -71,6 +78,63 @@ int main() {
   }
   okay &= expect(protocol::encode_request("unknown").empty(),
                  "unknown scenario cannot be encoded");
+
+  const auto scroll = protocol::scenario_events("scroll");
+  const auto pointer_start = std::ranges::find_if(
+      scroll, [](const protocol::Event &event) {
+        return is_event(event, protocol::Device::pointer, EV_REL, REL_X, 120);
+      });
+  okay &= expect(pointer_start != scroll.end() &&
+                     std::distance(pointer_start, scroll.end()) >= 4 &&
+                     is_event(*std::next(pointer_start),
+                              protocol::Device::pointer, EV_REL, REL_Y, 128) &&
+                     is_event(*std::next(pointer_start, 2),
+                              protocol::Device::pointer, EV_REL, REL_WHEEL,
+                              -4) &&
+                     is_event(*std::next(pointer_start, 3),
+                              protocol::Device::pointer, EV_REL, REL_WHEEL, 4),
+                 "scroll creates scrollback, enters xterm A, and restores its view");
+  const auto primary = protocol::scenario_events("primary-selection");
+  okay &= expect(primary.size() == 5 &&
+                     is_event(primary[0], protocol::Device::pointer, EV_REL,
+                              REL_Y, 264) &&
+                     is_event(primary[1], protocol::Device::pointer, EV_REL,
+                              REL_X, -18) &&
+                     is_event(primary[2], protocol::Device::pointer, EV_KEY,
+                              BTN_LEFT, 1) &&
+                     is_event(primary[3], protocol::Device::pointer, EV_REL,
+                              REL_X, 70) &&
+                     is_event(primary[4], protocol::Device::pointer, EV_KEY,
+                              BTN_LEFT, 0),
+                 "PRIMARY drag selects the known xterm A output row");
+  const auto paste = protocol::scenario_events("clipboard-probe");
+  okay &= expect(paste.size() > 8 &&
+                     is_event(paste[0], protocol::Device::pointer, EV_REL,
+                              REL_X, 328) &&
+                     is_event(paste[1], protocol::Device::pointer, EV_REL,
+                              REL_Y, -152) &&
+                     is_event(paste[2], protocol::Device::pointer, EV_KEY,
+                              BTN_MIDDLE, 1) &&
+                     is_event(paste[3], protocol::Device::pointer, EV_KEY,
+                              BTN_MIDDLE, 0) &&
+                     is_event(paste[4], protocol::Device::keyboard, EV_KEY,
+                              KEY_LEFTCTRL, 1),
+                 "PRIMARY paste targets and focuses xterm B before editing");
+  const auto close = protocol::scenario_events("close");
+  okay &= expect(close.size() == 8 &&
+                     is_event(close[0], protocol::Device::pointer, EV_REL,
+                              REL_X, -548) &&
+                     is_event(close[1], protocol::Device::pointer, EV_REL,
+                              REL_Y, -232) &&
+                     is_event(close[2], protocol::Device::pointer, EV_KEY,
+                              BTN_LEFT, 1) &&
+                     is_event(close[3], protocol::Device::pointer, EV_KEY,
+                              BTN_LEFT, 0) &&
+                     is_event(close[4], protocol::Device::keyboard, EV_KEY,
+                              KEY_LEFTALT, 1) &&
+                     is_event(close[7], protocol::Device::keyboard, EV_KEY,
+                              KEY_LEFTALT, 0),
+                 "close refocuses xterm A before Alt-F4");
 
   const auto keys = protocol::keyboard_key_codes();
   for (const auto required : {KEY_A, KEY_BACKSPACE, KEY_ENTER, KEY_F4,
