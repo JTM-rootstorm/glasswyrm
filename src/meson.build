@@ -482,3 +482,24 @@ if get_option('gwcomp')
     install: false,
   )
 endif
+
+if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
+  gw_session_launcher_lib = static_library(
+    'gw-session-launcher',
+    files(
+      'session/launcher.cpp',
+      'session/process_supervisor.cpp',
+    ),
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gw_session_launcher_dep = declare_dependency(
+    link_with: gw_session_launcher_lib,
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  glasswyrm_session_program = executable(
+    'glasswyrm-session',
+    files('session/main.cpp'),
+    dependencies: gw_session_launcher_dep,
+    install: true,
+  )
+endif
