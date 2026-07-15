@@ -2,7 +2,7 @@ project(
   'glasswyrm',
   ['cpp', 'c'],
   version: '0.2.0',
-  license: 'MIT',
+  license: 'GPL-3.0-only',
   default_options: [
     'cpp_std=c++20',
     'c_std=c17',
