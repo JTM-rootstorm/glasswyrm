@@ -21,6 +21,22 @@ API 0.5 adds synthetic-input contracts; and API 0.6 adds session-state and
 interactive-policy contracts plus cursor-surface capability negotiation.
 Wire 1.0 remains unchanged.
 
+## Installed Consumer Matrix
+
+`tests/install/gwipc_staged_consumers_test.sh` installs the selected build into
+an isolated `DESTDIR`, resolves `gwipc` only through that staged `pkg-config`
+file, and compiles, links, and runs C and C++ consumers for every additive API
+generation from 0.1 through 0.6. Run it after compiling the build tree:
+
+```sh
+tests/install/gwipc_staged_consumers_test.sh "$PWD" "$PWD/build-m11"
+```
+
+The Milestone 11 VM acceptance invokes the same matrix before declaring its API
+consumer result passed. The consumer sources intentionally use only the API
+surface available in their named generation; no source-tree include path or
+build-tree library path is accepted by the staged runner.
+
 ## Typed Control And Contracts
 
 `<glasswyrm/ipc/control.h>` exposes owned encodings and decoded views for

@@ -328,6 +328,7 @@ for component in "$server" "$server_standalone" "$server_synthetic" \
   meson compile -C "$component"
 done
 result[component_builds]=passed
+"$source_dir/tests/install/gwipc_staged_consumers_test.sh" "$source_dir" "$build"
 meson test -C "$build" --print-errorlogs \
   gwipc-api-0.6-session-c-consumer gwipc-api-0.6-session-cpp-consumer \
   gwipc-public-contract-api gwipc-public-control-api client-connection-deferred

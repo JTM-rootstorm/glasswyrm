@@ -1620,6 +1620,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f \
   -Dlibinput_backend=false -Dlibinput_backend=true -Ddrm_backend=true \
   -Dasan=true -Dubsan=true 'CC=clang CXX=clang++' source_layout_test.sh \
+  gwipc_staged_consumers_test.sh \
   'keyboard-mapping-dispatch' 'grab-state' 'grab-dispatch' \
   '[[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]' \
   gw_uinput_m11 'serve' 'basic-typing' 'repeat' 'scroll' 'primary-selection' \
@@ -1640,6 +1641,22 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   milestone11-interactive-wm.log milestone11-session-state.log \
   milestone11-drm-report.jsonl; do
   assert_contains "$command_log" "$expected"
+done
+for staged_consumer in \
+  '0.1|gwipc_transport_c_consumer.c|c' \
+  '0.1|gwipc_transport_cpp_consumer.cpp|c++' \
+  '0.2|gwipc_c_consumer.c|c' \
+  '0.2|gwipc_cpp_consumer.cpp|c++' \
+  '0.3|gwipc_policy_c_consumer.c|c' \
+  '0.3|gwipc_policy_cpp_consumer.cpp|c++' \
+  '0.4|gwipc_lifecycle_c_consumer.c|c' \
+  '0.4|gwipc_lifecycle_cpp_consumer.cpp|c++' \
+  '0.5|gwipc_input_c_consumer.c|c' \
+  '0.5|gwipc_input_cpp_consumer.cpp|c++' \
+  '0.6|gwipc_session_c_consumer.c|c' \
+  '0.6|gwipc_session_cpp_consumer.cpp|c++'; do
+  assert_contains "$repo_root/tests/install/gwipc_staged_consumers_test.sh" \
+    "$staged_consumer"
 done
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   '[[ -c /dev/uinput ]]' 'emerge --oneshot'
