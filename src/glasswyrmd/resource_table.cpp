@@ -3,11 +3,21 @@
 #include "glasswyrmd/resource_id.hpp"
 
 #include <algorithm>
+#include <string>
 
 namespace glasswyrm::server {
 
 ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
     : screen_(screen), limits_(limits) {
+  std::string cursor_error;
+  root_default_cursor_ = input::make_glyph_cursor(
+      {input::CursorFontIdentity::Cursor,
+       input::CursorFontIdentity::Cursor,
+       input::kCursorGlyphLeftPointer,
+       static_cast<std::uint16_t>(input::kCursorGlyphLeftPointer + 1U),
+       {},
+       {0xffff, 0xffff, 0xffff}},
+      cursor_error);
   WindowResource root;
   root.width = screen.width_pixels;
   root.height = screen.height_pixels;
@@ -78,6 +88,26 @@ const FontResource* ResourceTable::find_font(
     const std::uint32_t xid) const noexcept {
   const auto* resource = find(xid);
   return resource ? std::get_if<FontResource>(&resource->payload) : nullptr;
+}
+
+const CursorResource* ResourceTable::find_cursor(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<CursorResource>(&resource->payload) : nullptr;
+}
+
+std::shared_ptr<const input::CursorImage> ResourceTable::effective_cursor(
+    const std::uint32_t pointer_target) const noexcept {
+  auto current = pointer_target;
+  for (std::size_t depth = 0; depth <= resources_.size(); ++depth) {
+    const auto* window = find_window(current);
+    if (!window) return nullptr;
+    if (!window->attributes.cursor_inherit)
+      return window->attributes.cursor_image;
+    if (current == screen_.root_window) return root_default_cursor_;
+    current = window->parent;
+  }
+  return nullptr;
 }
 
 bool ResourceTable::valid_new_resource_id(

@@ -211,6 +211,7 @@ CleanupResult ResourceTable::commit_client_cleanup(
       if (find_pixmap(xid)) (void)free_pixmap(xid);
       else if (find_gc(xid)) (void)free_gc(xid);
       else if (find_font(xid)) (void)close_font(xid);
+      else if (find_cursor(xid)) (void)free_cursor(xid);
       ++result.resources_destroyed;
     }
   }

@@ -28,10 +28,11 @@ DispatchResult open_font(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadLength);
   const auto name = std::string_view(
       reinterpret_cast<const char*>(request.bytes.data() + 12), name_length);
-  if (!matches_fixed_font(name))
+  const auto identity = font_identity(name);
+  if (!identity)
     return error(context, request, x11::CoreErrorCode::BadName);
   switch (state.resources().open_font(context.client_id, context.resource_base,
-                                      context.resource_mask, xid)) {
+                                      context.resource_mask, xid, *identity)) {
     case OpenFontStatus::Success: return {};
     case OpenFontStatus::BadIdChoice:
       return error(context, request, x11::CoreErrorCode::BadIDChoice, xid);

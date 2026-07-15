@@ -74,6 +74,16 @@ DispatchResult dispatch_request(ServerState& state,
         return query_colors(state, context, request);
       case x11::CoreOpcode::LookupColor:
         return named_color(state, context, request, false);
+      case x11::CoreOpcode::CreateCursor:
+        return create_cursor(state, context, request);
+      case x11::CoreOpcode::CreateGlyphCursor:
+        return create_glyph_cursor(state, context, request);
+      case x11::CoreOpcode::FreeCursor:
+        return free_cursor(state, context, request);
+      case x11::CoreOpcode::RecolorCursor:
+        return recolor_cursor(state, context, request);
+      case x11::CoreOpcode::QueryBestSize:
+        return query_best_size(state, context, request);
       case x11::CoreOpcode::QueryExtension:
         return query_extension(context, request);
       case x11::CoreOpcode::ListExtensions:

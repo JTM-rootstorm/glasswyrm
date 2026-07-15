@@ -146,7 +146,8 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   }
 
   auto decoded = decode_window_attributes(reader, value_mask, spec.attributes,
-                                          state.screen().default_colormap);
+                                          state.screen().default_colormap,
+                                          state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad_value);
   spec.attributes = decoded.attributes;
   spec.initial_event_mask = decoded.event_mask.value_or(0);

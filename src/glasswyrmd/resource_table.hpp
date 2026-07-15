@@ -5,6 +5,7 @@
 #include "glasswyrmd/pixmap.hpp"
 #include "glasswyrmd/graphics_context.hpp"
 #include "glasswyrmd/font.hpp"
+#include "glasswyrmd/cursor_resource.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -17,13 +18,13 @@ namespace glasswyrm::server {
 
 using ClientId = std::uint64_t;
 
-enum class ResourceType { Window, Pixmap, GraphicsContext, Font };
+enum class ResourceType { Window, Pixmap, GraphicsContext, Font, Cursor };
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
   std::variant<WindowResource, PixmapResource, GraphicsContextResource,
-               FontResource> payload;
+               FontResource, CursorResource> payload;
 };
 
 enum class CreateWindowStatus {
@@ -56,6 +57,9 @@ enum class CreateGcStatus { Success, BadIdChoice, BadDrawable, BadMatch, BadAllo
 enum class FreeGcStatus { Success, BadGContext };
 enum class OpenFontStatus { Success, BadIdChoice, BadAlloc };
 enum class CloseFontStatus { Success, BadFont };
+enum class CreateCursorStatus { Success, BadIdChoice, BadAlloc };
+enum class FreeCursorStatus { Success, BadCursor };
+enum class RecolorCursorStatus { Success, BadCursor, BadAlloc };
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -103,6 +107,8 @@ struct ResourceLimits {
   std::size_t maximum_graphics_contexts{8192};
   std::size_t maximum_fonts_per_client{256};
   std::size_t maximum_total_fonts{1024};
+  std::size_t maximum_cursors_per_client{256};
+  std::size_t maximum_total_cursor_bytes{4U * 1024U * 1024U};
 };
 
 class ResourceTable {
@@ -121,6 +127,12 @@ class ResourceTable {
   [[nodiscard]] const GraphicsContextResource* find_gc(std::uint32_t xid) const noexcept;
   [[nodiscard]] GraphicsContextResource* find_gc(std::uint32_t xid) noexcept;
   [[nodiscard]] const FontResource* find_font(std::uint32_t xid) const noexcept;
+  [[nodiscard]] const CursorResource* find_cursor(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] std::shared_ptr<const input::CursorImage> effective_cursor(
+      std::uint32_t pointer_target) const noexcept;
+  [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
+  root_default_cursor() const noexcept { return root_default_cursor_; }
   [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
   [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
                                                           bool mapped);
@@ -147,8 +159,15 @@ class ResourceTable {
   [[nodiscard]] FreeGcStatus free_gc(std::uint32_t xid);
   [[nodiscard]] OpenFontStatus open_font(
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
-      std::uint32_t xid);
+      std::uint32_t xid, FontIdentity identity = FontIdentity::Fixed);
   [[nodiscard]] CloseFontStatus close_font(std::uint32_t xid);
+  [[nodiscard]] CreateCursorStatus create_cursor(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::shared_ptr<const input::CursorImage> image);
+  [[nodiscard]] FreeCursorStatus free_cursor(std::uint32_t xid);
+  [[nodiscard]] RecolorCursorStatus recolor_cursor(
+      std::uint32_t xid, input::CursorColor foreground,
+      input::CursorColor background);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
@@ -188,6 +207,9 @@ class ResourceTable {
   [[nodiscard]] std::size_t canonical_drawable_bytes() const noexcept {
     return canonical_drawable_bytes_;
   }
+  [[nodiscard]] std::size_t total_cursor_bytes() const noexcept {
+    return total_cursor_bytes_;
+  }
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
@@ -200,6 +222,8 @@ class ResourceTable {
   std::unordered_map<ClientId, std::vector<std::uint32_t>> resources_by_owner_;
   std::size_t total_property_bytes_{0};
   std::size_t canonical_drawable_bytes_{0};
+  std::size_t total_cursor_bytes_{0};
+  std::shared_ptr<const input::CursorImage> root_default_cursor_;
 };
 
 }  // namespace glasswyrm::server
