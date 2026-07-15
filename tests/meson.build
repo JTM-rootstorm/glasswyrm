@@ -1043,6 +1043,7 @@ if get_option('glasswyrmd')
     ['glasswyrmd-lifecycle', 'glasswyrmd_lifecycle_test.cpp'],
     ['glasswyrmd-core-requests', 'glasswyrmd_core_requests_test.cpp'],
     ['glasswyrmd-selection', 'glasswyrmd_selection_test.cpp'],
+    ['glasswyrmd-m11-isolation', 'glasswyrmd_m11_isolation_test.cpp'],
   ]
     integration_program = executable(
       integration_case[0],
