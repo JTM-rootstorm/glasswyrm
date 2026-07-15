@@ -631,18 +631,21 @@ mesa_absent=true
 drm_mode=1024x768
 keyboard_device=/dev/input/event11
 pointer_device=/dev/input/event12
+pointer_profile=relative-only
 canonical_hash=0123456789abcdef
 scanout_hash=0123456789abcdef
 mirror_sha256=aaaaaaaaaaaaaaaa
 screenshot_sha256=aaaaaaaaaaaaaaaa
 FACTS
-      for result in strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap relative_motion wheel key_repeat cursor_resources cursor_scanout grabs primary_selection clipboard_selection property_notify wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence; do
+      for result in strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence; do
         printf '%s=passed\n' "$result"
       done
       if [[ ${GW_VM_TEST_BAD_M11_FACTS:-0} == 1 ]]; then printf 'selection_paste=failed\nscenario_exit=1\n'; fi
       ;;
     milestone11-libinput-devices.json) printf '{"keyboard":{"event_path":"/dev/input/event11"},"pointer":{"event_path":"/dev/input/event12"}}\n' ;;
     milestone11-keymap.json) printf '{"model":"pc105","layout":"us"}\n' ;;
+    milestone11-gwm-bindings.json) printf '{"schema":1,"source":"gwm-journal","replay_verified":true}\n' ;;
+    milestone11-selection-client-message.json) printf '{"schema":1,"source":"normalized-x11-trace"}\n' ;;
     milestone11-xterm-trace.json) printf '{"gwm_replay":true,"compositor_replay":true}\n' ;;
     milestone11-drm-report.jsonl) printf '{"state":"active"}\n' ;;
     milestone11-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
@@ -757,7 +760,7 @@ if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
   for name in milestone11-desktop.ppm milestone11-desktop-after-vt.ppm milestone11-desktop-after-restart.ppm milestone11-canonical.ppm milestone11-canonical-after-vt.ppm milestone11-canonical-after-restart.ppm; do
     printf 'P6\n1 1\n255\n000' >"$scratch/$name"
   done
-  for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log milestone11-interactive-wm.log milestone11-session-state.log milestone11-drm-report.jsonl milestone11-glasswyrmd-journal.log milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl frames.jsonl; do printf '{}\n' >"$scratch/$name"; done
+  for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log milestone11-interactive-wm.log milestone11-gwm-bindings.json milestone11-selection-client-message.json milestone11-session-state.log milestone11-drm-report.jsonl milestone11-glasswyrmd-journal.log milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl frames.jsonl; do printf '{}\n' >"$scratch/$name"; done
   if [[ ${GW_VM_TEST_BAD_M11_ARCHIVE:-0} == 1 ]]; then rm -f "$scratch/scene.jsonl"; fi
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
@@ -1601,6 +1604,10 @@ assert_contains "$work_dir/milestone11.out" \
 assert_contains "$artifact_dir/milestone11-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone11-summary.json" \
   '"required_base_commit": "9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0"'
+assert_contains "$artifact_dir/milestone11-summary.json" '"core_mapping": "passed"'
+assert_contains "$artifact_dir/milestone11-summary.json" '"active_grab": "passed"'
+assert_contains "$artifact_dir/milestone11-summary.json" '"automatic_grab": "passed"'
+assert_contains "$artifact_dir/milestone11-summary.json" '"client_message": "passed"'
 for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   /var/tmp/glasswyrm-build-m11-runtime /var/tmp/glasswyrm-build-m11-default \
   /var/tmp/glasswyrm-build-m11-server /var/tmp/glasswyrm-build-m11-gwm \
@@ -1613,6 +1620,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f \
   -Dlibinput_backend=false -Dlibinput_backend=true -Ddrm_backend=true \
   -Dasan=true -Dubsan=true 'CC=clang CXX=clang++' source_layout_test.sh \
+  'keyboard-mapping-dispatch' 'grab-state' 'grab-dispatch' \
   '[[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]' \
   gw_uinput_m11 'serve' 'basic-typing' 'repeat' 'scroll' 'primary-selection' \
   'clipboard-probe' 'move' 'resize' 'close' 'post-vt' 'post-restart' \
@@ -1627,6 +1635,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   m11_xterm_acceptance '--wm-evidence' '--server-journal' \
   screenshot-ready screenshot-after-vt-ready screenshot-after-restart-ready \
   milestone11-libinput-devices.json milestone11-keymap.json \
+  milestone11-gwm-bindings.json milestone11-selection-client-message.json \
   milestone11-xterm-trace.json milestone11-selection.log \
   milestone11-interactive-wm.log milestone11-session-state.log \
   milestone11-drm-report.jsonl; do
@@ -1643,6 +1652,7 @@ for artifact in milestone11-runtime-test.log milestone11-meson-test.log \
   milestone11-source-layout.log milestone11-libinput-devices.json \
   milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.json \
   milestone11-selection.log milestone11-interactive-wm.log \
+  milestone11-gwm-bindings.json milestone11-selection-client-message.json \
   milestone11-session-state.log milestone11-drm-report.jsonl \
   milestone11-glasswyrmd-journal.log milestone11-gwm-journal.log \
   milestone11-gwcomp-journal.log milestone11-session-journal.log \

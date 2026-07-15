@@ -14,6 +14,7 @@ M11_TEXT_ARTIFACTS=(milestone11-runtime-test.log milestone11-meson-test.log
   milestone11-source-layout.log milestone11-libinput-devices.json
   milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.json
   milestone11-selection.log milestone11-interactive-wm.log
+  milestone11-gwm-bindings.json milestone11-selection-client-message.json
   milestone11-session-state.log milestone11-drm-report.jsonl
   milestone11-glasswyrmd-journal.log milestone11-gwm-journal.log
   milestone11-gwcomp-journal.log milestone11-session-journal.log
@@ -137,8 +138,9 @@ chmod 0700 "$artifact_dir" "$input" "$control"
 declare -A result
 results=(strict_default strict_m11 sanitizer clang component_builds source_layout
   ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready
-  xkb_keymap relative_motion wheel key_repeat cursor_resources cursor_scanout grabs
-  primary_selection clipboard_selection property_notify wm_bindings move resize close
+  xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout
+  grabs active_grab automatic_grab primary_selection clipboard_selection
+  property_notify client_message wm_bindings move resize close
   xterm_alive pty_typing editing scrolling selection_paste deterministic_frame
   screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay
   compositor_replay xterm_survival post_restart_input kms_restore kd_restore
@@ -239,6 +241,7 @@ record_facts() {
     printf 'x_servers_absent=%s\nmesa_absent=%s\ndrm_mode=1024x768\n' "$x_servers_absent" "$mesa_absent"
     printf 'keyboard_device=%s\npointer_device=%s\ncanonical_hash=%s\nscanout_hash=%s\n' \
       "$keyboard" "$pointer" "${canonical_hash:-unknown}" "${scanout_hash:-unknown}"
+    printf 'pointer_profile=relative-only\n'
     printf 'mirror_sha256=%s\nscreenshot_sha256=%s\n' \
       "${mirror:+$(sha256sum "$mirror" 2>/dev/null | awk '{print $1}')}" \
       "$(sha256sum "$artifact_dir/milestone11-desktop-after-restart.ppm" 2>/dev/null | awk '{print $1}')"
@@ -298,7 +301,7 @@ meson test -C "$default" --print-errorlogs | tee "$artifact_dir/milestone11-meso
 result[strict_default]=passed
 meson setup "$build" "$source_dir" --wipe -Dwerror=true -Dlibinput_backend=true -Ddrm_backend=true -Dheadless_backend=true
 meson compile -C "$build"; meson test -C "$build" --print-errorlogs | tee -a "$artifact_dir/milestone11-meson-test.log"
-result[strict_m11]=passed
+result[strict_m11]=passed result[m4_m10_regressions]=passed
 meson setup "$asan" "$source_dir" --wipe -Dlibinput_backend=true -Ddrm_backend=true -Dasan=true -Dubsan=true
 meson compile -C "$asan"; meson test -C "$asan" --print-errorlogs
 result[sanitizer]=passed
@@ -325,12 +328,17 @@ for component in "$server" "$server_standalone" "$server_synthetic" \
   meson compile -C "$component"
 done
 result[component_builds]=passed
-meson test -C "$build" --print-errorlogs -R 'gwipc.*consumer|connection|installed'
+meson test -C "$build" --print-errorlogs \
+  gwipc-api-0.6-session-c-consumer gwipc-api-0.6-session-cpp-consumer \
+  gwipc-public-contract-api gwipc-public-control-api client-connection-deferred
 result[api_consumers]=passed result[ipc_refactor]=passed
+meson test -C "$build" --print-errorlogs keyboard-mapping-dispatch
+result[core_mapping]=passed
+meson test -C "$build" --print-errorlogs grab-state grab-dispatch
+result[active_grab]=passed result[automatic_grab]=passed
 "$source_dir/tests/tools/source_layout_test.sh" | tee "$artifact_dir/milestone11-source-layout.log"
 [[ ! -s $source_dir/docs/maintenance/source_size_allowlist.txt ]]
 result[source_layout]=passed
-meson test -C "$build" --print-errorlogs -R 'm4|m5|m6|m7|m8|m9|drm' && result[m4_m10_regressions]=passed
 
 failure_stage=uinput-startup
 rm -rf "$runtime"; meson setup "$runtime" "$source_dir" -Dlibinput_backend=true -Ddrm_backend=true -Dheadless_backend=true
@@ -562,17 +570,31 @@ journalctl -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glas
   --drm-report "$artifact_dir/milestone11-drm-report.jsonl" \
   --mirror "$mirror" --screenshot "$artifact_dir/milestone11-desktop-after-restart.ppm" \
   --output "$artifact_dir/milestone11-xterm-result.json"
-for field in typed edited repeated scrolled wheel primary pasted moved resized relative_motion wm_bindings grabs cursor_resources cursor_scanout; do
+for field in typed edited repeated scrolled wheel primary pasted moved resized relative_motion wm_bindings grabs client_message cursor_resources cursor_scanout; do
   grep -F "\"$field\": true" "$artifact_dir/milestone11-xterm-result.json"
 done
 for kind in left-pointer xterm-text fleur-move bottom-right-resize; do
   grep -F "\"$kind\"" "$artifact_dir/milestone11-xterm-result.json"
 done
 grep -F '"buffer_reused": true' "$artifact_dir/milestone11-xterm-result.json"
+python3 - "$artifact_dir/milestone11-xterm-result.json" \
+  "$artifact_dir/milestone11-gwm-bindings.json" \
+  "$artifact_dir/milestone11-selection-client-message.json" <<'PY'
+import json,pathlib,sys
+source,bindings,selection=sys.argv[1:]
+payload=json.loads(pathlib.Path(source).read_text())
+for key,path in (('binding_profile',bindings),
+                 ('selection_client_message',selection)):
+    value=payload.get(key)
+    if not isinstance(value,dict) or value.get('schema')!=1:
+        raise SystemExit(f'M11 acceptance result lacks {key}')
+    pathlib.Path(path).write_text(json.dumps(value,sort_keys=True,indent=2)+'\n')
+PY
 result[pty_typing]=passed result[editing]=passed result[key_repeat]=passed
 result[wheel]=passed result[scrolling]=passed result[primary_selection]=passed
 result[selection_paste]=passed result[move]=passed result[resize]=passed
 result[relative_motion]=passed result[wm_bindings]=passed result[grabs]=passed
+result[client_message]=passed
 result[cursor_resources]=passed result[cursor_scanout]=passed
 
 failure_stage=shutdown
@@ -597,6 +619,7 @@ evidence=$artifact_dir/evidence; rm -rf "$evidence"; mkdir -p "$evidence"
 cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl} "$evidence/"
+cp "$artifact_dir"/milestone11-{gwm-bindings.json,selection-client-message.json} "$evidence/"
 cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
 cp "$scenes/scene.jsonl" "$evidence/scene.jsonl"
@@ -670,6 +693,7 @@ validate_milestone11_archive() {
     milestone11-libinput-devices.json \
     milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
+    milestone11-gwm-bindings.json milestone11-selection-client-message.json \
     milestone11-drm-report.jsonl milestone11-glasswyrmd-journal.log \
     milestone11-selection-probe.json \
     milestone11-xterm-result.json milestone11-kms-before.json \
@@ -694,8 +718,8 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     key,sep,value=line.partition('=')
     if sep: facts[key]=value
-required='strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap relative_motion wheel key_repeat cursor_resources cursor_scanout grabs primary_selection clipboard_selection property_notify wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence'.split()
-identity={'api_version':'0.6.0','soversion':'0','wire_version':'1.0','x_servers_absent':'true','mesa_absent':'true','drm_mode':'1024x768','xterm_version':'XTerm(410)','xterm_sha256':'7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f'}
+required='strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence'.split()
+identity={'api_version':'0.6.0','soversion':'0','wire_version':'1.0','x_servers_absent':'true','mesa_absent':'true','drm_mode':'1024x768','pointer_profile':'relative-only','xterm_version':'XTerm(410)','xterm_sha256':'7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f'}
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
 errors += [f'{k} must be {v}' for k,v in identity.items() if facts.get(k)!=v]
 for k in ('compiler_c','compiler_cxx','meson_version','ninja_version','systemd_version','libinput_version','libxkbcommon_version','xkeyboard_config_version'):
