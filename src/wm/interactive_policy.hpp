@@ -77,6 +77,7 @@ public:
   [[nodiscard]] bool complete_geometry(InteractiveGeometry applied) noexcept;
   [[nodiscard]] bool release(std::uint8_t button,
                              PointerPosition pointer) noexcept;
+  [[nodiscard]] bool confirm_cursor_published() noexcept;
   [[nodiscard]] bool finish_ready() const noexcept;
   [[nodiscard]] bool finish() noexcept;
   [[nodiscard]] bool abort() noexcept;
@@ -87,6 +88,9 @@ public:
     return transaction_in_flight_;
   }
   [[nodiscard]] InteractionCursor cursor() const noexcept { return cursor_; }
+  [[nodiscard]] bool cursor_published() const noexcept {
+    return cursor_published_;
+  }
   [[nodiscard]] const InteractiveGeometry &last_committed() const noexcept {
     return last_committed_;
   }
@@ -104,6 +108,7 @@ private:
   InteractiveGeometry last_committed_;
   bool transaction_in_flight_{false};
   bool ending_{false};
+  bool cursor_published_{false};
 };
 
 enum class CloseAction { None, SendDeleteWindow, DestroyTopLevel };

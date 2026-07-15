@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <bit>
 #include <limits>
+#include <utility>
 
 namespace glasswyrm::server {
 namespace {
@@ -85,6 +86,7 @@ GrabStatus GrabState::grab_pointer(const PointerGrabRequest& request) noexcept {
                               request.owner_events,
                               request.event_mask,
                               request.cursor,
+                              request.cursor_image,
                               activation_time,
                               0};
   last_pointer_grab_time_ = activation_time;
@@ -105,6 +107,7 @@ bool GrabState::ungrab_pointer(const GrabClientId client,
 GrabStatus GrabState::change_active_pointer_grab(
     const GrabClientId client, const std::uint32_t event_mask,
     const std::uint32_t cursor, const bool cursor_valid,
+    std::shared_ptr<const input::CursorImage> cursor_image,
     const std::uint32_t request_time,
     const std::uint32_t current_time) noexcept {
   if (!pointer_grab_.has_value()) return GrabStatus::NotFound;
@@ -117,6 +120,7 @@ GrabStatus GrabState::change_active_pointer_grab(
     return GrabStatus::InvalidTime;
   pointer_grab_->event_mask = event_mask;
   pointer_grab_->cursor = cursor;
+  pointer_grab_->cursor_image = std::move(cursor_image);
   return GrabStatus::Success;
 }
 
@@ -158,6 +162,7 @@ bool GrabState::begin_automatic_button_grab(
                               true,
                               kAutomaticGrabMask,
                               0,
+                              nullptr,
                               current_time,
                               button_bit(button)};
   last_pointer_grab_time_ = current_time;
@@ -261,6 +266,7 @@ bool GrabState::activate_passive_button(
                               request.owner_events,
                               request.event_mask,
                               request.cursor,
+                              request.cursor_image,
                               current_time,
                               button_bit(button)};
   last_pointer_grab_time_ = current_time;

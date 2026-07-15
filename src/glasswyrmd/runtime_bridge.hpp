@@ -77,6 +77,7 @@ public:
     compositor_reset_ = false;
     return result;
   }
+  void forget_cursor_replay() noexcept;
   [[nodiscard]] bool prepare_rollback() noexcept;
   void clear_transaction_result() noexcept;
 

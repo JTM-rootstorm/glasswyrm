@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
   const std::string cursor_policy_socket = root + "/gwm-cursor.sock";
   const std::string cursor_compositor_socket = root + "/gwcomp-cursor.sock";
   const auto cursor_policy_process = launch(argv[1], cursor_policy_socket);
-  const auto cursor_compositor_process =
+  auto cursor_compositor_process =
       launch(argv[2], cursor_compositor_socket, root + "/cursor-dump");
   RuntimeBridge cursor_bridge(cursor_policy_socket, cursor_compositor_socket,
                               gw::protocol::x11::kScreenModel,
@@ -164,6 +164,31 @@ int main(int argc, char** argv) {
   cursor_bridge.clear_transaction_result();
   require(cursor_bridge.transaction_idle(),
           "accepted cursor frame returns the bridge to idle");
+  const auto disconnected_buffer = cursor.buffer->attach.buffer_id;
+  stop(cursor_compositor_process);
+  drive_until(cursor_bridge,
+              [&] { return cursor_bridge.take_compositor_reset(); },
+              "cursor compositor disconnect was not reported");
+  cursor_bridge.forget_cursor_replay();
+  presenter.peer_disconnected();
+  require(presenter.needs_update(image, 7, 9, true),
+          "cursor presenter requires a fresh reconnect publication");
+  cursor_compositor_process = launch(argv[2], cursor_compositor_socket,
+                                     root + "/cursor-reconnect-dump");
+  drive_until(cursor_bridge, [&] { return cursor_bridge.ready(); },
+              "cursor bridge reconnect timed out");
+  glasswyrm::server::CompositorCursorSubmission reconnected;
+  require(presenter.prepare(image, 7, 9, true, reconnected, error) &&
+              reconnected.buffer && reconnected.damage &&
+              reconnected.buffer->attach.buffer_id != disconnected_buffer &&
+              cursor_bridge.submit_cursor(reconnected, 3, 3, error),
+          "reconnect submits a newly owned cursor buffer");
+  drive_until(cursor_bridge, [&] { return cursor_bridge.cursor_result_ready(); },
+              "reconnected cursor frame result timed out");
+  presenter.accept();
+  cursor_bridge.clear_transaction_result();
+  require(cursor_bridge.transaction_idle(),
+          "reconnected cursor frame returns the bridge to idle");
   stop(cursor_compositor_process);
   stop(cursor_policy_process);
   return 0;

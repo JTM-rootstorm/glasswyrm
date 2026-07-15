@@ -39,7 +39,8 @@ int main() {
                         true};
   const auto begun = policy.begin(move);
   require(begun.accepted && begun.consume_event && begun.focus && begun.raise &&
-              begun.cursor == InteractionCursor::FleurMove,
+              begun.cursor == InteractionCursor::FleurMove &&
+              !policy.cursor_published(),
           "managed visible direct-root window begins move interaction");
   require(!policy.begin(move).accepted, "only one interaction may be active");
   policy.motion({110, 120});
@@ -62,10 +63,11 @@ int main() {
               policy.take_geometry_request() ==
                   InteractiveGeometry{90, 120, 640, 480} &&
               policy.complete_geometry({90, 120, 640, 480}) &&
+              !policy.finish_ready() && policy.confirm_cursor_published() &&
               policy.finish_ready() && policy.finish() &&
               policy.kind() == InteractionKind::None &&
               policy.cursor() == InteractionCursor::None,
-          "release coalesces final geometry before clearing grab/cursor state");
+          "release waits for final geometry and one accepted cursor publication");
 
   InteractionBegin resize{InteractionKind::ResizeBottomRight,
                           11,
@@ -85,6 +87,14 @@ int main() {
   require(policy.abort() &&
               policy.last_committed() == InteractiveGeometry{10, 20, 100, 70},
           "abort retains last fully committed geometry");
+
+  require(policy.begin(move).accepted &&
+              policy.release(1, move.pointer) && !policy.finish_ready() &&
+              policy.kind() == InteractionKind::Move &&
+              policy.cursor() == InteractionCursor::FleurMove &&
+              policy.confirm_cursor_published() && policy.finish_ready() &&
+              policy.finish(),
+          "same-batch press and release retains the move cursor until accepted");
 
   for (auto rejected : {
            InteractionBegin{InteractionKind::Move,

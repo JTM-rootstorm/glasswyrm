@@ -50,6 +50,65 @@ bool ServerRuntime::initialize_real_input() {
   std::fprintf(
       stderr, "glasswyrmd: real input ready devices=%zu keyboard=1 pointer=1\n",
       server_.options_.libinput_devices.size());
+  mark_cursor_dirty();
+  return true;
+}
+
+bool ServerRuntime::service_cursor() {
+  if (!cursor_presenter_ || !real_input_ || !lifecycle_ || !bridge_->ready())
+    return true;
+  const auto image = current_cursor_image();
+  if (!image) {
+    std::fprintf(stderr, "glasswyrmd: effective cursor image is unavailable\n");
+    return false;
+  }
+  const bool visible = real_input_->active();
+  const bool interactive_override =
+      visible && interactive_policy_ &&
+      ((interactive_policy_->cursor() ==
+            glasswyrm::wm::InteractionCursor::FleurMove &&
+        image == move_cursor_) ||
+       (interactive_policy_->cursor() ==
+            glasswyrm::wm::InteractionCursor::BottomRightResize &&
+        image == resize_cursor_));
+  if (!cursor_dirty_ &&
+      !cursor_presenter_->needs_update(
+          image, input_state_.pointer_x(), input_state_.pointer_y(), visible))
+    return true;
+  if (lifecycle_->phase() != CoordinatorPhase::Idle ||
+      !bridge_->transaction_idle() || cursor_presenter_->in_flight() ||
+      (content_presenter_ && content_presenter_->frame_in_flight()))
+    return true;
+  if (!cursor_presenter_->needs_update(
+          image, input_state_.pointer_x(), input_state_.pointer_y(), visible)) {
+    cursor_dirty_ = false;
+    cursor_force_buffer_ = false;
+    if (interactive_override)
+      complete_interactive_cursor_publication();
+    return true;
+  }
+  CompositorCursorSubmission submission;
+  std::string error;
+  if (!cursor_presenter_->prepare(
+          image, input_state_.pointer_x(), input_state_.pointer_y(), visible,
+          submission, error, cursor_force_buffer_)) {
+    std::fprintf(stderr, "glasswyrmd: cursor preparation failed: %s\n",
+                 error.c_str());
+    return false;
+  }
+  if (!bridge_->submit_cursor(submission, next_compositor_commit_++,
+                              next_compositor_generation_++, error)) {
+    cursor_presenter_->reject();
+    std::fprintf(stderr, "glasswyrmd: cursor submission failed: %s\n",
+                 error.c_str());
+    return false;
+  }
+  cursor_dirty_ = false;
+  cursor_force_buffer_ = false;
+  cursor_submission_interactive_ = interactive_override;
+  cursor_submission_diagnostic_ = PendingCursorDiagnostic{
+      image->kind, submission.surface.logical_x, submission.surface.logical_y,
+      submission.surface.visible != 0, submission.buffer.has_value()};
   return true;
 }
 
@@ -93,6 +152,7 @@ bool ServerRuntime::service_session_changes() {
     return true;
   for (const auto &request : bridge_->take_session_state_changes()) {
     const auto applied = real_input_->apply_session_state(request.change.state);
+    mark_cursor_dirty();
     if (applied.reset_server_state) {
       input_state_.reset_provider_state();
       abort_interactive();
@@ -125,6 +185,7 @@ bool ServerRuntime::suspend_real_input_for_compositor_reset(const bool reset) {
     return true;
   const auto suspended =
       real_input_->apply_session_state(GWIPC_SESSION_INACTIVE);
+  mark_cursor_dirty();
   if (suspended.reset_server_state)
     input_state_.reset_provider_state();
   abort_interactive();
@@ -157,6 +218,7 @@ void ServerRuntime::deliver_real_input() {
     if (!next)
       break;
     const auto event = *next;
+    mark_cursor_dirty();
     if (event.kind == RealInputEventKind::StateReset) {
       abort_interactive();
       (void)server_.state_.grabs().suspend();

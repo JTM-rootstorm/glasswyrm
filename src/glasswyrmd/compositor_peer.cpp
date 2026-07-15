@@ -88,6 +88,21 @@ bool enqueue_buffer(gwipc_connection* connection,
   message.fd_count = 1;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
+void forget_cursor(CompositorSnapshotSubmission& submission) {
+  std::set<std::uint64_t> cursor_surfaces;
+  for (const auto& surface : submission.surfaces)
+    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
+      cursor_surfaces.insert(surface.surface_id);
+  std::erase_if(submission.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  std::erase_if(submission.buffers, [&](const auto& buffer) {
+    return cursor_surfaces.contains(buffer.attach.surface_id);
+  });
+  std::erase_if(submission.damages, [&](const auto& damage) {
+    return cursor_surfaces.contains(damage.surface_id);
+  });
+}
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
@@ -531,6 +546,11 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
       (software_content_ || session_state_))
     return drain(error);
   return PeerProcessOutcome::Progress;
+}
+
+void CompositorPeer::forget_cursor_replay() noexcept {
+  forget_cursor(replay_input_);
+  forget_cursor(pending_);
 }
 
 void CompositorPeer::disconnect() noexcept {

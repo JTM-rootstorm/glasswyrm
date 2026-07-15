@@ -55,6 +55,20 @@ int main() {
   require(!presenter.needs_update(pointer, 20, 30, true),
           "accepted identical cursor state is coalesced");
 
+  CompositorCursorSubmission rejected;
+  require(presenter.prepare(pointer, 22, 32, true, rejected, error) &&
+              !rejected.buffer && !rejected.damage,
+          "position-only cursor update reuses the accepted buffer");
+  presenter.reject();
+  require(presenter.needs_update(pointer, 22, 32, true),
+          "rejected cursor state remains dirty for replay");
+
+  CompositorCursorSubmission retried;
+  require(presenter.prepare(pointer, 22, 32, true, retried, error, true) &&
+              retried.buffer && retried.damage,
+          "forced rejection retry republishes immutable cursor content");
+  presenter.accept();
+
   CompositorCursorSubmission moved;
   require(presenter.needs_update(pointer, 25, 35, true) &&
               presenter.prepare(pointer, 25, 35, true, moved, error) &&
@@ -80,6 +94,18 @@ int main() {
   presenter.accept();
   require(presenter.release(first_buffer, GWIPC_BUFFER_RELEASE_REPLACED),
           "replaced cursor buffers remain owned until consumer release");
+  const auto disconnected_buffer = replaced.buffer->attach.buffer_id;
   presenter.peer_disconnected();
+  require(presenter.needs_update(resize, 40, 50, true),
+          "peer disconnect invalidates the accepted cursor publication");
+  CompositorCursorSubmission reconnected;
+  require(presenter.prepare(resize, 40, 50, true, reconnected, error) &&
+              reconnected.buffer && reconnected.damage &&
+              reconnected.buffer->attach.buffer_id != disconnected_buffer,
+          "reconnect publishes a fresh cursor buffer for the new peer");
+  require(!presenter.release(disconnected_buffer,
+                             GWIPC_BUFFER_RELEASE_REPLACED),
+          "disconnect drops buffers that the departed peer cannot release");
+  presenter.accept();
   return 0;
 }

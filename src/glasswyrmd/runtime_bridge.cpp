@@ -10,6 +10,26 @@ constexpr std::array kRetryDelays = {
     std::chrono::milliseconds(50),  std::chrono::milliseconds(100),
     std::chrono::milliseconds(200), std::chrono::milliseconds(400),
     std::chrono::milliseconds(800), std::chrono::milliseconds(1000)};
+
+void forget_cursor(CompositorSnapshotSubmission& submission) {
+  std::vector<std::uint64_t> cursor_surfaces;
+  for (const auto& surface : submission.surfaces)
+    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
+      cursor_surfaces.push_back(surface.surface_id);
+  const auto is_cursor = [&](const std::uint64_t surface_id) {
+    return std::ranges::find(cursor_surfaces, surface_id) !=
+           cursor_surfaces.end();
+  };
+  std::erase_if(submission.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  std::erase_if(submission.buffers, [&](const auto& buffer) {
+    return is_cursor(buffer.attach.surface_id);
+  });
+  std::erase_if(submission.damages, [&](const auto& damage) {
+    return is_cursor(damage.surface_id);
+  });
+}
 }
 
 RuntimeBridge::RuntimeBridge(std::string policy_path,
@@ -302,6 +322,20 @@ bool RuntimeBridge::replay_rejected_ready() const noexcept {
 }
 bool RuntimeBridge::transaction_idle() const noexcept {
   return transaction_stage_ == TransactionStage::None;
+}
+
+void RuntimeBridge::forget_cursor_replay() noexcept {
+  compositor_.forget_cursor_replay();
+  forget_cursor(pending_compositor_);
+  const auto cursor_stage = [](const TransactionStage stage) {
+    return stage == TransactionStage::Cursor ||
+           stage == TransactionStage::CursorComplete ||
+           stage == TransactionStage::CursorRejected;
+  };
+  if (cursor_stage(transaction_stage_))
+    transaction_stage_ = TransactionStage::None;
+  if (cursor_stage(resume_transaction_stage_))
+    resume_transaction_stage_ = TransactionStage::None;
 }
 
 bool RuntimeBridge::prepare_rollback() noexcept {
