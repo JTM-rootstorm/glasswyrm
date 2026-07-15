@@ -3,6 +3,7 @@ set -euo pipefail
 
 pids=()
 scenario_dir='' transcript='' trace='' selection='' wm_evidence=''
+server_journal=''
 frames='' scene='' drm_report='' mirror='' screenshot='' output=''
 while (($#)); do
   case "$1" in
@@ -12,6 +13,7 @@ while (($#)); do
     --trace) trace=$2; shift 2 ;;
     --selection) selection=$2; shift 2 ;;
     --wm-evidence) wm_evidence=$2; shift 2 ;;
+    --server-journal) server_journal=$2; shift 2 ;;
     --frames) frames=$2; shift 2 ;;
     --scene) scene=$2; shift 2 ;;
     --drm-report) drm_report=$2; shift 2 ;;
@@ -23,13 +25,14 @@ while (($#)); do
 done
 
 [[ ${#pids[@]} -eq 2 && -n $scenario_dir && -n $transcript && -n $trace &&
-   -n $selection && -n $wm_evidence && -n $frames && -n $scene && -n $drm_report &&
+   -n $selection && -n $wm_evidence && -n $server_journal && -n $frames &&
+   -n $scene && -n $drm_report &&
    -n $mirror && -n $screenshot && -n $output ]] || {
-  printf '%s\n' 'usage: m11_xterm_acceptance --xterm-pid PID --xterm-pid PID --scenario-dir DIR --transcript PATH --trace PATH --selection PATH --wm-evidence PATH --frames PATH --scene PATH --drm-report PATH --mirror PATH --screenshot PATH --output PATH' >&2
+  printf '%s\n' 'usage: m11_xterm_acceptance --xterm-pid PID --xterm-pid PID --scenario-dir DIR --transcript PATH --trace PATH --selection PATH --wm-evidence PATH --server-journal PATH --frames PATH --scene PATH --drm-report PATH --mirror PATH --screenshot PATH --output PATH' >&2
   exit 2
 }
-for path in "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" "$frames" \
-  "$scene" "$drm_report" "$mirror" "$screenshot"; do
+for path in "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" \
+  "$server_journal" "$frames" "$scene" "$drm_report" "$mirror" "$screenshot"; do
   [[ -e $path ]] || { printf 'm11_xterm_acceptance: missing evidence: %s\n' "$path" >&2; exit 1; }
 done
 for pid in "${pids[@]}"; do [[ $pid =~ ^[1-9][0-9]*$ ]] || exit 1; done
@@ -38,10 +41,11 @@ for pid in "${pids[@]}"; do [[ $pid =~ ^[1-9][0-9]*$ ]] || exit 1; done
   exit 1
 }
 
-python3 - "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" "$frames" \
+python3 - "$scenario_dir" "$transcript" "$trace" "$selection" "$wm_evidence" \
+  "$server_journal" "$frames" \
   "$scene" "$drm_report" "$mirror" "$screenshot" "$output" "${pids[@]}" <<'PY'
-import hashlib,json,os,pathlib,sys
-scenario_dir,transcript,trace,selection,wm_evidence,frames,scene,drm,mirror,screenshot,out,*pids=sys.argv[1:]
+import hashlib,json,os,pathlib,re,sys
+scenario_dir,transcript,trace,selection,wm_evidence,server_journal,frames,scene,drm,mirror,screenshot,out,*pids=sys.argv[1:]
 
 def documents(path):
     text=pathlib.Path(path).read_text(errors='strict')
@@ -83,6 +87,29 @@ wm_text=pathlib.Path(wm_evidence).read_text(errors='replace').lower()
 for marker in ('move_button=1','resize_button=3','close_keysym=0xffc1',
                'minimum_width=96','minimum_height=64'):
     if marker not in wm_text: raise SystemExit(f'GWM evidence lacks {marker}')
+
+cursor_pattern=re.compile(
+    r'glasswyrmd: cursor publication accepted kind=([a-z0-9-]+) '
+    r'x=(-?[0-9]+) y=(-?[0-9]+) visible=([01]) buffer=(attached|reused)')
+cursor_records=[{'kind':kind,'x':int(x),'y':int(y),'visible':visible=='1','buffer':buffer}
+                for kind,x,y,visible,buffer in cursor_pattern.findall(
+                    pathlib.Path(server_journal).read_text(errors='replace'))]
+visible_cursor_records=[item for item in cursor_records if item['visible']]
+required_cursor_kinds=('left-pointer','xterm-text','fleur-move',
+                       'bottom-right-resize')
+visible_kinds={item['kind'] for item in visible_cursor_records}
+missing_cursor_kinds=set(required_cursor_kinds)-visible_kinds
+if missing_cursor_kinds:
+    raise SystemExit(f'server journal lacks accepted visible cursor kinds {sorted(missing_cursor_kinds)}')
+attached_kinds={item['kind'] for item in visible_cursor_records
+                if item['buffer']=='attached'}
+if not set(required_cursor_kinds) <= attached_kinds:
+    raise SystemExit('server journal does not prove attached buffers for every required cursor kind')
+cursor_positions={(item['x'],item['y']) for item in visible_cursor_records}
+if len(cursor_positions)<2:
+    raise SystemExit('server journal does not prove accepted cursor movement across positions')
+if not any(item['buffer']=='reused' for item in visible_cursor_records):
+    raise SystemExit('server journal does not prove accepted cursor buffer reuse')
 
 trace_docs=documents(trace); trace_text=json.dumps(trace_docs,separators=(',',':')).lower()
 event_types=set(); event_records=[]
@@ -146,6 +173,12 @@ payload={'status':'passed','xterm_pids':[int(x) for x in pids],
          'moved':True,'resized':True,'relative_motion':True,
          'wm_bindings':True,'grabs':True,'cursor_resources':True,
          'cursor_scanout':True,'scenario_events':scenario_counts,
+         'cursor_diagnostics':{'accepted':len(cursor_records),
+             'visible':len(visible_cursor_records),
+             'kinds':list(required_cursor_kinds),
+             'positions':len(cursor_positions),
+             'attached_kinds':sorted(attached_kinds),
+             'buffer_reused':True},
          'windows':len(geometries),'canonical_hash':present[-1]['canonical_hash'],
          'scanout_hash':present[-1]['scanout_hash'],
          'mirror_sha256':mirror_hash,'screenshot_sha256':screenshot_hash}
