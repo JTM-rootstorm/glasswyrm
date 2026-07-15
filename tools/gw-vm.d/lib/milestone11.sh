@@ -258,6 +258,9 @@ exec > >(tee -a "$runtime_log") 2>&1
 
 [[ -c /dev/uinput && -c $drm_device && -c $target_vt ]] || exit 30
 failure_stage=dependency-installation
+install -d -m 0755 /etc/portage/package.accept_keywords
+printf '=x11-terms/xterm-410 ~amd64\n' \
+  >/etc/portage/package.accept_keywords/glasswyrm-m11
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja virtual/pkgconfig \
   net-misc/curl app-crypt/gnupg \
   x11-libs/libdrm x11-libs/libxcb x11-base/xcb-proto x11-libs/libX11 \
@@ -763,9 +766,13 @@ milestone11_runtime_test() {
     guest_run_script "$script" "$GUEST_SOURCE_PATH" "$M11_GUEST_ARTIFACT_DIR" \
       "$drm_device" "$connector" "$target_vt" "$M11_XTERM_SHA256" \
       >>"$ARTIFACTS_PATH_ABS/milestone11-runtime-test.log" 2>&1 & guest_pid=$!
-    if ! milestone11_capture_screen screenshot-ready screen-captured milestone11-desktop.ppm "$guest_pid"; then status=$?; failure=desktop-screenshot; milestone11_release_guest_waits; fi
-    if [[ -z $failure ]] && ! milestone11_capture_screen screenshot-after-vt-ready screen-after-vt-captured milestone11-desktop-after-vt.ppm "$guest_pid"; then status=$?; failure=post-vt-screenshot; milestone11_release_guest_waits; fi
-    if [[ -z $failure ]] && ! milestone11_capture_screen screenshot-after-restart-ready screen-after-restart-captured milestone11-desktop-after-restart.ppm "$guest_pid"; then status=$?; failure=post-restart-screenshot; milestone11_release_guest_waits; fi
+    if milestone11_capture_screen screenshot-ready screen-captured milestone11-desktop.ppm "$guest_pid"; then :; else status=$?; failure=desktop-screenshot; milestone11_release_guest_waits; fi
+    if [[ -z $failure ]]; then
+      if milestone11_capture_screen screenshot-after-vt-ready screen-after-vt-captured milestone11-desktop-after-vt.ppm "$guest_pid"; then :; else status=$?; failure=post-vt-screenshot; milestone11_release_guest_waits; fi
+    fi
+    if [[ -z $failure ]]; then
+      if milestone11_capture_screen screenshot-after-restart-ready screen-after-restart-captured milestone11-desktop-after-restart.ppm "$guest_pid"; then :; else status=$?; failure=post-restart-screenshot; milestone11_release_guest_waits; fi
+    fi
     if wait "$guest_pid"; then :; else guest_status=$?; if [[ -z $failure ]]; then status=$guest_status; failure=guest-runtime; fi; fi
   fi
   collect_milestone11_artifacts || collection=$?
