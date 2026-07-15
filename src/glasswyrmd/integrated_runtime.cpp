@@ -17,7 +17,7 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   server_.input_snapshot_provider_ = [this] {
     return InputSnapshot{input_state_.pointer_x(), input_state_.pointer_y(),
                          input_state_.mask(), input_state_.pointer_target(),
-                         input_state_.time()};
+                         input_state_.time(), input_state_.query_keymap()};
   };
   if (!server_.options_.integrated()) return 0;
 

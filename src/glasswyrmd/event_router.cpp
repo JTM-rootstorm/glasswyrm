@@ -306,6 +306,60 @@ std::size_t EventRouter::route_input(
   return delivered;
 }
 
+std::optional<std::pair<ClientId, std::uint32_t>>
+EventRouter::input_recipient(const std::uint32_t source,
+                             const std::uint32_t delivery_mask) const {
+  const auto target = glasswyrm::input::propagate_event(
+      route_windows(resources_, source), source, delivery_mask);
+  if (target.event_window == 0 || target.clients.empty())
+    return std::nullopt;
+  return std::pair{target.clients.front(), target.event_window};
+}
+
+std::size_t EventRouter::route_input_grabbed(
+    const GrabState& grabs, const gw::protocol::x11::CoreEventType type,
+    const std::uint8_t detail, const std::uint32_t time,
+    const std::uint32_t source, const std::uint16_t state,
+    const std::uint32_t delivery_mask, const std::int32_t root_x,
+    const std::int32_t root_y, const std::uint32_t pointer_target,
+    const std::span<ClientConnection *const> clients) const {
+  const auto natural = input_recipient(source, delivery_mask);
+  const GrabRouteInput input{natural ? natural->first : 0,
+                             natural ? natural->second : 0, delivery_mask,
+                             pointer_target};
+  const bool keyboard =
+      type == gw::protocol::x11::CoreEventType::KeyPress ||
+      type == gw::protocol::x11::CoreEventType::KeyRelease;
+  const auto decision = keyboard ? grabs.route_keyboard(input)
+                                 : grabs.route_pointer(input);
+  if (decision.kind == GrabRouteKind::Suppressed)
+    return 0;
+  if (decision.kind == GrabRouteKind::Natural)
+    return route_input(type, detail, time, source, state, delivery_mask,
+                       root_x, root_y, pointer_target, clients);
+  auto* client = find_client(clients, decision.client);
+  if (!client || !resources_.find_window(decision.window))
+    return 0;
+  const auto coordinates = glasswyrm::input::event_coordinates(
+      resources_, decision.window, pointer_target, root_x, root_y);
+  gw::protocol::x11::InputEvent event{};
+  event.type = type;
+  event.detail = detail;
+  event.time = time;
+  event.root = resources_.screen().root_window;
+  event.event = decision.window;
+  event.child = coordinates.child;
+  event.root_x = coordinates.root_x;
+  event.root_y = coordinates.root_y;
+  event.event_x = coordinates.event_x;
+  event.event_y = coordinates.event_y;
+  event.state = state;
+  return client->enqueue_server_packet(gw::protocol::x11::encode_input_event(
+             client->byte_order(), client->last_request_sequence(), event))
+             ? 1U
+             : 0U;
+}
+
 std::size_t EventRouter::route_crossing(
     const std::uint32_t old_target, const std::uint32_t new_target,
     const std::uint32_t focus, const glasswyrm::input::InputState& input,

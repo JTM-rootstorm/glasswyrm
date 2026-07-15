@@ -21,6 +21,14 @@ bool InputState::button_down(const std::uint8_t button) const noexcept {
   return button >= 1 && button <= buttons_.size() && buttons_[button - 1];
 }
 
+std::array<std::uint8_t, 32> InputState::query_keymap() const noexcept {
+  std::array<std::uint8_t, 32> result{};
+  for (std::size_t keycode = 0; keycode < keys_.size(); ++keycode)
+    if (keys_[keycode])
+      result[keycode / 8U] |= static_cast<std::uint8_t>(1U << (keycode & 7U));
+  return result;
+}
+
 bool InputState::any_button_down() const noexcept {
   return std::ranges::any_of(buttons_, [](const bool down) { return down; });
 }

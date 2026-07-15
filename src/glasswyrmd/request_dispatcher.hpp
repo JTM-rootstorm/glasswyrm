@@ -8,6 +8,7 @@
 #include "core/geometry/rectangle.hpp"
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -21,6 +22,7 @@ struct InputSnapshot {
   std::uint16_t state_mask{0};
   std::uint32_t pointer_target{1};
   std::uint32_t logical_time{1};
+  std::array<std::uint8_t, 32> keymap{};
 };
 
 struct DispatchContext {

@@ -16,6 +16,7 @@ class InputState {
   [[nodiscard]] std::uint16_t mask() const noexcept;
   [[nodiscard]] bool button_down(std::uint8_t button) const noexcept;
   [[nodiscard]] bool key_down(std::uint8_t keycode) const noexcept { return keys_[keycode]; }
+  [[nodiscard]] std::array<std::uint8_t, 32> query_keymap() const noexcept;
   [[nodiscard]] bool any_button_down() const noexcept;
   void set_pointer(std::int32_t x, std::int32_t y, std::uint32_t target) noexcept;
   void set_pointer_target(std::uint32_t target) noexcept { pointer_target_ = target; }
