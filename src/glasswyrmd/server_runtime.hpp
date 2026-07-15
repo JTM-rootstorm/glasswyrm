@@ -12,6 +12,7 @@
 #include "input/input_state.hpp"
 #if GW_HAS_LIBINPUT_BACKEND
 #include "glasswyrmd/real_input_controller.hpp"
+#include "wm/interactive_policy.hpp"
 #endif
 #endif
 
@@ -92,6 +93,15 @@ class ServerRuntime {
   [[nodiscard]] bool suspend_real_input_for_compositor_reset(bool reset);
   void deliver_real_input();
   void complete_real_focus(bool success);
+  [[nodiscard]] bool initialize_interactive_policy();
+  [[nodiscard]] bool begin_interactive_pointer(const RealInputEvent& event);
+  [[nodiscard]] bool update_interactive_geometry();
+  [[nodiscard]] bool handle_interactive_close(const RealInputEvent& event);
+  void complete_interactive_lifecycle(const LifecycleOperation& operation,
+                                      bool success);
+  void abort_interactive() noexcept;
+  [[nodiscard]] std::shared_ptr<const glasswyrm::input::CursorImage>
+  current_cursor_image() const noexcept;
 #endif
 
   std::unique_ptr<RuntimeBridge> bridge_;
@@ -107,6 +117,11 @@ class ServerRuntime {
   };
   std::unique_ptr<RealInputController> real_input_;
   std::optional<PendingRealFocus> pending_real_focus_;
+  std::optional<glasswyrm::wm::InteractiveBindings> interactive_bindings_;
+  std::optional<glasswyrm::wm::InteractivePolicy> interactive_policy_;
+  std::optional<std::uint64_t> interactive_geometry_token_;
+  std::shared_ptr<const glasswyrm::input::CursorImage> move_cursor_;
+  std::shared_ptr<const glasswyrm::input::CursorImage> resize_cursor_;
 #endif
   std::uint64_t next_lifecycle_token_{1};
   // Runtime bootstrap owns commit/generation 1.

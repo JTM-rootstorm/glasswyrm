@@ -4,6 +4,7 @@
 #include "protocol/x11/screen_model.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -17,11 +18,13 @@ struct PolicySnapshotSubmission {
 struct PolicySnapshotResult {
   std::uint64_t generation{}, hash{};
   std::vector<gwipc_policy_window_state> windows;
+  std::optional<gwipc_policy_bindings_upsert> bindings;
 };
 
 class PolicyPeer {
 public:
-  PolicyPeer(std::string path, gw::protocol::x11::ScreenModel screen);
+  PolicyPeer(std::string path, gw::protocol::x11::ScreenModel screen,
+             bool interactive_policy = true);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -53,6 +56,7 @@ private:
   std::uint64_t policy_hash_{};
   bool reply_snapshot_active_{};
   bool reply_snapshot_complete_{};
+  bool interactive_profile_{};
   PolicySnapshotSubmission pending_;
   PolicySnapshotSubmission replay_input_;
   PolicySnapshotResult result_;

@@ -35,6 +35,10 @@ public:
                                    std::string& error);
   [[nodiscard]] bool policy_result_ready() const noexcept;
   [[nodiscard]] bool policy_rejected_ready() const noexcept;
+  [[nodiscard]] const std::optional<gwipc_policy_bindings_upsert> &
+  policy_bindings() const noexcept {
+    return policy_.result().bindings;
+  }
   [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
     return policy_.result();
   }

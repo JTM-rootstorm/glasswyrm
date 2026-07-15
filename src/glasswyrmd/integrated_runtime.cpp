@@ -64,8 +64,9 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
 
   initialize_lifecycle();
 #if GW_HAS_LIBINPUT_BACKEND
-  if (server_.options_.real_input_enabled() && !initialize_real_input())
-    return 1;
+  if (server_.options_.real_input_enabled() &&
+      (!initialize_interactive_policy() || !initialize_real_input()))
+      return 1;
 #endif
   if (server_.options_.synthetic_input_socket) {
     input_peer_ = std::make_unique<SyntheticInputPeer>(
@@ -99,6 +100,12 @@ bool ServerRuntime::service_integrated(const short policy_events,
                  error.c_str());
     return false;
   }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (!bridge_->ready()) {
+    abort_interactive();
+    (void)server_.state_.grabs().suspend();
+  }
+#endif
   const bool compositor_reset = bridge_->take_compositor_reset();
 #if GW_HAS_LIBINPUT_BACKEND
   if (!suspend_real_input_for_compositor_reset(compositor_reset)) return false;

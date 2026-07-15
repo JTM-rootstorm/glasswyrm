@@ -25,6 +25,7 @@ struct RealInputEvent {
   std::int32_t root_y{};
   std::uint32_t focus_window{};
   std::uint8_t detail{};
+  std::uint32_t keysym{};
   bool pressed{};
   std::uint16_t state_before{};
   std::uint16_t state_after{};

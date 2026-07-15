@@ -8,7 +8,8 @@
 namespace glasswyrm::server {
 namespace {
 constexpr gwipc_capabilities kCapabilities =
-    GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_WINDOW_LIFECYCLE;
+    GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_WINDOW_LIFECYCLE |
+    GWIPC_CAP_INTERACTIVE_POLICY;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -79,10 +80,31 @@ canonical_policy_hash(const PolicySnapshotResult &result,
     hash_little(hash, UINT32_C(0));
     hash_little(hash, UINT32_C(0));
   }
+  if (result.bindings) {
+    const auto v1 = hash;
+    hash = UINT64_C(14695981039346656037);
+    for (char byte : std::string_view("glasswyrm-policy-v2"))
+      hash_byte(hash, static_cast<std::uint8_t>(byte));
+    hash_little(hash, v1);
+    const auto &bindings = *result.bindings;
+    hash_little(hash, bindings.move_modifiers);
+    hash_little(hash, bindings.resize_modifiers);
+    hash_little(hash, bindings.close_modifiers);
+    hash_little(hash, bindings.move_button);
+    hash_little(hash, bindings.resize_button);
+    hash_little(hash, bindings.close_keysym);
+    hash_little(hash, bindings.minimum_width);
+    hash_little(hash, bindings.minimum_height);
+    hash_byte(hash, bindings.raise_on_focus);
+    hash_byte(hash, bindings.consume_wm_bindings);
+  }
   return hash;
 }
 bool valid_policy_result(const PolicySnapshotSubmission &input,
-                         const PolicySnapshotResult &result) {
+                         const PolicySnapshotResult &result,
+                         const bool interactive) {
+  if (result.bindings.has_value() != interactive)
+    return false;
   std::set<std::uint32_t> expected;
   for (const auto &window : input.windows)
     if (!expected.insert(window.window.window_id).second)
@@ -149,8 +171,12 @@ bool enqueue_control(gwipc_connection *connection, std::uint16_t type,
 } // namespace
 
 PolicyPeer::PolicyPeer(std::string path,
-                       const gw::protocol::x11::ScreenModel screen)
-    : transport_(std::move(path), GWIPC_ROLE_WINDOW_MANAGER, kCapabilities,
+                       const gw::protocol::x11::ScreenModel screen,
+                       const bool interactive_policy)
+    : transport_(std::move(path), GWIPC_ROLE_WINDOW_MANAGER,
+                 interactive_policy
+                     ? kCapabilities
+                     : kCapabilities & ~GWIPC_CAP_INTERACTIVE_POLICY,
                  "glasswyrmd-policy"),
       screen_(screen) {}
 
@@ -163,6 +189,9 @@ bool PolicyPeer::connect(std::string &error) {
 }
 
 bool PolicyPeer::send_bootstrap(std::string &error) {
+  interactive_profile_ =
+      (gwipc_connection_peer_info(transport_.connection()).capabilities &
+       GWIPC_CAP_INTERACTIVE_POLICY) != 0;
   return submit(replay_input_.commit_id != 0
                     ? replay_input_
                     : PolicySnapshotSubmission{1, 1, {}},
@@ -256,7 +285,8 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
             value->snapshot_id != pending_.commit_id ||
             value->domain != GWIPC_SNAPSHOT_WINDOW_POLICY ||
             value->generation != pending_.generation ||
-            value->expected_item_count != pending_.windows.size()) {
+            value->expected_item_count !=
+                pending_.windows.size() + (interactive_profile_ ? 1U : 0U)) {
           error = "invalid policy bootstrap snapshot";
           return PeerProcessOutcome::Fatal;
         }
@@ -266,8 +296,10 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
         if (!value || !reply_snapshot_active_ ||
             value->snapshot_id != pending_.commit_id ||
             value->generation != pending_.generation ||
-            value->actual_item_count != pending_.windows.size() ||
-            result_.windows.size() != pending_.windows.size()) {
+            value->actual_item_count !=
+                pending_.windows.size() + (interactive_profile_ ? 1U : 0U) ||
+            result_.windows.size() != pending_.windows.size() ||
+            result_.bindings.has_value() != interactive_profile_) {
           error = "invalid policy bootstrap snapshot end";
           return PeerProcessOutcome::Fatal;
         }
@@ -286,6 +318,21 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
       if (!value || !reply_snapshot_active_)
         return PeerProcessOutcome::Fatal;
       result_.windows.push_back(*value);
+      continue;
+    }
+    if (type == GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT) {
+      gwipc_decoded_contract *raw = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw) != GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedContractDelete> decoded(
+          raw);
+      const auto *value = gwipc_decoded_policy_bindings_upsert(decoded.get());
+      if (!interactive_profile_ || !value || !reply_snapshot_active_ ||
+          result_.bindings) {
+        error = "invalid or duplicate interactive policy bindings";
+        return PeerProcessOutcome::Fatal;
+      }
+      result_.bindings = *value;
       continue;
     }
     if (type != GWIPC_MESSAGE_POLICY_ACKNOWLEDGED) {
@@ -319,7 +366,7 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
     }
     result_.generation = ack->applied_generation;
     result_.hash = ack->policy_hash;
-    if (!valid_policy_result(pending_, result_) ||
+    if (!valid_policy_result(pending_, result_, interactive_profile_) ||
         canonical_policy_hash(result_, screen_) != ack->policy_hash) {
       error = "policy acknowledgement hash does not match returned snapshot";
       return PeerProcessOutcome::Fatal;
@@ -355,5 +402,6 @@ void PolicyPeer::disconnect() noexcept {
   commit_sequence_ = 0;
   reply_snapshot_active_ = false;
   reply_snapshot_complete_ = false;
+  interactive_profile_ = false;
 }
 } // namespace glasswyrm::server

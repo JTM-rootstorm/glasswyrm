@@ -218,6 +218,14 @@ bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_me
     return false;
   if (interactive) {
     const auto bindings = default_bindings();
+    std::fprintf(stderr,
+                 "gwm: interactive bindings move_button=%u resize_button=%u "
+                 "close_keysym=0x%04x minimum_width=%u minimum_height=%u\n",
+                 static_cast<unsigned>(bindings.move_button),
+                 static_cast<unsigned>(bindings.resize_button),
+                 static_cast<unsigned>(bindings.close_keysym),
+                 static_cast<unsigned>(bindings.minimum_width),
+                 static_cast<unsigned>(bindings.minimum_height));
     if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,
                           GWIPC_FLAG_SNAPSHOT_ITEM, 0, bindings,
                           gwipc_contract_encode_policy_bindings_upsert))
