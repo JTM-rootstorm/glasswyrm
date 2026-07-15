@@ -225,6 +225,22 @@ int main() {
                     glasswyrm::input::CursorKind::XtermText,
             "CreateGlyphCursor recognizes xterm cursorfont identity");
 
+    auto scrollbar = header(order, x11::CoreOpcode::CreateGlyphCursor, 0, 8);
+    scrollbar.write_u32(base + 9U);
+    scrollbar.write_u32(base + 4U);
+    scrollbar.write_u32(base + 4U);
+    scrollbar.write_u16(
+        glasswyrm::input::kCursorGlyphVerticalDoubleArrow);
+    scrollbar.write_u16(
+        glasswyrm::input::kCursorGlyphVerticalDoubleArrow + 1U);
+    write_colors(scrollbar, {}, {0xffff, 0xffff, 0xffff});
+    result = dispatch(state, context, std::move(scrollbar),
+                      x11::CoreOpcode::CreateGlyphCursor);
+    require(result.output.empty() &&
+                state.resources().find_cursor(base + 9U)->image->kind ==
+                    glasswyrm::input::CursorKind::VerticalResize,
+            "CreateGlyphCursor recognizes xterm scrollbar cursor identity");
+
     auto hidden = header(order, x11::CoreOpcode::CreateGlyphCursor, 0, 8);
     hidden.write_u32(base + 8U);
     hidden.write_u32(base + 5U);
@@ -286,7 +302,7 @@ int main() {
         state.resources().find_window(window.xid)->attributes.cursor_image;
     const auto cleanup = state.resources().cleanup_client(1);
     target = state.resources().find_window(window.xid);
-    require(result.output.empty() && cleanup.resources_destroyed == 7 && target &&
+    require(result.output.empty() && cleanup.resources_destroyed == 8 && target &&
                 !target->attributes.cursor_inherit &&
                 target->attributes.cursor == 0 &&
                 target->attributes.cursor_image == cleanup_image &&

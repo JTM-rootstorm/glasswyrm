@@ -141,6 +141,9 @@ The normal pointer is not a pixmap cursor in this profile:
   `CreateGlyphCursor`, and font close requests.
 - `util.c:2941` calls `XRecolorCursor`, and `misc.c:1021` applies the cursor
   with `XDefineCursor`.
+- Patch 410 also creates the cursor-font `XC_sb_v_double_arrow` pair during
+  widget startup, even with the fixed no-toolbar profile. The accepted bounded
+  glyph subset therefore includes source character 116 and mask character 117.
 
 There is a second, easy-to-miss cursor path. The documented default
 `pointerMode` is 1, so typing may hide the pointer. `misc.c:700`

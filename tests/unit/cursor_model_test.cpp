@@ -46,11 +46,12 @@ int main() {
   require(!make_pixmap_cursor(pixmap, error) && !error.empty(),
           "source and mask dimensions are checked");
 
-  const std::array<std::pair<std::uint16_t, CursorKind>, 5> builtins{{
+  const std::array<std::pair<std::uint16_t, CursorKind>, 6> builtins{{
       {kCursorGlyphLeftPointer, CursorKind::LeftPointer},
       {kCursorGlyphXterm, CursorKind::XtermText},
       {kCursorGlyphFleur, CursorKind::FleurMove},
       {kCursorGlyphBottomRightCorner, CursorKind::BottomRightResize},
+      {kCursorGlyphVerticalDoubleArrow, CursorKind::VerticalResize},
       {kCursorGlyphWatch, CursorKind::Watch},
   }};
   require(cursor_kind_name(CursorKind::Pixmap) == "pixmap" &&
@@ -59,6 +60,8 @@ int main() {
               cursor_kind_name(CursorKind::FleurMove) == "fleur-move" &&
               cursor_kind_name(CursorKind::BottomRightResize) ==
                   "bottom-right-resize" &&
+              cursor_kind_name(CursorKind::VerticalResize) ==
+                  "vertical-resize" &&
               cursor_kind_name(CursorKind::Watch) == "watch" &&
               cursor_kind_name(CursorKind::HiddenGlyph) == "hidden-glyph",
           "cursor diagnostics use stable professional kind labels");
