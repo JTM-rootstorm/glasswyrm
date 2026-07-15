@@ -6,6 +6,18 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
+  session_launcher_test = executable(
+    'session_launcher_test',
+    files('unit/session_launcher_test.cpp'),
+    dependencies: [gw_session_launcher_dep, dependency('threads')],
+    include_directories: include_directories('..'),
+  )
+  test('session-launcher', session_launcher_test, timeout: 10)
+  test('session-launcher-help', glasswyrm_session_program, args: ['--help'],
+       depends: glasswyrm_session_program, timeout: 10)
+endif
+
 if host_machine.system() == 'linux'
   uinput_m11_protocol_lib = static_library(
     'uinput_m11_protocol',
