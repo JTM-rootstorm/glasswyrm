@@ -318,6 +318,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/subtree_compositor.cpp',
       'input/input_state.cpp',
       'input/input_router.cpp',
+      'input/cursor_model.cpp',
     ),
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),

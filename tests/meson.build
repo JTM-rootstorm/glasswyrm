@@ -243,6 +243,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('input-foundation', input_foundation_test, timeout: 10)
+  cursor_model_test = executable(
+    'cursor_model_test',
+    files('unit/cursor_model_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-model', cursor_model_test, timeout: 10)
   drawable_core_test = executable(
     'drawable_core_test',
     files('unit/drawable_core_test.cpp'),
