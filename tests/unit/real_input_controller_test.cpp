@@ -1,7 +1,10 @@
 #include "glasswyrmd/real_input_controller.hpp"
+#include "glasswyrmd/request_dispatcher.hpp"
 
 #include "input/fake_libinput_api.hpp"
 #include "protocol/x11/event_mask.hpp"
+#include "protocol/x11/byte_cursor.hpp"
+#include "protocol/x11/core.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <linux/input-event-codes.h>
@@ -36,6 +39,23 @@ input::LibinputEvent event(const input::LibinputEventKind kind,
   return result;
 }
 
+gw::protocol::x11::FramedRequest auto_repeat_request(const bool enabled) {
+  namespace x11 = gw::protocol::x11;
+  x11::ByteWriter writer(x11::ByteOrder::LittleEndian);
+  writer.write_u8(static_cast<std::uint8_t>(
+      x11::CoreOpcode::ChangeKeyboardControl));
+  writer.write_u8(0);
+  writer.write_u16(3);
+  writer.write_u32(UINT32_C(1) << 7U);
+  writer.write_u32(enabled ? 1 : 0);
+  x11::FramedRequest request;
+  request.opcode =
+      static_cast<std::uint8_t>(x11::CoreOpcode::ChangeKeyboardControl);
+  request.bytes = std::move(writer).take();
+  request.length_units = 3;
+  return request;
+}
+
 } // namespace
 
 int main() {
@@ -55,6 +75,14 @@ int main() {
   require(controller != nullptr && controller->ready() &&
               controller->input_fd() == 73 && controller->repeat_fd() >= 0,
           error);
+  const auto& mapping = controller->keyboard_mapping();
+  require(mapping && mapping->keysyms_per_keycode == 4 &&
+              mapping->keysyms[38U * 4U] == 'a' &&
+              mapping->keysyms[38U * 4U + 1U] == 'A' &&
+              mapping->keycodes_per_modifier >= 2 &&
+              mapping->modifier_keycodes.size() ==
+                  8U * mapping->keycodes_per_modifier,
+          "controller caches the compiled core mapping profile");
 
   auto motion = event(input::LibinputEventKind::MotionRelative, 2, 1000);
   motion.x = 4.0;
@@ -97,6 +125,52 @@ int main() {
               routed_button->state_before == state::Shift &&
               routed_button->state_after == (state::Shift | state::Button1),
           "pointer buttons compose with xkb modifier state");
+  require(controller->repeat_active(),
+          "repeatable key press arms controller repeat state");
+
+  server::ServerState control_state;
+  server::InputSnapshot control_snapshot;
+  control_snapshot.set_global_auto_repeat = [&controller](const bool enabled) {
+    return controller->set_global_auto_repeat(enabled);
+  };
+  server::DispatchContext control_context{
+      1, 0x400000, 0x1fffff, 1,
+      gw::protocol::x11::ByteOrder::LittleEndian, false,
+      std::move(control_snapshot)};
+  auto control_result = server::dispatch_request(
+      control_state, control_context, auto_repeat_request(false));
+  require(control_result.output.empty() &&
+              control_state.keyboard_control().global_auto_repeat == 0 &&
+              !controller->global_auto_repeat() &&
+              !controller->repeat_active(),
+          "ChangeKeyboardControl disables and cancels real repeat atomically");
+
+  auto release = event(input::LibinputEventKind::Key, 1, 4500);
+  release.code = KEY_A;
+  release.pressed = false;
+  fixture->queue(release);
+  auto disabled_press = event(input::LibinputEventKind::Key, 1, 4600);
+  disabled_press.code = KEY_A;
+  disabled_press.pressed = true;
+  fixture->queue(disabled_press);
+  require(controller->service_backend(0x440001U).success &&
+              !controller->repeat_active(),
+          "repeatable presses stay unarmed while global repeat is disabled");
+  while (controller->take_event()) {}
+
+  control_result = server::dispatch_request(
+      control_state, control_context, auto_repeat_request(true));
+  require(control_result.output.empty() && controller->global_auto_repeat() &&
+              control_state.keyboard_control().global_auto_repeat == 1,
+          "ChangeKeyboardControl re-enables real repeat");
+  release.time_usec = 4700;
+  disabled_press.time_usec = 4800;
+  fixture->queue(release);
+  fixture->queue(disabled_press);
+  require(controller->service_backend(0x440001U).success &&
+              controller->repeat_active(),
+          "subsequent repeatable presses arm after re-enable");
+  while (controller->take_event()) {}
 
   auto inactive = controller->apply_session_state(GWIPC_SESSION_INACTIVE);
   require(inactive.result == GWIPC_SESSION_STATE_ACCEPTED &&

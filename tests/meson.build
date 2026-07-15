@@ -269,6 +269,14 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('input-foundation', input_foundation_test, timeout: 10)
+  keyboard_mapping_dispatch_test = executable(
+    'keyboard_mapping_dispatch_test',
+    files('unit/keyboard_mapping_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('keyboard-mapping-dispatch', keyboard_mapping_dispatch_test,
+       timeout: 10)
   cursor_model_test = executable(
     'cursor_model_test',
     files('unit/cursor_model_test.cpp'),

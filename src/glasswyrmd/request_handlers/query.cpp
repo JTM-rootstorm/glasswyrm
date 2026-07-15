@@ -181,6 +181,28 @@ DispatchResult get_keyboard_mapping(const DispatchContext& context, const x11::F
   const auto first = request.bytes[4], count = request.bytes[5];
   if (first < 8 || count == 0 || static_cast<unsigned>(first) + count > 256)
     return error(context, request, x11::CoreErrorCode::BadValue, first);
+  if (const auto& mapping = context.input.keyboard_mapping) {
+    const auto end = static_cast<unsigned>(first) + count;
+    const auto required =
+        (static_cast<std::size_t>(mapping->maximum_keycode) + 1U) *
+        mapping->keysyms_per_keycode;
+    if (mapping->keysyms_per_keycode == 0 ||
+        mapping->keysyms.size() < required)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    if (first < mapping->minimum_keycode ||
+        end > static_cast<unsigned>(mapping->maximum_keycode) + 1U)
+      return error(context, request, x11::CoreErrorCode::BadValue, first);
+    x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                            mapping->keysyms_per_keycode);
+    for (unsigned keycode = first; keycode < end; ++keycode) {
+      const auto offset =
+          static_cast<std::size_t>(keycode) * mapping->keysyms_per_keycode;
+      for (std::size_t level = 0; level < mapping->keysyms_per_keycode;
+           ++level)
+        reply.write_payload_u32(mapping->keysyms[offset + level]);
+    }
+    return {std::move(reply).finish()};
+  }
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 2);
   for (unsigned keycode = first; keycode < static_cast<unsigned>(first) + count; ++keycode) { reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), false)); reply.write_payload_u32(keysym_for(static_cast<std::uint8_t>(keycode), true)); }
   return {std::move(reply).finish()};
@@ -193,6 +215,17 @@ DispatchResult get_pointer_mapping(const DispatchContext& context, const x11::Fr
 
 DispatchResult get_modifier_mapping(const DispatchContext& context, const x11::FramedRequest& request) {
   if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
+  if (const auto& mapping = context.input.keyboard_mapping) {
+    const auto required =
+        static_cast<std::size_t>(mapping->keycodes_per_modifier) * 8U;
+    if (mapping->keycodes_per_modifier == 0 ||
+        mapping->modifier_keycodes.size() != required)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                            mapping->keycodes_per_modifier);
+    reply.write_payload(mapping->modifier_keycodes);
+    return {std::move(reply).finish()};
+  }
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 2); constexpr std::array<std::uint8_t,16> map{50,62, 0,0, 37,105, 64,108, 0,0, 0,0, 0,0, 0,0}; reply.write_payload(map); return {std::move(reply).finish()};
 }
 
