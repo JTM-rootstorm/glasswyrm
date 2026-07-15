@@ -135,6 +135,15 @@ logind_enabled_before=unknown logind_enabled_after=unknown
 logind_socket_enabled_before=unknown logind_socket_enabled_after=unknown
 mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
 chmod 0700 "$artifact_dir" "$input" "$control"
+
+# A failed diagnostic run can leave transient unit definitions loaded even
+# after their processes have stopped.  Clear those definitions before reusing
+# a guest so systemd-run cannot replay stale services or reject the new run.
+m11_units=(xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service
+  gwcomp-m11.service gwm-m11.service glasswyrm-session-m11.service
+  gw-uinput-m11.service)
+systemctl stop "${m11_units[@]}" >/dev/null 2>&1 || true
+systemctl reset-failed "${m11_units[@]}" >/dev/null 2>&1 || true
 declare -A result
 results=(strict_default strict_m11 sanitizer clang component_builds source_layout
   ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready
