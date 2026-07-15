@@ -123,6 +123,21 @@ int main() {
               converted.records[11].code == 6 && !converted.records[11].pressed,
           "evdev buttons and signed vertical/horizontal detents map to X buttons");
 
+  std::vector<std::uint32_t> extra_button_codes;
+  for (const auto code : {BTN_MIDDLE, BTN_RIGHT, BTN_EXTRA}) {
+    button = event(input::LibinputEventKind::Button, 2, 11500);
+    button.code = code;
+    button.pressed = true;
+    api.queue(button);
+    button.pressed = false;
+    api.queue(button);
+  }
+  const auto extra_buttons = backend.service();
+  for (const auto& record : extra_buttons.records)
+    if (record.pressed) extra_button_codes.push_back(record.code);
+  require(extra_button_codes == std::vector<std::uint32_t>{2, 3, 9},
+          "middle, right, and extra evdev buttons use their core mappings");
+
   auto key = event(input::LibinputEventKind::Key, 1, 12000);
   key.code = KEY_A;
   key.pressed = true;
@@ -159,6 +174,40 @@ int main() {
   api.queue(event(input::LibinputEventKind::Unsupported, 2, 15000));
   const auto bounded = backend.service({1, 1});
   require(bounded.status == input::InputServiceStatus::BudgetExhausted &&
-              bounded.consumed_events == 1 && api.consumed_event_count() == 19,
+              bounded.consumed_events == 1 && api.consumed_event_count() == 25,
           "event and work budgets preserve reactor fairness");
+
+  input::FakeLibinputApi dispatch_failure_api;
+  dispatch_failure_api.queue(device(input::LibinputEventKind::DeviceAdded, 1,
+                                    input::DeviceCapabilityKeyboard));
+  dispatch_failure_api.queue(device(input::LibinputEventKind::DeviceAdded, 2,
+                                    input::DeviceCapabilityPointer));
+  input::LibinputBackend dispatch_failure(dispatch_failure_api);
+  require(dispatch_failure.initialize(paths, 10, 10, error),
+          "failure-injection backend initializes");
+  dispatch_failure_api.fail_dispatch("fixture dispatch failure");
+  require(dispatch_failure.service().status == input::InputServiceStatus::Fatal,
+          "dispatch failure is reported as fatal");
+
+  input::FakeLibinputApi missing_pointer_api;
+  missing_pointer_api.queue(device(input::LibinputEventKind::DeviceAdded, 1,
+                                   input::DeviceCapabilityKeyboard));
+  input::LibinputBackend missing_pointer(missing_pointer_api);
+  require(!missing_pointer.initialize(paths, 10, 10, error) &&
+              error.find("keyboard and pointer") != std::string::npos,
+          "startup fails without both required capabilities");
+
+  input::FakeLibinputApi resume_failure_api;
+  resume_failure_api.queue(device(input::LibinputEventKind::DeviceAdded, 1,
+                                  input::DeviceCapabilityKeyboard));
+  resume_failure_api.queue(device(input::LibinputEventKind::DeviceAdded, 2,
+                                  input::DeviceCapabilityPointer));
+  input::LibinputBackend resume_failure(resume_failure_api);
+  require(resume_failure.initialize(paths, 10, 10, error) &&
+              resume_failure.suspend(error),
+          "resume-failure backend suspends");
+  resume_failure_api.fail_resume("fixture resume failure");
+  require(!resume_failure.resume(error) &&
+              error.find("fixture resume failure") != std::string::npos,
+          "resume failure is returned to the caller");
 }
