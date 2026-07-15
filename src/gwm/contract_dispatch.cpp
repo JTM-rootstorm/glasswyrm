@@ -1,5 +1,7 @@
 #include "gwm/contract_dispatch.hpp"
 
+#include "wm/interactive_policy.hpp"
+
 #include <glasswyrm/ipc.h>
 
 #include <cstddef>
@@ -177,10 +179,34 @@ bool preflight_policy(const glasswyrm::wm::PolicyState& policy) {
   return bytes <= kMaximumQueuedBytes;
 }
 
+gwipc_policy_bindings_upsert default_bindings() {
+  const glasswyrm::wm::InteractiveBindings bindings;
+  gwipc_policy_bindings_upsert result{};
+  result.struct_size = sizeof(result);
+  result.move_modifiers = bindings.move_modifiers;
+  result.resize_modifiers = bindings.resize_modifiers;
+  result.close_modifiers = bindings.close_modifiers;
+  result.move_button = bindings.move_button;
+  result.resize_button = bindings.resize_button;
+  result.close_keysym = bindings.close_keysym;
+  result.minimum_width = bindings.minimum_width;
+  result.minimum_height = bindings.minimum_height;
+  result.raise_on_focus = bindings.raise_on_focus;
+  result.consume_wm_bindings = bindings.consume_wm_bindings;
+  return result;
+}
+
+bool preflight_interactive_policy(const glasswyrm::wm::PolicyState& policy) {
+  if (!preflight_policy(policy)) return false;
+  return policy.windows.size() + 4U <= kMaximumQueuedMessages;
+}
+
 bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_message,
                     const gwipc_policy_commit& commit,
-                    const glasswyrm::wm::PolicyState& policy) {
-  const auto count = static_cast<std::uint32_t>(policy.output_order.size());
+                    const glasswyrm::wm::PolicyState& policy,
+                    const bool interactive) {
+  const auto count = static_cast<std::uint32_t>(
+      policy.output_order.size() + (interactive ? 1U : 0U));
   gwipc_snapshot_begin begin{};
   begin.struct_size = sizeof(begin);
   begin.snapshot_id = commit.commit_id;
@@ -190,6 +216,13 @@ bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_me
   if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                        gwipc_control_encode_snapshot_begin))
     return false;
+  if (interactive) {
+    const auto bindings = default_bindings();
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, 0, bindings,
+                          gwipc_contract_encode_policy_bindings_upsert))
+      return false;
+  }
   for (const auto id : policy.output_order) {
     const auto state = state_from(policy.windows.at(id));
     if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_WINDOW_STATE,
@@ -211,7 +244,7 @@ bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_me
   ack.producer_generation = commit.producer_generation;
   ack.applied_generation = policy.generation;
   ack.policy_hash = policy.hash;
-  ack.window_count = count;
+  ack.window_count = static_cast<std::uint32_t>(policy.output_order.size());
   ack.result = GWIPC_POLICY_ACCEPTED;
   return enqueue_contract(connection, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
                           GWIPC_FLAG_REPLY,
@@ -335,8 +368,12 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
       }
       peer.last_commit_id = value->commit_id;
       peer.last_generation = value->producer_generation;
-      auto evaluation = peer.transaction.commit(value->producer_generation,
-                                                 preflight_policy);
+      const bool interactive =
+          (gwipc_connection_peer_info(connection).capabilities &
+           GWIPC_CAP_INTERACTIVE_POLICY) != 0;
+      auto evaluation = peer.transaction.commit(
+          value->producer_generation,
+          interactive ? preflight_interactive_policy : preflight_policy);
       if (!evaluation) {
         if (evaluation.error == glasswyrm::wm::EvaluationError::OutputFailure)
           return false;
@@ -349,7 +386,14 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
                      static_cast<unsigned>(result));
         return true;
       }
-      if (!enqueue_policy(connection, message, *value, evaluation.policy))
+      if (interactive) {
+        const glasswyrm::wm::InteractiveBindings bindings;
+        evaluation.policy.hash = glasswyrm::wm::interactive_policy_hash(
+            evaluation.policy, bindings);
+        peer.transaction.set_committed_policy_hash(evaluation.policy.hash);
+      }
+      if (!enqueue_policy(connection, message, *value, evaluation.policy,
+                          interactive))
         return false;
       accepted = true;
       std::fprintf(stderr,

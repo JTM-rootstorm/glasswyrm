@@ -382,7 +382,11 @@ endif
 if get_option('gwm')
   gw_wm_policy_lib = static_library(
     'gw-wm-policy',
-    files('wm/policy_engine.cpp', 'wm/transaction.cpp'),
+    files(
+      'wm/interactive_policy.cpp',
+      'wm/policy_engine.cpp',
+      'wm/transaction.cpp',
+    ),
     include_directories: include_directories('.'),
   )
   gw_wm_policy_dep = declare_dependency(
