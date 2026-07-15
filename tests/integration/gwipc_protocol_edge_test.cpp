@@ -503,7 +503,9 @@ void test_lifecycle_capabilities_flags_and_descriptors() {
                   gw::ipc::wire::encode(surface)) ==
               GWIPC_STATUS_CAPABILITY_MISMATCH,
           "cursor surfaces require their dedicated capability");
-  metadata.connection->peer.capabilities |= GWIPC_CAP_CURSOR_SURFACE;
+  metadata.connection->peer.capabilities |=
+      GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_FD_PASSING |
+      GWIPC_CAP_MEMFD_BUFFERS | GWIPC_CAP_DAMAGE_REGIONS;
   require(enqueue(metadata.connection, GWIPC_MESSAGE_SURFACE_UPSERT, 0,
                   gw::ipc::wire::encode(surface)) == GWIPC_STATUS_OK,
           "cursor presentation flag accepts its negotiated capability");

@@ -37,7 +37,8 @@ constexpr std::uint64_t kCommonCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
 constexpr std::uint64_t kOfferedCapabilities =
-    kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE;
+    kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE |
+    GWIPC_CAP_CURSOR_SURFACE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 

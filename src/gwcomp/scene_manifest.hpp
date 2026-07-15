@@ -11,6 +11,7 @@ namespace gw::compositor {
 struct SceneManifestResult {
   std::uint64_t hash{};
   std::uint32_t surface_count{};
+  std::uint32_t cursor_count{};
 };
 
 struct PreparedSceneManifest {

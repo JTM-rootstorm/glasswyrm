@@ -538,6 +538,14 @@ if get_option('gwcomp') and get_option('headless_backend')
   )
   test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10)
 
+  gwcomp_cursor_surface_test = executable(
+    'gwcomp_cursor_surface_test',
+    files('unit/gwcomp_cursor_surface_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-cursor-surface', gwcomp_cursor_surface_test, timeout: 10)
+
   gwcomp_metadata_process_test = executable(
     'gwcomp_metadata_process_test',
     files('integration/gwcomp_metadata_process_test.cpp'),
