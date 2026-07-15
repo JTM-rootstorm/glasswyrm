@@ -2,11 +2,13 @@
 #include <glasswyrm/ipc/lifecycle.h>
 #include <glasswyrm/ipc/input.h>
 #include <glasswyrm/ipc/policy.h>
+#include <glasswyrm/ipc/session.h>
 
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
+#include "ipc/wire/session_contract.hpp"
 
 #include <algorithm>
 #include <new>
@@ -23,7 +25,9 @@ using ContractValue = std::variant<w::OutputUpsert, w::OutputRemove,
     w::PolicyCommit, w::PolicyWindowState, w::PolicyAcknowledged,
     w::PolicyLifecycleWindowUpsert, w::SurfacePolicyUpsert,
     w::SyntheticMotion, w::SyntheticButton, w::SyntheticKey,
-    w::SyntheticBarrier, w::SyntheticInputAcknowledged>;
+    w::SyntheticBarrier, w::SyntheticInputAcknowledged,
+    w::PolicyBindingsUpsert, w::SessionStateChange,
+    w::SessionStateAcknowledged>;
 struct gwipc_decoded_contract {
   std::uint16_t type{};
   ContractValue value{w::OutputRemove{}};
@@ -44,6 +48,9 @@ struct gwipc_decoded_contract {
   gwipc_synthetic_key synthetic_key{};
   gwipc_synthetic_barrier synthetic_barrier{};
   gwipc_synthetic_input_acknowledged synthetic_input_acknowledged{};
+  gwipc_policy_bindings_upsert policy_bindings_upsert{};
+  gwipc_session_state_change session_state_change{};
+  gwipc_session_state_acknowledged session_state_acknowledged{};
 };
 
 namespace {
@@ -96,6 +103,8 @@ SIMPLE_ENCODE(gwipc_policy_context_upsert, policy_context_upsert, w::PolicyConte
 SIMPLE_ENCODE(gwipc_policy_window_remove, policy_window_remove, w::PolicyWindowRemove, {v->window_id})
 SIMPLE_ENCODE(gwipc_policy_commit, policy_commit, w::PolicyCommit, {v->commit_id,v->producer_generation,v->flags})
 SIMPLE_ENCODE(gwipc_policy_acknowledged, policy_acknowledged, w::PolicyAcknowledged, {v->commit_id,v->producer_generation,v->applied_generation,v->policy_hash,v->window_count,static_cast<w::PolicyResult>(v->result)})
+SIMPLE_ENCODE(gwipc_session_state_change, session_state_change, w::SessionStateChange, {v->generation,static_cast<w::SessionState>(v->state),v->flags})
+SIMPLE_ENCODE(gwipc_session_state_acknowledged, session_state_acknowledged, w::SessionStateAcknowledged, {v->generation,static_cast<w::SessionState>(v->state),static_cast<w::SessionStateResult>(v->result),v->flags})
 #undef SIMPLE_ENCODE
 
 gwipc_status gwipc_contract_encode_output_upsert(const gwipc_output_upsert* v, gwipc_contract_payload** out) {
@@ -136,6 +145,9 @@ gwipc_status gwipc_contract_encode_policy_lifecycle_window_upsert(const gwipc_po
 gwipc_status gwipc_contract_encode_surface_policy_upsert(const gwipc_surface_policy_upsert* v, gwipc_contract_payload** out) {
   if(!valid_input(v)||!out||v->focused>1||v->managed>1||v->decoration_eligible>1||v->override_redirect>1||v->attention_requested>1)return GWIPC_STATUS_INVALID_ARGUMENT;
   return make_payload(w::SurfacePolicyUpsert{v->surface_id,v->x11_window_id,v->workspace_id,static_cast<w::PolicyWindowType>(v->window_type),static_cast<w::PolicyAppliedState>(v->applied_state),v->focused!=0,v->managed!=0,v->decoration_eligible!=0,v->override_redirect!=0,v->attention_requested!=0,static_cast<uint16_t>(v->fullscreen_eligible),static_cast<uint16_t>(v->direct_scanout_eligible),v->flags},out); }
+gwipc_status gwipc_contract_encode_policy_bindings_upsert(const gwipc_policy_bindings_upsert* v, gwipc_contract_payload** out) {
+  if(!valid_input(v)||!out||v->reserved16||v->reserved_buttons||v->reserved_flags||v->raise_on_focus>1||v->consume_wm_bindings>1)return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(w::PolicyBindingsUpsert{v->move_modifiers,v->resize_modifiers,v->close_modifiers,v->move_button,v->resize_button,v->close_keysym,v->minimum_width,v->minimum_height,v->raise_on_focus!=0,v->consume_wm_bindings!=0},out); }
 
 const uint8_t* gwipc_contract_payload_data(const gwipc_contract_payload* p,size_t* n) { if(n)*n=p?p->bytes.size():0; return !p||p->bytes.empty()?nullptr:p->bytes.data(); }
 void gwipc_contract_payload_destroy(gwipc_contract_payload* p) { delete p; }
@@ -158,6 +170,9 @@ gwipc_status gwipc_contract_decode_message(const gwipc_message* m, gwipc_decoded
       DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_MOTION,w::SyntheticMotion) DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_BUTTON,w::SyntheticButton)
       DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_KEY,w::SyntheticKey) DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_BARRIER,w::SyntheticBarrier)
       DECODE_CASE(GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,w::SyntheticInputAcknowledged)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,w::PolicyBindingsUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_SESSION_STATE_CHANGE,w::SessionStateChange)
+      DECODE_CASE(GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,w::SessionStateAcknowledged)
       default: delete d; return GWIPC_STATUS_INVALID_ARGUMENT; }
 #undef DECODE_CASE
     if(s!=w::CodecStatus::Ok){delete d;return codec_status(s);}
@@ -188,6 +203,9 @@ SIMPLE_ACCESS(synthetic_button,GWIPC_MESSAGE_SYNTHETIC_BUTTON,w::SyntheticButton
 SIMPLE_ACCESS(synthetic_key,GWIPC_MESSAGE_SYNTHETIC_KEY,w::SyntheticKey,{sizeof(o),v.input_id,v.time_ms,v.keycode,v.pressed,v.reserved16,v.flags,{}})
 SIMPLE_ACCESS(synthetic_barrier,GWIPC_MESSAGE_SYNTHETIC_BARRIER,w::SyntheticBarrier,{sizeof(o),v.input_id,v.flags,{}})
 SIMPLE_ACCESS(synthetic_input_acknowledged,GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED,w::SyntheticInputAcknowledged,{sizeof(o),v.input_id,v.time_ms,static_cast<gwipc_synthetic_input_result>(v.result),v.root_x,v.root_y,v.pointer_window,v.focus_window,v.state,v.reserved16,v.delivered_event_count,v.flags,{}})
+SIMPLE_ACCESS(policy_bindings_upsert,GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,w::PolicyBindingsUpsert,{sizeof(o),v.move_modifiers,v.resize_modifiers,v.close_modifiers,0,v.move_button,v.resize_button,0,v.close_keysym,v.minimum_width,v.minimum_height,(uint8_t)v.raise_on_focus,(uint8_t)v.consume_wm_bindings,0,{}})
+SIMPLE_ACCESS(session_state_change,GWIPC_MESSAGE_SESSION_STATE_CHANGE,w::SessionStateChange,{sizeof(o),v.generation,(gwipc_session_state)v.state,v.flags,{}})
+SIMPLE_ACCESS(session_state_acknowledged,GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,w::SessionStateAcknowledged,{sizeof(o),v.generation,(gwipc_session_state)v.state,(gwipc_session_state_result)v.result,v.flags,{}})
 #undef SIMPLE_ACCESS
 
 const gwipc_output_upsert* gwipc_decoded_output_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_OUTPUT_UPSERT)return nullptr;const auto&v=std::get<w::OutputUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->output_upsert;o={sizeof(o),v.output_id,(uint8_t)v.enabled,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.physical_pixel_width,v.physical_pixel_height,v.refresh_millihertz,v.scale_numerator,v.scale_denominator,(gwipc_transform)v.transform,color(v.color),{}};return&o;}

@@ -18,6 +18,26 @@ for symbol in gwipc_get_api_version gwipc_listener_create \
   }
 done
 
+for symbol in gwipc_contract_encode_synthetic_motion \
+  gwipc_decoded_synthetic_input_acknowledged; do
+  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.5$" || {
+    printf 'missing API 0.5 symbol version: %s\n' "$symbol" >&2
+    exit 1
+  }
+done
+
+for symbol in gwipc_contract_encode_policy_bindings_upsert \
+  gwipc_decoded_policy_bindings_upsert \
+  gwipc_contract_encode_session_state_change \
+  gwipc_decoded_session_state_change \
+  gwipc_contract_encode_session_state_acknowledged \
+  gwipc_decoded_session_state_acknowledged; do
+  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.6$" || {
+    printf 'missing API 0.6 symbol version: %s\n' "$symbol" >&2
+    exit 1
+  }
+done
+
 for symbol in gwipc_contract_encode_policy_lifecycle_window_upsert \
   gwipc_contract_encode_surface_policy_upsert \
   gwipc_decoded_policy_lifecycle_window_upsert \

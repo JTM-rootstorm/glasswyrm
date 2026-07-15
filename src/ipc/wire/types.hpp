@@ -41,11 +41,14 @@ enum class MessageType : std::uint16_t {
   PolicyCommit = 0x0210,
   PolicyWindowState = 0x0211,
   PolicyAcknowledged = 0x0212,
+  PolicyBindingsUpsert = 0x0213,
   SyntheticMotion = 0x0300,
   SyntheticButton = 0x0301,
   SyntheticKey = 0x0302,
   SyntheticBarrier = 0x0303,
   SyntheticInputAcknowledged = 0x0310,
+  SessionStateChange = 0x0400,
+  SessionStateAcknowledged = 0x0401,
 };
 
 enum class MessageFlag : std::uint32_t {
@@ -87,9 +90,12 @@ enum class Capability : std::uint64_t {
   WindowPolicy = 1ULL << 10U,
   WindowLifecycle = 1ULL << 11U,
   SyntheticInput = 1ULL << 12U,
+  SessionState = 1ULL << 13U,
+  InteractivePolicy = 1ULL << 14U,
+  CursorSurface = 1ULL << 15U,
 };
 
-inline constexpr std::uint64_t kKnownCapabilities = 0x1fffULL;
+inline constexpr std::uint64_t kKnownCapabilities = 0xffffULL;
 
 enum class RejectReason : std::uint16_t {
   IncompatibleVersion = 1,

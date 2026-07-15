@@ -90,11 +90,14 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_POLICY_COMMIT:
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
+    case GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT:
     case GWIPC_MESSAGE_SYNTHETIC_MOTION:
     case GWIPC_MESSAGE_SYNTHETIC_BUTTON:
     case GWIPC_MESSAGE_SYNTHETIC_KEY:
     case GWIPC_MESSAGE_SYNTHETIC_BARRIER:
     case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED:
+    case GWIPC_MESSAGE_SESSION_STATE_CHANGE:
+    case GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED:
       return true;
     default:
       return false;
@@ -287,7 +290,8 @@ gwipc_status validate_established(gwipc_connection& connection,
     return unsupported_message(connection, envelope);
   const auto status = validate_application(
       connection, static_cast<std::uint16_t>(envelope.type), envelope.flags,
-      payload, fds, connection.incoming_snapshot);
+      payload, fds, connection.incoming_snapshot,
+      MessageDirection::Incoming);
   if (status == GWIPC_STATUS_OK) return GWIPC_STATUS_OK;
   auto code = wire::ProtocolErrorCode::MalformedPayload;
   if (status == GWIPC_STATUS_CAPABILITY_MISMATCH)
@@ -328,6 +332,7 @@ gwipc_status queue_received(gwipc_connection& connection,
     message->fds = std::move(record.fds);
     connection.incoming.push_back(message.get());
     message.release();
+    commit_incoming_request(connection, envelope, payload);
   } catch (...) {
     rollback_incoming_request(connection, envelope);
     return GWIPC_STATUS_OUT_OF_MEMORY;

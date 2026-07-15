@@ -82,6 +82,7 @@ void exact_goldens() {
                           0};
   PolicyAcknowledged ack{
       20, 2, 3, 0x0102030405060708ULL, 1, PolicyResult::Accepted};
+  PolicyBindingsUpsert bindings{8, 8, 8, 1, 3, 0xffc1, 96, 64, true, true};
   require(encode(context) == hex("01000000020000000300000000000000fcffffff05000"
                                  "00080020000e00100000000000000000000"),
           "context exact golden");
@@ -101,12 +102,17 @@ void exact_goldens() {
   require(encode(ack) == hex("1400000000000000020000000000000003000000000000000"
                              "8070605040302010100000001000000"),
           "ack exact golden");
+  require(encode(bindings) ==
+              hex("080008000800000001030000c1ff00006000000040000000"
+                  "0101000000000000"),
+          "interactive bindings exact golden");
   malformed_prefixes(context, "truncated context");
   malformed_prefixes(window, "truncated window");
   malformed_prefixes(remove, "truncated remove");
   malformed_prefixes(commit, "truncated commit");
   malformed_prefixes(state, "truncated state");
   malformed_prefixes(ack, "truncated ack");
+  malformed_prefixes(bindings, "truncated bindings");
 }
 
 void invalid_values() {
@@ -180,6 +186,26 @@ void invalid_values() {
   PolicyAcknowledged da;
   require(decode(encode(ack), da) == CodecStatus::InvalidValue,
           "invalid result rejected");
+  PolicyBindingsUpsert bindings{8, 8, 8, 1, 3, 0xffc1, 96, 64, true, true};
+  PolicyBindingsUpsert decoded_bindings;
+  auto bb = encode(bindings);
+  bb[6] = 1;
+  require(decode(bb, decoded_bindings) == CodecStatus::InvalidValue,
+          "bindings reserved fields are rejected");
+  bindings.move_modifiers = UINT16_C(0x0100);
+  require(decode(encode(bindings), decoded_bindings) ==
+              CodecStatus::InvalidValue,
+          "bindings reject unknown core modifier bits");
+  bindings.move_modifiers = 8;
+  bindings.resize_button = 10;
+  require(decode(encode(bindings), decoded_bindings) ==
+              CodecStatus::InvalidValue,
+          "bindings reject buttons outside the core policy range");
+  bindings.resize_button = 3;
+  bindings.minimum_width = 16385;
+  require(decode(encode(bindings), decoded_bindings) ==
+              CodecStatus::InvalidValue,
+          "bindings reject minimum dimensions beyond policy bounds");
 }
 } // namespace
 int main() {

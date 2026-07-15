@@ -4,6 +4,7 @@
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
+#include "ipc/wire/session_contract.hpp"
 
 #include <algorithm>
 #include <new>
@@ -19,9 +20,12 @@ struct CorrelationChanges {
   bool frame_commit_inserted{};
   bool policy_commit_inserted{};
   bool synthetic_input_inserted{};
+  bool session_state_inserted{};
   bool frame_acknowledged{};
   bool policy_acknowledged{};
   bool synthetic_input_acknowledged{};
+  bool session_state_acknowledged{};
+  std::uint64_t session_generation{};
 };
 
 bool synthetic_input_id(std::uint16_t type,
@@ -98,6 +102,22 @@ gwipc_status prepare_request(gwipc_connection& connection,
     connection.pending_synthetic_inputs.emplace(changes.sequence, input_id);
     changes.synthetic_input_inserted = true;
   }
+  if (message.type == GWIPC_MESSAGE_SESSION_STATE_CHANGE) {
+    wire::SessionStateChange value;
+    if (wire::decode(payload, value) != wire::CodecStatus::Ok)
+      return GWIPC_STATUS_PROTOCOL_ERROR;
+    if (value.generation <= connection.last_outgoing_session_generation)
+      return GWIPC_STATUS_INVALID_STATE;
+    if (connection.pending_session_states.size() >=
+        connection.config.maximum_queued_messages)
+      return GWIPC_STATUS_LIMIT_EXCEEDED;
+    connection.pending_session_states.emplace(
+        changes.sequence,
+        SessionCorrelation{value.generation,
+                           static_cast<std::uint16_t>(value.state)});
+    changes.session_state_inserted = true;
+    changes.session_generation = value.generation;
+  }
   return GWIPC_STATUS_OK;
 }
 
@@ -135,6 +155,17 @@ gwipc_status prepare_reply(gwipc_connection& connection,
       return GWIPC_STATUS_INVALID_STATE;
     changes.synthetic_input_acknowledged = true;
   }
+  if (message.type == GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) {
+    wire::SessionStateAcknowledged value;
+    const auto expected =
+        connection.incoming_session_states.find(message.reply_to);
+    if (wire::decode(payload, value) != wire::CodecStatus::Ok ||
+        expected == connection.incoming_session_states.end() ||
+        expected->second.generation != value.generation ||
+        expected->second.state != static_cast<std::uint16_t>(value.state))
+      return GWIPC_STATUS_INVALID_STATE;
+    changes.session_state_acknowledged = true;
+  }
   return GWIPC_STATUS_OK;
 }
 
@@ -148,6 +179,8 @@ void rollback_requests(gwipc_connection& connection,
     connection.pending_policy_commits.erase(changes.sequence);
   if (changes.synthetic_input_inserted)
     connection.pending_synthetic_inputs.erase(changes.sequence);
+  if (changes.session_state_inserted)
+    connection.pending_session_states.erase(changes.sequence);
 }
 
 void commit_replies(gwipc_connection& connection,
@@ -158,6 +191,8 @@ void commit_replies(gwipc_connection& connection,
     connection.incoming_policy_commits.erase(changes.reply_to);
   if (changes.synthetic_input_acknowledged)
     connection.incoming_synthetic_inputs.erase(changes.reply_to);
+  if (changes.session_state_acknowledged)
+    connection.incoming_session_states.erase(changes.reply_to);
 }
 
 bool valid_outgoing_message(const gwipc_outgoing_message& message) noexcept {
@@ -225,6 +260,19 @@ gwipc_status validate_incoming_reply(
           "synthetic input acknowledgement does not match input");
     connection.pending_synthetic_inputs.erase(expected);
   }
+  if (envelope.type == wire::MessageType::SessionStateAcknowledged) {
+    wire::SessionStateAcknowledged value;
+    const auto expected =
+        connection.pending_session_states.find(envelope.reply_to);
+    if (expected == connection.pending_session_states.end() ||
+        wire::decode(payload, value) != wire::CodecStatus::Ok ||
+        expected->second.generation != value.generation ||
+        expected->second.state != static_cast<std::uint16_t>(value.state))
+      return protocol_failure(
+          connection, wire::ProtocolErrorCode::UnexpectedReply, envelope,
+          "session state acknowledgement does not match request");
+    connection.pending_session_states.erase(expected);
+  }
   const bool protocol_error = envelope.type == wire::MessageType::ProtocolError;
   if (connection.pending_replies.erase(envelope.reply_to) == 0 &&
       !(protocol_error && envelope.reply_to > 0 &&
@@ -272,6 +320,25 @@ gwipc_status track_incoming_request(
           GWIPC_STATUS_LIMIT_EXCEEDED);
     connection.incoming_synthetic_inputs.emplace(envelope.sequence, input_id);
   }
+  if (envelope.type == wire::MessageType::SessionStateChange) {
+    wire::SessionStateChange value;
+    if (wire::decode(payload, value) != wire::CodecStatus::Ok ||
+        value.generation <= connection.last_incoming_session_generation)
+      return protocol_failure(connection,
+                              wire::ProtocolErrorCode::MalformedPayload,
+                              envelope,
+                              "session generation is not strictly increasing");
+    if (connection.incoming_session_states.size() >=
+        connection.config.maximum_queued_messages)
+      return protocol_failure(connection, wire::ProtocolErrorCode::LimitExceeded,
+                              envelope,
+                              "session acknowledgement tracking limit exceeded",
+                              GWIPC_STATUS_LIMIT_EXCEEDED);
+    connection.incoming_session_states.emplace(
+        envelope.sequence,
+        SessionCorrelation{value.generation,
+                           static_cast<std::uint16_t>(value.state)});
+  }
   return GWIPC_STATUS_OK;
 }
 
@@ -286,6 +353,17 @@ void rollback_incoming_request(gwipc_connection& connection,
       envelope.type == wire::MessageType::SyntheticKey ||
       envelope.type == wire::MessageType::SyntheticBarrier)
     connection.incoming_synthetic_inputs.erase(envelope.sequence);
+  if (envelope.type == wire::MessageType::SessionStateChange)
+    connection.incoming_session_states.erase(envelope.sequence);
+}
+
+void commit_incoming_request(gwipc_connection& connection,
+                             const wire::Envelope& envelope,
+                             std::span<const std::uint8_t> payload) noexcept {
+  if (envelope.type != wire::MessageType::SessionStateChange) return;
+  wire::SessionStateChange value;
+  if (wire::decode(payload, value) == wire::CodecStatus::Ok)
+    connection.last_incoming_session_generation = value.generation;
 }
 
 gwipc_status enqueue_with_sequence(gwipc_connection& connection,
@@ -300,7 +378,8 @@ gwipc_status enqueue_with_sequence(gwipc_connection& connection,
   const auto fds = std::span(message.fds, message.fd_count);
   auto snapshot = connection.outgoing_snapshot;
   const auto validation = validate_application(
-      connection, message.type, message.flags, payload, fds, snapshot);
+      connection, message.type, message.flags, payload, fds, snapshot,
+      MessageDirection::Outgoing);
   if (validation != GWIPC_STATUS_OK) return validation;
 
   CorrelationChanges changes;
@@ -325,6 +404,8 @@ gwipc_status enqueue_with_sequence(gwipc_connection& connection,
     return status;
   }
   connection.outgoing_snapshot = snapshot;
+  if (changes.session_state_inserted)
+    connection.last_outgoing_session_generation = changes.session_generation;
   commit_replies(connection, changes);
   out_sequence = changes.sequence;
   return GWIPC_STATUS_OK;
