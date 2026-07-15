@@ -308,9 +308,15 @@ result[strict_m11]=passed result[m4_m10_regressions]=passed
 meson setup "$asan" "$source_dir" --wipe -Dlibinput_backend=true -Ddrm_backend=true -Dasan=true -Dubsan=true
 meson compile -C "$asan"; meson test -C "$asan" --print-errorlogs
 result[sanitizer]=passed
-CC=clang CXX=clang++ meson setup "$clang_build" "$source_dir" --wipe -Dwerror=true -Dlibinput_backend=true -Ddrm_backend=true
-meson compile -C "$clang_build"; meson test -C "$clang_build" --print-errorlogs
-result[clang]=passed
+if command -v clang >/dev/null && command -v clang++ >/dev/null; then
+  CC=clang CXX=clang++ meson setup "$clang_build" "$source_dir" --wipe \
+    -Dwerror=true -Dlibinput_backend=true -Ddrm_backend=true
+  meson compile -C "$clang_build"
+  meson test -C "$clang_build" --print-errorlogs
+  result[clang]=passed
+else
+  result[clang]=unavailable
+fi
 meson setup "$server" "$source_dir" --wipe -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false -Dlibinput_backend=true
 meson setup "$server_standalone" "$source_dir" --wipe -Dwerror=true \
   -Dlibgwipc=false -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false \
@@ -722,9 +728,10 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     key,sep,value=line.partition('=')
     if sep: facts[key]=value
-required='strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence'.split()
+required='strict_default strict_m11 sanitizer component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence'.split()
 identity={'api_version':'0.6.0','soversion':'0','wire_version':'1.0','x_servers_absent':'true','mesa_absent':'true','drm_mode':'1024x768','pointer_profile':'relative-only','xterm_version':'XTerm(410)','xterm_sha256':'7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f'}
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
+if facts.get('clang') not in {'passed','unavailable'}: errors.append('clang must be passed or unavailable')
 errors += [f'{k} must be {v}' for k,v in identity.items() if facts.get(k)!=v]
 for k in ('compiler_c','compiler_cxx','meson_version','ninja_version','systemd_version','libinput_version','libxkbcommon_version','xkeyboard_config_version'):
   if facts.get(k) in (None,'','unknown','unavailable'): errors.append(f'{k} must be recorded')
@@ -733,7 +740,9 @@ for k in ('keyboard_device','pointer_device','canonical_hash','scanout_hash','mi
   if facts.get(k) in (None,'','unknown'): errors.append(f'{k} must be recorded')
 if facts.get('canonical_hash') != facts.get('scanout_hash'): errors.append('canonical and scanout hashes differ')
 if facts.get('mirror_sha256') != facts.get('screenshot_sha256'): errors.append('mirror and screenshot hashes differ')
-payload={'required_base_commit':base,'tested_commit':tested,'facts':facts,'results':{k:facts.get(k,'unknown') for k in required},'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
+results={k:facts.get(k,'unknown') for k in required}
+results['clang']=facts.get('clang','unknown')
+payload={'required_base_commit':base,'tested_commit':tested,'facts':facts,'results':results,'passed':requested=='true' and not errors,'failure_stage':failure or facts.get('failure_stage',''),'evidence_errors':errors}
 pathlib.Path(out).write_text(json.dumps(payload,indent=2)+'\n')
 if requested=='true' and errors: raise SystemExit(2)
 PY
