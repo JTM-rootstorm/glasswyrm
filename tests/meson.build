@@ -271,6 +271,13 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('selection-store', selection_store_test, timeout: 10)
+  selection_dispatch_test = executable(
+    'selection_dispatch_test',
+    files('unit/selection_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('selection-dispatch', selection_dispatch_test, timeout: 10)
   grab_state_test = executable(
     'grab_state_test',
     files('unit/grab_state_test.cpp'),
@@ -977,6 +984,7 @@ if get_option('glasswyrmd')
     ['glasswyrmd-malformed-client', 'glasswyrmd_malformed_client_test.cpp'],
     ['glasswyrmd-lifecycle', 'glasswyrmd_lifecycle_test.cpp'],
     ['glasswyrmd-core-requests', 'glasswyrmd_core_requests_test.cpp'],
+    ['glasswyrmd-selection', 'glasswyrmd_selection_test.cpp'],
   ]
     integration_program = executable(
       integration_case[0],

@@ -23,7 +23,8 @@ ClientConnection::ClientConnection(const int descriptor,
                                    DrawableDamageHandler damage_handler,
                                    ExposeIntentHandler expose_handler,
                                    CompatibilityTrace* trace,
-                                   InputSnapshotProvider input_snapshot_provider)
+                                   InputSnapshotProvider input_snapshot_provider,
+                                   ProtocolEventHandler protocol_event_handler)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -34,7 +35,8 @@ ClientConnection::ClientConnection(const int descriptor,
       damage_handler_(std::move(damage_handler)),
       expose_handler_(std::move(expose_handler)),
       trace_(trace),
-      input_snapshot_provider_(std::move(input_snapshot_provider)) {
+      input_snapshot_provider_(std::move(input_snapshot_provider)),
+      protocol_event_handler_(std::move(protocol_event_handler)) {
   if (trace_) trace_->connection(identifier_, "accepted");
 }
 
@@ -241,6 +243,8 @@ void ClientConnection::process_input(
           damage_handler_(result_packet.drawable_damage);
         if (!result_packet.expose_intents.empty() && expose_handler_)
           expose_handler_(result_packet.expose_intents);
+        if (!result_packet.protocol_events.empty() && protocol_event_handler_)
+          protocol_event_handler_(result_packet.protocol_events);
         if (result_packet.kind == DispatchKind::DeferredLifecycle &&
             (!deferred_handler_ || !deferred_handler_(*this, result_packet))) {
           close_with_log("deferred lifecycle handoff failed");
