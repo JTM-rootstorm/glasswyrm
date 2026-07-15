@@ -161,6 +161,25 @@ std::uint64_t policy_hash(const PolicyState& policy) {
 
 }  // namespace
 
+std::uint64_t interactive_policy_hash(
+    const PolicyState& policy, const InteractiveBindings& bindings) noexcept {
+  std::uint64_t hash = UINT64_C(14695981039346656037);
+  constexpr std::string_view tag = "glasswyrm-policy-v2";
+  for (const char byte : tag) hash_byte(hash, static_cast<std::uint8_t>(byte));
+  hash_little(hash, policy.hash);
+  hash_little(hash, bindings.move_modifiers);
+  hash_little(hash, bindings.resize_modifiers);
+  hash_little(hash, bindings.close_modifiers);
+  hash_little(hash, bindings.move_button);
+  hash_little(hash, bindings.resize_button);
+  hash_little(hash, bindings.close_keysym);
+  hash_little(hash, bindings.minimum_width);
+  hash_little(hash, bindings.minimum_height);
+  hash_little(hash, static_cast<std::uint8_t>(bindings.raise_on_focus));
+  hash_little(hash, static_cast<std::uint8_t>(bindings.consume_wm_bindings));
+  return hash;
+}
+
 std::array<std::uint8_t, 64> encode_policy_window_state(
     const WindowState& state) noexcept {
   std::array<std::uint8_t, 64> bytes{};
