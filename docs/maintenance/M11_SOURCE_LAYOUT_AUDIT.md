@@ -1,6 +1,6 @@
 # Milestone 11 Source Layout Audit
 
-Status: current repository gate passes; repeat after final Milestone 11 edits.
+Status: final Milestone 11 source-layout review passes.
 
 The M10 exception for `src/ipc/connection.cpp` has been removed. The public C
 ABI/lifecycle shell is now 70 lines, with private work divided into handshake,
@@ -20,7 +20,26 @@ handlers and stores (cursor, grabs, selections, keyboard control),
 `src/wm/interactive_policy.*`, `src/gwcomp/session_state_coordinator.*`, and
 the standalone session launcher. No new M11 source file is allowlisted.
 
-The current `tests/tools/source_layout_test.sh` run passes with eight advisory
-function-review findings and no file-budget or allowlist failure. The line
-counts above describe the current working implementation; repeat the gate
-after all M11 edits settle.
+The final `tests/tools/source_layout_test.sh` run passes with eight advisory
+function-review findings and no file-budget or allowlist failure. Each advisory
+was reviewed as follows:
+
+| Function | Approximate span | Review disposition |
+| --- | ---: | --- |
+| `CompositorPeer::submit` | 186 | Keeps snapshot validation, retained-cursor replay, and one atomic compositor submission together. Split if another retained surface class is added. |
+| `ServerRuntime::service_input` | 163 | Owns the ordered synthetic-input transaction: provider lifecycle, validation, routing, acknowledgement, and focus publication. Real input remains in separate modules. |
+| `ServerRuntime::service_integrated` | 217 | Is the top-level integrated-cycle coordinator for peer readiness, real-input suspension/resume, replay, and publishing. Its branches share cycle state; split when another input backend or peer role is introduced. |
+| `dispatch_request` | 157 | Is a deliberately flat opcode-to-handler routing shell with behavior implemented in focused request-handler modules. |
+| `RuntimeBridge::service` | 156 | Keeps the peer-pair connection/retry state machine in one transition function so failure and readiness are evaluated atomically. |
+| `PresentationTransaction::commit` | 306 | Preserves the staged frame transaction and rollback boundary across scene, attachment, presentation, and evidence publication. Existing helpers hold independent calculations. |
+| `gwcomp::run` | 370 | Is process-lifetime orchestration for backend creation, IPC, polling, and orderly shutdown; rendering and DRM policy remain outside it. |
+| `evaluate` | 202 | Evaluates one immutable WM policy snapshot in deterministic order, including placement, stacking, focus, and transient constraints. |
+
+The M11 VM helper is 746 lines. Most of that file is one quoted, self-contained
+guest program plus host-side screenshot and evidence coordination. It is below
+the comparable M10 hardware harness (855 lines). Extracting the guest program
+would add a second copied artifact and a host-to-guest version/argument boundary
+while the current CLI tests intentionally inspect the exact embedded program.
+That is not a straightforward behavior-preserving split, so M11 retains the
+single helper. Revisit extraction when a second scenario reuses the M11 guest
+build or interactive-runtime phases.
