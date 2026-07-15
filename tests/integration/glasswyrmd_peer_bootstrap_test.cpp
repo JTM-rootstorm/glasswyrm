@@ -224,6 +224,17 @@ int main(int argc, char **argv) {
     require(entry.path().extension() != ".ppm",
             "metadata sequence creates no PPM");
 
+  const std::string session_socket = root + "/gwcomp-session.sock";
+  const auto session_compositor =
+      launch(argv[2], session_socket, "--dump-dir", root + "/session-dump");
+  glasswyrm::server::CompositorPeer session_peer(
+      session_socket, gw::protocol::x11::kScreenModel, false, true);
+  synchronize(session_peer);
+  require(session_peer.state() ==
+              glasswyrm::server::PeerBootstrapState::Synchronized,
+          "real-input profile negotiates compositor session-state support");
+  stop(session_compositor);
+
   const std::string buffered_socket = root + "/gwcomp-buffered.sock";
   auto pixels = glasswyrm::server::PixelStorage::create(32, 24);
   require(pixels.has_value(), "create restart pixels");

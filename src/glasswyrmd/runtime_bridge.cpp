@@ -16,9 +16,11 @@ RuntimeBridge::RuntimeBridge(std::string policy_path,
                              std::string compositor_path,
                              const gw::protocol::x11::ScreenModel screen,
                              const std::chrono::milliseconds deadline,
-                             const bool software_content)
+                             const bool software_content,
+                             const bool session_state)
     : policy_(std::move(policy_path), screen),
-      compositor_(std::move(compositor_path), screen, software_content),
+      compositor_(std::move(compositor_path), screen, software_content,
+                  session_state),
       deadline_duration_(deadline) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {

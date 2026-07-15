@@ -1,0 +1,240 @@
+#include "glasswyrmd/server_runtime.hpp"
+
+#include "input/input_router.hpp"
+#include "protocol/x11/event_mask.hpp"
+
+#include <cstdio>
+
+namespace glasswyrm::server {
+namespace {
+
+std::vector<ClientConnection *>
+recipients(const std::vector<std::unique_ptr<ClientConnection>> &source) {
+  std::vector<ClientConnection *> result;
+  result.reserve(source.size());
+  for (const auto &client : source)
+    result.push_back(client.get());
+  return result;
+}
+
+} // namespace
+
+bool ServerRuntime::initialize_real_input() {
+  std::string error;
+  if (!validate_input_device_paths(server_.options_, error)) {
+    std::fprintf(stderr,
+                 "glasswyrmd: real input device validation failed: %s\n",
+                 error.c_str());
+    return false;
+  }
+  RealInputControllerConfig config;
+  config.device_paths.reserve(server_.options_.libinput_devices.size());
+  for (const auto &device : server_.options_.libinput_devices)
+    config.device_paths.push_back(device.canonical_path);
+  config.keymap.rules = server_.options_.xkb_rules;
+  config.keymap.model = server_.options_.xkb_model;
+  config.keymap.layout = server_.options_.xkb_layout;
+  config.keymap.variant = server_.options_.xkb_variant;
+  config.keymap.options = server_.options_.xkb_options;
+  config.repeat.delay_ms = server_.options_.repeat_delay_ms;
+  config.repeat.rate_hz = server_.options_.repeat_rate_hz;
+  config.root_width = server_.state_.screen().width_pixels;
+  config.root_height = server_.state_.screen().height_pixels;
+  real_input_ = RealInputController::create(
+      glasswyrm::input::make_real_libinput_api(), std::move(config), error);
+  if (!real_input_) {
+    std::fprintf(stderr, "glasswyrmd: real input initialization failed: %s\n",
+                 error.c_str());
+    return false;
+  }
+  std::fprintf(
+      stderr, "glasswyrmd: real input ready devices=%zu keyboard=1 pointer=1\n",
+      server_.options_.libinput_devices.size());
+  return true;
+}
+
+bool ServerRuntime::service_real_input(const short input_events,
+                                       const short repeat_events) {
+  constexpr short fatal_events = POLLERR | POLLHUP | POLLNVAL;
+  if ((input_events & fatal_events) != 0) {
+    std::fprintf(stderr, "glasswyrmd: real input poll descriptor failed\n");
+    return false;
+  }
+  if ((repeat_events & fatal_events) != 0) {
+    std::fprintf(stderr, "glasswyrmd: repeat timer poll descriptor failed\n");
+    return false;
+  }
+  if ((input_events & POLLIN) != 0 || real_input_->backend_work_pending()) {
+    const auto serviced =
+        real_input_->service_backend(server_.state_.focused_window());
+    if (!serviced.success) {
+      std::fprintf(stderr, "glasswyrmd: real input service failed: %s\n",
+                   serviced.error.c_str());
+      return false;
+    }
+    if (serviced.input_unavailable)
+      std::fprintf(stderr,
+                   "glasswyrmd: required real input capability unavailable\n");
+  }
+  if ((repeat_events & POLLIN) != 0) {
+    const auto serviced = real_input_->service_repeat();
+    if (!serviced.success) {
+      std::fprintf(stderr, "glasswyrmd: key repeat service failed: %s\n",
+                   serviced.error.c_str());
+      return false;
+    }
+  }
+  deliver_real_input();
+  return true;
+}
+
+bool ServerRuntime::service_session_changes() {
+  if (!real_input_)
+    return true;
+  for (const auto &request : bridge_->take_session_state_changes()) {
+    const auto applied = real_input_->apply_session_state(request.change.state);
+    if (applied.reset_server_state)
+      input_state_.reset_provider_state();
+    std::string error;
+    if (!bridge_->acknowledge_session_state(request, applied.result, error)) {
+      std::fprintf(stderr,
+                   "glasswyrmd: session state acknowledgement failed: %s\n",
+                   error.c_str());
+      return false;
+    }
+    std::fprintf(
+        stderr,
+        "glasswyrmd: session state generation=%llu state=%u result=%u\n",
+        static_cast<unsigned long long>(request.change.generation),
+        static_cast<unsigned>(request.change.state),
+        static_cast<unsigned>(applied.result));
+    if (applied.fatal) {
+      std::fprintf(stderr, "glasswyrmd: fatal real input resume failure: %s\n",
+                   applied.error.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ServerRuntime::suspend_real_input_for_compositor_reset(const bool reset) {
+  if (!reset || !real_input_ || !real_input_->active())
+    return true;
+  const auto suspended =
+      real_input_->apply_session_state(GWIPC_SESSION_INACTIVE);
+  if (suspended.reset_server_state)
+    input_state_.reset_provider_state();
+  if (suspended.result == GWIPC_SESSION_STATE_ACCEPTED ||
+      suspended.result == GWIPC_SESSION_STATE_ALREADY_APPLIED)
+    return true;
+  std::fprintf(stderr,
+               "glasswyrmd: could not suspend real input after compositor "
+               "disconnect: %s\n",
+               suspended.error.c_str());
+  return false;
+}
+
+void ServerRuntime::complete_real_focus(const bool success) {
+  const auto new_focus = server_.state_.focused_window();
+  if (success) {
+    auto clients = recipients(server_.clients_);
+    EventRouter router(server_.state_.resources());
+    (void)router.route_focus(pending_real_focus_->old_focus, new_focus,
+                             clients);
+  }
+  pending_real_focus_.reset();
+}
+
+void ServerRuntime::deliver_real_input() {
+  std::size_t processed = 0;
+  while (!pending_real_focus_ && processed++ < 64) {
+    const auto next = real_input_->take_event();
+    if (!next)
+      break;
+    const auto event = *next;
+    if (event.kind == RealInputEventKind::StateReset) {
+      input_state_.reset_provider_state();
+      continue;
+    }
+    auto clients = recipients(server_.clients_);
+    EventRouter router(server_.state_.resources());
+    if (event.kind == RealInputEventKind::Motion) {
+      const auto old_target = input_state_.pointer_target();
+      const auto new_target = glasswyrm::input::hit_test_top_level(
+          server_.state_.resources(), event.root_x, event.root_y);
+      (void)input_state_.accept_wrapping_time(event.time_ms);
+      input_state_.set_pointer(event.root_x, event.root_y, new_target);
+      (void)router.route_crossing(old_target, new_target,
+                                  server_.state_.focused_window(), input_state_,
+                                  clients);
+      (void)router.route_input(
+          gw::protocol::x11::CoreEventType::MotionNotify, 0, event.time_ms,
+          new_target, event.state_before,
+          glasswyrm::input::motion_delivery_mask(input_state_), event.root_x,
+          event.root_y, new_target, clients);
+      continue;
+    }
+    auto staged = input_state_;
+    (void)staged.accept_wrapping_time(event.time_ms);
+    if (event.kind == RealInputEventKind::Button) {
+      if (staged.transition_button(event.detail, event.pressed) !=
+          glasswyrm::input::TransitionStatus::Accepted)
+        continue;
+      (void)router.route_input(
+          event.pressed ? gw::protocol::x11::CoreEventType::ButtonPress
+                        : gw::protocol::x11::CoreEventType::ButtonRelease,
+          event.detail, event.time_ms, input_state_.pointer_target(),
+          event.state_before,
+          event.pressed ? gw::protocol::x11::event_mask::ButtonPress
+                        : gw::protocol::x11::event_mask::ButtonRelease,
+          event.root_x, event.root_y, input_state_.pointer_target(), clients);
+      input_state_ = staged;
+      const auto target = input_state_.pointer_target();
+      const auto *window = server_.state_.resources().find_window(target);
+      const bool requests_focus =
+          event.pressed && event.detail == 1 && window &&
+          server_.state_.resources().is_policy_candidate(target) &&
+          window->map_state == MapState::Viewable && window->policy_visible &&
+          !window->cleanup_pending && !window->attributes.override_redirect &&
+          server_.state_.focused_window() != target;
+      if (!requests_focus)
+        continue;
+      const auto serial = server_.state_.next_lifecycle_serial();
+      auto proposed = lifecycle_->committed();
+      auto found = proposed.windows.find(target);
+      if (!serial || found == proposed.windows.end())
+        continue;
+      found->second.focus_serial = *serial;
+      LifecycleOperation operation;
+      operation.token = next_lifecycle_token_++;
+      operation.kind = LifecycleOperationKind::Focus;
+      operation.window = target;
+      operation.proposed = std::move(proposed);
+      pending_real_focus_ = PendingRealFocus{server_.state_.focused_window()};
+      const auto status = content_presenter_ && !bridge_->transaction_idle()
+                              ? lifecycle_->enqueue_paused(std::move(operation))
+                              : lifecycle_->enqueue(std::move(operation));
+      if (status != EnqueueStatus::Queued)
+        pending_real_focus_.reset();
+      continue;
+    }
+    if (staged.transition_key(event.detail, event.pressed) !=
+        glasswyrm::input::TransitionStatus::Accepted)
+      continue;
+    staged.set_core_modifier_mask(event.state_after);
+    const auto focus =
+        server_.state_.resources().find_window(event.focus_window)
+            ? event.focus_window
+            : server_.state_.screen().root_window;
+    (void)router.route_input(
+        event.pressed ? gw::protocol::x11::CoreEventType::KeyPress
+                      : gw::protocol::x11::CoreEventType::KeyRelease,
+        event.detail, event.time_ms, focus, event.state_before,
+        event.pressed ? gw::protocol::x11::event_mask::KeyPress
+                      : gw::protocol::x11::event_mask::KeyRelease,
+        event.root_x, event.root_y, input_state_.pointer_target(), clients);
+    input_state_ = staged;
+  }
+}
+
+} // namespace glasswyrm::server

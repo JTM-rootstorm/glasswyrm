@@ -32,7 +32,8 @@ struct DecodedDelete {
 template <class T, class Encoder>
 bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
                       std::uint32_t flags, const T &value, Encoder encoder,
-                      std::uint64_t *out_sequence = nullptr) {
+                      std::uint64_t *out_sequence = nullptr,
+                      std::uint64_t reply_to = 0) {
   gwipc_contract_payload *raw = nullptr;
   if (encoder(&value, &raw) != GWIPC_STATUS_OK)
     return false;
@@ -45,6 +46,7 @@ bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
   message.flags = flags;
   message.payload = data;
   message.payload_size = size;
+  message.reply_to = reply_to;
   if (out_sequence)
     return gwipc_connection_enqueue_with_sequence(
                connection, &message, out_sequence) == GWIPC_STATUS_OK;
@@ -90,12 +92,15 @@ bool enqueue_buffer(gwipc_connection* connection,
 
 CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
-                               const bool software_content)
+                               const bool software_content,
+                               const bool session_state)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
-                 software_content ? kContentCapabilities
-                                  : kMetadataCapabilities,
+                 (software_content ? kContentCapabilities
+                                   : kMetadataCapabilities) |
+                     (session_state ? GWIPC_CAP_SESSION_STATE : 0),
                  "glasswyrmd-compositor"),
-      screen_(screen), software_content_(software_content) {}
+      screen_(screen), software_content_(software_content),
+      session_state_(session_state) {}
 
 bool CompositorPeer::connect(std::string &error) {
   disconnect();
@@ -312,6 +317,37 @@ std::vector<CompositorBufferRelease> CompositorPeer::take_releases() {
   return result;
 }
 
+std::vector<CompositorSessionStateChange>
+CompositorPeer::take_session_state_changes() {
+  auto result = std::move(session_state_changes_);
+  session_state_changes_.clear();
+  return result;
+}
+
+bool CompositorPeer::acknowledge_session_state(
+    const CompositorSessionStateChange& request,
+    const gwipc_session_state_result result, std::string& error) {
+  if (!session_state_ || !transport_.established() || request.sequence == 0) {
+    error = "compositor session state reply is unavailable";
+    return false;
+  }
+  gwipc_session_state_acknowledged acknowledged{};
+  acknowledged.struct_size = sizeof(acknowledged);
+  acknowledged.generation = request.change.generation;
+  acknowledged.state = request.change.state;
+  acknowledged.result = result;
+  if (!enqueue_contract(transport_.connection(),
+                        GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,
+                        GWIPC_FLAG_REPLY, acknowledged,
+                        gwipc_contract_encode_session_state_acknowledged,
+                        nullptr, request.sequence)) {
+    error = "could not queue compositor session state acknowledgement";
+    return false;
+  }
+  error.clear();
+  return true;
+}
+
 void CompositorPeer::promote_replay_snapshot() {
   CompositorSnapshotSubmission replay = pending_;
   replay.buffers.clear();
@@ -343,6 +379,24 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     if (status != GWIPC_STATUS_OK) {
       error = "compositor peer receive failed";
       return PeerProcessOutcome::Fatal;
+    }
+    if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
+        session_state_) {
+      gwipc_decoded_contract* raw_change = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw_change) !=
+          GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedDelete> decoded_change(
+          raw_change);
+      const auto* change =
+          gwipc_decoded_session_state_change(decoded_change.get());
+      if (!change || change->generation == 0) {
+        error = "invalid compositor session state change";
+        return PeerProcessOutcome::Fatal;
+      }
+      session_state_changes_.push_back(
+          {*change, gwipc_message_sequence(message.get())});
+      continue;
     }
     if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE &&
         software_content_) {
@@ -415,7 +469,8 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
       state_ = PeerBootstrapState::Failed;
     return outcome;
   }
-  if (state_ == PeerBootstrapState::Synchronized && software_content_)
+  if (state_ == PeerBootstrapState::Synchronized &&
+      (software_content_ || session_state_))
     return drain(error);
   return PeerProcessOutcome::Progress;
 }
@@ -426,5 +481,6 @@ void CompositorPeer::disconnect() noexcept {
   commit_sequence_ = 0;
   content_submission_ = false;
   releases_.clear();
+  session_state_changes_.clear();
 }
 } // namespace glasswyrm::server

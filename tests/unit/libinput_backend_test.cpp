@@ -167,7 +167,8 @@ int main() {
   api.queue(device(input::LibinputEventKind::DeviceRemoved, 1, 0));
   const auto removal = backend.service();
   require(removal.status == input::InputServiceStatus::Complete &&
-              !backend.readiness().ready() && removal.ignored_events == 1,
+              !backend.readiness().ready() && removal.ignored_events == 1 &&
+              removal.provider_state_reset,
           "required-device removal marks input unavailable without failure");
 
   api.queue(event(input::LibinputEventKind::Unsupported, 2, 14000));

@@ -24,7 +24,7 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   bridge_ = std::make_unique<RuntimeBridge>(
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
-      server_.options_.software_content);
+      server_.options_.software_content, server_.options_.real_input_enabled());
   if (server_.options_.software_content) {
     content_presenter_ = std::make_unique<ContentPresenter>();
     server_.drawable_damage_handler_ = [this](
@@ -63,6 +63,10 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   if (SignalRuntime::stop_requested()) return 2;
 
   initialize_lifecycle();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (server_.options_.real_input_enabled() && !initialize_real_input())
+    return 1;
+#endif
   if (server_.options_.synthetic_input_socket) {
     input_peer_ = std::make_unique<SyntheticInputPeer>(
         *server_.options_.synthetic_input_socket);
@@ -95,9 +99,14 @@ bool ServerRuntime::service_integrated(const short policy_events,
                  error.c_str());
     return false;
   }
+  const bool compositor_reset = bridge_->take_compositor_reset();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (!suspend_real_input_for_compositor_reset(compositor_reset)) return false;
+  if (!service_session_changes()) return false;
+#endif
   std::vector<CompositorBufferRelease> compositor_releases;
   if (content_presenter_) {
-    if (bridge_->take_compositor_reset())
+    if (compositor_reset)
       content_presenter_->peer_disconnected();
     compositor_releases = bridge_->take_buffer_releases();
     if (bridge_->content_rejected_ready()) {

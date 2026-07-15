@@ -198,6 +198,7 @@ void LibinputBackend::convert(const LibinputEvent &event,
   }
   if (event.kind == LibinputEventKind::DeviceRemoved) {
     devices_.erase(event.device_id);
+    result.provider_state_reset = true;
     if (!readiness().ready()) note_ignored(result);
     return;
   }
