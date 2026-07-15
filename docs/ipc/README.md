@@ -12,6 +12,9 @@ window-policy contract used by `gwm`.
   and metadata-only records.
 - [M8 Synthetic-Input Contract](M8_SYNTHETIC_INPUT_CONTRACT.md) documents the
   additive API 0.5 DiagnosticTool input vocabulary.
+- [GWIPC API 0](GWIPC_API_0.md) and [wire version 1](GWIPC_WIRE_V1.md) also
+  record API 0.6 session-state, interactive-policy, and cursor-surface
+  additions.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records

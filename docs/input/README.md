@@ -13,3 +13,9 @@ Milestone 8 adds an opt-in, headless synthetic-input path owned by
 
 This is a deterministic test backend, not a real device stack.
 
+Milestone 11 adds a separate opt-in real-device profile:
+
+- [libinput backend](M11_LIBINPUT_BACKEND.md)
+- [keyboard model and repeat](M11_KEYBOARD_MODEL.md)
+- [grab subset](M11_GRABS.md)
+- [cursor model](M11_CURSOR_MODEL.md)

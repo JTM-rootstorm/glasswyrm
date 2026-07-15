@@ -19,3 +19,4 @@ Current decisions:
 - [0010: Route Synthetic Input Through the Protocol Server](0010-synthetic-input-routing.md)
 - [0011: Pin Simple Clients and Flatten Child Subtrees](0011-pinned-simple-client-compatibility.md)
 - [0012: Present the Canonical Software Frame Through DRM/KMS](0012-drm-kms-software-scanout.md)
+- [0013: Keep Interactive Input in the Server and Display Authority in the Compositor](0013-interactive-input-and-session.md)
