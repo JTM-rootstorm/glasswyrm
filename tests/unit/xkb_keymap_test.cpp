@@ -64,6 +64,14 @@ int main() {
           "core mapping has fixed group0/group1 level0/level1 slots");
   require(keymap->core_keysyms(9)[0] == XKB_KEY_Escape,
           "core mapping exposes non-printing keysyms");
+  require(keymap->core_keysyms(10)[0] == XKB_KEY_1 &&
+              keymap->core_keysyms(10)[1] == XKB_KEY_exclam &&
+              keymap->core_keysyms(20)[0] == XKB_KEY_minus &&
+              keymap->core_keysyms(20)[1] == XKB_KEY_underscore,
+          "core mapping exposes digits and punctuation levels");
+  require(keymap->core_keysyms(111)[0] == XKB_KEY_Up &&
+              keymap->core_keysyms(67)[0] == XKB_KEY_F1,
+          "core mapping exposes arrow and function keysyms");
 
   auto shift_down = prepare(*keymap, 42, true);
   require(shift_down.x11_keycode == 50 &&
@@ -75,6 +83,16 @@ int main() {
   apply(*keymap, shift_down);
   require((keymap->core_modifier_state() & cm::Shift) != 0,
           "apply updates xkb modifier state after event preparation");
+
+  auto control_down = prepare(*keymap, 29, true);
+  apply(*keymap, control_down);
+  auto alt_down = prepare(*keymap, 56, true);
+  apply(*keymap, alt_down);
+  require((keymap->core_modifier_state() & cm::Control) != 0 &&
+              (keymap->core_modifier_state() & cm::Mod1) != 0,
+          "Control and Alt serialize to their core modifier masks");
+  apply(*keymap, prepare(*keymap, 56, false));
+  apply(*keymap, prepare(*keymap, 29, false));
 
   auto a_down = prepare(*keymap, 30, true);
   require(a_down.keysym_before == XKB_KEY_A &&
