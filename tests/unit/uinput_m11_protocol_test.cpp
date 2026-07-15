@@ -103,7 +103,7 @@ int main() {
                      is_event(primary[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(primary[3], protocol::Device::pointer, EV_REL,
-                              REL_X, 70) &&
+                              REL_X, 130) &&
                      is_event(primary[4], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 0),
                  "PRIMARY drag selects the known xterm A output row");
@@ -123,7 +123,7 @@ int main() {
   const auto close = protocol::scenario_events("close");
   okay &= expect(close.size() == 8 &&
                      is_event(close[0], protocol::Device::pointer, EV_REL,
-                              REL_X, -548) &&
+                              REL_X, -608) &&
                      is_event(close[1], protocol::Device::pointer, EV_REL,
                               REL_Y, -232) &&
                      is_event(close[2], protocol::Device::pointer, EV_KEY,
