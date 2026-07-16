@@ -956,7 +956,7 @@ M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
-M11 Interactive desktop baseline                implementation in progress; live acceptance pending
+M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
 M14 Variable refresh rate
@@ -1035,9 +1035,13 @@ bounded core cursor, grab, selection, keyboard-control, and client-event
 behavior; capability-gated session-state and GWM interactive bindings through
 GWIPC API 0.6; a software cursor composed by `gwcomp`; and the unprivileged
 `glasswyrm-session` orchestrator. The intended external target is only xterm
-patch 410 under the pinned core-font ASCII profile. Host implementation does
-not establish that compatibility claim: live trace, interaction, VT/restart,
-DRM screenshot, restoration, and evidence-archive validation remain pending.
+patch 410 under the pinned core-font ASCII profile. The fixed Gentoo VM route
+validates its live trace, typing, scrolling, selection exchange, interactive
+move/resize/close, VT and compositor-restart recovery, canonical DRM frames,
+graphical-console screenshots, ordered restoration, and evidence archive.
+Passive grabs cover only the observed `GrabButton` path; `UngrabButton` and
+passive key grabs remain unsupported. This is not a broader xterm, Xt/Xaw,
+toolkit, Unicode, or X11 compatibility claim.
 
 ## 26. Definition of done
 

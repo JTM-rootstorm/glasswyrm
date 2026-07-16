@@ -11,8 +11,8 @@ selection and GWM interactions.
   `confine_to=None`, a validated optional cursor, event-mask validation, and
   core timestamp/status behavior.
 - `GrabKeyboard` and `UngrabKeyboard` support one asynchronous keyboard grab.
-- `GrabButton` and `UngrabButton` provide the passive-button subset needed by
-  the pinned toolkit profile.
+- `GrabButton` provides the passive-button subset observed in the pinned xterm
+  profile.
 - `AllowEvents` accepts only the documented asynchronous release modes.
 
 Matching GWM move/resize bindings use an internal pointer grab and take
@@ -20,6 +20,7 @@ precedence over ordinary client button delivery. Grabs are aborted on relevant
 client/window cleanup, interaction abort, peer loss, VT suspension, or input
 loss.
 
-Synchronous freezing, replay modes, confinement windows, passive-key grabs,
-and complete X11 grab ordering are unsupported. Applications must not infer a
-general X11 grab compatibility claim from this subset.
+`UngrabButton`, synchronous freezing, replay modes, confinement windows,
+passive-key grabs, and complete X11 grab ordering are unsupported.
+Applications must not infer a general X11 grab compatibility claim from this
+subset.

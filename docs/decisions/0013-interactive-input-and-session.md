@@ -1,6 +1,6 @@
 # 0013: Keep Interactive Input in the Server and Display Authority in the Compositor
 
-Status: Provisional; implementation and live Milestone 11 acceptance pending
+Status: Accepted
 
 ## Context
 
@@ -32,8 +32,9 @@ devices.
 
 ## Compatibility boundary
 
-The intended M11 external-client claim is limited to xterm patch 410 under the
-pinned core-font ASCII profile. Live trace, VM, and screenshot acceptance are
-still required before that claim is marked validated. XKB extension support,
-XIM/compose, arbitrary layouts, full grabs, themed cursors, clipboard
-persistence, decorations, and multiple workspaces or outputs remain deferred.
+The accepted M11 external-client claim is limited to xterm patch 410 under the
+pinned core-font ASCII profile and the fixed live VM evidence route. Passive
+grabs cover the observed `GrabButton` request only; `UngrabButton` and passive
+key grabs are unsupported. XKB extension support, XIM/compose, arbitrary
+layouts, full grabs, themed cursors, clipboard persistence, decorations, and
+multiple workspaces or outputs remain deferred.
