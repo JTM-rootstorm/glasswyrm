@@ -178,6 +178,13 @@ only for `PolyFillRectangle`. Other patterned drawing remains outside this
 bounded xterm requirement and fails explicitly rather than being rendered as a
 solid foreground fill.
 
+The live startup trace also records request 316 creating GC `0x200015` on the
+terminal child window `0x200010` with value mask `0x4008` (white background and
+font `0x20000c`). That drawable is a nested depth-24 `InputOutput` window, not a
+root child. Glasswyrm therefore accepts GC creation on any valid depth-24
+`InputOutput` window; `InputOnly` windows and incompatible window depths remain
+`BadMatch`.
+
 The startup upload is a depth-1 `ZPixmap`, not an `XYBitmap`: the accepted
 trace records format 2, depth 1, and a 48-by-48 image. Glasswyrm therefore
 advertises the matching depth-1 pixmap format and allowed screen depth, then

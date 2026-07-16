@@ -49,8 +49,44 @@ int main() {
                         OpenFontStatus::Success &&
                         table.find_font(base | 5U) != nullptr,
                     "open client font for cleanup");
+  WindowCreateSpec parent;
+  parent.xid = base | 6U;
+  parent.parent = table.screen().root_window;
+  parent.width = 8;
+  parent.height = 8;
+  parent.window_class = WindowClass::InputOutput;
+  WindowCreateSpec child = parent;
+  child.xid = base | 7U;
+  child.parent = parent.xid;
+  WindowCreateSpec input_only = child;
+  input_only.xid = base | 8U;
+  input_only.window_class = WindowClass::InputOnly;
+  gw::test::require(
+      table.create_window(owner, base, mask, parent) ==
+              CreateWindowStatus::Success &&
+          table.create_window(owner, base, mask, child) ==
+              CreateWindowStatus::Success &&
+          table.create_window(owner, base, mask, input_only) ==
+              CreateWindowStatus::Success,
+      "create nested drawable candidates");
+  gw::test::require(
+      table.create_gc(owner, base, mask, base | 9U, child.xid, {}) ==
+          CreateGcStatus::Success,
+      "create gc for nested depth-24 InputOutput window");
+  gw::test::require(
+      table.create_gc(owner, base, mask, base | 10U, input_only.xid, {}) ==
+              CreateGcStatus::BadMatch &&
+          table.find_gc(base | 10U) == nullptr,
+      "InputOnly window rejects gc creation");
+  table.find_window(child.xid)->depth = 1;
+  gw::test::require(
+      table.create_gc(owner, base, mask, base | 10U, child.xid, {}) ==
+              CreateGcStatus::BadMatch &&
+          table.find_gc(base | 10U) == nullptr,
+      "incompatible window depth rejects gc creation");
+  table.find_window(child.xid)->depth = 24;
   const auto cleanup = table.cleanup_client(owner);
-  gw::test::require(cleanup.resources_destroyed == 5, "cleanup typed resources");
+  gw::test::require(cleanup.resources_destroyed == 9, "cleanup typed resources");
   gw::test::require(table.resource_count(ResourceType::Pixmap) == 0, "pixmap cleanup");
   gw::test::require(table.resource_count(ResourceType::GraphicsContext) == 0,
                     "gc cleanup");
