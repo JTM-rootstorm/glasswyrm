@@ -120,7 +120,8 @@ ipc_only=/var/tmp/glasswyrm-build-m11-ipc-only
 session_build=/var/tmp/glasswyrm-build-m11-session
 client_dir=/var/tmp/glasswyrm-m11-clients
 dumps=/var/tmp/glasswyrm-m11-dumps scenes=/var/tmp/glasswyrm-m11-scenes
-launcher_dumps=$dumps/launcher launcher_scenes=$scenes/launcher
+launcher_dumps=/var/tmp/glasswyrm-m11-launcher-dumps
+launcher_scenes=/var/tmp/glasswyrm-m11-launcher-scenes
 input=/var/tmp/glasswyrm-m11-input control=/var/tmp/glasswyrm-m11-control
 artifact_dir=${artifact_dir:-/var/tmp/glasswyrm-m11-artifacts}
 facts=$artifact_dir/milestone11-facts.env
@@ -142,7 +143,8 @@ m11_units=(xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service
   gw-uinput-m11.service)
 systemctl stop "${m11_units[@]}" >/dev/null 2>&1 || true
 systemctl reset-failed "${m11_units[@]}" >/dev/null 2>&1 || true
-rm -rf "$artifact_dir" "$dumps" "$scenes" "$input" "$control"
+rm -rf "$artifact_dir" "$dumps" "$scenes" "$launcher_dumps" \
+  "$launcher_scenes" "$input" "$control"
 mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
 mkdir -p "$launcher_dumps" "$launcher_scenes"
 chmod 0700 "$artifact_dir" "$input" "$control"
