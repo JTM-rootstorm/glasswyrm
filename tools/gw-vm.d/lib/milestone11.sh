@@ -16,6 +16,7 @@ M11_TEXT_ARTIFACTS=(milestone11-runtime-test.log milestone11-meson-test.log
   milestone11-selection.log milestone11-interactive-wm.log
   milestone11-gwm-bindings.json milestone11-selection-client-message.json
   milestone11-session-state.log milestone11-drm-report.jsonl
+  milestone11-drm-report-before-restart.jsonl
   milestone11-glasswyrmd-journal.log milestone11-gwm-journal.log
   milestone11-gwcomp-journal.log milestone11-session-journal.log
   milestone11-facts.env)
@@ -120,6 +121,8 @@ ipc_only=/var/tmp/glasswyrm-build-m11-ipc-only
 session_build=/var/tmp/glasswyrm-build-m11-session
 client_dir=/var/tmp/glasswyrm-m11-clients
 dumps=/var/tmp/glasswyrm-m11-dumps scenes=/var/tmp/glasswyrm-m11-scenes
+pre_restart_dumps=/var/tmp/glasswyrm-m11-dumps-before-restart
+pre_restart_scenes=/var/tmp/glasswyrm-m11-scenes-before-restart
 launcher_dumps=/var/tmp/glasswyrm-m11-launcher-dumps
 launcher_scenes=/var/tmp/glasswyrm-m11-launcher-scenes
 input=/var/tmp/glasswyrm-m11-input control=/var/tmp/glasswyrm-m11-control
@@ -143,7 +146,8 @@ m11_units=(xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service
   gw-uinput-m11.service)
 systemctl stop "${m11_units[@]}" >/dev/null 2>&1 || true
 systemctl reset-failed "${m11_units[@]}" >/dev/null 2>&1 || true
-rm -rf "$artifact_dir" "$dumps" "$scenes" "$launcher_dumps" \
+rm -rf "$artifact_dir" "$dumps" "$scenes" "$pre_restart_dumps" \
+  "$pre_restart_scenes" "$launcher_dumps" \
   "$launcher_scenes" "$input" "$control"
 mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
 mkdir -p "$launcher_dumps" "$launcher_scenes"
@@ -505,6 +509,12 @@ run_input() {
   grep -F '"status":"completed"' "$input/$scenario.json"
   printf '%s passed\n' "$scenario" >>"$artifact_dir/$log"
 }
+wait_transcript_token() {
+  local token=$1
+  for _ in {1..200}; do grep -Fq "$token" "$transcript" 2>/dev/null && return; sleep .05; done
+  printf 'Timed out waiting for xterm transcript token: %s\n' "$token" >&2
+  return 1
+}
 frame_hashes() {
   python3 - "$artifact_dir/milestone11-drm-report.jsonl" <<'PY'
 import json,sys
@@ -600,8 +610,16 @@ done
 journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
   grep -Eq 'session state generation=[0-9]+ state=2 result=[12]'
 result[vt_resume]=passed
+post_vt_frames_before=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') != "$trace_hash_before" ]]
+wait_transcript_token M11_VT
+for _ in {1..200}; do
+  post_vt_frames_after=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
+  ((post_vt_frames_after > post_vt_frames_before)) && break
+  sleep .05
+done
+((post_vt_frames_after > post_vt_frames_before))
 result[post_vt_command]=passed
 mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1); read -r canonical_hash scanout_hash < <(frame_hashes)
 cp "$mirror" "$artifact_dir/milestone11-canonical-after-vt.ppm"
@@ -610,6 +628,8 @@ while [[ ! -e $control/screen-after-vt-captured ]]; do sleep .1; done
 cmp "$mirror" "$artifact_dir/milestone11-desktop-after-vt.ppm"
 
 failure_stage=peer-restart
+gwm_pid_before=$(systemctl show gwm-m11.service -p MainPID --value)
+gwcomp_pid_before=$(systemctl show gwcomp-m11.service -p MainPID --value)
 gwm_bindings_before=$(journalctl --since "@$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
 systemctl restart gwm-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
@@ -618,17 +638,38 @@ for _ in {1..200}; do
   ((gwm_bindings_after > gwm_bindings_before)) && break
   sleep .05
 done
+gwm_pid_after=$(systemctl show gwm-m11.service -p MainPID --value)
+[[ $gwm_pid_after != "$gwm_pid_before" && $gwm_pid_after != 0 ]]
+[[ $(systemctl show gwcomp-m11.service -p MainPID --value) == "$gwcomp_pid_before" ]]
+systemctl is-active --quiet gwcomp-m11.service glasswyrmd-m11.service
 ((gwm_bindings_after > gwm_bindings_before)); result[gwm_replay]=passed
-scene_records_before=$(wc -l <"$scenes/scene.jsonl")
-systemctl restart gwcomp-m11.service
+systemctl stop gwcomp-m11.service
+mv "$artifact_dir/milestone11-drm-report.jsonl" \
+  "$artifact_dir/milestone11-drm-report-before-restart.jsonl"
+mv "$dumps" "$pre_restart_dumps"
+mv "$scenes" "$pre_restart_scenes"
+mkdir -p "$dumps" "$scenes"
+systemctl start gwcomp-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
 for _ in {1..200}; do
-  scene_records_after=$(wc -l <"$scenes/scene.jsonl")
-  ((scene_records_after > scene_records_before)) && break
+  scene_records_after=$(wc -l <"$scenes/scene.jsonl" 2>/dev/null || true)
+  ((scene_records_after > 0)) && break
   sleep .05
 done
-((scene_records_after > scene_records_before)); result[compositor_replay]=passed
+gwcomp_pid_after=$(systemctl show gwcomp-m11.service -p MainPID --value)
+[[ $gwcomp_pid_after != "$gwcomp_pid_before" && $gwcomp_pid_after != 0 ]]
+[[ $(systemctl show gwm-m11.service -p MainPID --value) == "$gwm_pid_after" ]]
+systemctl is-active --quiet gwm-m11.service glasswyrmd-m11.service
+((scene_records_after > 0)); result[compositor_replay]=passed
+post_restart_frames_before=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
 run_input post-restart milestone11-session-state.log
+wait_transcript_token M11_RESTART
+for _ in {1..200}; do
+  post_restart_frames_after=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
+  ((post_restart_frames_after > post_restart_frames_before)) && break
+  sleep .05
+done
+((post_restart_frames_after > post_restart_frames_before))
 systemctl is-active --quiet xterm-m11-a.service; systemctl is-active --quiet xterm-m11-b.service
 result[post_restart_input]=passed result[xterm_survival]=passed
 mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1); read -r canonical_hash scanout_hash < <(frame_hashes)
@@ -703,12 +744,14 @@ failure_stage=evidence-archive
 evidence=$artifact_dir/evidence; rm -rf "$evidence"; mkdir -p "$evidence"
 cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
-cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl} "$evidence/"
+cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl,drm-report-before-restart.jsonl} "$evidence/"
 cp "$artifact_dir"/milestone11-{gwm-bindings.json,selection-client-message.json} "$evidence/"
 cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
 cp "$scenes/scene.jsonl" "$evidence/scene.jsonl"
 find "$dumps" -name frames.jsonl -exec cp {} "$evidence/frames.jsonl" \;
+cp "$pre_restart_scenes/scene.jsonl" "$evidence/scene-before-restart.jsonl"
+find "$pre_restart_dumps" -name frames.jsonl -exec cp {} "$evidence/frames-before-restart.jsonl" \;
 (cd "$evidence" && sha256sum ./* >SHA256SUMS && sha256sum --check --status SHA256SUMS && tar -cf "$artifact_dir/milestone11-interactive-evidence.tar" ./*)
 result[archive_validation]=passed failure_stage= scenario_exit=0
 GUEST_SCRIPT
@@ -801,11 +844,13 @@ validate_milestone11_archive() {
     milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
     milestone11-gwm-bindings.json milestone11-selection-client-message.json \
-    milestone11-drm-report.jsonl milestone11-glasswyrmd-journal.log \
+    milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl \
+    milestone11-glasswyrmd-journal.log \
     milestone11-selection-probe.json \
     milestone11-xterm-result.json milestone11-kms-before.json \
     milestone11-kms-after.json milestone11-vt-before.json \
-    milestone11-vt-after.json scene.jsonl frames.jsonl SHA256SUMS; do
+    milestone11-vt-after.json scene.jsonl scene-before-restart.jsonl \
+    frames.jsonl frames-before-restart.jsonl SHA256SUMS; do
     grep -Eq "^(\\./)?$member$" <<<"$listing" || return
   done
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m11-evidence.XXXXXX") || return
