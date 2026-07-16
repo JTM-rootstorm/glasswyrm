@@ -221,6 +221,14 @@ int main(int argc, char** argv) try {
   // The interactive xterm path owns PRIMARY before this probe runs. Replace
   // it once so the live trace proves SelectionClear delivery as well as the
   // CLIPBOARD request/notify exchange above.
+  XPtr<xcb_get_selection_owner_reply_t> previous_primary_reply(
+      xcb_get_selection_owner_reply(
+          requestor.connection,
+          xcb_get_selection_owner(requestor.connection, XCB_ATOM_PRIMARY),
+          nullptr));
+  require(previous_primary_reply && previous_primary_reply->owner != XCB_NONE &&
+              previous_primary_reply->owner != owner.window,
+          "PRIMARY is not owned by the interactive xterm");
   checked(owner.connection,
           xcb_set_selection_owner_checked(owner.connection, owner.window,
                                           XCB_ATOM_PRIMARY, XCB_CURRENT_TIME),

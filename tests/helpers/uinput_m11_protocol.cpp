@@ -180,7 +180,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
     // scroll scenario leaves the pointer at (120, 128) and returns to the
     // original vertical scroll position.
-    relative(events, REL_Y, 264);
+    relative(events, REL_Y, 237);
     relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
     relative(events, REL_X, 130);
@@ -208,7 +208,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Move from the post-resize pointer location back into xterm A, focus it,
     // and close A while xterm B remains alive.
     relative(events, REL_X, -608);
-    relative(events, REL_Y, -232);
+    relative(events, REL_Y, -205);
     button(events, BTN_LEFT, true);
     button(events, BTN_LEFT, false);
     chord(events, KEY_LEFTALT, KEY_F4);
