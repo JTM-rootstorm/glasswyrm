@@ -578,12 +578,12 @@ while True:
 PY
 systemctl is-active --quiet gwcomp-m11.service glasswyrmd-m11.service
 for _ in {1..100}; do
-  journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
-    grep -Eq 'session state generation=[0-9]+ state=1 result=[12]' && break
+  grep -Eq 'session state generation=[0-9]+ state=1 result=[12]' \
+    <<<"$(journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager)" && break
   sleep .05
 done
-journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
-  grep -Eq 'session state generation=[0-9]+ state=1 result=[12]'
+grep -Eq 'session state generation=[0-9]+ state=1 result=[12]' \
+  <<<"$(journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager)"
 result[vt_suspend]=passed
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') == "$trace_hash_before" ]]
@@ -605,12 +605,12 @@ while True:
 PY
 systemctl is-active --quiet gwcomp-m11.service glasswyrmd-m11.service
 for _ in {1..100}; do
-  journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
-    grep -Eq 'session state generation=[0-9]+ state=2 result=[12]' && break
+  grep -Eq 'session state generation=[0-9]+ state=2 result=[12]' \
+    <<<"$(journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager)" && break
   sleep .05
 done
-journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
-  grep -Eq 'session state generation=[0-9]+ state=2 result=[12]'
+grep -Eq 'session state generation=[0-9]+ state=2 result=[12]' \
+  <<<"$(journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager)"
 result[vt_resume]=passed
 post_vt_frames_before=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
 run_input post-vt milestone11-session-state.log
