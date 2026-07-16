@@ -1635,7 +1635,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   '--drm-api atomic' '--mirror-dump-dir' '--scene-manifest' \
   '--drm-report' '--x11-trace' '-geometry' '80x24+96+96' '-fn' 'fixed' \
   'm11-bashrc' 'chvt 1' 'systemctl restart gwm-m11.service' \
-  'systemctl stop gwcomp-m11.service' 'systemctl start gwcomp-m11.service' \
+  'systemctl stop gwcomp-m11.service' 'start_gwcomp' \
   milestone11-drm-report-before-restart.jsonl m11_selection_probe \
   m11_xterm_acceptance '--wm-evidence' '--server-journal' \
   screenshot-ready screenshot-after-vt-ready screenshot-after-restart-ready \

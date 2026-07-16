@@ -448,18 +448,21 @@ systemd-run --unit=gwm-m11.service --property=PrivateDevices=yes \
   --property=RestrictAddressFamilies=AF_UNIX --property=NoNewPrivileges=yes \
   "$runtime/src/gwm" --ipc-socket /run/glasswyrm-m11/gwm.sock
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
-systemd-run --unit=gwcomp-m11.service --property=PrivateDevices=no \
-  --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
-  --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
-  --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
-  --property=StandardOutput=journal --property=StandardError=journal \
-  --property=TTYReset=yes --property=TTYVHangup=yes \
-  --property=TTYVTDisallocate=no \
-  --property=NoNewPrivileges=yes "$runtime/src/gwcomp" --backend drm \
-  --ipc-socket /run/glasswyrm-m11/gwcomp.sock --drm-device "$drm_device" \
-  --tty "$target_vt" --connector "$connector" --mode 1024x768 --drm-api atomic \
-  --mirror-dump-dir "$dumps" --scene-manifest "$scenes/scene.jsonl" \
-  --drm-report "$artifact_dir/milestone11-drm-report.jsonl"
+start_gwcomp() {
+  systemd-run --unit=gwcomp-m11.service --property=PrivateDevices=no \
+    --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
+    --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
+    --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+    --property=StandardOutput=journal --property=StandardError=journal \
+    --property=TTYReset=yes --property=TTYVHangup=yes \
+    --property=TTYVTDisallocate=no \
+    --property=NoNewPrivileges=yes "$runtime/src/gwcomp" --backend drm \
+    --ipc-socket /run/glasswyrm-m11/gwcomp.sock --drm-device "$drm_device" \
+    --tty "$target_vt" --connector "$connector" --mode 1024x768 --drm-api atomic \
+    --mirror-dump-dir "$dumps" --scene-manifest "$scenes/scene.jsonl" \
+    --drm-report "$artifact_dir/milestone11-drm-report.jsonl"
+}
+start_gwcomp
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
 systemd-run --unit=glasswyrmd-m11.service --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$keyboard r" \
@@ -670,7 +673,7 @@ mv "$artifact_dir/milestone11-drm-report.jsonl" \
 mv "$dumps" "$pre_restart_dumps"
 mv "$scenes" "$pre_restart_scenes"
 mkdir -p "$dumps" "$scenes"
-systemctl start gwcomp-m11.service
+start_gwcomp
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
 for _ in {1..200}; do
   scene_records_after=$(wc -l <"$scenes/scene.jsonl" 2>/dev/null || true)
