@@ -13,7 +13,7 @@ M11_TESTED_COMMIT=
 M11_TEXT_ARTIFACTS=(milestone11-runtime-test.log milestone11-meson-test.log
   milestone11-source-layout.log milestone11-libinput-devices.json
   milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.raw.jsonl
-  milestone11-xterm-trace.json
+  milestone11-xterm-trace.json milestone11-pty-transcript.log
   milestone11-selection.log milestone11-interactive-wm.log
   milestone11-gwm-bindings.json milestone11-selection-client-message.json
   milestone11-session-state.log milestone11-drm-report.jsonl
@@ -790,6 +790,7 @@ evidence=$artifact_dir/evidence; rm -rf "$evidence"; mkdir -p "$evidence"
 cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.raw.jsonl,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl,drm-report-before-restart.jsonl} "$evidence/"
+cp "$artifact_dir/milestone11-pty-transcript.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{gwm-bindings.json,selection-client-message.json} "$evidence/"
 cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
@@ -887,7 +888,8 @@ validate_milestone11_archive() {
     milestone11-canonical-after-vt.ppm milestone11-canonical-after-restart.ppm \
     milestone11-libinput-devices.json \
     milestone11-keymap.json milestone11-xterm-trace.raw.jsonl \
-    milestone11-xterm-trace.json milestone11-selection.log \
+    milestone11-xterm-trace.json milestone11-pty-transcript.log \
+    milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
     milestone11-gwm-bindings.json milestone11-selection-client-message.json \
     milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl \
