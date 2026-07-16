@@ -15,7 +15,7 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
                                 const ResourceTable& resources) {
   constexpr std::uint32_t supported = (1U << 0U) | (1U << 1U) | (1U << 2U) |
       (1U << 3U) | (1U << 4U) | (1U << 5U) | (1U << 6U) |
-      (1U << 7U) | (1U << 8U) | (1U << 14U) | (1U << 15U) |
+      (1U << 7U) | (1U << 8U) | (1U << 11U) | (1U << 14U) | (1U << 15U) |
       (1U << 16U) | (1U << 17U) |
       (1U << 18U) | (1U << 19U);
   GcDecodeResult result{}; result.gc = gc;
@@ -46,7 +46,19 @@ GcDecodeResult decode_gc_values(x11::ByteReader& reader, std::uint32_t mask,
         if (value > 2) { result.error=x11::CoreErrorCode::BadValue; return result; }
         if (value != 0) return result;
         result.gc.join_style=0; break;
-      case 8: if (value != 0) { result.error=x11::CoreErrorCode::BadValue; return result; } result.gc.fill_style=0; break;
+      case 8:
+        if (value > 3) { result.error=x11::CoreErrorCode::BadValue; return result; }
+        if (value != 0 && value != 3) return result;
+        result.gc.fill_style=static_cast<std::uint8_t>(value); break;
+      case 11: {
+        const auto* pixmap = resources.find_pixmap(value);
+        if (!pixmap) { result.error=x11::CoreErrorCode::BadPixmap; return result; }
+        const auto* bitmap = std::get_if<std::shared_ptr<BitmapStorage>>(&pixmap->storage);
+        if (pixmap->depth != 1 || pixmap->root != resources.screen().root_window || !bitmap) {
+          result.error=x11::CoreErrorCode::BadMatch; return result;
+        }
+        result.gc.stipple=*bitmap; break;
+      }
       case 14:
         if (!resources.find_font(value)) {
           result.error = x11::CoreErrorCode::BadFont;

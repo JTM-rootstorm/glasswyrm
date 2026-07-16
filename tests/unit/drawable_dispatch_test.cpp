@@ -179,6 +179,79 @@ int main() {
     gw::test::require(result.output.empty()&&bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
                       "one-plane depth-one XYPixmap uses the bitmap upload path");
 
+    x11::ByteWriter stippled_gc(order); stippled_gc.write_u8(55); stippled_gc.write_u8(0); stippled_gc.write_u16(7);
+    stippled_gc.write_u32(base+11); stippled_gc.write_u32(base+1);
+    stippled_gc.write_u32((1U<<3U)|(1U<<8U)|(1U<<11U));
+    stippled_gc.write_u32(0x00ffffffU); stippled_gc.write_u32(3); stippled_gc.write_u32(base+7);
+    result=dispatch_request(state,context,finish(std::move(stippled_gc),x11::CoreOpcode::CreateGC,0));
+    const auto* retained_stipple=state.resources().find_gc(base+11)->stipple.get();
+    gw::test::require(result.output.empty()&&retained_stipple&&
+                      state.resources().find_gc(base+11)->fill_style==3&&
+                      state.resources().find_gc(base+11)->background==0x00ffffffU,
+                      "Xaw opaque-stippled CreateGC mask");
+
+    x11::ByteWriter bad_stipple(order); bad_stipple.write_u8(56); bad_stipple.write_u8(0); bad_stipple.write_u16(4);
+    bad_stipple.write_u32(base+11); bad_stipple.write_u32(1U<<11U); bad_stipple.write_u32(base+6);
+    result=dispatch_request(state,context,finish(std::move(bad_stipple),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadPixmap)&&
+                      state.resources().find_gc(base+11)->stipple.get()==retained_stipple,
+                      "invalid GCStipple is atomic BadPixmap");
+
+    x11::ByteWriter bad_combination(order); bad_combination.write_u8(56); bad_combination.write_u8(0); bad_combination.write_u16(5);
+    bad_combination.write_u32(base+2); bad_combination.write_u32((1U<<8U)|(1U<<11U));
+    bad_combination.write_u32(3); bad_combination.write_u32(base+6);
+    result=dispatch_request(state,context,finish(std::move(bad_combination),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadPixmap)&&
+                      state.resources().find_gc(base+2)->fill_style==0&&!state.resources().find_gc(base+2)->stipple,
+                      "combined fill-style and invalid stipple change is atomic");
+
+    x11::ByteWriter wrong_depth(order); wrong_depth.write_u8(55); wrong_depth.write_u8(0); wrong_depth.write_u16(5);
+    wrong_depth.write_u32(base+12); wrong_depth.write_u32(base+1); wrong_depth.write_u32(1U<<11U); wrong_depth.write_u32(base+1);
+    result=dispatch_request(state,context,finish(std::move(wrong_depth),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+12),"GCStipple requires depth-one pixmap");
+
+    x11::ByteWriter tiled_style(order); tiled_style.write_u8(56); tiled_style.write_u8(0); tiled_style.write_u16(4);
+    tiled_style.write_u32(base+11); tiled_style.write_u32(1U<<8U); tiled_style.write_u32(1);
+    result=dispatch_request(state,context,finish(std::move(tiled_style),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation)&&
+                      state.resources().find_gc(base+11)->fill_style==3,"unsupported valid fill style is atomic");
+
+    x11::ByteWriter invalid_style(order); invalid_style.write_u8(56); invalid_style.write_u8(0); invalid_style.write_u16(4);
+    invalid_style.write_u32(base+11); invalid_style.write_u32(1U<<8U); invalid_style.write_u32(4);
+    result=dispatch_request(state,context,finish(std::move(invalid_style),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadValue)&&
+                      state.resources().find_gc(base+11)->fill_style==3,"invalid fill style is atomic BadValue");
+
+    x11::ByteWriter free_stipple(order); free_stipple.write_u8(54); free_stipple.write_u8(0); free_stipple.write_u16(2); free_stipple.write_u32(base+7);
+    result=dispatch_request(state,context,finish(std::move(free_stipple),x11::CoreOpcode::FreePixmap,0));
+    gw::test::require(result.output.empty()&&!state.resources().find_pixmap(base+7)&&
+                      state.resources().find_gc(base+11)->stipple.get()==retained_stipple,
+                      "GC retains freed stipple storage");
+
+    x11::ByteWriter stippled_fill(order); stippled_fill.write_u8(70); stippled_fill.write_u8(0); stippled_fill.write_u16(5);
+    stippled_fill.write_u32(base+1); stippled_fill.write_u32(base+11);
+    stippled_fill.write_u16(static_cast<std::uint16_t>(-1)); stippled_fill.write_u16(0);
+    stippled_fill.write_u16(5); stippled_fill.write_u16(1);
+    result=dispatch_request(state,context,finish(std::move(stippled_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(0,0)==0xffffffffU&&
+                      state.resources().find_pixmap(base+1)->pixels()->at(1,0)==0xff000000U,
+                      "opaque stipple is drawable-anchored and clipped");
+
+    x11::ByteWriter patterned_polygon(order); patterned_polygon.write_u8(69); patterned_polygon.write_u8(0); patterned_polygon.write_u16(7);
+    patterned_polygon.write_u32(base+1); patterned_polygon.write_u32(base+11); patterned_polygon.write_u8(2); patterned_polygon.write_u8(0); patterned_polygon.write_u16(0);
+    patterned_polygon.write_u16(0); patterned_polygon.write_u16(0); patterned_polygon.write_u16(2); patterned_polygon.write_u16(0); patterned_polygon.write_u16(0); patterned_polygon.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(patterned_polygon),x11::CoreOpcode::FillPoly,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
+                      "patterned FillPoly is explicitly unsupported");
+
+    x11::ByteWriter patterned_arc(order); patterned_arc.write_u8(71); patterned_arc.write_u8(0); patterned_arc.write_u16(6);
+    patterned_arc.write_u32(base+1); patterned_arc.write_u32(base+11); patterned_arc.write_u16(0); patterned_arc.write_u16(0);
+    patterned_arc.write_u16(2); patterned_arc.write_u16(2); patterned_arc.write_u16(0); patterned_arc.write_u16(360*64);
+    result=dispatch_request(state,context,finish(std::move(patterned_arc),x11::CoreOpcode::PolyFillArc,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
+                      "patterned PolyFillArc is explicitly unsupported");
+
     WindowCreateSpec parent; parent.xid=base+9; parent.parent=state.screen().root_window;
     parent.width=8; parent.height=8; parent.window_class=WindowClass::InputOutput;
     gw::test::require(state.resources().create_window(1,base,mask,parent)==CreateWindowStatus::Success,
