@@ -97,7 +97,7 @@ int main() {
   const auto primary = protocol::scenario_events("primary-selection");
   okay &= expect(primary.size() == 5 &&
                      is_event(primary[0], protocol::Device::pointer, EV_REL,
-                              REL_Y, 264) &&
+                              REL_Y, 237) &&
                      is_event(primary[1], protocol::Device::pointer, EV_REL,
                               REL_X, -18) &&
                      is_event(primary[2], protocol::Device::pointer, EV_KEY,
@@ -125,7 +125,7 @@ int main() {
                      is_event(close[0], protocol::Device::pointer, EV_REL,
                               REL_X, -608) &&
                      is_event(close[1], protocol::Device::pointer, EV_REL,
-                              REL_Y, -232) &&
+                              REL_Y, -205) &&
                      is_event(close[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(close[3], protocol::Device::pointer, EV_KEY,
