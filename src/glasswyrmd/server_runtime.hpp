@@ -92,6 +92,7 @@ class ServerRuntime {
                                         short repeat_events);
   [[nodiscard]] bool service_session_changes();
   [[nodiscard]] bool suspend_real_input_for_compositor_reset(bool reset);
+  [[nodiscard]] bool resume_real_input_after_compositor_reset();
   [[nodiscard]] bool service_cursor();
   void mark_cursor_dirty() noexcept { cursor_dirty_ = true; }
   void deliver_real_input();
@@ -136,6 +137,7 @@ class ServerRuntime {
   std::optional<glasswyrm::wm::InteractivePolicy> interactive_policy_;
   std::optional<std::uint64_t> interactive_geometry_token_;
   bool cursor_submission_interactive_{};
+  bool real_input_suspended_for_compositor_reset_{};
   std::optional<PendingCursorDiagnostic> cursor_submission_diagnostic_;
   std::shared_ptr<const glasswyrm::input::CursorImage> move_cursor_;
   std::shared_ptr<const glasswyrm::input::CursorImage> resize_cursor_;
