@@ -551,6 +551,7 @@ settled_mirror() {
   return 1
 }
 failure_stage=interactive-scenarios
+wait_transcript_token M11_READY
 run_input basic-typing milestone11-xterm.log
 run_input repeat milestone11-xterm.log
 run_input scroll milestone11-interactive-wm.log
