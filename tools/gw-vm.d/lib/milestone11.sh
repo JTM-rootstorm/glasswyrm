@@ -824,6 +824,13 @@ milestone11_runtime_test() {
     drm_device=$(sed -n 's/^drm_primary_node=//p' <<<"$preflight")
     connector=$(sed -n 's/^drm_connector=//p' <<<"$preflight")
     target_vt=$(sed -n 's/^target_vt=//p' <<<"$preflight")
+    # Remove markers from interrupted or failed attempts before starting the
+    # asynchronous guest script.  Otherwise the host can consume a stale
+    # ready marker before the guest reaches its own cleanup prologue.
+    guest_run_script 'set -euo pipefail; rm -rf -- "$1"; mkdir -p "$1"' \
+      "$M11_GUEST_CONTROL_DIR" || { status=$?; failure=guest-control-reset; }
+  fi
+  if [[ -z $failure ]]; then
     script=$(milestone11_guest_script)
     guest_run_script "$script" "$GUEST_SOURCE_PATH" "$M11_GUEST_ARTIFACT_DIR" \
       "$drm_device" "$connector" "$target_vt" "$M11_XTERM_SHA256" \
