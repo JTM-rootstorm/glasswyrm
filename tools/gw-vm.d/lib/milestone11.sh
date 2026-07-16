@@ -527,6 +527,25 @@ if not frames or frames[-1]['canonical_hash'] != frames[-1]['scanout_hash']:
 print(frames[-1]['canonical_hash'],frames[-1]['scanout_hash'])
 PY
 }
+settled_mirror() {
+  local candidate= last= stable=0
+  for _ in {1..200}; do
+    candidate=$(find "$dumps" -type f -name '*.ppm' -print | sort -V | tail -n1)
+    if [[ -n $candidate && -s $candidate && $candidate == "$last" ]]; then
+      stable=$((stable + 1))
+      if ((stable >= 10)); then
+        printf '%s\n' "$candidate"
+        return
+      fi
+    else
+      last=$candidate
+      stable=0
+    fi
+    sleep .1
+  done
+  printf '%s\n' 'Timed out waiting for a quiescent compositor mirror' >&2
+  return 1
+}
 failure_stage=interactive-scenarios
 run_input basic-typing milestone11-xterm.log
 run_input repeat milestone11-xterm.log
@@ -551,7 +570,7 @@ grep -F '"status":"passed"' "$artifact_dir/milestone11-selection-probe.json"
 grep -F '"selection":"CLIPBOARD"' "$artifact_dir/milestone11-selection-probe.json"
 grep -F '"token":"M11_CLIPBOARD_TOKEN"' "$artifact_dir/milestone11-selection-probe.json"
 result[clipboard_selection]=passed result[property_notify]=passed
-mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1)
+mirror=$(settled_mirror)
 [[ -s $mirror ]]; read -r canonical_hash scanout_hash < <(frame_hashes)
 cp "$mirror" "$artifact_dir/milestone11-canonical.ppm"
 printf 'ready\nmode=1024x768\ncommit_id=initial\ngeneration=1\nconnector=%s\ncanonical_hash=%s\nscanout_hash=%s\n' "$connector" "$canonical_hash" "$scanout_hash" >"$control/screenshot-ready"
@@ -623,7 +642,7 @@ for _ in {1..200}; do
 done
 ((post_vt_frames_after > post_vt_frames_before))
 result[post_vt_command]=passed
-mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1); read -r canonical_hash scanout_hash < <(frame_hashes)
+mirror=$(settled_mirror); read -r canonical_hash scanout_hash < <(frame_hashes)
 cp "$mirror" "$artifact_dir/milestone11-canonical-after-vt.ppm"
 printf 'ready\nmode=1024x768\ncommit_id=post-vt\ngeneration=2\nconnector=%s\ncanonical_hash=%s\nscanout_hash=%s\n' "$connector" "$canonical_hash" "$scanout_hash" >"$control/screenshot-after-vt-ready"
 while [[ ! -e $control/screen-after-vt-captured ]]; do sleep .1; done
@@ -674,7 +693,7 @@ done
 ((post_restart_frames_after > post_restart_frames_before))
 systemctl is-active --quiet xterm-m11-a.service; systemctl is-active --quiet xterm-m11-b.service
 result[post_restart_input]=passed result[xterm_survival]=passed
-mirror=$(find "$dumps" -type f -name '*.ppm' -print | sort | tail -n1); read -r canonical_hash scanout_hash < <(frame_hashes)
+mirror=$(settled_mirror); read -r canonical_hash scanout_hash < <(frame_hashes)
 cp "$mirror" "$artifact_dir/milestone11-canonical-after-restart.ppm"
 printf 'ready\nmode=1024x768\ncommit_id=restart\ngeneration=3\nconnector=%s\ncanonical_hash=%s\nscanout_hash=%s\n' "$connector" "$canonical_hash" "$scanout_hash" >"$control/screenshot-after-restart-ready"
 while [[ ! -e $control/screen-after-restart-captured ]]; do sleep .1; done
@@ -799,7 +818,7 @@ milestone11_capture_screen() {
     magick "$raw" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/$name" || { rm -f "$raw"; return 1; }
     rsync -a -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" \
       "$ARTIFACTS_PATH_ABS/$name" "$SSH_TARGET:$M11_GUEST_ARTIFACT_DIR/$name" || { rm -f "$raw"; return 1; }
-    if guest_run_script 'set -euo pipefail; cmp "$1" "$2"' \
+    if guest_run_script 'set -euo pipefail; cmp -s "$1" "$2"' \
       "$M11_GUEST_ARTIFACT_DIR/$canonical" "$M11_GUEST_ARTIFACT_DIR/$name"; then
       rm -f "$raw"
       guest_run_script 'set -euo pipefail; mkdir -p "${1%/*}"; printf "screen-captured\n" >"$1"' \
