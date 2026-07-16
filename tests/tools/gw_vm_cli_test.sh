@@ -1628,6 +1628,8 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   'DeviceAllow=/dev/uinput rw' 'DeviceAllow=$drm_device rw' \
   'DeviceAllow=$target_vt rw' 'DeviceAllow=$keyboard r' \
   'DeviceAllow=$pointer r' glasswyrm-session '--runtime-dir' \
+  'StandardInput=tty-force' 'TTYPath=$target_vt' 'TTYReset=yes' \
+  'TTYVHangup=yes' 'TTYVTDisallocate=no' \
   '/run/glasswyrm-m11' '--input-device' '--xkb-layout' '--xkb-model' \
   '--drm-api atomic' '--mirror-dump-dir' '--scene-manifest' \
   '--drm-report' '--x11-trace' '-geometry' '80x24+96+96' '-fn' 'fixed' \
