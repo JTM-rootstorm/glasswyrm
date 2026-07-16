@@ -38,6 +38,23 @@ int main() {
                     "zero plane mask accepts bounded bitmap payload");
   gw::test::require(bitmap->at(1, 0) == 1 && bitmap->at(2, 0) == 0,
                     "zero plane mask preserves bitmap");
+  const std::array<std::uint8_t, 8> zbitmap_payload{
+      0b00000110, 0, 0, 0, 0b00000001, 0, 0, 0};
+  gw::test::require(put_zpixmap_lsb32(*bitmap, -1, 1, 3, 2,
+                                      zbitmap_payload, 1),
+                    "upload padded depth-one ZPixmap with clipping");
+  gw::test::require(bitmap->at(0, 1) == 1 && bitmap->at(1, 1) == 1 &&
+                        bitmap->at(0, 2) == 0 && bitmap->at(1, 2) == 0,
+                    "depth-one ZPixmap stores source bits directly");
+  gw::test::require(!put_zpixmap_lsb32(*bitmap, 0, 0, 3, 2,
+                                       std::span<const std::uint8_t>{}, 1),
+                    "depth-one ZPixmap validates padded payload atomically");
+  const auto preserved = bitmap->at(0, 1);
+  gw::test::require(put_zpixmap_lsb32(*bitmap, 0, 1, 3, 1,
+                                      ignored_payload, 0),
+                    "zero plane mask accepts depth-one ZPixmap");
+  gw::test::require(bitmap->at(0, 1) == preserved,
+                    "zero plane mask preserves depth-one ZPixmap target");
   gw::test::require(!glasswyrm::server::BitmapStorage::create(
                          glasswyrm::server::BitmapStorage::kMaximumDimension + 1U,
                          1U),

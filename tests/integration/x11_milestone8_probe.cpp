@@ -67,8 +67,8 @@ struct Session {
     base = gw::test::read_wire_u32(setup.data() + 12, order);
     // The first screen starts after the fixed setup header, vendor and format
     // list. All repository setup profiles advertise one zero-length vendor and
-    // one pixmap format, placing root at byte 72.
-    root = gw::test::read_wire_u32(setup.data() + 72, order);
+    // two pixmap formats, placing root at byte 80.
+    root = gw::test::read_wire_u32(setup.data() + 80, order);
   }
   void send(const std::vector<std::uint8_t>& request) {
     client.send_all(request); ++sequence;
