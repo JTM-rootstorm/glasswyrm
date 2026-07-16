@@ -105,7 +105,7 @@ int main() {
                      is_event(primary[3], protocol::Device::pointer, EV_REL,
                               REL_X, 130) &&
                      is_event(primary[4], protocol::Device::pointer, EV_KEY,
-                              BTN_LEFT, 0),
+                              BTN_LEFT, 0) && primary[4].delay_ms == 250,
                  "PRIMARY drag selects the known xterm A output row");
   const auto paste = protocol::scenario_events("clipboard-probe");
   okay &= expect(paste.size() > 8 &&
@@ -129,7 +129,7 @@ int main() {
                      is_event(close[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(close[3], protocol::Device::pointer, EV_KEY,
-                              BTN_LEFT, 0) &&
+                              BTN_LEFT, 0) && close[3].delay_ms == 250 &&
                      is_event(close[4], protocol::Device::keyboard, EV_KEY,
                               KEY_LEFTALT, 1) &&
                      is_event(close[7], protocol::Device::keyboard, EV_KEY,
