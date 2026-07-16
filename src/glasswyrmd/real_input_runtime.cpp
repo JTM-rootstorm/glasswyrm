@@ -181,8 +181,10 @@ bool ServerRuntime::service_session_changes() {
 }
 
 bool ServerRuntime::suspend_real_input_for_compositor_reset(const bool reset) {
-  if (!reset || !real_input_ || !real_input_->active())
+  if (!reset || !real_input_)
     return true;
+  real_input_suspended_for_compositor_reset_ = true;
+  if (!real_input_->active()) return true;
   const auto suspended =
       real_input_->apply_session_state(GWIPC_SESSION_INACTIVE);
   mark_cursor_dirty();
@@ -197,6 +199,29 @@ bool ServerRuntime::suspend_real_input_for_compositor_reset(const bool reset) {
                "glasswyrmd: could not suspend real input after compositor "
                "disconnect: %s\n",
                suspended.error.c_str());
+  return false;
+}
+
+bool ServerRuntime::resume_real_input_after_compositor_reset() {
+  if (!real_input_suspended_for_compositor_reset_ || !bridge_->ready())
+    return true;
+  const auto resumed =
+      real_input_->apply_session_state(GWIPC_SESSION_ACTIVE);
+  mark_cursor_dirty();
+  if (resumed.reset_server_state) {
+    input_state_.reset_provider_state();
+    abort_interactive();
+    (void)server_.state_.grabs().suspend();
+  }
+  if (resumed.result == GWIPC_SESSION_STATE_ACCEPTED ||
+      resumed.result == GWIPC_SESSION_STATE_ALREADY_APPLIED) {
+    real_input_suspended_for_compositor_reset_ = false;
+    return true;
+  }
+  std::fprintf(stderr,
+               "glasswyrmd: could not resume real input after compositor "
+               "reconnect: %s\n",
+               resumed.error.c_str());
   return false;
 }
 

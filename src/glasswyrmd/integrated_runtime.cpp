@@ -129,6 +129,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
 #if GW_HAS_LIBINPUT_BACKEND
   if (!suspend_real_input_for_compositor_reset(compositor_reset)) return false;
   if (!service_session_changes()) return false;
+  if (!resume_real_input_after_compositor_reset()) return false;
 #endif
   std::vector<CompositorBufferRelease> compositor_releases;
   if (content_presenter_ || cursor_presenter_) {
