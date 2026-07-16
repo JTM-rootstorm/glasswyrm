@@ -120,6 +120,7 @@ ipc_only=/var/tmp/glasswyrm-build-m11-ipc-only
 session_build=/var/tmp/glasswyrm-build-m11-session
 client_dir=/var/tmp/glasswyrm-m11-clients
 dumps=/var/tmp/glasswyrm-m11-dumps scenes=/var/tmp/glasswyrm-m11-scenes
+launcher_dumps=$dumps/launcher launcher_scenes=$scenes/launcher
 input=/var/tmp/glasswyrm-m11-input control=/var/tmp/glasswyrm-m11-control
 artifact_dir=${artifact_dir:-/var/tmp/glasswyrm-m11-artifacts}
 facts=$artifact_dir/milestone11-facts.env
@@ -143,8 +144,9 @@ systemctl stop "${m11_units[@]}" >/dev/null 2>&1 || true
 systemctl reset-failed "${m11_units[@]}" >/dev/null 2>&1 || true
 rm -rf "$artifact_dir" "$dumps" "$scenes" "$input" "$control"
 mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
+mkdir -p "$launcher_dumps" "$launcher_scenes"
 chmod 0700 "$artifact_dir" "$input" "$control"
-run_started=$(date --iso-8601=ns)
+run_started=$(date +%s)
 declare -A result
 results=(strict_default strict_m11 sanitizer clang component_builds source_layout
   ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready
@@ -408,8 +410,8 @@ launcher=("$runtime/src/glasswyrm-session" --runtime-dir /run/glasswyrm-m11 --di
   --drm-device "$drm_device" --tty "$target_vt" --connector "$connector"
   --mode 1024x768 --input-device "$keyboard" --input-device "$pointer"
   --xkb-layout us --xkb-model pc105 --drm-api atomic
-  --mirror-dump-dir "$dumps" --scene-manifest "$scenes/scene.jsonl"
-  --drm-report "$artifact_dir/milestone11-drm-report.jsonl"
+  --mirror-dump-dir "$launcher_dumps" --scene-manifest "$launcher_scenes/scene.jsonl"
+  --drm-report "$artifact_dir/milestone11-launcher-drm-report.jsonl"
   --x11-trace "$artifact_dir/milestone11-launcher-trace.json"
   --client xterm -geometry 80x24+96+96 -fn fixed -fb fixed
   -xrm '*cursorBlink:false' -xrm '*toolBar:false' -title Glasswyrm-M11
@@ -424,6 +426,8 @@ systemd-run --unit=glasswyrm-session-m11.service \
   --property=NoNewPrivileges=yes "${launcher[@]}"
 for _ in {1..300}; do [[ -S /tmp/.X11-unix/X99 && -S /run/glasswyrm-m11/gwm.sock && -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .1; done
 [[ -S /tmp/.X11-unix/X99 ]]
+sleep 1
+systemctl is-active --quiet glasswyrm-session-m11.service
 systemctl stop glasswyrm-session-m11.service
 for _ in {1..200}; do [[ ! -e /tmp/.X11-unix/X99 && ! -e /run/glasswyrm-m11/gwm.sock && ! -e /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
 
