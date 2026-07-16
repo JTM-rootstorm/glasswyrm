@@ -77,6 +77,28 @@ xcb_atom_t intern(Client& client, const std::string_view name) {
   return reply->atom;
 }
 
+void exercise_cursor_lifecycle(Client& client) {
+  constexpr std::string_view cursor_font_name = "cursor";
+  const auto font = xcb_generate_id(client.connection);
+  checked(client.connection,
+          xcb_open_font_checked(
+              client.connection, font,
+              static_cast<std::uint16_t>(cursor_font_name.size()),
+              cursor_font_name.data()),
+          "OpenFont cursor failed");
+  const auto cursor = xcb_generate_id(client.connection);
+  checked(client.connection,
+          xcb_create_glyph_cursor_checked(
+              client.connection, cursor, font, font, 152, 153,
+              UINT16_C(0xffff), UINT16_C(0xffff), UINT16_C(0xffff), 0, 0, 0),
+          "CreateGlyphCursor failed");
+  checked(client.connection, xcb_free_cursor_checked(client.connection, cursor),
+          "FreeCursor failed");
+  checked(client.connection, xcb_close_font_checked(client.connection, font),
+          "CloseFont cursor failed");
+  require(xcb_flush(client.connection) > 0, "cursor lifecycle flush failed");
+}
+
 XPtr<xcb_generic_event_t> wait_event(Client& client,
                                      const std::uint8_t expected) {
   const auto deadline = std::chrono::steady_clock::now() +
@@ -169,6 +191,7 @@ int main(int argc, char** argv) try {
   Client requestor;
   connect(owner);
   connect(requestor);
+  exercise_cursor_lifecycle(owner);
   const auto clipboard = intern(owner, "CLIPBOARD");
   const auto targets = intern(owner, "TARGETS");
   const auto utf8 = intern(owner, "UTF8_STRING");

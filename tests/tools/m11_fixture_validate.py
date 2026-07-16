@@ -14,9 +14,7 @@ REQUIRED_REQUESTS = frozenset((
     "ConvertSelection", "SendEvent",
 ))
 REQUIRED_EVENT_TYPES = frozenset((2, 3, 4, 5, 6, 22, 28, 29, 30, 31, 33))
-TRACE_GATED_REQUESTS = frozenset((
-    "GrabButton", "UngrabButton", "GrabKey", "UngrabKey",
-))
+TRACE_GATED_REQUESTS = frozenset(("GrabButton",))
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
 TRACE_KEYS = frozenset((
     "schema", "first_request_occurrence", "request_histogram",
@@ -119,7 +117,7 @@ if extensions and "QueryExtension" not in requests:
 
 trace_gated = positive_histogram(trace.get("trace_gated_requests"),
                                  "trace_gated_requests")
-if not set(trace_gated).issubset(TRACE_GATED_REQUESTS):
+if set(trace_gated) != TRACE_GATED_REQUESTS:
     fail("invalid trace_gated_requests")
 expected_trace_gated = {
     name: requests[name] for name in TRACE_GATED_REQUESTS if name in requests

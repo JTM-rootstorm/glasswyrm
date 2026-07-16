@@ -12,7 +12,7 @@ import tempfile
 requests = {name: 1 for name in (
     "ChangeWindowAttributes", "CreateGlyphCursor", "FreeCursor",
     "RecolorCursor", "GetSelectionOwner", "SetSelectionOwner",
-    "ConvertSelection", "SendEvent", "GrabButton", "UngrabButton")}
+    "ConvertSelection", "SendEvent", "GrabButton")}
 events = {str(event_type): count for event_type, count in (
     (2, 3), (3, 1), (4, 4), (5, 4), (6, 1), (22, 1), (28, 1),
     (29, 1), (30, 1), (31, 1), (33, 1))}
@@ -34,7 +34,7 @@ fixture = {
     "recurring_requests": [],
     "extension_queries": [],
     "unknown_opcodes": [],
-    "trace_gated_requests": {"GrabButton": 1, "UngrabButton": 1},
+    "trace_gated_requests": {"GrabButton": 1},
     "application_connection_count": 1,
     "maximum_request_length": 24,
 }
@@ -80,8 +80,14 @@ with tempfile.TemporaryDirectory() as temporary:
 
     changed = copy.deepcopy(fixture)
     changed["trace_gated_requests"] = {}
-    rejected(directory, changed,
-             "trace_gated_requests does not match request_histogram")
+    rejected(directory, changed, "invalid trace_gated_requests")
+
+    changed = copy.deepcopy(fixture)
+    changed["request_histogram"]["UngrabButton"] = 1
+    changed["first_request_occurrence"].append("UngrabButton")
+    changed["opcode_histogram"][str(len(changed["opcode_histogram"]) + 1)] = 1
+    changed["trace_gated_requests"]["UngrabButton"] = 1
+    rejected(directory, changed, "invalid trace_gated_requests")
 
     changed = copy.deepcopy(fixture)
     changed["opcode_histogram"]["1"] = 2
