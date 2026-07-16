@@ -183,14 +183,14 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
     // clear leaves the token one fixed bitmap-font row above the prompt.
     relative(events, REL_Y, -13);
-    relative(events, REL_X, -18);
+    relative(events, REL_X, -6);
     button(events, BTN_LEFT, true);
-    relative(events, REL_X, 130);
+    relative(events, REL_X, 111);
     button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
     // Move from xterm A to the non-overlapping interior of xterm B
     // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
-    relative(events, REL_X, 328);
+    relative(events, REL_X, 335);
     relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false, 250);
