@@ -162,6 +162,22 @@ The pointer cursor is applied to both shell and terminal child windows. The
 effective-cursor implementation therefore needs child-aware hit testing and
 window-ancestor inheritance.
 
+## Xaw scrollbar stipple
+
+The fixed profile still constructs an Xaw Scrollbar widget. In libXaw 1.0.16,
+`Scrollbar.c:471-500` creates the default depth-1 thumb with
+`XmuCreateStippledPixmap`, then requests a GC with `FillOpaqueStippled` and
+`GCStipple`. Xt omits the default foreground from the wire request, leaving the
+observed value mask `0x908`: background, fill style, and stipple, with values
+white, `3`, and the generated depth-1 pixmap XID. `Scrollbar.c:390-399` uses
+that GC with `XFillRectangle` to paint the thumb.
+
+Glasswyrm consequently retains the bitmap storage through the GC even if the
+pixmap XID is freed, and implements the drawable-origin opaque-stipple pattern
+only for `PolyFillRectangle`. Other patterned drawing remains outside this
+bounded xterm requirement and fails explicitly rather than being rendered as a
+solid foreground fill.
+
 ## Grabs and keyboard discovery
 
 No direct calls to `XGrabPointer`, `XUngrabPointer`,

@@ -17,6 +17,9 @@ not a broad X11 compatibility declaration.
   [the grab document](../input/M11_GRABS.md).
 - `QueryKeymap`, core keyboard mapping/modifier replies, bounded keyboard
   control, and bell behavior.
+- The Xaw scrollbar's exact `CreateGC` subset: `FillOpaqueStippled` with a
+  retained same-screen depth-1 `GCStipple`, and patterned
+  `PolyFillRectangle` rendering anchored at the drawable origin.
 
 The implementation retains M9 core fonts/text, properties/atoms, child-window
 composition, CopyArea scrolling, focus/exposure behavior, and absent optional
@@ -32,4 +35,6 @@ protocol profile rather than a completed client claim.
 Unsupported behavior includes the XKB extension, XIM/compose, Xft/Unicode,
 arbitrary layouts, full synchronous/replay/confinement grabs, complete cursor
 fonts, clipboard persistence, drag-and-drop, decorations, and multiple
-workspaces or outputs.
+workspaces or outputs. Tiled and transparent-stippled fills remain unsupported;
+the opaque-stippled GC is accepted only by `PolyFillRectangle`, while line,
+segment, polygon, and arc drawing reject that GC with `BadImplementation`.

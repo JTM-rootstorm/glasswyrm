@@ -1,5 +1,8 @@
 #pragma once
+#include "glasswyrmd/bitmap_storage.hpp"
+
 #include <cstdint>
+#include <memory>
 namespace glasswyrm::server {
 struct GraphicsContextResource {
   std::uint32_t root{};
@@ -13,6 +16,7 @@ struct GraphicsContextResource {
   std::uint8_t cap_style{1};
   std::uint8_t join_style{};
   std::uint8_t fill_style{};
+  std::shared_ptr<const BitmapStorage> stipple;
   std::uint8_t subwindow_mode{};
   bool graphics_exposures{true};
   std::int16_t clip_x_origin{}, clip_y_origin{};

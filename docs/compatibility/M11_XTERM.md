@@ -14,6 +14,7 @@ Once the pending gate passes, the claim is limited to:
 - one US `pc105` keymap through explicit libinput keyboard/mouse path devices;
 - one workspace and single DRM/KMS output;
 - software cursor;
+- the core Xaw scrollbar thumb's depth-1 opaque-stippled rectangle fill;
 - PRIMARY and minimum CLIPBOARD exchange;
 - Alt+Button1 move, Alt+Button3 resize, and Alt+F4 close.
 
