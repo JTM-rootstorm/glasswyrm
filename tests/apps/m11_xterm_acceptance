@@ -86,6 +86,8 @@ if selection_value.get('status')!='passed' or selection_value.get('selection')!=
     raise SystemExit('selection probe did not pass CLIPBOARD exchange')
 if selection_value.get('token')!='M11_CLIPBOARD_TOKEN' or set(selection_value.get('targets',()))!={'TARGETS','UTF8_STRING'}:
     raise SystemExit('selection probe payload or targets mismatch')
+if selection_value.get('primary_replaced') is not True:
+    raise SystemExit('selection probe did not replace PRIMARY for SelectionClear evidence')
 wm_text=pathlib.Path(wm_evidence).read_text(errors='replace').lower()
 binding_values={}
 for name,expected,base in (('move_button',1,10),('resize_button',3,10),

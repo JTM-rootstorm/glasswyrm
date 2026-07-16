@@ -218,10 +218,27 @@ int main(int argc, char** argv) try {
                            utf8_data.size()) == token,
           "UTF8_STRING payload mismatch");
 
+  // The interactive xterm path owns PRIMARY before this probe runs. Replace
+  // it once so the live trace proves SelectionClear delivery as well as the
+  // CLIPBOARD request/notify exchange above.
+  checked(owner.connection,
+          xcb_set_selection_owner_checked(owner.connection, owner.window,
+                                          XCB_ATOM_PRIMARY, XCB_CURRENT_TIME),
+          "PRIMARY replacement failed");
+  require(xcb_flush(owner.connection) > 0, "PRIMARY replacement flush failed");
+  XPtr<xcb_get_selection_owner_reply_t> primary_reply(
+      xcb_get_selection_owner_reply(
+          requestor.connection,
+          xcb_get_selection_owner(requestor.connection, XCB_ATOM_PRIMARY),
+          nullptr));
+  require(primary_reply && primary_reply->owner == owner.window,
+          "PRIMARY replacement owner mismatch");
+
   const std::string result =
       "{\"status\":\"passed\",\"selection\":\"CLIPBOARD\","
       "\"targets\":[\"TARGETS\",\"UTF8_STRING\"],"
-      "\"token\":\"M11_CLIPBOARD_TOKEN\"}\n";
+      "\"token\":\"M11_CLIPBOARD_TOKEN\","
+      "\"primary_replaced\":true}\n";
   if (output.empty()) {
     std::fwrite(result.data(), 1, result.size(), stdout);
   } else {
