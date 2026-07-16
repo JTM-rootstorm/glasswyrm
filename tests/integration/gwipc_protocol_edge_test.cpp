@@ -379,6 +379,33 @@ void test_session_direction_generation_and_correlation() {
   require(gwipc_connection_process_poll_events(repeated.connection, POLLIN) ==
               GWIPC_STATUS_PROTOCOL_ERROR,
           "repeated incoming session generation is rejected");
+
+  RawPair buffered;
+  buffered.connection->config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  buffered.connection->peer.role = GWIPC_ROLE_COMPOSITOR;
+  buffered.connection->peer.capabilities |= GWIPC_CAP_SESSION_STATE;
+  const auto active = gw::ipc::wire::encode(
+      gw::ipc::wire::SessionStateChange{
+          2, gw::ipc::wire::SessionState::Active, 0});
+  send_record(buffered.peer, 1, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+              GWIPC_FLAG_ACK_REQUIRED, change);
+  send_record(buffered.peer, 2, GWIPC_MESSAGE_SESSION_STATE_CHANGE,
+              GWIPC_FLAG_ACK_REQUIRED, active);
+  require(gwipc_connection_process_poll_events(buffered.connection, POLLIN) ==
+              GWIPC_STATUS_OK,
+          "one transport service buffers consecutive session records");
+  gwipc_message* first = nullptr;
+  gwipc_message* second = nullptr;
+  require(gwipc_connection_receive(buffered.connection, &first) ==
+              GWIPC_STATUS_OK,
+          "receive first buffered session record");
+  pollfd readiness{gwipc_connection_fd(buffered.connection), POLLIN, 0};
+  require(::poll(&readiness, 1, 0) == 0 &&
+              gwipc_connection_receive(buffered.connection, &second) ==
+                  GWIPC_STATUS_OK,
+          "internal incoming work remains after kernel readiness clears");
+  gwipc_message_destroy(first);
+  gwipc_message_destroy(second);
 }
 
 void test_interactive_bindings_snapshot_rules() {

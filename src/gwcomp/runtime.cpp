@@ -180,6 +180,7 @@ int run(const Options& options) {
   bool stopping = false;
   bool vt_release_requested = false;
   bool vt_acquire_requested = false;
+  bool buffered_work_pending = false;
   SessionStateCoordinator session_state;
   int exit_status = 0;
   std::optional<std::uint64_t> pending_reply_sequence;
@@ -196,10 +197,12 @@ int run(const Options& options) {
         {signals.poll_fd(), POLLIN, 0},
         {compositor.presentation_poll_fd(),
          compositor.presentation_poll_events(), 0}};
-    const int count = ::poll(
-        descriptors, 4,
+    const int runtime_timeout =
         minimum_timeout(compositor.presentation_timeout_ms(),
-                        session_state.timeout_ms()));
+                        session_state.timeout_ms());
+    const int count =
+        ::poll(descriptors, 4, buffered_work_pending ? 0 : runtime_timeout);
+    buffered_work_pending = false;
     if (count < 0) {
       if (errno == EINTR) continue;
       std::perror("gwcomp: poll");
@@ -349,10 +352,21 @@ int run(const Options& options) {
       }
     }
     if (producer && peer_validated && session_state.waiting()) {
-      gwipc_message* raw_message = nullptr;
-      if (gwipc_connection_receive(producer.get(), &raw_message) ==
-          GWIPC_STATUS_OK) {
+      std::size_t session_messages = 0;
+      std::size_t session_payload_bytes = 0;
+      while (!stopping && producer && peer_validated &&
+             session_state.waiting() &&
+             session_messages < kMaximumMessagesPerTurn &&
+             session_payload_bytes < kMaximumPayloadBytesPerTurn) {
+        gwipc_message* raw_message = nullptr;
+        if (gwipc_connection_receive(producer.get(), &raw_message) !=
+            GWIPC_STATUS_OK)
+          break;
         std::unique_ptr<gwipc_message, MessageDeleter> message(raw_message);
+        std::size_t size = 0;
+        (void)gwipc_message_payload(message.get(), &size);
+        session_payload_bytes += size;
+        ++session_messages;
         if (gwipc_message_type(message.get()) ==
             GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) {
           gwipc_session_state_acknowledged acknowledged{};
@@ -385,6 +399,10 @@ int run(const Options& options) {
           }
         }
       }
+      if (session_state.waiting() &&
+          (session_messages == kMaximumMessagesPerTurn ||
+           session_payload_bytes >= kMaximumPayloadBytesPerTurn))
+        buffered_work_pending = true;
     }
     std::string session_error;
     if (!stopping && !session_state.check_timeout(session_error)) {
@@ -423,6 +441,12 @@ int run(const Options& options) {
         break;
       }
     }
+    if (producer && peer_validated && !compositor.presentation_pending() &&
+        !compositor.presentation_suspended() && !vt_release_requested &&
+        !session_state.waiting() &&
+        (messages == kMaximumMessagesPerTurn ||
+         payload_bytes >= kMaximumPayloadBytesPerTurn))
+      buffered_work_pending = true;
     if (producer && gwipc_connection_get_state(producer.get()) ==
                         GWIPC_CONNECTION_CLOSED) {
       if (compositor.presentation_pending()) {
