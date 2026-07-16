@@ -57,11 +57,14 @@ std::uint32_t hit_test_deepest_viewable(
       if (!child || child->map_state != server::MapState::Viewable ||
           child->cleanup_pending)
         continue;
-      const auto child_x = origin_x + child->x + child->border_width;
-      const auto child_y = origin_y + child->y + child->border_width;
-      const auto right = child_x + child->width;
-      const auto bottom = child_y + child->height;
-      if (x >= child_x && y >= child_y && x < right && y < bottom) {
+      const auto child_outer_x = origin_x + child->x;
+      const auto child_outer_y = origin_y + child->y;
+      const auto border = static_cast<std::int64_t>(child->border_width);
+      const auto child_x = child_outer_x + border;
+      const auto child_y = child_outer_y + border;
+      const auto right = child_outer_x + child->width + border * 2;
+      const auto bottom = child_outer_y + child->height + border * 2;
+      if (x >= child_outer_x && y >= child_outer_y && x < right && y < bottom) {
         selected = *child_id;
         selected_x = child_x;
         selected_y = child_y;
@@ -113,6 +116,55 @@ std::vector<std::uint32_t> window_ancestry(
   return {};
 }
 
+std::optional<std::pair<std::int64_t, std::int64_t>> window_root_origin(
+    const server::ResourceTable& resources,
+    const std::uint32_t window) noexcept {
+  const auto root = resources.screen().root_window;
+  if (window == root) return std::pair<std::int64_t, std::int64_t>{0, 0};
+  auto current = window;
+  std::int64_t x = 0;
+  std::int64_t y = 0;
+  const auto maximum_depth =
+      resources.resource_count(server::ResourceType::Window);
+  for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+    const auto* candidate = resources.find_window(current);
+    if (!candidate || candidate->parent == 0 || candidate->parent == current)
+      return std::nullopt;
+    x += candidate->x;
+    y += candidate->y;
+    if (candidate->parent != root) {
+      x += candidate->border_width;
+      y += candidate->border_width;
+    }
+    if (candidate->parent == root) return std::pair{x, y};
+    current = candidate->parent;
+  }
+  return std::nullopt;
+}
+
+std::uint32_t immediate_child_on_path(
+    const server::ResourceTable& resources, const std::uint32_t ancestor,
+    const std::uint32_t descendant) noexcept {
+  if (ancestor == descendant) return 0;
+  auto current = descendant;
+  const auto maximum_depth =
+      resources.resource_count(server::ResourceType::Window);
+  for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+    const auto* candidate = resources.find_window(current);
+    if (!candidate || candidate->parent == 0 || candidate->parent == current)
+      return 0;
+    if (candidate->parent == ancestor) return current;
+    current = candidate->parent;
+  }
+  return 0;
+}
+
+std::int16_t clamp_event_coordinate(const std::int64_t value) noexcept {
+  return static_cast<std::int16_t>(std::clamp<std::int64_t>(
+      value, std::numeric_limits<std::int16_t>::min(),
+      std::numeric_limits<std::int16_t>::max()));
+}
+
 std::uint32_t motion_delivery_mask(const InputState& state) noexcept {
   std::uint32_t mask = em::PointerMotion;
   if (state.any_button_down()) mask |= em::ButtonMotion;
@@ -160,48 +212,58 @@ EventCoordinates event_coordinates(const server::ResourceTable& resources,
                                    const std::uint32_t pointer_target,
                                    const std::int32_t root_x,
                                    const std::int32_t root_y) noexcept {
-  EventCoordinates result{static_cast<std::int16_t>(root_x), static_cast<std::int16_t>(root_y),
-                          static_cast<std::int16_t>(root_x), static_cast<std::int16_t>(root_y), 0};
-  if (event_window == resources.screen().root_window) {
-    result.child = pointer_target == event_window ? 0 : pointer_target;
-  } else if (resources.find_window(event_window)) {
-    const auto root = resources.screen().root_window;
-    const auto maximum_depth =
-        resources.resource_count(server::ResourceType::Window);
-    auto current = event_window;
-    std::int64_t origin_x = 0;
-    std::int64_t origin_y = 0;
-    bool resolved = false;
-    for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
-      const auto* window = resources.find_window(current);
-      if (!window || window->parent == 0 || window->parent == current)
-        break;
-      origin_x += window->x;
-      origin_y += window->y;
-      if (window->parent != root) {
-        origin_x += window->border_width;
-        origin_y += window->border_width;
-      }
-      if (window->parent == root) {
-        resolved = true;
-        break;
-      }
-      current = window->parent;
-    }
-    if (resolved) {
-      result.event_x = static_cast<std::int16_t>(root_x - origin_x);
-      result.event_y = static_cast<std::int16_t>(root_y - origin_y);
-    }
+  EventCoordinates result{clamp_event_coordinate(root_x),
+                          clamp_event_coordinate(root_y),
+                          clamp_event_coordinate(root_x),
+                          clamp_event_coordinate(root_y),
+                          immediate_child_on_path(resources, event_window,
+                                                  pointer_target)};
+  const auto origin = window_root_origin(resources, event_window);
+  if (origin) {
+    result.event_x = clamp_event_coordinate(
+        static_cast<std::int64_t>(root_x) - origin->first);
+    result.event_y = clamp_event_coordinate(
+        static_cast<std::int64_t>(root_y) - origin->second);
   }
   return result;
 }
 
 std::pair<gw::protocol::x11::NotifyDetail, gw::protocol::x11::NotifyDetail>
-crossing_details(const std::uint32_t root, const std::uint32_t old_target,
+crossing_details(const server::ResourceTable& resources,
+                 const std::uint32_t old_target,
                  const std::uint32_t new_target) noexcept {
+  const auto is_ancestor = [&](const std::uint32_t ancestor,
+                               std::uint32_t descendant) {
+    const auto maximum_depth =
+        resources.resource_count(server::ResourceType::Window);
+    for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+      if (descendant == ancestor) return true;
+      const auto* candidate = resources.find_window(descendant);
+      if (!candidate || candidate->parent == 0 ||
+          candidate->parent == descendant)
+        return false;
+      descendant = candidate->parent;
+    }
+    return false;
+  };
   using D = gw::protocol::x11::NotifyDetail;
-  if (old_target == root && new_target != root) return {D::Inferior, D::Ancestor};
-  if (old_target != root && new_target == root) return {D::Ancestor, D::Inferior};
+  if (is_ancestor(old_target, new_target)) return {D::Inferior, D::Ancestor};
+  if (is_ancestor(new_target, old_target)) return {D::Ancestor, D::Inferior};
+  return {D::Nonlinear, D::Nonlinear};
+}
+
+std::pair<gw::protocol::x11::NotifyDetail, gw::protocol::x11::NotifyDetail>
+crossing_details(const std::span<const std::uint32_t> old_ancestry,
+                 const std::span<const std::uint32_t> new_ancestry) noexcept {
+  using D = gw::protocol::x11::NotifyDetail;
+  if (old_ancestry.empty() || new_ancestry.empty())
+    return {D::Nonlinear, D::Nonlinear};
+  if (std::ranges::find(new_ancestry, old_ancestry.front()) !=
+      new_ancestry.end())
+    return {D::Inferior, D::Ancestor};
+  if (std::ranges::find(old_ancestry, new_ancestry.front()) !=
+      old_ancestry.end())
+    return {D::Ancestor, D::Inferior};
   return {D::Nonlinear, D::Nonlinear};
 }
 

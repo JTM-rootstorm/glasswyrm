@@ -1,5 +1,6 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 
+#include "input/input_router.hpp"
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/reply.hpp"
 
@@ -8,7 +9,6 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 
 namespace glasswyrm::server::request_handlers {
@@ -51,21 +51,6 @@ DispatchResult get_input_focus(const ServerState& state,
   return {std::move(reply).finish()};
 }
 
-std::optional<std::pair<std::int64_t, std::int64_t>> window_root_origin(
-    const ResourceTable& resources, std::uint32_t xid) {
-  std::int64_t x = 0, y = 0;
-  std::unordered_set<std::uint32_t> visited;
-  while (xid != resources.screen().root_window) {
-    if (!visited.insert(xid).second) return std::nullopt;
-    const auto* window = resources.find_window(xid);
-    if (!window) return std::nullopt;
-    x += static_cast<std::int64_t>(window->x) + window->border_width;
-    y += static_cast<std::int64_t>(window->y) + window->border_width;
-    xid = window->parent;
-  }
-  return std::pair{x, y};
-}
-
 std::uint32_t immediate_child_at(const ResourceTable& resources,
                                  const WindowResource& parent,
                                  const std::int64_t root_x,
@@ -73,7 +58,7 @@ std::uint32_t immediate_child_at(const ResourceTable& resources,
   for (auto iterator = parent.children.rbegin(); iterator != parent.children.rend(); ++iterator) {
     const auto* child = resources.find_window(*iterator);
     if (!child || child->map_state != MapState::Viewable) continue;
-    const auto origin = window_root_origin(resources, *iterator);
+    const auto origin = glasswyrm::input::window_root_origin(resources, *iterator);
     if (!origin) continue;
     const auto border = static_cast<std::int64_t>(child->border_width);
     const auto left = origin->first - border, top = origin->second - border;
@@ -98,7 +83,7 @@ DispatchResult query_pointer(const ServerState& state,
   (void)reader.read_u32(xid);
   const auto* window = state.resources().find_window(xid);
   if (!window) return error(context, request, x11::CoreErrorCode::BadWindow, xid);
-  const auto origin = window_root_origin(state.resources(), xid);
+  const auto origin = glasswyrm::input::window_root_origin(state.resources(), xid);
   if (!origin) return error(context, request, x11::CoreErrorCode::BadImplementation);
   const auto win_x = static_cast<std::int64_t>(context.input.root_x) - origin->first;
   const auto win_y = static_cast<std::int64_t>(context.input.root_y) - origin->second;
@@ -129,8 +114,10 @@ DispatchResult translate_coordinates(const ServerState& state,
   if (!source_window) return error(context, request, x11::CoreErrorCode::BadWindow, source);
   const auto* destination_window = state.resources().find_window(destination);
   if (!destination_window) return error(context, request, x11::CoreErrorCode::BadWindow, destination);
-  const auto source_origin = window_root_origin(state.resources(), source);
-  const auto destination_origin = window_root_origin(state.resources(), destination);
+  const auto source_origin =
+      glasswyrm::input::window_root_origin(state.resources(), source);
+  const auto destination_origin =
+      glasswyrm::input::window_root_origin(state.resources(), destination);
   if (!source_origin || !destination_origin)
     return error(context, request, x11::CoreErrorCode::BadImplementation);
   const auto root_x = source_origin->first + static_cast<std::int16_t>(source_x_wire);
