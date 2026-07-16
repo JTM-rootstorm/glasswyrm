@@ -691,19 +691,38 @@ milestone11_poll_marker() {
 }
 
 milestone11_capture_screen() {
-  local ready=$1 captured=$2 name=$3 guest_pid=$4 marker raw
+  local ready=$1 captured=$2 name=$3 guest_pid=$4 marker raw canonical attempt
   marker=$(milestone11_poll_marker "$ready" "$guest_pid") || return
   printf '%s\n' "$marker" >>"$ARTIFACTS_PATH_ABS/milestone11-session-state.log"
-  # QXL publishes the accepted KMS buffer to the SPICE screenshot surface
-  # asynchronously.  Input is quiescent while the guest waits on the marker.
-  sleep 1
+  case $name in
+    milestone11-desktop.ppm) canonical=milestone11-canonical.ppm ;;
+    milestone11-desktop-after-vt.ppm) canonical=milestone11-canonical-after-vt.ppm ;;
+    milestone11-desktop-after-restart.ppm) canonical=milestone11-canonical-after-restart.ppm ;;
+    *) printf 'Unknown M11 screenshot artifact: %s\n' "$name" >&2; return 1 ;;
+  esac
   raw=$(mktemp "$ARTIFACTS_PATH_ABS/.milestone11-screen.XXXXXX") || return
-  virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw" || { rm -f "$raw"; return 1; }
-  magick "$raw" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/$name" || { rm -f "$raw"; return 1; }
+  # QXL publishes the accepted KMS buffer to the SPICE screenshot surface
+  # asynchronously.  Input remains quiescent while the guest waits, so poll
+  # until the graphical console is byte-identical to the accepted canonical
+  # frame instead of relying on a host-timing delay.
+  for attempt in {1..40}; do
+    virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw" || { rm -f "$raw"; return 1; }
+    magick "$raw" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/$name" || { rm -f "$raw"; return 1; }
+    rsync -a -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" \
+      "$ARTIFACTS_PATH_ABS/$name" "$SSH_TARGET:$M11_GUEST_ARTIFACT_DIR/$name" || { rm -f "$raw"; return 1; }
+    if guest_run_script 'set -euo pipefail; cmp "$1" "$2"' \
+      "$M11_GUEST_ARTIFACT_DIR/$canonical" "$M11_GUEST_ARTIFACT_DIR/$name"; then
+      rm -f "$raw"
+      guest_run_script 'set -euo pipefail; mkdir -p "${1%/*}"; printf "screen-captured\n" >"$1"' \
+        "$M11_GUEST_CONTROL_DIR/$captured"
+      return
+    fi
+    kill -0 "$guest_pid" 2>/dev/null || { rm -f "$raw"; return 1; }
+    sleep .25
+  done
   rm -f "$raw"
-  rsync -a -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" \
-    "$ARTIFACTS_PATH_ABS/$name" "$SSH_TARGET:$M11_GUEST_ARTIFACT_DIR/$name" || return
-  guest_run_script 'set -euo pipefail; mkdir -p "${1%/*}"; printf "screen-captured\n" >"$1"' "$M11_GUEST_CONTROL_DIR/$captured"
+  printf 'Timed out waiting for M11 graphical console parity: %s\n' "$name" >&2
+  return 1
 }
 
 milestone11_release_guest_waits() {
