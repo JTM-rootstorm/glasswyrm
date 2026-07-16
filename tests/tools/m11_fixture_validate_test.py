@@ -25,6 +25,9 @@ fixture = {
     "request_histogram": requests,
     "event_histogram": events,
     "event_sequence": sequence,
+    "error_histogram": {},
+    "unknown_opcodes": [],
+    "trace_gated_requests": {"GrabButton": 1, "UngrabButton": 1},
 }
 
 with tempfile.TemporaryDirectory() as temporary:

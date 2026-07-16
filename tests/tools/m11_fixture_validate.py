@@ -52,6 +52,16 @@ except (UnicodeDecodeError, json.JSONDecodeError) as error:
     fail(f"invalid xterm.trace.json: {error}")
 if not isinstance(trace, dict) or trace.get("schema") != 1:
     fail("xterm.trace.json must be a schema 1 object")
+if trace.get("error_histogram") != {}:
+    fail("accepted trace must not contain X11 errors")
+if trace.get("unknown_opcodes") != []:
+    fail("accepted trace must not contain unknown opcodes")
+trace_gated = trace.get("trace_gated_requests")
+if not isinstance(trace_gated, dict) or not all(
+        name in {"GrabButton", "UngrabButton", "GrabKey", "UngrabKey"}
+        and isinstance(count, int) and not isinstance(count, bool) and count > 0
+        for name, count in trace_gated.items()):
+    fail("invalid trace_gated_requests")
 
 requests = trace.get("request_histogram")
 events = trace.get("event_histogram")

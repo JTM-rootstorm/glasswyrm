@@ -10,6 +10,9 @@ import sys
 MAXIMUM_LINE_BYTES = 64 * 1024
 MAXIMUM_TRACE_BYTES = 8 * 1024 * 1024
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
+TRACE_GATED_REQUESTS = (
+    "GrabButton", "UngrabButton", "GrabKey", "UngrabKey",
+)
 
 
 def fail(message):
@@ -108,6 +111,10 @@ def summarize(records):
         "unknown_opcodes": sorted({
             record["opcode"] for record in requests
             if record["name"] == "Unknown"}),
+        "trace_gated_requests": {
+            name: request_counts[name] for name in TRACE_GATED_REQUESTS
+            if request_counts[name]
+        },
         "event_histogram": dict(sorted(event_counts.items(),
                                        key=lambda item: int(item[0]))),
         "event_sequence": events,
