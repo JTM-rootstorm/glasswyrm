@@ -1651,6 +1651,16 @@ assert_contains "$command_log" 'journalctl --since "@$run_started"'
 assert_contains "$command_log" 'xterm_has_pty "$first_xterm_pid"'
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'QXL publishes the accepted KMS buffer'
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "r.get('record')=='vt' and r.get('transition')==transition"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "state=1 result=[12]"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "state=2 result=[12]"
+assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "grep -F 'suspended'"
+assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "grep -F 'active'"
 assert_not_contains "$command_log" '<-u8>'
 assert_not_contains "$repo_root/tests/compat/m11/clients.toml" '"-u8"'
 for staged_consumer in \

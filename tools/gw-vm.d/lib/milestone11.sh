@@ -564,6 +564,14 @@ while True:
     if time.monotonic() >= deadline: raise SystemExit('VT release report proof is incomplete')
     time.sleep(.05)
 PY
+systemctl is-active --quiet gwcomp-m11.service glasswyrmd-m11.service
+for _ in {1..100}; do
+  journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
+    grep -Eq 'session state generation=[0-9]+ state=1 result=[12]' && break
+  sleep .05
+done
+journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
+  grep -Eq 'session state generation=[0-9]+ state=1 result=[12]'
 result[vt_suspend]=passed
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') == "$trace_hash_before" ]]
@@ -583,6 +591,14 @@ while True:
     if time.monotonic() >= deadline: raise SystemExit('VT acquire report proof is incomplete')
     time.sleep(.05)
 PY
+systemctl is-active --quiet gwcomp-m11.service glasswyrmd-m11.service
+for _ in {1..100}; do
+  journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
+    grep -Eq 'session state generation=[0-9]+ state=2 result=[12]' && break
+  sleep .05
+done
+journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager |
+  grep -Eq 'session state generation=[0-9]+ state=2 result=[12]'
 result[vt_resume]=passed
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') != "$trace_hash_before" ]]
