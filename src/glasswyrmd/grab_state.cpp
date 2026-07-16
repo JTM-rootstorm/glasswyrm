@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <iterator>
 #include <limits>
 #include <utility>
 
@@ -218,31 +219,21 @@ GrabStatus GrabState::grab_button(const PassiveButtonGrabRequest& request) {
   return GrabStatus::Success;
 }
 
-std::size_t GrabState::ungrab_button(const GrabClientId client,
-                                     const std::uint32_t window,
-                                     const std::uint8_t button,
-                                     const std::uint16_t modifiers) noexcept {
-  if (!valid_button(button) || !valid_modifiers(modifiers)) return 0;
-  const auto old_size = passive_buttons_.size();
-  std::erase_if(passive_buttons_, [&](const PassiveButtonGrab& passive) {
-    const bool button_matches =
-        button == kAnyButton || passive.request.button == button;
-    const bool modifiers_match =
-        modifiers == kAnyModifier || passive.request.modifiers == modifiers;
-    return passive.request.client == client && passive.request.window == window &&
-           button_matches && modifiers_match;
-  });
-  return old_size - passive_buttons_.size();
-}
-
 bool GrabState::activate_passive_button(
     const std::uint8_t button, const std::uint16_t modifiers,
+    const std::span<const std::uint32_t> pointer_ancestry,
     const std::uint32_t current_time) noexcept {
-  if (pointer_grab_.has_value() || button < 1 || button > 9) return false;
+  if (pointer_grab_.has_value() || button < 1 || button > 9 ||
+      pointer_ancestry.empty())
+    return false;
   const auto core_modifiers = modifiers & kCoreModifierMask;
   const PassiveButtonGrab* best = nullptr;
+  std::size_t best_depth = std::numeric_limits<std::size_t>::max();
   int best_specificity = -1;
   for (const auto& passive : passive_buttons_) {
+    const auto ancestor = std::ranges::find(pointer_ancestry,
+                                            passive.request.window);
+    if (ancestor == pointer_ancestry.end()) continue;
     if (passive.request.button != kAnyButton &&
         passive.request.button != button)
       continue;
@@ -252,9 +243,14 @@ bool GrabState::activate_passive_button(
     const int specificity =
         (passive.request.button != kAnyButton ? 2 : 0) +
         (passive.request.modifiers != kAnyModifier ? 1 : 0);
-    if (best == nullptr || specificity > best_specificity ||
-        (specificity == best_specificity && passive.serial < best->serial)) {
+    const auto depth = static_cast<std::size_t>(
+        std::distance(pointer_ancestry.begin(), ancestor));
+    if (best == nullptr || depth < best_depth ||
+        (depth == best_depth && specificity > best_specificity) ||
+        (depth == best_depth && specificity == best_specificity &&
+         passive.serial < best->serial)) {
       best = &passive;
+      best_depth = depth;
       best_specificity = specificity;
     }
   }

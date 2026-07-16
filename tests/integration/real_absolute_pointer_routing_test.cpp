@@ -128,9 +128,19 @@ int main() {
   target->map_requested = true;
   target->map_state = server::MapState::Viewable;
   target->policy_visible = true;
-  require(state.resources().set_event_selection(window.xid, client_id,
+  server::WindowCreateSpec child = window;
+  child.xid = resource_base + 2;
+  child.parent = window.xid;
+  require(state.resources().create_window(
+              client_id, resource_base, state.screen().resource_id_mask,
+              child) == server::CreateWindowStatus::Success,
+          "create nested input target");
+  auto *nested = state.resources().find_window(child.xid);
+  nested->map_requested = true;
+  nested->map_state = server::MapState::Viewable;
+  require(state.resources().set_event_selection(child.xid, client_id,
                                                 x11::event_mask::PointerMotion),
-          "select pointer motion on input target");
+          "select pointer motion on nested input target");
 
   input::LibinputEvent absolute;
   absolute.kind = input::LibinputEventKind::MotionAbsolute;
@@ -149,10 +159,12 @@ int main() {
 
   input::InputState input_state;
   const auto old_target = input_state.pointer_target();
-  const auto new_target = input::hit_test_top_level(
+  const auto new_target = input::hit_test_deepest_viewable(
       state.resources(), routed->root_x, routed->root_y);
-  require(new_target == window.xid,
-          "bounded position hits the full-screen target");
+  require(new_target == child.xid &&
+              input::managed_top_level_ancestor(state.resources(),
+                                                new_target) == window.xid,
+          "bounded position hits the nested target and resolves its managed ancestor");
   require(input_state.accept_wrapping_time(routed->time_ms),
           "accept absolute motion timestamp");
   input_state.set_pointer(routed->root_x, routed->root_y, new_target);
@@ -176,7 +188,7 @@ int main() {
           "receive routed MotionNotify packet");
   require(packet[0] ==
                   static_cast<std::uint8_t>(x11::CoreEventType::MotionNotify) &&
-              read_u32(packet, 12) == window.xid &&
+              read_u32(packet, 12) == child.xid &&
               static_cast<std::int16_t>(read_u16(packet, 20)) == 99 &&
               static_cast<std::int16_t>(read_u16(packet, 22)) == 0 &&
               static_cast<std::int16_t>(read_u16(packet, 24)) == 99 &&

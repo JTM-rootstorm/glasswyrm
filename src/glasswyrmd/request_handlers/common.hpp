@@ -106,8 +106,6 @@ namespace x11 = gw::protocol::x11;
     ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult grab_button(
     ServerState&, const DispatchContext&, const x11::FramedRequest&);
-[[nodiscard]] DispatchResult ungrab_button(
-    ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult change_active_pointer_grab(
     ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult grab_keyboard(

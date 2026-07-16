@@ -254,7 +254,7 @@ void ServerRuntime::deliver_real_input() {
     EventRouter router(server_.state_.resources());
     if (event.kind == RealInputEventKind::Motion) {
       const auto old_target = input_state_.pointer_target();
-      const auto new_target = glasswyrm::input::hit_test_top_level(
+      const auto new_target = glasswyrm::input::hit_test_deepest_viewable(
           server_.state_.resources(), event.root_x, event.root_y);
       (void)input_state_.accept_wrapping_time(event.time_ms);
       input_state_.set_pointer(event.root_x, event.root_y, new_target);
@@ -297,9 +297,11 @@ void ServerRuntime::deliver_real_input() {
         consumed = begin_interactive_pointer(event);
       }
       if (!consumed && event.pressed && !server_.state_.grabs().pointer_grab()) {
+        const auto ancestry = glasswyrm::input::window_ancestry(
+            server_.state_.resources(), input_state_.pointer_target());
         if (!server_.state_.grabs().activate_passive_button(
                 event.detail, static_cast<std::uint16_t>(event.state_before & 0xffU),
-                event.time_ms)) {
+                ancestry, event.time_ms)) {
           const auto recipient = router.input_recipient(
               input_state_.pointer_target(),
               gw::protocol::x11::event_mask::ButtonPress);
@@ -328,7 +330,8 @@ void ServerRuntime::deliver_real_input() {
       }
       if (consumed)
         continue;
-      const auto target = input_state_.pointer_target();
+      const auto target = glasswyrm::input::managed_top_level_ancestor(
+          server_.state_.resources(), input_state_.pointer_target());
       const auto *window = server_.state_.resources().find_window(target);
       const bool requests_focus =
           event.pressed && event.detail == 1 && window &&

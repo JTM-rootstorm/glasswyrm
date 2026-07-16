@@ -204,7 +204,7 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
 #endif
          ) && input_transition_before_ &&
         operation->kind != LifecycleOperationKind::Focus) {
-      const auto new_target = glasswyrm::input::hit_test_top_level(
+      const auto new_target = glasswyrm::input::hit_test_deepest_viewable(
           server_.state_.resources(), input_state_.pointer_x(),
           input_state_.pointer_y());
       input_state_.set_pointer(input_state_.pointer_x(), input_state_.pointer_y(),

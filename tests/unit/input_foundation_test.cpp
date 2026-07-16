@@ -115,8 +115,14 @@ int main() {
   child->border_width = 2;
   require(input::hit_test_top_level(resources, 18, 19) == base + 1 &&
               input::hit_test_deepest_viewable(resources, 18, 19) == base + 4 &&
-              input::hit_test_deepest_viewable(resources, 14, 15) == base + 1,
-          "deep cursor hit-test descends into viewable children without changing top-level targeting");
+              input::hit_test_deepest_viewable(resources, 14, 15) == base + 1 &&
+              input::managed_top_level_ancestor(resources, base + 4) == base + 1 &&
+              input::managed_top_level_ancestor(resources, base + 3) == root,
+          "deep pointer hit-test descends into viewable children while policy resolves the managed ancestor");
+  require(input::window_ancestry(resources, base + 4) ==
+              std::vector<std::uint32_t>{base + 4, base + 1, root} &&
+              input::window_ancestry(resources, base + 99).empty(),
+          "pointer ancestry is ordered deepest-to-root and rejects missing windows");
   auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
   require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
           "top-level signed event coordinates");

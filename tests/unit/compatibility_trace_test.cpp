@@ -16,6 +16,8 @@ void require(bool condition) {
 }
 
 int main() {
+  require(glasswyrm::server::x11_request_name(33) == "GrabKey" &&
+          glasswyrm::server::x11_request_name(34) == "UngrabKey");
   using glasswyrm::server::x11_request_name;
   require(x11_request_name(9) == "MapSubwindows");
   require(x11_request_name(22) == "SetSelectionOwner");

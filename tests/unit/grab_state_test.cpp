@@ -4,6 +4,7 @@
 #include "input/cursor_model.hpp"
 #include "protocol/x11/event_mask.hpp"
 
+#include <array>
 #include <cstdint>
 #include <memory>
 
@@ -168,23 +169,24 @@ int main() {
   any.window = 20;
   any.cursor = 0;
   require(grabs.grab_button(any) == GrabStatus::Success &&
-              grabs.activate_passive_button(3, 0x13, 120) &&
+              !grabs.activate_passive_button(
+                  1, 4, std::array<std::uint32_t, 2>{30, 1}, 119) &&
+              grabs.activate_passive_button(3, 0x13,
+                                            std::array<std::uint32_t, 2>{20, 1},
+                                            120) &&
               grabs.pointer_grab()->origin == PointerGrabOrigin::PassiveButton &&
               grabs.pointer_grab()->client == 1 &&
               grabs.pointer_grab()->window == 20,
-          "AnyButton/AnyModifier passive grab activates on normalized modifiers");
+          "passive grabs activate only within the pointer ancestry");
   require(grabs.note_button_release(3) && !grabs.pointer_grab().has_value(),
           "activated passive grab releases when buttons are up");
-  require(grabs.activate_passive_button(1, 4, 121) &&
+  require(grabs.activate_passive_button(
+              1, 4, std::array<std::uint32_t, 3>{99, 10, 1}, 121) &&
               grabs.pointer_grab()->window == 10,
           "specific xterm-style Ctrl+Button grab activates");
   require(grabs.suspend().pointer_released &&
               grabs.passive_button_count() == 2,
           "VT suspend cancels active grab but retains passive registrations");
-  require(grabs.ungrab_button(1, 20, kAnyButton, kAnyModifier) == 1 &&
-              grabs.passive_button_count() == 1,
-          "UngrabButton wildcard removes matching owned registrations");
-
   require(grabs.grab_keyboard(keyboard_request(7)) == GrabStatus::Success,
           "cleanup keyboard fixture");
   auto owned = passive_request(7);
@@ -197,8 +199,12 @@ int main() {
           "client disconnect releases active and passive grabs");
   cleanup = grabs.cleanup_window(10);
   require(cleanup.passive_buttons_removed == 1 &&
-              grabs.passive_button_count() == 0,
+              grabs.passive_button_count() == 1,
           "window destruction removes its passive grabs");
+  cleanup = grabs.cleanup_client(1);
+  require(cleanup.passive_buttons_removed == 1 &&
+              grabs.passive_button_count() == 0,
+          "disconnect cleanup removes passive grabs without UngrabButton");
 
   GrabState owner_events;
   pointer = pointer_request();

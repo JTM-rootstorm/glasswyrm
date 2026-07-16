@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace glasswyrm::input {
@@ -168,12 +169,9 @@ class GrabState {
 
   [[nodiscard]] GrabStatus grab_button(
       const PassiveButtonGrabRequest& request);
-  [[nodiscard]] std::size_t ungrab_button(GrabClientId client,
-                                          std::uint32_t window,
-                                          std::uint8_t button,
-                                          std::uint16_t modifiers) noexcept;
   [[nodiscard]] bool activate_passive_button(
       std::uint8_t button, std::uint16_t modifiers,
+      std::span<const std::uint32_t> pointer_ancestry,
       std::uint32_t current_time) noexcept;
 
   [[nodiscard]] GrabRouteDecision route_pointer(
