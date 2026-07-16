@@ -694,6 +694,9 @@ milestone11_capture_screen() {
   local ready=$1 captured=$2 name=$3 guest_pid=$4 marker raw
   marker=$(milestone11_poll_marker "$ready" "$guest_pid") || return
   printf '%s\n' "$marker" >>"$ARTIFACTS_PATH_ABS/milestone11-session-state.log"
+  # QXL publishes the accepted KMS buffer to the SPICE screenshot surface
+  # asynchronously.  Input is quiescent while the guest waits on the marker.
+  sleep 1
   raw=$(mktemp "$ARTIFACTS_PATH_ABS/.milestone11-screen.XXXXXX") || return
   virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw" || { rm -f "$raw"; return 1; }
   magick "$raw" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/$name" || { rm -f "$raw"; return 1; }
