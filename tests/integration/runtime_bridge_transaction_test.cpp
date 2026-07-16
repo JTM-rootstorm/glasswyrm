@@ -95,7 +95,12 @@ int main(int argc, char** argv) {
               bridge.submit_policy({4, 4, {}}, error),
           "completed transaction can explicitly begin policy rollback");
 
+  const auto compositor_fd_before_policy_restart = bridge.compositor_fd();
   stop(policy_process);
+  drive_until(bridge, [&] { return !bridge.ready(); },
+              "policy disconnect was not reported");
+  require(bridge.compositor_fd() == compositor_fd_before_policy_restart,
+          "policy restart preserves the healthy compositor transport");
   policy_process = launch(argv[1], policy_socket);
   drive_until(bridge, [&] { return bridge.policy_result_ready(); },
               "peer restart replays bootstrap and pending policy transaction");
@@ -165,10 +170,13 @@ int main(int argc, char** argv) {
   require(cursor_bridge.transaction_idle(),
           "accepted cursor frame returns the bridge to idle");
   const auto disconnected_buffer = cursor.buffer->attach.buffer_id;
+  const auto policy_fd_before_compositor_restart = cursor_bridge.policy_fd();
   stop(cursor_compositor_process);
   drive_until(cursor_bridge,
               [&] { return cursor_bridge.take_compositor_reset(); },
               "cursor compositor disconnect was not reported");
+  require(cursor_bridge.policy_fd() == policy_fd_before_compositor_restart,
+          "compositor restart preserves the healthy policy transport");
   cursor_bridge.forget_cursor_replay();
   presenter.peer_disconnected();
   require(presenter.needs_update(image, 7, 9, true),

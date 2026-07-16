@@ -82,13 +82,34 @@ bool RuntimeBridge::service(const short policy_revents,
     }
     if (policy_outcome == PeerProcessOutcome::Disconnected ||
         compositor_outcome == PeerProcessOutcome::Disconnected) {
-      if (compositor_outcome == PeerProcessOutcome::Disconnected)
-        compositor_reset_ = true;
+      const bool policy_disconnected =
+          policy_outcome == PeerProcessOutcome::Disconnected;
+      bool compositor_disconnected =
+          compositor_outcome == PeerProcessOutcome::Disconnected;
+      const bool policy_in_flight =
+          transaction_stage_ == TransactionStage::Policy;
+      const bool compositor_in_flight =
+          transaction_stage_ == TransactionStage::Compositor ||
+          transaction_stage_ == TransactionStage::Content ||
+          transaction_stage_ == TransactionStage::Cursor ||
+          transaction_stage_ == TransactionStage::Replay;
       resume_transaction_stage_ = transaction_stage_;
       recovering_ = true;
-      policy_.disconnect();
-      compositor_.disconnect();
-      stage_ = Stage::Policy;
+      if (policy_disconnected) policy_.disconnect();
+      if (compositor_disconnected) compositor_.disconnect();
+
+      // Preserve an unaffected peer across an idle peer restart.  An in-flight
+      // transaction still uses the conservative paired reconnect so its reply
+      // cannot race replay on the retained transport.
+      if (policy_disconnected && compositor_in_flight) {
+        compositor_.disconnect();
+        compositor_disconnected = true;
+      }
+      if (compositor_disconnected && policy_in_flight) policy_.disconnect();
+      compositor_reset_ = compositor_reset_ || compositor_disconnected;
+      stage_ = policy_.state() == PeerBootstrapState::Disconnected
+                   ? Stage::Policy
+                   : Stage::Compositor;
       deadline_ = now + deadline_duration_;
       retry_index_ = 0;
       schedule_retry(now);
