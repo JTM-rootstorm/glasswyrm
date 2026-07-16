@@ -12,7 +12,8 @@ M11_SCREENSHOT_WAIT_SECONDS=1800
 M11_TESTED_COMMIT=
 M11_TEXT_ARTIFACTS=(milestone11-runtime-test.log milestone11-meson-test.log
   milestone11-source-layout.log milestone11-libinput-devices.json
-  milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.json
+  milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.raw.jsonl
+  milestone11-xterm-trace.json
   milestone11-selection.log milestone11-interactive-wm.log
   milestone11-gwm-bindings.json milestone11-selection-client-message.json
   milestone11-session-state.log milestone11-drm-report.jsonl
@@ -163,7 +164,7 @@ results=(strict_default strict_m11 sanitizer clang component_builds source_layou
   screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay
   compositor_replay xterm_survival post_restart_input kms_restore kd_restore
   vt_restore getty_restore service_results socket_cleanup device_cleanup
-  archive_validation journal_evidence)
+  normalized_trace exact_trace archive_validation journal_evidence)
 for key in "${results[@]}"; do result[$key]=not-run; done
 
 capture_getty_state() {
@@ -472,7 +473,7 @@ systemd-run --unit=glasswyrmd-m11.service --property=PrivateDevices=no \
   --compositor-socket /run/glasswyrm-m11/gwcomp.sock --software-content \
   --libinput-device "$keyboard" --libinput-device "$pointer" \
   --xkb-layout us --xkb-model pc105 \
-  --x11-trace "$artifact_dir/milestone11-xterm-trace.json"
+  --x11-trace "$artifact_dir/milestone11-xterm-trace.raw.jsonl"
 for _ in {1..300}; do [[ -S /tmp/.X11-unix/X99 ]] && break; sleep .1; done
 [[ -S /tmp/.X11-unix/X99 ]]
 systemd-run --unit=xterm-m11-a.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
@@ -582,7 +583,7 @@ cmp "$mirror" "$artifact_dir/milestone11-desktop.ppm"
 result[deterministic_frame]=passed result[screenshot_equal]=passed
 
 failure_stage=vt-cycle
-trace_hash_before=$(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}')
+trace_hash_before=$(sha256sum "$artifact_dir/milestone11-xterm-trace.raw.jsonl" | awk '{print $1}')
 chvt 1; sleep 1
 python3 - "$artifact_dir/milestone11-drm-report.jsonl" release "$canonical_hash" <<'PY'
 import json,pathlib,sys,time
@@ -608,7 +609,7 @@ grep -Eq 'session state generation=[0-9]+ state=1 result=[12]' \
   <<<"$(journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager)"
 result[vt_suspend]=passed
 run_input post-vt milestone11-session-state.log
-[[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') == "$trace_hash_before" ]]
+[[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.raw.jsonl" | awk '{print $1}') == "$trace_hash_before" ]]
 result[vt_no_delivery]=passed
 chvt "${target_vt##*/tty}"; sleep 1
 python3 - "$artifact_dir/milestone11-drm-report.jsonl" acquire "$canonical_hash" <<'PY'
@@ -636,7 +637,7 @@ grep -Eq 'session state generation=[0-9]+ state=2 result=[12]' \
 result[vt_resume]=passed
 post_vt_frames_before=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
 run_input post-vt milestone11-session-state.log
-[[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') != "$trace_hash_before" ]]
+[[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.raw.jsonl" | awk '{print $1}') != "$trace_hash_before" ]]
 wait_transcript_token M11_VT
 for _ in {1..200}; do
   post_vt_frames_after=$(grep -c '"record":"flip"' "$artifact_dir/milestone11-drm-report.jsonl" || true)
@@ -709,6 +710,24 @@ result[close]=passed
 frames=$(find "$dumps" -type f -name frames.jsonl -print -quit)
 journalctl --since "@$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
 journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
+failure_stage=trace-fixture
+"$source_dir/tests/compat/m11/m11_trace_summarize" \
+  "$artifact_dir/milestone11-xterm-trace.raw.jsonl" \
+  >"$artifact_dir/milestone11-xterm-trace.json"
+"$source_dir/tests/tools/m11_fixture_validate.py" \
+  "$source_dir/tests/fixtures/m11"
+if ! cmp -s "$source_dir/tests/fixtures/m11/xterm.trace.json" \
+    "$artifact_dir/milestone11-xterm-trace.json"; then
+  diff -u "$source_dir/tests/fixtures/m11/xterm.trace.json" \
+    "$artifact_dir/milestone11-xterm-trace.json" \
+    >"$artifact_dir/milestone11-xterm-trace.diff" || true
+  sed -n '1,200p' "$artifact_dir/milestone11-xterm-trace.diff" >&2
+  printf '%s\n' 'M11 normalized trace differs from the accepted fixture' >&2
+  exit 1
+fi
+result[normalized_trace]=passed result[exact_trace]=passed
+
+failure_stage=interactive-acceptance
 "$source_dir/tests/apps/m11_xterm_acceptance" \
   --xterm-pid "$first_xterm_pid" --xterm-pid "$second_xterm_pid" \
   --scenario-dir "$input" --transcript "$transcript" \
@@ -768,7 +787,7 @@ failure_stage=evidence-archive
 evidence=$artifact_dir/evidence; rm -rf "$evidence"; mkdir -p "$evidence"
 cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
-cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl,drm-report-before-restart.jsonl} "$evidence/"
+cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.raw.jsonl,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl,drm-report-before-restart.jsonl} "$evidence/"
 cp "$artifact_dir"/milestone11-{gwm-bindings.json,selection-client-message.json} "$evidence/"
 cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
@@ -865,7 +884,8 @@ validate_milestone11_archive() {
     milestone11-desktop-after-restart.ppm milestone11-canonical.ppm \
     milestone11-canonical-after-vt.ppm milestone11-canonical-after-restart.ppm \
     milestone11-libinput-devices.json \
-    milestone11-keymap.json milestone11-xterm-trace.json milestone11-selection.log \
+    milestone11-keymap.json milestone11-xterm-trace.raw.jsonl \
+    milestone11-xterm-trace.json milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
     milestone11-gwm-bindings.json milestone11-selection-client-message.json \
     milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl \
@@ -894,7 +914,7 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     key,sep,value=line.partition('=')
     if sep: facts[key]=value
-required='strict_default strict_m11 sanitizer component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup archive_validation journal_evidence'.split()
+required='strict_default strict_m11 sanitizer component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup normalized_trace exact_trace archive_validation journal_evidence'.split()
 identity={'api_version':'0.6.0','soversion':'0','wire_version':'1.0','x_servers_absent':'true','mesa_absent':'true','drm_mode':'1024x768','pointer_profile':'relative-only','xterm_version':'XTerm(410)','xterm_sha256':'7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f'}
 errors=[f'{k} must be passed' for k in required if facts.get(k)!='passed']
 if facts.get('clang') not in {'passed','unavailable'}: errors.append('clang must be passed or unavailable')
