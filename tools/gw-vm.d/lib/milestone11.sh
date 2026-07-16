@@ -425,6 +425,9 @@ systemd-run --unit=glasswyrm-session-m11.service \
   --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
   --property="DeviceAllow=$target_vt rw" --property="DeviceAllow=$keyboard r" \
   --property="DeviceAllow=$pointer r" --property=RestrictAddressFamilies=AF_UNIX \
+  --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+  --property=TTYReset=yes --property=TTYVHangup=yes \
+  --property=TTYVTDisallocate=no \
   --property=NoNewPrivileges=yes "${launcher[@]}"
 for _ in {1..300}; do [[ -S /tmp/.X11-unix/X99 && -S /run/glasswyrm-m11/gwm.sock && -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .1; done
 [[ -S /tmp/.X11-unix/X99 ]]
@@ -443,6 +446,9 @@ for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; 
 systemd-run --unit=gwcomp-m11.service --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
   --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
+  --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+  --property=TTYReset=yes --property=TTYVHangup=yes \
+  --property=TTYVTDisallocate=no \
   --property=NoNewPrivileges=yes "$runtime/src/gwcomp" --backend drm \
   --ipc-socket /run/glasswyrm-m11/gwcomp.sock --drm-device "$drm_device" \
   --tty "$target_vt" --connector "$connector" --mode 1024x768 --drm-api atomic \
