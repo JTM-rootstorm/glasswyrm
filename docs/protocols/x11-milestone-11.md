@@ -20,6 +20,8 @@ not a broad X11 compatibility declaration.
 - The Xaw scrollbar's exact `CreateGC` subset: `FillOpaqueStippled` with a
   retained same-screen depth-1 `GCStipple`, and patterned
   `PolyFillRectangle` rendering anchored at the drawable origin.
+- `CreateGC` accepts nested depth-24 `InputOutput` windows as drawables while
+  preserving `BadMatch` for `InputOnly` and incompatible-depth windows.
 - Setup advertises depth-1 pixmaps as one bit per pixel with 32-bit scanline
   padding and an allowed depth with no visuals. `PutImage` accepts the pinned
   xterm/Xaw depth-1 `ZPixmap` upload as LSBFirst, 32-bit-padded rows; source

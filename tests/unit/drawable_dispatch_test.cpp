@@ -278,6 +278,36 @@ int main() {
     child.border_width=1; child.width=2; child.height=2; child.window_class=WindowClass::InputOutput;
     gw::test::require(state.resources().create_window(1,base,mask,child)==CreateWindowStatus::Success,
                       "nested child");
+    gw::test::require(state.resources().open_font(1,base,mask,base+13)==OpenFontStatus::Success,
+                      "xterm client font");
+    x11::ByteWriter child_gc(order); child_gc.write_u8(55); child_gc.write_u8(0); child_gc.write_u16(6);
+    child_gc.write_u32(base+14); child_gc.write_u32(base+10); child_gc.write_u32(0x4008);
+    child_gc.write_u32(0x00ffffffU); child_gc.write_u32(base+13);
+    result=dispatch_request(state,context,finish(std::move(child_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.empty()&&state.resources().find_gc(base+14)&&
+                      state.resources().find_gc(base+14)->depth==24&&
+                      state.resources().find_gc(base+14)->background==0x00ffffffU,
+                      "CreateGC accepts nested depth-24 InputOutput drawable");
+
+    WindowCreateSpec input_only; input_only.xid=base+15; input_only.parent=base+9;
+    input_only.width=2; input_only.height=2; input_only.window_class=WindowClass::InputOnly;
+    gw::test::require(state.resources().create_window(1,base,mask,input_only)==CreateWindowStatus::Success,
+                      "InputOnly GC target");
+    x11::ByteWriter input_only_gc(order); input_only_gc.write_u8(55); input_only_gc.write_u8(0); input_only_gc.write_u16(4);
+    input_only_gc.write_u32(base+16); input_only_gc.write_u32(base+15); input_only_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(input_only_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+16),"CreateGC rejects InputOnly drawable");
+
+    WindowCreateSpec incompatible_window=child; incompatible_window.xid=base+17;
+    gw::test::require(state.resources().create_window(1,base,mask,incompatible_window)==CreateWindowStatus::Success,
+                      "incompatible depth GC target");
+    state.resources().find_window(base+17)->depth=1;
+    x11::ByteWriter wrong_depth_gc(order); wrong_depth_gc.write_u8(55); wrong_depth_gc.write_u8(0); wrong_depth_gc.write_u16(4);
+    wrong_depth_gc.write_u32(base+18); wrong_depth_gc.write_u32(base+17); wrong_depth_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(wrong_depth_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+18),"CreateGC rejects incompatible window depth");
     x11::ByteWriter child_fill(order); child_fill.write_u8(70); child_fill.write_u8(0); child_fill.write_u16(5);
     child_fill.write_u32(base+10); child_fill.write_u32(base+2);
     child_fill.write_u16(0); child_fill.write_u16(0); child_fill.write_u16(2); child_fill.write_u16(2);
