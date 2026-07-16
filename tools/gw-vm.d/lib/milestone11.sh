@@ -133,9 +133,6 @@ logind_state_captured=false logind_active_before=unknown logind_active_after=unk
 logind_socket_active_before=unknown logind_socket_active_after=unknown
 logind_enabled_before=unknown logind_enabled_after=unknown
 logind_socket_enabled_before=unknown logind_socket_enabled_after=unknown
-mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
-chmod 0700 "$artifact_dir" "$input" "$control"
-
 # A failed diagnostic run can leave transient unit definitions loaded even
 # after their processes have stopped.  Clear those definitions before reusing
 # a guest so systemd-run cannot replay stale services or reject the new run.
@@ -144,6 +141,10 @@ m11_units=(xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service
   gw-uinput-m11.service)
 systemctl stop "${m11_units[@]}" >/dev/null 2>&1 || true
 systemctl reset-failed "${m11_units[@]}" >/dev/null 2>&1 || true
+rm -rf "$artifact_dir" "$dumps" "$scenes" "$input" "$control"
+mkdir -p "$artifact_dir" "$client_dir" "$dumps" "$scenes" "$input" "$control"
+chmod 0700 "$artifact_dir" "$input" "$control"
+run_started=$(date --iso-8601=ns)
 declare -A result
 results=(strict_default strict_m11 sanitizer clang component_builds source_layout
   ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready
@@ -229,10 +230,10 @@ record_facts() {
     result[getty_restore]=failed
     [[ $status != 0 ]] || { status=1; scenario_exit=1; failure_stage=getty-restore; }
   fi
-  journalctl -u glasswyrm-session-m11.service --no-pager >"$artifact_dir/milestone11-session-journal.log" 2>&1
-  journalctl -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log" 2>&1
-  journalctl -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-gwm-journal.log" 2>&1
-  journalctl -u gwcomp-m11.service --no-pager >"$artifact_dir/milestone11-gwcomp-journal.log" 2>&1
+  journalctl --since "$run_started" -u glasswyrm-session-m11.service --no-pager >"$artifact_dir/milestone11-session-journal.log" 2>&1
+  journalctl --since "$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log" 2>&1
+  journalctl --since "$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-gwm-journal.log" 2>&1
+  journalctl --since "$run_started" -u gwcomp-m11.service --no-pager >"$artifact_dir/milestone11-gwcomp-journal.log" 2>&1
   [[ -s $artifact_dir/milestone11-session-journal.log &&
      -s $artifact_dir/milestone11-glasswyrmd-journal.log &&
      -s $artifact_dir/milestone11-gwm-journal.log &&
@@ -409,7 +410,7 @@ launcher=("$runtime/src/glasswyrm-session" --runtime-dir /run/glasswyrm-m11 --di
   --xkb-layout us --xkb-model pc105 --drm-api atomic
   --mirror-dump-dir "$dumps" --scene-manifest "$scenes/scene.jsonl"
   --drm-report "$artifact_dir/milestone11-drm-report.jsonl"
-  --x11-trace "$artifact_dir/milestone11-xterm-trace.json"
+  --x11-trace "$artifact_dir/milestone11-launcher-trace.json"
   --client xterm -geometry 80x24+96+96 -fn fixed -fb fixed
   -xrm '*cursorBlink:false' -xrm '*toolBar:false' -title Glasswyrm-M11
   -e /bin/bash --noprofile --rcfile "$source_dir/tests/compat/m11/m11-bashrc")
@@ -547,11 +548,11 @@ while [[ ! -e $control/screen-after-vt-captured ]]; do sleep .1; done
 cmp "$mirror" "$artifact_dir/milestone11-desktop-after-vt.ppm"
 
 failure_stage=peer-restart
-gwm_bindings_before=$(journalctl -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
+gwm_bindings_before=$(journalctl --since "$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
 systemctl restart gwm-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
 for _ in {1..200}; do
-  gwm_bindings_after=$(journalctl -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
+  gwm_bindings_after=$(journalctl --since "$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
   ((gwm_bindings_after > gwm_bindings_before)) && break
   sleep .05
 done
@@ -579,8 +580,8 @@ for _ in {1..100}; do ! systemctl is-active --quiet xterm-m11-a.service && break
 systemctl is-active --quiet xterm-m11-b.service
 result[close]=passed
 frames=$(find "$dumps" -type f -name frames.jsonl -print -quit)
-journalctl -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
-journalctl -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
+journalctl --since "$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
+journalctl --since "$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
 "$source_dir/tests/apps/m11_xterm_acceptance" \
   --xterm-pid "$first_xterm_pid" --xterm-pid "$second_xterm_pid" \
   --scenario-dir "$input" --transcript "$transcript" \
