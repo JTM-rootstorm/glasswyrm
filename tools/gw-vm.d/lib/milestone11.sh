@@ -550,12 +550,40 @@ result[deterministic_frame]=passed result[screenshot_equal]=passed
 failure_stage=vt-cycle
 trace_hash_before=$(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}')
 chvt 1; sleep 1
-grep -F 'suspended' "$artifact_dir/milestone11-drm-report.jsonl"; result[vt_suspend]=passed
+python3 - "$artifact_dir/milestone11-drm-report.jsonl" release "$canonical_hash" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); transition=sys.argv[2]; expected=sys.argv[3]; deadline=time.monotonic()+5
+while True:
+  try:
+    records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    record=next(r for r in reversed(records) if r.get('record')=='vt' and r.get('transition')==transition)
+    assert record['master_owned'] is False and record['full_modeset'] is False
+    assert record['committed_hash'] == expected
+    break
+  except (AssertionError,KeyError,StopIteration,json.JSONDecodeError):
+    if time.monotonic() >= deadline: raise SystemExit('VT release report proof is incomplete')
+    time.sleep(.05)
+PY
+result[vt_suspend]=passed
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') == "$trace_hash_before" ]]
 result[vt_no_delivery]=passed
 chvt "${target_vt##*/tty}"; sleep 1
-grep -F 'active' "$artifact_dir/milestone11-drm-report.jsonl"; result[vt_resume]=passed
+python3 - "$artifact_dir/milestone11-drm-report.jsonl" acquire "$canonical_hash" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); transition=sys.argv[2]; expected=sys.argv[3]; deadline=time.monotonic()+5
+while True:
+  try:
+    records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    record=next(r for r in reversed(records) if r.get('record')=='vt' and r.get('transition')==transition)
+    assert record['master_owned'] is True and record['full_modeset'] is True
+    assert record['committed_hash'] == expected
+    break
+  except (AssertionError,KeyError,StopIteration,json.JSONDecodeError):
+    if time.monotonic() >= deadline: raise SystemExit('VT acquire report proof is incomplete')
+    time.sleep(.05)
+PY
+result[vt_resume]=passed
 run_input post-vt milestone11-session-state.log
 [[ $(sha256sum "$artifact_dir/milestone11-xterm-trace.json" | awk '{print $1}') != "$trace_hash_before" ]]
 result[post_vt_command]=passed
