@@ -5,10 +5,12 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/m11-xterm-acceptance.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/scenarios"
 for name in basic-typing repeat scroll primary-selection clipboard-probe move resize close post-vt post-restart; do
-  printf '{"status":"completed","emitted":3}\n' >"$work/scenarios/$name.json"
+  printf '{"status":"completed","event_count":3}\n' >"$work/scenarios/$name.json"
 done
 printf 'M11_TYPED M11_TYPED M11_SELECTION_TOKEN M11_SELECTION_TOKEN M11_VT M11_RESTART\n' >"$work/transcript.log"
-printf '{"requests":[{"name":"ChangeWindowAttributes"},{"name":"CreateGlyphCursor"},{"name":"FreeCursor"},{"name":"RecolorCursor"},{"name":"GetSelectionOwner"},{"name":"SetSelectionOwner"},{"name":"ConvertSelection"},{"name":"SendEvent"}],"events":[{"event_type":2},{"event_type":2},{"event_type":2},{"event_type":3},{"event_type":4},{"event_type":5},{"event_type":4},{"event_type":5},{"event_type":4},{"event_type":5},{"event_type":4},{"event_type":5},{"event_type":6},{"event_type":22},{"event_type":28},{"event_type":29},{"event_type":30},{"event_type":31},{"event_type":33}]}\n' >"$work/trace.jsonl"
+cat >"$work/trace.json" <<'EOF'
+{"schema":1,"request_histogram":{"ChangeWindowAttributes":1,"CreateGlyphCursor":1,"FreeCursor":1,"RecolorCursor":1,"GetSelectionOwner":1,"SetSelectionOwner":1,"ConvertSelection":1,"SendEvent":1,"GrabButton":1},"error_histogram":{},"unknown_opcodes":[],"trace_gated_requests":{"GrabButton":1},"event_histogram":{"2":3,"3":1,"4":4,"5":4,"6":1,"22":1,"28":1,"29":1,"30":1,"31":1,"33":1},"event_sequence":[{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":3},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":6},{"client":1,"event_type":22},{"client":1,"event_type":28},{"client":1,"event_type":29},{"client":1,"event_type":30},{"client":1,"event_type":31},{"client":1,"event_type":33}]}
+EOF
 printf '{"status":"passed","selection":"CLIPBOARD","targets":["TARGETS","UTF8_STRING"],"token":"M11_CLIPBOARD_TOKEN"}\n' >"$work/selection.json"
 printf '%s\n' 'move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64' >"$work/wm.log"
 cat >"$work/server.log" <<'EOF'
@@ -28,7 +30,7 @@ cp "$work/mirror.ppm" "$work/screen.ppm"
 run_acceptance() {
   local result=$1
   "$helper" --xterm-pid $$ --xterm-pid $$ --scenario-dir "$work/scenarios" \
-    --transcript "$work/transcript.log" --trace "$work/trace.jsonl" \
+    --transcript "$work/transcript.log" --trace "$work/trace.json" \
     --selection "$work/selection.json" --wm-evidence "$work/wm.log" \
     --server-journal "$work/server.log" --frames "$work/frames.jsonl" \
     --scene "$work/scene.jsonl" --drm-report "$work/drm.jsonl" \
@@ -42,6 +44,18 @@ grep -F '"positions": 6' "$work/result.json"
 grep -F '"client_message": true' "$work/result.json"
 grep -F '"replay_verified": true' "$work/result.json"
 grep -F '"ClientMessage": 33' "$work/result.json"
+cp "$work/trace.json" "$work/trace-good.json"
+sed 's/"2":3/"2":4/' "$work/trace-good.json" >"$work/trace.json"
+if run_acceptance "$work/bad-event-histogram.json" >/dev/null 2>&1; then
+  printf '%s\n' 'acceptance helper accepted inconsistent normalized event evidence' >&2
+  exit 1
+fi
+sed 's/"GrabButton":1}/"GrabButton":2}/' "$work/trace-good.json" >"$work/trace.json"
+if run_acceptance "$work/bad-trace-gated.json" >/dev/null 2>&1; then
+  printf '%s\n' 'acceptance helper accepted inconsistent trace-gated evidence' >&2
+  exit 1
+fi
+cp "$work/trace-good.json" "$work/trace.json"
 printf 'different\n' >"$work/screen.ppm"
 if run_acceptance "$work/bad-screenshot.json" >/dev/null 2>&1; then
   printf '%s\n' 'acceptance helper accepted mismatched screenshot' >&2

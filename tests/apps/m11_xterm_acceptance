@@ -66,9 +66,12 @@ for name in required_scenarios:
     path=pathlib.Path(scenario_dir,f'{name}.json')
     if not path.is_file(): raise SystemExit(f'missing uinput scenario result: {name}')
     value=json.loads(path.read_text())
-    if value.get('status')!='completed' or not isinstance(value.get('emitted'),int) or value['emitted']<=0:
+    if (value.get('status')!='completed' or
+            not isinstance(value.get('event_count'),int) or
+            isinstance(value.get('event_count'),bool) or
+            value['event_count']<=0):
         raise SystemExit(f'uinput scenario did not complete with events: {name}')
-    scenario_counts[name]=value['emitted']
+    scenario_counts[name]=value['event_count']
 
 transcript_text=pathlib.Path(transcript).read_text(errors='replace')
 for token in ('M11_VT','M11_RESTART'):
@@ -118,28 +121,61 @@ if len(cursor_positions)<2:
 if not any(item['buffer']=='reused' for item in visible_cursor_records):
     raise SystemExit('server journal does not prove accepted cursor buffer reuse')
 
-trace_docs=documents(trace); trace_text=json.dumps(trace_docs,separators=(',',':')).lower()
-event_types=set(); event_records=[]
-def trace_visit(value):
-    if isinstance(value,dict):
-        if isinstance(value.get('event_type'),int):
-            event_types.add(value['event_type']); event_records.append(value)
-        for child in value.values(): trace_visit(child)
-    elif isinstance(value,list):
-        for child in value: trace_visit(child)
-for doc in trace_docs: trace_visit(doc)
+trace_docs=documents(trace)
+if len(trace_docs)!=1 or not isinstance(trace_docs[0],dict) or trace_docs[0].get('schema')!=1:
+    raise SystemExit('normalized trace must be one schema 1 object')
+trace_value=trace_docs[0]
+request_histogram=trace_value.get('request_histogram')
+event_histogram=trace_value.get('event_histogram')
+event_records=trace_value.get('event_sequence')
+if not isinstance(request_histogram,dict) or not all(
+        isinstance(name,str) and isinstance(count,int) and not isinstance(count,bool)
+        and count>0 for name,count in request_histogram.items()):
+    raise SystemExit('normalized trace has an invalid request_histogram')
+if not isinstance(event_histogram,dict) or not all(
+        isinstance(name,str) and name.isdigit() and isinstance(count,int)
+        and not isinstance(count,bool) and count>0
+        for name,count in event_histogram.items()):
+    raise SystemExit('normalized trace has an invalid event_histogram')
+if not isinstance(event_records,list):
+    raise SystemExit('normalized trace has an invalid event_sequence')
+observed_events={}
+for record in event_records:
+    if not isinstance(record,dict) or set(record)!= {'client','event_type'}:
+        raise SystemExit('normalized trace has an invalid event_sequence record')
+    client=record['client']; event_type=record['event_type']
+    if (isinstance(client,bool) or not isinstance(client,int) or client<0 or
+            isinstance(event_type,bool) or not isinstance(event_type,int) or
+            event_type<0):
+        raise SystemExit('normalized trace has an invalid event_sequence value')
+    key=str(event_type); observed_events[key]=observed_events.get(key,0)+1
+if observed_events!=event_histogram:
+    raise SystemExit('normalized trace event_sequence does not match event_histogram')
+if trace_value.get('error_histogram')!={}:
+    raise SystemExit('normalized trace contains X11 errors')
+if trace_value.get('unknown_opcodes')!=[]:
+    raise SystemExit('normalized trace contains unknown opcodes')
+trace_gated=trace_value.get('trace_gated_requests')
+if not isinstance(trace_gated,dict) or not all(
+        name in {'GrabButton','UngrabButton','GrabKey','UngrabKey'} and
+        isinstance(count,int) and not isinstance(count,bool) and count>0 and
+        request_histogram.get(name)==count
+        for name,count in trace_gated.items()):
+    raise SystemExit('normalized trace has invalid trace_gated_requests')
+event_types={int(name) for name in event_histogram}
 required_types={2,3,4,5,6,22,28,29,30,31,33}
 if not required_types <= event_types:
     raise SystemExit(f'normalized trace lacks event types {sorted(required_types-event_types)}')
-for request in ('changewindowattributes','createglyphcursor','freecursor',
-                'recolorcursor','getselectionowner','setselectionowner',
-                'convertselection','sendevent'):
-    if request not in trace_text: raise SystemExit(f'normalized trace lacks {request} request evidence')
-button_presses=sum(item.get('event_type')==4 for item in event_records)
-button_releases=sum(item.get('event_type')==5 for item in event_records)
+for request in ('ChangeWindowAttributes','CreateGlyphCursor','FreeCursor',
+                'RecolorCursor','GetSelectionOwner','SetSelectionOwner',
+                'ConvertSelection','SendEvent'):
+    if request not in request_histogram:
+        raise SystemExit(f'normalized trace lacks {request} request evidence')
+button_presses=event_histogram.get('4',0)
+button_releases=event_histogram.get('5',0)
 if button_presses<4 or button_releases<4:
     raise SystemExit('trace lacks the button delivery volume required by selection and wheel scenarios')
-if sum(item.get('event_type')==2 for item in event_records)<3:
+if event_histogram.get('2',0)<3:
     raise SystemExit('trace lacks repeated keyboard delivery')
 
 frame_docs=documents(frames)
