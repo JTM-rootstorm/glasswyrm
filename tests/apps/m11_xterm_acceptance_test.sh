@@ -7,7 +7,7 @@ mkdir "$work/scenarios"
 for name in basic-typing repeat scroll primary-selection clipboard-probe move resize close post-vt post-restart; do
   printf '{"status":"completed","event_count":3}\n' >"$work/scenarios/$name.json"
 done
-printf 'M11_TYPED M11_TYPED M11_SELECTION_TOKEN M11_SELECTION_TOKEN M11_VT M11_RESTART\n' >"$work/transcript.log"
+printf 'M11_TYPED\nM11_TYPED\nM11_SELECTION_TOKEN\nM11_PASTED_M11_SELECTION_TOKEN\nM11_VT\nM11_RESTART\n' >"$work/transcript.log"
 cat >"$work/trace.json" <<'EOF'
 {"schema":1,"request_histogram":{"ChangeWindowAttributes":1,"CreateGlyphCursor":1,"FreeCursor":1,"RecolorCursor":1,"GetSelectionOwner":1,"SetSelectionOwner":1,"ConvertSelection":1,"SendEvent":1,"GrabButton":1},"error_histogram":{},"unknown_opcodes":[],"trace_gated_requests":{"GrabButton":1},"event_histogram":{"2":3,"3":1,"4":4,"5":4,"6":1,"22":1,"28":1,"29":1,"30":1,"31":1,"33":1},"event_sequence":[{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":3},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":6},{"client":1,"event_type":22},{"client":1,"event_type":28},{"client":1,"event_type":29},{"client":1,"event_type":30},{"client":1,"event_type":31},{"client":1,"event_type":33}]}
 EOF

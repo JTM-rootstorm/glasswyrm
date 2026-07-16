@@ -151,10 +151,11 @@ std::vector<Event> scenario_events(std::string_view name) {
     tap(events, KEY_BACKSPACE);
     text(events, "D\\n'");
     tap(events, KEY_ENTER);
-    tap(events, KEY_UP);
-    tap(events, KEY_END);
-    tap(events, KEY_X);
+    // Repeat the corrected command explicitly. The fixed shell profile keeps
+    // history disabled, so KEY_UP cannot provide deterministic re-execution.
+    text(events, "printf 'M11_TYPEX");
     tap(events, KEY_BACKSPACE);
+    text(events, "D\\n'");
     tap(events, KEY_ENTER);
   } else if (name == "repeat") {
     key(events, KEY_A, true, 700);
@@ -173,15 +174,14 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_HWHEEL, 1);
     relative(events, REL_HWHEEL, -1);
 #endif
-    // Return to the bottom and print the selection token so the next scenario
-    // selects a stable visible row after the viewport exercise.
+    // Clear the viewport before printing the selection token so it occupies a
+    // stable row independent of the amount of scrollback above it.
+    chord(events, KEY_LEFTCTRL, KEY_L);
     text(events, "printf 'M11_SELECTION_TOKEN\\n'");
     tap(events, KEY_ENTER);
   } else if (name == "primary-selection") {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
-    // scroll scenario leaves the pointer at (120, 128) and returns to the
-    // original vertical scroll position.
-    relative(events, REL_Y, 237);
+    // clear leaves the token on the fixed row under the pointer at y=128.
     relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
     relative(events, REL_X, 130);
@@ -190,13 +190,13 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Move from xterm A to the non-overlapping interior of xterm B
     // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
     relative(events, REL_X, 328);
-    relative(events, REL_Y, -152);
+    relative(events, REL_Y, 85);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false);
     // Prefix the pasted token without replacing it, then print it through
     // the PTY so the acceptance transcript proves the cross-client paste.
     chord(events, KEY_LEFTCTRL, KEY_A);
-    text(events, "printf '%s\\n' ");
+    text(events, "printf 'M11_PASTED_%s\\n' ");
     tap(events, KEY_ENTER);
   } else if (name == "move" || name == "resize") {
     key(events, KEY_LEFTALT, true);
