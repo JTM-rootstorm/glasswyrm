@@ -69,10 +69,6 @@ int main() {
           "motion hint is inert without pointer selection");
 
   using D = gw::protocol::x11::NotifyDetail;
-  require(input::crossing_details(1, 1, 2) == std::pair{D::Inferior,D::Ancestor} &&
-          input::crossing_details(1, 2, 1) == std::pair{D::Ancestor,D::Inferior} &&
-          input::crossing_details(1, 2, 3) == std::pair{D::Nonlinear,D::Nonlinear},
-          "one-level crossing detail matrix");
   require(input::crossing_focus(1, 1, 2) && input::crossing_focus(1, 2, 2) &&
           !input::crossing_focus(1, 3, 2), "crossing focus bit");
 
@@ -107,7 +103,7 @@ int main() {
   require(input::hit_test_top_level(resources, 10, 10) == base + 1 &&
           input::hit_test_top_level(resources, 9, 10) == root &&
           input::hit_test_top_level(resources, 60, 10) == root,
-          "override redirect included and borders excluded");
+          "override redirect is included while top-level borders stay excluded");
   auto* child = resources.find_window(base + 4);
   child->map_state = server::MapState::Viewable;
   child->x = 5;
@@ -123,14 +119,25 @@ int main() {
               std::vector<std::uint32_t>{base + 4, base + 1, root} &&
               input::window_ancestry(resources, base + 99).empty(),
           "pointer ancestry is ordered deepest-to-root and rejects missing windows");
-  auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
-  require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
-          "top-level signed event coordinates");
+  auto coordinates = input::event_coordinates(resources, base + 1, base + 4, 18, 19);
+  require(coordinates.event_x == 8 && coordinates.event_y == 9 &&
+              coordinates.child == base + 4,
+          "ancestor event coordinates name the immediate pointer child");
   coordinates = input::event_coordinates(resources, base + 4, base + 4, 18, 19);
   require(coordinates.event_x == 1 && coordinates.event_y == 1 &&
               coordinates.child == 0,
           "nested event coordinates include the complete window ancestry");
-  coordinates = input::event_coordinates(resources, root, base + 1, 5, 7);
-  require(coordinates.event_x == 5 && coordinates.event_y == 7 && coordinates.child == base + 1,
+  coordinates = input::event_coordinates(resources, root, base + 4, 18, 19);
+  require(coordinates.event_x == 18 && coordinates.event_y == 19 &&
+              coordinates.child == base + 1,
           "root coordinates name immediate pointer child");
+  require(input::crossing_details(resources, root, base + 4) ==
+                  std::pair{D::Inferior, D::Ancestor} &&
+              input::crossing_details(resources, base + 4, base + 1) ==
+                  std::pair{D::Ancestor, D::Inferior} &&
+              input::crossing_details(resources, base + 1, base + 4) ==
+                  std::pair{D::Inferior, D::Ancestor} &&
+              input::crossing_details(resources, base + 1, base + 2) ==
+                  std::pair{D::Nonlinear, D::Nonlinear},
+          "nested crossing details follow ancestor relationships");
 }

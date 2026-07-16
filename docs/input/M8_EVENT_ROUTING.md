@@ -54,3 +54,20 @@ recipient's last processed request sequence. Unsupported behavior includes
 grabs, pointer queries and motion history, child/InputOnly hit testing,
 PointerMotionHint semantics, virtual crossing events, and real devices.
 
+## Milestone 11 nested-window extension
+
+Milestone 11 extends the same router to descend through viewable nested
+InputOutput windows. Nested borders participate in hit testing and each nested
+content origin includes its border width. Direct-root windows retain the
+established Glasswyrm content-geometry convention: their presented `x`, `y`,
+`width`, and `height` are the hit-test rectangle and the protocol border is not
+presented as additional pixels.
+
+For propagated or grabbed input, `child` is the immediate descendant of the
+event window on the path to the deepest pointer target. Root-relative origins
+accumulate every nested ancestor offset, crossing detail recognizes
+ancestor/inferior relationships at arbitrary supported depth, and lifecycle
+departure coordinates are captured before the affected subtree changes.
+Crossing notifications still omit virtual intermediate events; each emitted
+LeaveNotify uses the initial pointer target and each EnterNotify uses the final
+pointer target when deriving `child`.

@@ -17,8 +17,10 @@ namespace glasswyrm::server {
 
 struct DirectInputEventState {
   std::uint32_t window{};
-  std::int16_t x{};
-  std::int16_t y{};
+  std::int64_t root_origin_x{};
+  std::int64_t root_origin_y{};
+  bool root_origin_valid{};
+  std::vector<std::uint32_t> ancestry;
   std::vector<ClientId> focus_recipients;
   std::vector<ClientId> leave_recipients;
 };

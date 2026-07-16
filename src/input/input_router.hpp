@@ -5,7 +5,9 @@
 #include "protocol/x11/crossing_event.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace glasswyrm::input {
@@ -41,6 +43,13 @@ struct EventCoordinates {
     const server::ResourceTable& resources, std::uint32_t window) noexcept;
 [[nodiscard]] std::vector<std::uint32_t> window_ancestry(
     const server::ResourceTable& resources, std::uint32_t window);
+[[nodiscard]] std::optional<std::pair<std::int64_t, std::int64_t>>
+window_root_origin(const server::ResourceTable& resources,
+                   std::uint32_t window) noexcept;
+[[nodiscard]] std::uint32_t immediate_child_on_path(
+    const server::ResourceTable& resources, std::uint32_t ancestor,
+    std::uint32_t descendant) noexcept;
+[[nodiscard]] std::int16_t clamp_event_coordinate(std::int64_t value) noexcept;
 [[nodiscard]] std::uint32_t motion_delivery_mask(const InputState& state) noexcept;
 [[nodiscard]] DeliveryTarget propagate_event(std::span<const RouteWindow> windows,
                                              std::uint32_t source,
@@ -55,8 +64,13 @@ struct EventCoordinates {
                                                  std::int32_t root_y) noexcept;
 [[nodiscard]] std::pair<gw::protocol::x11::NotifyDetail,
                         gw::protocol::x11::NotifyDetail>
-crossing_details(std::uint32_t root, std::uint32_t old_target,
+crossing_details(const server::ResourceTable& resources,
+                 std::uint32_t old_target,
                  std::uint32_t new_target) noexcept;
+[[nodiscard]] std::pair<gw::protocol::x11::NotifyDetail,
+                        gw::protocol::x11::NotifyDetail>
+crossing_details(std::span<const std::uint32_t> old_ancestry,
+                 std::span<const std::uint32_t> new_ancestry) noexcept;
 [[nodiscard]] bool crossing_focus(std::uint32_t root, std::uint32_t event,
                                   std::uint32_t focus) noexcept;
 
