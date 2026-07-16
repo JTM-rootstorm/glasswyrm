@@ -17,8 +17,8 @@ narrow `SendEvent` path. The server neither inspects nor transforms selection
 payload bytes. Property changes generate `PropertyNotify` for interested
 clients.
 
-The target acceptance boundary is xterm PRIMARY selection and middle-button
-paste plus the repository CLIPBOARD probe serving TARGETS and UTF8_STRING.
-Those live xterm/VM results remain pending until the evidence gate is run.
-Clipboard-manager persistence, payload conversion, and drag-and-drop are not
-implemented.
+The accepted boundary is xterm PRIMARY selection and middle-button paste plus
+the repository CLIPBOARD probe serving TARGETS and UTF8_STRING. The fixed VM
+route validates those exchanges in the pinned xterm patch 410 core-font ASCII
+profile. Clipboard-manager persistence, payload conversion, and drag-and-drop
+are not implemented.

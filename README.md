@@ -9,8 +9,9 @@ configured Gentoo QXL VM through its real DRM primary node, graphical console,
 and VT lifecycle.
 Milestone 11 implementation adds an opt-in libinput/libxkbcommon input path,
 core cursor/grab/selection behavior, interactive GWM bindings, coordinated
-input/VT state, and a session launcher. Its live xterm and VM evidence gate is
-still pending, so the pinned xterm profile is not yet declared validated.
+input/VT state, and a session launcher. The pinned xterm patch 410 core-font
+ASCII profile is validated by the live interaction, restart, VT, normalized
+trace, canonical-frame, graphical-console, restoration, and archive gates.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -284,13 +285,15 @@ caller must already be able to open the selected DRM node, VT, and explicit
 input device paths. See [the launcher contract](docs/session/M11_SESSION_LAUNCHER.md)
 and [input documentation](docs/input/).
 
-The intended compatibility claim is only xterm patch 410 under the exact
+The validated compatibility claim is only xterm patch 410 under the exact
 core-font ASCII build, environment, and command pinned in
 `tests/compat/m11/clients.toml`: one US pc105 keymap, one workspace, software
 cursor, minimum PRIMARY/CLIPBOARD exchange, Alt+Button1 move, Alt+Button3
-resize, Alt+F4 close, and one DRM/KMS output. Xft/Unicode, the XKB extension,
-XIM/compose, arbitrary layouts, themed/hardware cursors, full grabs, clipboard
-persistence, decorations, and multiple workspaces/outputs are unsupported.
+resize, Alt+F4 close, and one DRM/KMS output. Passive grabs are limited to the
+observed `GrabButton` path; `UngrabButton` and passive key grabs are
+unsupported. Xft/Unicode, the XKB extension, XIM/compose, arbitrary layouts,
+themed/hardware cursors, full grabs, clipboard persistence, decorations, and
+multiple workspaces/outputs are unsupported.
 
 The fixed VM command is:
 
@@ -298,10 +301,9 @@ The fixed VM command is:
 ./tools/gw-vm milestone11-runtime-test --yes
 ```
 
-That command and implementation do not by themselves establish acceptance.
-The live trace, interaction, VT/restart, canonical-frame, console screenshot,
-restoration, and archive checks must all pass before the profile is declared
-validated.
+That command establishes acceptance only when its live trace, interaction,
+VT/restart, canonical-frame, console screenshot, restoration, and archive
+checks all pass.
 
 ## Setup probes
 
@@ -516,5 +518,6 @@ opt-in drawable and raster subset. The
 synthetic event-routing subset. None is a compatibility claim for normal X11
 applications.
 The [Milestone 11 profile](docs/protocols/x11-milestone-11.md) records the
-implemented interactive subset, while the [xterm profile](docs/compatibility/M11_XTERM.md)
-keeps the external-client claim pending until live acceptance evidence passes.
+accepted interactive subset, while the
+[xterm profile](docs/compatibility/M11_XTERM.md) limits the external-client
+claim to the pinned patch 410 core-font ASCII invocation.

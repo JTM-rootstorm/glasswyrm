@@ -187,12 +187,12 @@ Milestone 11 has a fixed interactive desktop command:
 ./tools/gw-vm milestone11-runtime-test --yes
 ```
 
-It is intended to reset from the single configured `base` snapshot, build the
-libinput/DRM profile, create fixed uinput keyboard and pointer devices, run the
-pinned xterm 410 profile through `glasswyrm-session`, and collect trace,
-selection, interaction, VT/restart, frame, console, restoration, and summary
-evidence. The existence of the command is not an acceptance result; its
-summary and archive must be reviewed before M11 is declared complete.
+It resets from the single configured `base` snapshot, builds the libinput/DRM
+profile, creates fixed uinput keyboard and pointer devices, runs the pinned
+xterm 410 core-font ASCII profile through `glasswyrm-session`, and validates
+trace, selection, interaction, VT/restart, frame, graphical-console,
+restoration, and archive evidence. A successful summary is the accepted M11
+VM result; the existence of the command alone is not.
 
 ## Safety
 
@@ -248,3 +248,9 @@ Milestone 4 acceptance writes `milestone4-runtime-test.log`,
 `milestone4-frames.tar`. A passing summary requires exact source identity,
 build and runtime evidence, at least one golden hash, socket cleanup, a valid
 frame archive, and the current systemd invocation journal.
+
+Milestone 11 acceptance writes the runtime, Meson, xterm interaction,
+selection, VT/restart, journal, normalized-trace, DRM frame, graphical-console,
+restoration, facts, and summary evidence plus its checksum-protected archive.
+The summary passes only when the exact pinned xterm patch 410 core-font ASCII
+profile completes every gate and the collected archive validates.
