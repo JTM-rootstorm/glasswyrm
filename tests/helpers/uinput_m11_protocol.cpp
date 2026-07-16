@@ -193,7 +193,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_X, 328);
     relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
-    button(events, BTN_MIDDLE, false);
+    button(events, BTN_MIDDLE, false, 250);
     // Prefix the pasted token without replacing it, then print it through
     // the PTY so the acceptance transcript proves the cross-client paste.
     chord(events, KEY_LEFTCTRL, KEY_A);
