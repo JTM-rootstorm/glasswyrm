@@ -164,9 +164,34 @@ EventCoordinates event_coordinates(const server::ResourceTable& resources,
                           static_cast<std::int16_t>(root_x), static_cast<std::int16_t>(root_y), 0};
   if (event_window == resources.screen().root_window) {
     result.child = pointer_target == event_window ? 0 : pointer_target;
-  } else if (const auto* window = resources.find_window(event_window)) {
-    result.event_x = static_cast<std::int16_t>(root_x - window->x);
-    result.event_y = static_cast<std::int16_t>(root_y - window->y);
+  } else if (resources.find_window(event_window)) {
+    const auto root = resources.screen().root_window;
+    const auto maximum_depth =
+        resources.resource_count(server::ResourceType::Window);
+    auto current = event_window;
+    std::int64_t origin_x = 0;
+    std::int64_t origin_y = 0;
+    bool resolved = false;
+    for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+      const auto* window = resources.find_window(current);
+      if (!window || window->parent == 0 || window->parent == current)
+        break;
+      origin_x += window->x;
+      origin_y += window->y;
+      if (window->parent != root) {
+        origin_x += window->border_width;
+        origin_y += window->border_width;
+      }
+      if (window->parent == root) {
+        resolved = true;
+        break;
+      }
+      current = window->parent;
+    }
+    if (resolved) {
+      result.event_x = static_cast<std::int16_t>(root_x - origin_x);
+      result.event_y = static_cast<std::int16_t>(root_y - origin_y);
+    }
   }
   return result;
 }

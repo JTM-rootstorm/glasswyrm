@@ -126,6 +126,10 @@ int main() {
   auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
   require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
           "top-level signed event coordinates");
+  coordinates = input::event_coordinates(resources, base + 4, base + 4, 18, 19);
+  require(coordinates.event_x == 1 && coordinates.event_y == 1 &&
+              coordinates.child == 0,
+          "nested event coordinates include the complete window ancestry");
   coordinates = input::event_coordinates(resources, root, base + 1, 5, 7);
   require(coordinates.event_x == 5 && coordinates.event_y == 7 && coordinates.child == base + 1,
           "root coordinates name immediate pointer child");
