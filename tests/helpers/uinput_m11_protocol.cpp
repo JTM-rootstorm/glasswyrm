@@ -183,9 +183,9 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
     // clear leaves the token one fixed bitmap-font row above the prompt.
     relative(events, REL_Y, -13);
-    relative(events, REL_X, -6);
+    relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
-    relative(events, REL_X, 111);
+    relative(events, REL_X, 123);
     button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
     // Move from xterm A to the non-overlapping interior of xterm B
