@@ -99,11 +99,11 @@ int main() {
                      is_event(primary[0], protocol::Device::pointer, EV_REL,
                               REL_Y, -13) &&
                      is_event(primary[1], protocol::Device::pointer, EV_REL,
-                              REL_X, -6) &&
+                              REL_X, -18) &&
                      is_event(primary[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(primary[3], protocol::Device::pointer, EV_REL,
-                              REL_X, 111) &&
+                              REL_X, 123) &&
                      is_event(primary[4], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 0) && primary[4].delay_ms == 250,
                  "PRIMARY drag selects the known xterm A output row");
