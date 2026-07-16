@@ -441,6 +441,7 @@ sleep 1
 systemctl is-active --quiet glasswyrm-session-m11.service
 systemctl stop glasswyrm-session-m11.service
 for _ in {1..200}; do [[ ! -e /tmp/.X11-unix/X99 && ! -e /run/glasswyrm-m11/gwm.sock && ! -e /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
+: >"$transcript"
 
 # The launcher supervision contract intentionally treats a required peer exit
 # as fatal. The restart-survival acceptance therefore runs the same exact argv
@@ -555,6 +556,7 @@ wait_transcript_token M11_READY
 run_input basic-typing milestone11-xterm.log
 run_input repeat milestone11-xterm.log
 run_input scroll milestone11-interactive-wm.log
+run_input primary-selection milestone11-selection.log
 systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv=LANG=C --setenv=XMODIFIERS=@im=none --setenv=SESSION_MANAGER= \
   --setenv=XAUTHORITY=/dev/null --setenv=TERM=xterm \
@@ -564,7 +566,6 @@ systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-b.service && break; sleep .05; done
 second_xterm_pid=$(systemctl show xterm-m11-b.service -p MainPID --value)
-run_input primary-selection milestone11-selection.log
 run_input clipboard-probe milestone11-selection.log
 run_input move milestone11-interactive-wm.log
 run_input resize milestone11-interactive-wm.log
