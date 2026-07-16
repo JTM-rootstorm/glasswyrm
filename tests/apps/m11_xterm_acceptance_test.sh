@@ -11,7 +11,7 @@ printf 'M11_TYPED M11_TYPED M11_SELECTION_TOKEN M11_SELECTION_TOKEN M11_VT M11_R
 cat >"$work/trace.json" <<'EOF'
 {"schema":1,"request_histogram":{"ChangeWindowAttributes":1,"CreateGlyphCursor":1,"FreeCursor":1,"RecolorCursor":1,"GetSelectionOwner":1,"SetSelectionOwner":1,"ConvertSelection":1,"SendEvent":1,"GrabButton":1},"error_histogram":{},"unknown_opcodes":[],"trace_gated_requests":{"GrabButton":1},"event_histogram":{"2":3,"3":1,"4":4,"5":4,"6":1,"22":1,"28":1,"29":1,"30":1,"31":1,"33":1},"event_sequence":[{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":2},{"client":1,"event_type":3},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":4},{"client":1,"event_type":5},{"client":1,"event_type":6},{"client":1,"event_type":22},{"client":1,"event_type":28},{"client":1,"event_type":29},{"client":1,"event_type":30},{"client":1,"event_type":31},{"client":1,"event_type":33}]}
 EOF
-printf '{"status":"passed","selection":"CLIPBOARD","targets":["TARGETS","UTF8_STRING"],"token":"M11_CLIPBOARD_TOKEN"}\n' >"$work/selection.json"
+printf '{"status":"passed","selection":"CLIPBOARD","targets":["TARGETS","UTF8_STRING"],"token":"M11_CLIPBOARD_TOKEN","primary_replaced":true}\n' >"$work/selection.json"
 printf '%s\n' 'move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64' >"$work/wm.log"
 cat >"$work/server.log" <<'EOF'
 glasswyrmd: cursor publication accepted kind=left-pointer x=0 y=0 visible=1 buffer=attached
