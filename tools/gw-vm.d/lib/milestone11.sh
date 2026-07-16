@@ -430,6 +430,7 @@ systemd-run --unit=glasswyrm-session-m11.service \
   --property="DeviceAllow=$target_vt rw" --property="DeviceAllow=$keyboard r" \
   --property="DeviceAllow=$pointer r" --property=RestrictAddressFamilies=AF_UNIX \
   --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+  --property=StandardOutput=journal --property=StandardError=journal \
   --property=TTYReset=yes --property=TTYVHangup=yes \
   --property=TTYVTDisallocate=no \
   --property=NoNewPrivileges=yes "${launcher[@]}"
@@ -451,6 +452,7 @@ systemd-run --unit=gwcomp-m11.service --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
   --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
   --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+  --property=StandardOutput=journal --property=StandardError=journal \
   --property=TTYReset=yes --property=TTYVHangup=yes \
   --property=TTYVTDisallocate=no \
   --property=NoNewPrivileges=yes "$runtime/src/gwcomp" --backend drm \
