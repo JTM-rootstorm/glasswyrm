@@ -172,7 +172,10 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
           target != server_.state_.screen().root_window,
       window && window->attributes.override_redirect, supports_delete,
       event.time_ms);
-  if (decision.action != glasswyrm::wm::CloseAction::None)
+  if (decision.action != glasswyrm::wm::CloseAction::None ||
+      (event.pressed &&
+       static_cast<std::uint16_t>(event.state_before & 0xffU) ==
+           interactive_bindings_->close_modifiers))
     std::fprintf(stderr,
                  "glasswyrmd: close binding target=0x%08x wm_delete=%u action=%u\n",
                  target, supports_delete ? 1U : 0U,

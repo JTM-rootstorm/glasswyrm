@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <utility>
 
@@ -59,8 +60,11 @@ bool key_stroke(char character, KeyStroke &stroke) {
       {'q', {KEY_Q, false}},           {'s', {KEY_S, false}},
       {'t', {KEY_T, false}},
       {'y', {KEY_Y, false}},           {'A', {KEY_A, true}},
-      {'D', {KEY_D, true}},            {'E', {KEY_E, true}},
+      {'C', {KEY_C, true}},            {'D', {KEY_D, true}},
+      {'E', {KEY_E, true}},            {'I', {KEY_I, true}},
+      {'K', {KEY_K, true}},            {'L', {KEY_L, true}},
       {'M', {KEY_M, true}},            {'P', {KEY_P, true}},
+      {'N', {KEY_N, true}},            {'O', {KEY_O, true}},
       {'R', {KEY_R, true}},            {'S', {KEY_S, true}},
       {'T', {KEY_T, true}},            {'V', {KEY_V, true}},
       {'X', {KEY_X, true}},            {'Y', {KEY_Y, true}},
@@ -74,7 +78,7 @@ bool key_stroke(char character, KeyStroke &stroke) {
 void text(Events &events, std::string_view value) {
   for (const char character : value) {
     KeyStroke stroke{};
-    if (!key_stroke(character, stroke)) continue;
+    if (!key_stroke(character, stroke)) std::abort();
     if (stroke.shift) key(events, KEY_LEFTSHIFT, true);
     tap(events, stroke.code);
     if (stroke.shift) key(events, KEY_LEFTSHIFT, false);
