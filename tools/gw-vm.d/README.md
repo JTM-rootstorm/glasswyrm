@@ -187,8 +187,9 @@ Milestone 11 has a fixed interactive desktop command:
 ./tools/gw-vm milestone11-runtime-test --yes
 ```
 
-It resets from the single configured `base` snapshot, builds the libinput/DRM
-profile, creates fixed uinput keyboard and pointer devices, runs the pinned
+Run it after the required external reset to the single configured `base`
+snapshot. It builds the libinput/DRM profile, creates fixed uinput keyboard and
+pointer devices, runs the pinned
 xterm 410 core-font ASCII profile through `glasswyrm-session`, and validates
 trace, selection, interaction, VT/restart, frame, graphical-console,
 restoration, and archive evidence. A successful summary is the accepted M11

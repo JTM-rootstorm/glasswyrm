@@ -761,7 +761,7 @@ if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
   for name in milestone11-desktop.ppm milestone11-desktop-after-vt.ppm milestone11-desktop-after-restart.ppm milestone11-canonical.ppm milestone11-canonical-after-vt.ppm milestone11-canonical-after-restart.ppm; do
     printf 'P6\n1 1\n255\n000' >"$scratch/$name"
   done
-  for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.raw.jsonl milestone11-xterm-trace.json milestone11-selection.log milestone11-interactive-wm.log milestone11-gwm-bindings.json milestone11-selection-client-message.json milestone11-session-state.log milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl milestone11-glasswyrmd-journal.log milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl scene-before-restart.jsonl frames.jsonl frames-before-restart.jsonl; do printf '{}\n' >"$scratch/$name"; done
+  for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.raw.jsonl milestone11-xterm-trace.json milestone11-pty-transcript.log milestone11-selection.log milestone11-interactive-wm.log milestone11-gwm-bindings.json milestone11-selection-client-message.json milestone11-session-state.log milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl milestone11-glasswyrmd-journal.log milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl scene-before-restart.jsonl frames.jsonl frames-before-restart.jsonl; do printf '{}\n' >"$scratch/$name"; done
   if [[ ${GW_VM_TEST_BAD_M11_ARCHIVE:-0} == 1 ]]; then rm -f "$scratch/scene.jsonl"; fi
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
@@ -1643,6 +1643,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   milestone11-libinput-devices.json milestone11-keymap.json \
   milestone11-gwm-bindings.json milestone11-selection-client-message.json \
   milestone11-xterm-trace.raw.jsonl milestone11-xterm-trace.json \
+  milestone11-pty-transcript.log \
   m11_trace_summarize m11_fixture_validate.py \
   'cmp -s "$source_dir/tests/fixtures/m11/xterm.trace.json"' \
   milestone11-selection.log \
@@ -1695,7 +1696,7 @@ assert_file_glob "$artifact_dir/milestone11-interactive-evidence.tar"
 for artifact in milestone11-runtime-test.log milestone11-meson-test.log \
   milestone11-source-layout.log milestone11-libinput-devices.json \
   milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.raw.jsonl \
-  milestone11-xterm-trace.json \
+  milestone11-xterm-trace.json milestone11-pty-transcript.log \
   milestone11-selection.log milestone11-interactive-wm.log \
   milestone11-gwm-bindings.json milestone11-selection-client-message.json \
   milestone11-session-state.log milestone11-drm-report.jsonl \
