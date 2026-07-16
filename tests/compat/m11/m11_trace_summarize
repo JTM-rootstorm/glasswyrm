@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Normalize a bounded Milestone 11 Glasswyrm X11 JSONL trace."""
+
+import collections
+import json
+import pathlib
+import sys
+
+
+MAXIMUM_LINE_BYTES = 64 * 1024
+MAXIMUM_TRACE_BYTES = 8 * 1024 * 1024
+RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
+
+
+def fail(message):
+    raise SystemExit(f"m11_trace_summarize: {message}")
+
+
+def load_records(path):
+    source_path = pathlib.Path(path)
+    try:
+        if source_path.stat().st_size > MAXIMUM_TRACE_BYTES:
+            fail("trace exceeds 8 MiB")
+        source = source_path.open("r", encoding="utf-8")
+    except OSError as error:
+        fail(str(error))
+
+    records = []
+    with source:
+        for number, line in enumerate(source, 1):
+            if len(line.encode("utf-8")) > MAXIMUM_LINE_BYTES:
+                fail(f"trace line {number} exceeds 64 KiB")
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                fail(f"trace line {number}: {error.msg}")
+            if not isinstance(record, dict):
+                fail(f"trace line {number} is not an object")
+            records.append(record)
+    return records
+
+
+def integer(value, field):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        fail(f"invalid {field}")
+    return value
+
+
+def summarize(records):
+    requests = []
+    replies = set()
+    events = []
+    accepted_clients = set()
+
+    for record in records:
+        direction = record.get("direction")
+        client = integer(record.get("client"), "client")
+        if direction == "connection":
+            if record.get("outcome") == "accepted":
+                accepted_clients.add(client)
+            continue
+        if direction == "request":
+            integer(record.get("sequence"), "request sequence")
+            integer(record.get("opcode"), "request opcode")
+            integer(record.get("length"), "request length")
+            if not isinstance(record.get("name"), str):
+                fail("invalid request name")
+            requests.append(record)
+            continue
+        if direction == "reply":
+            replies.add((client, integer(record.get("sequence"),
+                                         "reply sequence")))
+            continue
+        if direction == "event":
+            event_type = integer(record.get("event_type"), "event type")
+            events.append({"client": client, "event_type": event_type})
+            continue
+        if direction == "error":
+            continue
+        fail(f"unknown direction {direction!r}")
+
+    request_counts = collections.Counter(record["name"] for record in requests)
+    opcode_counts = collections.Counter(str(record["opcode"])
+                                         for record in requests)
+    error_counts = collections.Counter(
+        record.get("error", "UnknownError") for record in requests
+        if record.get("outcome") == "error")
+    event_counts = collections.Counter(str(record["event_type"])
+                                        for record in events)
+
+    return {
+        "schema": 1,
+        "first_request_occurrence": list(dict.fromkeys(
+            record["name"] for record in requests)),
+        "request_histogram": dict(sorted(request_counts.items())),
+        "opcode_histogram": dict(sorted(opcode_counts.items(),
+                                        key=lambda item: int(item[0]))),
+        "error_histogram": dict(sorted(error_counts.items())),
+        "reply_requests": list(dict.fromkeys(
+            record["name"] for record in requests
+            if (record["client"], record["sequence"]) in replies)),
+        "recurring_requests": sorted(
+            name for name in RECURRING_REQUESTS if request_counts[name]),
+        "extension_queries": list(dict.fromkeys(
+            record["extension"] for record in requests
+            if record["name"] == "QueryExtension"
+            and isinstance(record.get("extension"), str))),
+        "unknown_opcodes": sorted({
+            record["opcode"] for record in requests
+            if record["name"] == "Unknown"}),
+        "event_histogram": dict(sorted(event_counts.items(),
+                                       key=lambda item: int(item[0]))),
+        "event_sequence": events,
+        "application_connection_count": len(accepted_clients),
+        "maximum_request_length": max(
+            (record["length"] for record in requests), default=0),
+    }
+
+
+if len(sys.argv) != 2:
+    fail("usage: m11_trace_summarize TRACE.jsonl")
+
+json.dump(summarize(load_records(sys.argv[1])), sys.stdout, indent=2,
+          separators=(",", ": "))
+sys.stdout.write("\n")
