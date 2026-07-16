@@ -178,6 +178,13 @@ only for `PolyFillRectangle`. Other patterned drawing remains outside this
 bounded xterm requirement and fails explicitly rather than being rendered as a
 solid foreground fill.
 
+The startup upload is a depth-1 `ZPixmap`, not an `XYBitmap`: the accepted
+trace records format 2, depth 1, and a 48-by-48 image. Glasswyrm therefore
+advertises the matching depth-1 pixmap format and allowed screen depth, then
+decodes its one-bit pixels using the setup LSBFirst bitmap order and 32-bit row
+padding. Focused little- and big-endian request tests prove that client byte
+order affects the request header only, while the image bits remain LSBFirst.
+
 ## Grabs and keyboard discovery
 
 No direct calls to `XGrabPointer`, `XUngrabPointer`,

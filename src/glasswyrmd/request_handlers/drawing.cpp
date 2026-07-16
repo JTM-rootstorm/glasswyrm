@@ -214,16 +214,21 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
   (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id); (void)reader.read_u16(width);
   (void)reader.read_u16(height); (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
   (void)reader.read_u8(left_pad); (void)reader.read_u8(depth); (void)reader.skip(2);
-  const auto payload_size = request.data <= 1
+  const bool bitmap_payload = request.data <= 1 || depth == 1;
+  const auto payload_size = bitmap_payload
       ? ((static_cast<std::uint64_t>(width) + 31U) / 32U * 4U) * height
       : static_cast<std::uint64_t>(width) * height * 4U;
   if (payload_size > std::numeric_limits<std::size_t>::max() ||
       request.bytes.size() != 24U + payload_size)
     return error(context, request, x11::CoreErrorCode::BadLength);
-  const auto expected_depth = request.data <= 1 ? 1U : 24U;
-  if (depth != expected_depth || left_pad != 0)
+  const auto expected_depth = request.data <= 1 ? 1U : depth;
+  if ((request.data <= 1 && depth != 1) ||
+      (request.data == 2 && depth != 1 && depth != 24) || left_pad != 0)
     return error(context, request, x11::CoreErrorCode::BadValue,
-                 depth != expected_depth ? depth : left_pad);
+                 ((request.data <= 1 && depth != 1) ||
+                  (request.data == 2 && depth != 1 && depth != 24))
+                     ? depth
+                     : left_pad);
   auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
   auto* pixmap = state.resources().find_pixmap(drawable);
@@ -241,6 +246,15 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
                              static_cast<std::int16_t>(raw_y), width, height,
                              payload, gc->foreground, gc->background,
                              gc->plane_mask)
+        ? DispatchResult{}
+        : error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  if (depth == 1) {
+    auto* bitmap = pixmap ? pixmap->bitmap() : nullptr;
+    if (!bitmap) return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
+    return put_zpixmap_lsb32(*bitmap, static_cast<std::int16_t>(raw_x),
+                            static_cast<std::int16_t>(raw_y), width, height,
+                            payload, gc->plane_mask)
         ? DispatchResult{}
         : error(context, request, x11::CoreErrorCode::BadLength);
   }

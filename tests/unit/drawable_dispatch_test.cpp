@@ -179,6 +179,24 @@ int main() {
     gw::test::require(result.output.empty()&&bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
                       "one-plane depth-one XYPixmap uses the bitmap upload path");
 
+    state.resources().find_gc(base+8)->foreground=0;
+    state.resources().find_gc(base+8)->background=1;
+    x11::ByteWriter z_pixmap_image(order); z_pixmap_image.write_u8(72); z_pixmap_image.write_u8(2); z_pixmap_image.write_u16(7);
+    z_pixmap_image.write_u32(base+7); z_pixmap_image.write_u32(base+8); z_pixmap_image.write_u16(3); z_pixmap_image.write_u16(1);
+    z_pixmap_image.write_u16(0); z_pixmap_image.write_u16(0); z_pixmap_image.write_u8(0); z_pixmap_image.write_u8(1); z_pixmap_image.write_u16(0);
+    z_pixmap_image.write_u8(0b00000010); z_pixmap_image.write_padding(3);
+    result=dispatch_request(state,context,finish(std::move(z_pixmap_image),x11::CoreOpcode::PutImage,2));
+    gw::test::require(result.output.empty()&&bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
+                      "depth-one ZPixmap stores LSBFirst source bits independent of GC colors");
+
+    x11::ByteWriter short_z_pixmap(order); short_z_pixmap.write_u8(72); short_z_pixmap.write_u8(2); short_z_pixmap.write_u16(6);
+    short_z_pixmap.write_u32(base+7); short_z_pixmap.write_u32(base+8); short_z_pixmap.write_u16(3); short_z_pixmap.write_u16(1);
+    short_z_pixmap.write_u16(0); short_z_pixmap.write_u16(0); short_z_pixmap.write_u8(0); short_z_pixmap.write_u8(1); short_z_pixmap.write_u16(0);
+    result=dispatch_request(state,context,finish(std::move(short_z_pixmap),x11::CoreOpcode::PutImage,2));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadLength)&&
+                      bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
+                      "short depth-one ZPixmap is atomic BadLength");
+
     x11::ByteWriter stippled_gc(order); stippled_gc.write_u8(55); stippled_gc.write_u8(0); stippled_gc.write_u16(7);
     stippled_gc.write_u32(base+11); stippled_gc.write_u32(base+1);
     stippled_gc.write_u32((1U<<3U)|(1U<<8U)|(1U<<11U));
