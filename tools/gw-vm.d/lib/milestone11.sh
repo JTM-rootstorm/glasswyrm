@@ -327,7 +327,9 @@ meson setup "$build" "$source_dir" --wipe -Dwerror=true -Dlibinput_backend=true 
 meson compile -C "$build"; meson test -C "$build" --print-errorlogs | tee -a "$artifact_dir/milestone11-meson-test.log"
 result[strict_m11]=passed result[m4_m10_regressions]=passed
 meson setup "$asan" "$source_dir" --wipe -Dlibinput_backend=true -Ddrm_backend=true -Dasan=true -Dubsan=true
-meson compile -C "$asan"; meson test -C "$asan" --print-errorlogs
+# Sanitizer instrumentation raises peak compiler memory enough that the fixed
+# 4 GiB validation guest can OOM under Ninja's default parallelism.
+meson compile -C "$asan" -j 1; meson test -C "$asan" --print-errorlogs
 result[sanitizer]=passed
 if command -v clang >/dev/null && command -v clang++ >/dev/null; then
   CC=clang CXX=clang++ meson setup "$clang_build" "$source_dir" --wipe \
