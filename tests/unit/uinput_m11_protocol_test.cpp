@@ -95,22 +95,24 @@ int main() {
                               protocol::Device::pointer, EV_REL, REL_WHEEL, 4),
                  "scroll creates scrollback, enters xterm A, and restores its view");
   const auto primary = protocol::scenario_events("primary-selection");
-  okay &= expect(primary.size() == 4 &&
+  okay &= expect(primary.size() == 5 &&
                      is_event(primary[0], protocol::Device::pointer, EV_REL,
+                              REL_Y, -13) &&
+                     is_event(primary[1], protocol::Device::pointer, EV_REL,
                               REL_X, -18) &&
-                     is_event(primary[1], protocol::Device::pointer, EV_KEY,
+                     is_event(primary[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
-                     is_event(primary[2], protocol::Device::pointer, EV_REL,
+                     is_event(primary[3], protocol::Device::pointer, EV_REL,
                               REL_X, 130) &&
-                     is_event(primary[3], protocol::Device::pointer, EV_KEY,
-                              BTN_LEFT, 0) && primary[3].delay_ms == 250,
+                     is_event(primary[4], protocol::Device::pointer, EV_KEY,
+                              BTN_LEFT, 0) && primary[4].delay_ms == 250,
                  "PRIMARY drag selects the known xterm A output row");
   const auto paste = protocol::scenario_events("clipboard-probe");
   okay &= expect(paste.size() > 8 &&
                      is_event(paste[0], protocol::Device::pointer, EV_REL,
                               REL_X, 328) &&
                      is_event(paste[1], protocol::Device::pointer, EV_REL,
-                              REL_Y, 85) &&
+                              REL_Y, 98) &&
                      is_event(paste[2], protocol::Device::pointer, EV_KEY,
                               BTN_MIDDLE, 1) &&
                      is_event(paste[3], protocol::Device::pointer, EV_KEY,
