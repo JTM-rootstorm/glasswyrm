@@ -116,7 +116,7 @@ int main() {
                      is_event(paste[2], protocol::Device::pointer, EV_KEY,
                               BTN_MIDDLE, 1) &&
                      is_event(paste[3], protocol::Device::pointer, EV_KEY,
-                              BTN_MIDDLE, 0) &&
+                              BTN_MIDDLE, 0) && paste[3].delay_ms == 250 &&
                      is_event(paste[4], protocol::Device::keyboard, EV_KEY,
                               KEY_LEFTCTRL, 1),
                  "PRIMARY paste targets and focuses xterm B before editing");
