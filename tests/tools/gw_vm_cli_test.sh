@@ -1645,7 +1645,8 @@ done
 assert_contains "$command_log" 'rm -rf "$gpg_home"'
 assert_contains "$command_log" 'systemctl reset-failed "${m11_units[@]}"'
 assert_contains "$command_log" 'rm -rf "$artifact_dir" "$dumps" "$scenes" "$input" "$control"'
-assert_contains "$command_log" 'journalctl --since "$run_started"'
+assert_contains "$command_log" 'journalctl --since "@$run_started"'
+assert_contains "$command_log" 'xterm_has_pty "$first_xterm_pid"'
 assert_not_contains "$command_log" '<-u8>'
 assert_not_contains "$repo_root/tests/compat/m11/clients.toml" '"-u8"'
 for staged_consumer in \
