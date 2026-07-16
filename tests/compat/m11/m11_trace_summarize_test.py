@@ -23,7 +23,10 @@ records = [
      "event_type": 2, "window": 0x200001},
     {"direction": "event", "client": 7, "sequence": 3,
      "event_type": 2, "window": 0x200001},
-    {"direction": "request", "client": 7, "sequence": 4, "opcode": 250,
+    {"direction": "request", "client": 7, "sequence": 4, "opcode": 28,
+     "name": "GrabButton", "length": 24, "outcome": "success",
+     "error": None},
+    {"direction": "request", "client": 7, "sequence": 5, "opcode": 250,
      "name": "Unknown", "length": 12, "outcome": "error",
      "error": "BadRequest"},
     {"direction": "connection", "client": 7, "outcome": "disconnected"},
@@ -37,20 +40,21 @@ with tempfile.TemporaryDirectory() as directory:
 
 summary = json.loads(output)
 assert summary["first_request_occurrence"] == [
-    "QueryExtension", "QueryPointer", "Unknown"]
+    "QueryExtension", "QueryPointer", "GrabButton", "Unknown"]
 assert summary["request_histogram"] == {
-    "QueryExtension": 1, "QueryPointer": 2, "Unknown": 1}
-assert summary["opcode_histogram"] == {"38": 2, "98": 1, "250": 1}
+    "GrabButton": 1, "QueryExtension": 1, "QueryPointer": 2, "Unknown": 1}
+assert summary["opcode_histogram"] == {"28": 1, "38": 2, "98": 1, "250": 1}
 assert summary["error_histogram"] == {"BadRequest": 1}
 assert summary["reply_requests"] == ["QueryExtension"]
 assert summary["recurring_requests"] == ["QueryPointer"]
 assert summary["extension_queries"] == ["XInputExtension"]
 assert summary["unknown_opcodes"] == [250]
+assert summary["trace_gated_requests"] == {"GrabButton": 1}
 assert summary["event_histogram"] == {"2": 2}
 assert summary["event_sequence"] == [
     {"client": 7, "event_type": 2}, {"client": 7, "event_type": 2}]
 assert summary["application_connection_count"] == 1
-assert summary["maximum_request_length"] == 16
+assert summary["maximum_request_length"] == 24
 
 with tempfile.TemporaryDirectory() as directory:
     invalid = pathlib.Path(directory) / "invalid.jsonl"
