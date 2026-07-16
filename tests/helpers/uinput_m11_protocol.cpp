@@ -181,7 +181,8 @@ std::vector<Event> scenario_events(std::string_view name) {
     tap(events, KEY_ENTER);
   } else if (name == "primary-selection") {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
-    // clear leaves the token on the fixed row under the pointer at y=128.
+    // clear leaves the token one fixed bitmap-font row above the prompt.
+    relative(events, REL_Y, -13);
     relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
     relative(events, REL_X, 130);
@@ -190,7 +191,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     // Move from xterm A to the non-overlapping interior of xterm B
     // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
     relative(events, REL_X, 328);
-    relative(events, REL_Y, 85);
+    relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false);
     // Prefix the pasted token without replacing it, then print it through
