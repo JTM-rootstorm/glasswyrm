@@ -99,8 +99,11 @@ class RealLibinputApi final : public LibinputApi {
       out.time_usec = libinput_event_pointer_get_time_usec(pointer);
       if (type == LIBINPUT_EVENT_POINTER_MOTION) {
         out.kind = LibinputEventKind::MotionRelative;
-        out.x = libinput_event_pointer_get_dx(pointer);
-        out.y = libinput_event_pointer_get_dy(pointer);
+        // Pointer acceleration policy is deferred beyond M11. Consume the
+        // device's unaccelerated relative deltas so routing remains stable
+        // and does not silently inherit libinput's desktop profile.
+        out.x = libinput_event_pointer_get_dx_unaccelerated(pointer);
+        out.y = libinput_event_pointer_get_dy_unaccelerated(pointer);
       } else if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
         out.kind = LibinputEventKind::MotionAbsolute;
         out.x = libinput_event_pointer_get_absolute_x_transformed(pointer,

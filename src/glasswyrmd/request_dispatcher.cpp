@@ -62,8 +62,6 @@ DispatchResult dispatch_request(ServerState& state,
         return ungrab_pointer(state, context, request);
       case x11::CoreOpcode::GrabButton:
         return grab_button(state, context, request);
-      case x11::CoreOpcode::UngrabButton:
-        return ungrab_button(state, context, request);
       case x11::CoreOpcode::ChangeActivePointerGrab:
         return change_active_pointer_grab(state, context, request);
       case x11::CoreOpcode::GrabKeyboard:

@@ -76,6 +76,43 @@ std::uint32_t hit_test_deepest_viewable(
   return current;
 }
 
+std::uint32_t managed_top_level_ancestor(
+    const server::ResourceTable& resources,
+    const std::uint32_t window) noexcept {
+  const auto root = resources.screen().root_window;
+  auto current = window;
+  const auto maximum_depth =
+      resources.resource_count(server::ResourceType::Window);
+  for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+    const auto* candidate = resources.find_window(current);
+    if (!candidate) return root;
+    if (candidate->parent == root)
+      return resources.is_policy_candidate(current) ? current : root;
+    if (candidate->parent == 0 || candidate->parent == current) return root;
+    current = candidate->parent;
+  }
+  return root;
+}
+
+std::vector<std::uint32_t> window_ancestry(
+    const server::ResourceTable& resources, const std::uint32_t window) {
+  std::vector<std::uint32_t> result;
+  const auto root = resources.screen().root_window;
+  auto current = window;
+  const auto maximum_depth =
+      resources.resource_count(server::ResourceType::Window);
+  result.reserve(maximum_depth);
+  for (std::size_t depth = 0; depth < maximum_depth; ++depth) {
+    const auto* candidate = resources.find_window(current);
+    if (!candidate) return {};
+    result.push_back(current);
+    if (current == root) return result;
+    if (candidate->parent == 0 || candidate->parent == current) return {};
+    current = candidate->parent;
+  }
+  return {};
+}
+
 std::uint32_t motion_delivery_mask(const InputState& state) noexcept {
   std::uint32_t mask = em::PointerMotion;
   if (state.any_button_down()) mask |= em::ButtonMotion;

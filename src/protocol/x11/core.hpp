@@ -29,7 +29,6 @@ enum class CoreOpcode : std::uint8_t {
   GrabPointer = 26,
   UngrabPointer = 27,
   GrabButton = 28,
-  UngrabButton = 29,
   ChangeActivePointerGrab = 30,
   GrabKeyboard = 31,
   UngrabKeyboard = 32,

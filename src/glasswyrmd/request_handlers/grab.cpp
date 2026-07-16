@@ -137,27 +137,6 @@ DispatchResult grab_button(ServerState &state, const DispatchContext &context,
              : field_error(context, request, status, cursor);
 }
 
-DispatchResult ungrab_button(ServerState &state,
-                             const DispatchContext &context,
-                             const x11::FramedRequest &request) {
-  if (!exact_size(request, 12))
-    return error(context, request, x11::CoreErrorCode::BadLength);
-  x11::ByteReader reader(request.body(), context.byte_order);
-  std::uint32_t window{};
-  std::uint16_t modifiers{};
-  if (!reader.read_u32(window) || !reader.read_u16(modifiers))
-    return error(context, request, x11::CoreErrorCode::BadLength);
-  if (!state.resources().find_window(window))
-    return error(context, request, x11::CoreErrorCode::BadWindow, window);
-  if ((request.data != kAnyButton && request.data > 9) ||
-      (modifiers != kAnyModifier && (modifiers & ~UINT16_C(0x00ff)) != 0))
-    return error(context, request, x11::CoreErrorCode::BadValue,
-                 request.data > 9 ? request.data : modifiers);
-  (void)state.grabs().ungrab_button(context.client_id, window, request.data,
-                                   modifiers);
-  return {};
-}
-
 DispatchResult change_active_pointer_grab(
     ServerState &state, const DispatchContext &context,
     const x11::FramedRequest &request) {

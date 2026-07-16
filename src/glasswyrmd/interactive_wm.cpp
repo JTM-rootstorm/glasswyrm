@@ -60,7 +60,8 @@ bool ServerRuntime::begin_interactive_pointer(const RealInputEvent &event) {
     kind = glasswyrm::wm::InteractionKind::ResizeBottomRight;
   if (kind == glasswyrm::wm::InteractionKind::None)
     return false;
-  const auto target = input_state_.pointer_target();
+  const auto target = glasswyrm::input::managed_top_level_ancestor(
+      server_.state_.resources(), input_state_.pointer_target());
   const auto *window = server_.state_.resources().find_window(target);
   const auto found = lifecycle_->committed().windows.find(target);
   if (!window || found == lifecycle_->committed().windows.end())

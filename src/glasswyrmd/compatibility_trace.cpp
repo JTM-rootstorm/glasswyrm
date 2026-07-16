@@ -110,6 +110,8 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 30: return "ChangeActivePointerGrab";
     case 31: return "GrabKeyboard";
     case 32: return "UngrabKeyboard";
+    case 33: return "GrabKey";
+    case 34: return "UngrabKey";
     case 35: return "AllowEvents";
     case 38: return "QueryPointer";
     case 40: return "TranslateCoordinates";

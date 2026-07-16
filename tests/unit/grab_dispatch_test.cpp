@@ -190,16 +190,6 @@ int main() {
     require(result.output.empty() && state.grabs().passive_button_count() == 1,
             "GrabButton installs an asynchronous passive grab");
 
-    auto remove = header(order, x11::CoreOpcode::UngrabButton, 1, 3);
-    remove.write_u32(xid);
-    remove.write_u16(8);
-    remove.write_u16(0);
-    result = dispatch_request(
-        state, context,
-        finish(std::move(remove), x11::CoreOpcode::UngrabButton, 1));
-    require(result.output.empty() && state.grabs().passive_button_count() == 0,
-            "UngrabButton removes the matching passive grab");
-
     const auto keyboard_request = [&](const std::uint8_t owner_events,
                                       const std::uint8_t pointer_mode,
                                       const std::uint8_t keyboard_mode) {
