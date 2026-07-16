@@ -89,8 +89,9 @@ void relative(Events &events, std::uint16_t code, std::int32_t value) {
   add(events, Device::pointer, EV_REL, code, value);
 }
 
-void button(Events &events, std::uint16_t code, bool pressed) {
-  add(events, Device::pointer, EV_KEY, code, pressed ? 1 : 0);
+void button(Events &events, std::uint16_t code, bool pressed,
+            std::uint16_t delay_ms = 8) {
+  add(events, Device::pointer, EV_KEY, code, pressed ? 1 : 0, delay_ms);
 }
 
 std::string escape_json(std::string_view value) {
@@ -184,7 +185,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_X, -18);
     button(events, BTN_LEFT, true);
     relative(events, REL_X, 130);
-    button(events, BTN_LEFT, false);
+    button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
     // Move from xterm A to the non-overlapping interior of xterm B
     // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
@@ -210,7 +211,7 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_X, -608);
     relative(events, REL_Y, -205);
     button(events, BTN_LEFT, true);
-    button(events, BTN_LEFT, false);
+    button(events, BTN_LEFT, false, 250);
     chord(events, KEY_LEFTALT, KEY_F4);
   } else if (name == "post-vt") {
     text(events, "printf 'M11_VT\\n'");
