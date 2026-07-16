@@ -232,10 +232,10 @@ record_facts() {
     result[getty_restore]=failed
     [[ $status != 0 ]] || { status=1; scenario_exit=1; failure_stage=getty-restore; }
   fi
-  journalctl --since "$run_started" -u glasswyrm-session-m11.service --no-pager >"$artifact_dir/milestone11-session-journal.log" 2>&1
-  journalctl --since "$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log" 2>&1
-  journalctl --since "$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-gwm-journal.log" 2>&1
-  journalctl --since "$run_started" -u gwcomp-m11.service --no-pager >"$artifact_dir/milestone11-gwcomp-journal.log" 2>&1
+  journalctl --since "@$run_started" -u glasswyrm-session-m11.service --no-pager >"$artifact_dir/milestone11-session-journal.log" 2>&1
+  journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log" 2>&1
+  journalctl --since "@$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-gwm-journal.log" 2>&1
+  journalctl --since "@$run_started" -u gwcomp-m11.service --no-pager >"$artifact_dir/milestone11-gwcomp-journal.log" 2>&1
   [[ -s $artifact_dir/milestone11-session-journal.log &&
      -s $artifact_dir/milestone11-glasswyrmd-journal.log &&
      -s $artifact_dir/milestone11-gwm-journal.log &&
@@ -467,7 +467,8 @@ systemd-run --unit=xterm-m11-a.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-a.service && break; sleep .05; done
 first_xterm_pid=$(systemctl show xterm-m11-a.service -p MainPID --value)
-python3 - "$first_xterm_pid" <<'PY'
+xterm_has_pty() {
+python3 - "$1" <<'PY'
 import os,sys
 todo=[int(sys.argv[1])]; seen=set(); pty=False
 while todo:
@@ -479,8 +480,13 @@ while todo:
     children=open(f'/proc/{pid}/task/{pid}/children').read().split()
     todo.extend(map(int,children))
   except (FileNotFoundError,PermissionError): pass
-if not pty: raise SystemExit('xterm process tree has no real PTY-backed shell')
+raise SystemExit(0 if pty else 1)
 PY
+}
+for _ in {1..200}; do xterm_has_pty "$first_xterm_pid" && break; sleep .05; done
+xterm_has_pty "$first_xterm_pid" || {
+  printf '%s\n' 'xterm process tree has no real PTY-backed shell' >&2; exit 1;
+}
 result[xterm_alive]=passed result[xkb_keymap]=passed
 printf '{"rules":"evdev","model":"pc105","layout":"us"}\n' >"$artifact_dir/milestone11-keymap.json"
 
@@ -552,11 +558,11 @@ while [[ ! -e $control/screen-after-vt-captured ]]; do sleep .1; done
 cmp "$mirror" "$artifact_dir/milestone11-desktop-after-vt.ppm"
 
 failure_stage=peer-restart
-gwm_bindings_before=$(journalctl --since "$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
+gwm_bindings_before=$(journalctl --since "@$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
 systemctl restart gwm-m11.service
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
 for _ in {1..200}; do
-  gwm_bindings_after=$(journalctl --since "$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
+  gwm_bindings_after=$(journalctl --since "@$run_started" -u gwm-m11.service --no-pager | grep -c 'gwm: interactive bindings' || true)
   ((gwm_bindings_after > gwm_bindings_before)) && break
   sleep .05
 done
@@ -584,8 +590,8 @@ for _ in {1..100}; do ! systemctl is-active --quiet xterm-m11-a.service && break
 systemctl is-active --quiet xterm-m11-b.service
 result[close]=passed
 frames=$(find "$dumps" -type f -name frames.jsonl -print -quit)
-journalctl --since "$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
-journalctl --since "$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
+journalctl --since "@$run_started" -u gwm-m11.service --no-pager >"$artifact_dir/milestone11-interactive-wm.log"
+journalctl --since "@$run_started" -u glasswyrmd-m11.service --no-pager >"$artifact_dir/milestone11-glasswyrmd-journal.log"
 "$source_dir/tests/apps/m11_xterm_acceptance" \
   --xterm-pid "$first_xterm_pid" --xterm-pid "$second_xterm_pid" \
   --scenario-dir "$input" --transcript "$transcript" \
