@@ -1,3 +1,5 @@
+fs = import('fs')
+
 scaffold_test = executable(
   'scaffold_test',
   files('unit/scaffold_test.cpp'),
@@ -95,6 +97,29 @@ test(
   args: [meson.current_source_dir() / 'compat/m9/m9_trace_summarize'],
   timeout: 10,
 )
+m11_trace_summarize_test = find_program('compat/m11/m11_trace_summarize_test.py')
+test(
+  'm11-trace-summarize',
+  m11_trace_summarize_test,
+  args: [meson.current_source_dir() / 'compat/m11/m11_trace_summarize'],
+  timeout: 10,
+)
+m11_fixture_validate_test = find_program('tools/m11_fixture_validate_test.py')
+test(
+  'm11-fixture-validator',
+  m11_fixture_validate_test,
+  args: [meson.current_source_dir() / 'tools/m11_fixture_validate.py'],
+  timeout: 10,
+)
+m11_fixture_path = meson.project_source_root() / 'tests/fixtures/m11/xterm.trace.json'
+if fs.exists(m11_fixture_path)
+  test(
+    'm11-fixture-checksum',
+    find_program('tools/m11_fixture_validate.py'),
+    args: [meson.project_source_root() / 'tests/fixtures/m11'],
+    timeout: 10,
+  )
+endif
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
