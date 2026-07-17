@@ -10,6 +10,7 @@ import os
 import pathlib
 import signal
 import subprocess
+import time
 from typing import Any
 
 
@@ -92,6 +93,96 @@ def run(
     }
 
 
+def stop(process: subprocess.Popen[bytes]) -> int:
+    if process.poll() is None:
+        os.killpg(process.pid, signal.SIGTERM)
+        try:
+            return process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+    return process.wait(timeout=3)
+
+
+def run_resident_workloads(
+    programs: pathlib.Path,
+    artifacts: pathlib.Path,
+    control: pathlib.Path,
+    environment: dict[str, str],
+) -> list[dict[str, Any]]:
+    control.mkdir(parents=True, exist_ok=True)
+    for name in ("fullscreen-ready", "exit-fullscreen", "borderless-ready",
+                 "resident-ready.json", "resident-release"):
+        (control / name).unlink(missing_ok=True)
+    sdl_log = artifacts / "resident-sdl.log"
+    sprite_log = artifacts / "resident-testsprite2.log"
+    sdl_result = artifacts / "resident-sdl.json"
+    sdl_argv = [str(programs / "m12_sdl_probe"), "--output", str(sdl_result),
+                "--control-dir", str(control)]
+    sprite_argv = [str(programs / "testsprite2"), "--video", "x11", "--renderer",
+                   "software", "--windows", "1", "--geometry", "640x480",
+                   "--position", "64,64", "--blend", "none", "--iterations",
+                   "120", "100", "icon.bmp"]
+    with sdl_log.open("wb") as sdl_output, sprite_log.open("wb") as sprite_output:
+        sdl = subprocess.Popen(sdl_argv, cwd=programs, env=environment,
+                               stdout=sdl_output, stderr=subprocess.STDOUT,
+                               start_new_session=True)
+        sprite = subprocess.Popen(sprite_argv, cwd=programs, env=environment,
+                                  stdout=sprite_output, stderr=subprocess.STDOUT,
+                                  start_new_session=True)
+        ready = False
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if sdl.poll() is not None or sprite.poll() is not None:
+                break
+            if (control / "fullscreen-ready").is_file():
+                ready = True
+                break
+            time.sleep(0.02)
+        if ready:
+            (control / "resident-ready.json").write_text(json.dumps({
+                "schema": 1, "sdl_pid": sdl.pid, "testsprite2_pid": sprite.pid,
+                "fullscreen": True,
+            }, sort_keys=True) + "\n")
+        deadline = time.monotonic() + 240
+        while ready and time.monotonic() < deadline:
+            if (control / "resident-release").is_file() and sdl.poll() is not None:
+                break
+            if sprite.poll() is not None:
+                ready = False
+                break
+            time.sleep(0.02)
+        released = (control / "resident-release").is_file()
+        sdl_code = stop(sdl)
+        sprite_was_alive = sprite.poll() is None
+        sprite_code = stop(sprite)
+    sdl_text = sdl_log.read_text(errors="replace")
+    sprite_text = sprite_log.read_text(errors="replace")
+    try:
+        sdl_payload = json.loads(sdl_result.read_text())
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        sdl_payload = {}
+    sdl_passed = (ready and released and sdl_code == 0 and
+                  sdl_payload.get("passed") is True and
+                  "X Error" not in sdl_text)
+    sprite_passed = (ready and released and sprite_was_alive and
+                     sprite_code in (0, -signal.SIGTERM) and
+                     "X Error" not in sprite_text and "XIO:" not in sprite_text)
+    return [
+        {"name": "resident-sdl-public-api", "argv": sdl_argv,
+         "exit_code": sdl_code, "bounded_timeout": False,
+         "continuous_workload": True, "protocol_error": "X Error" in sdl_text,
+         "log": sdl_log.name, "log_sha256": sha256(sdl_log),
+         "passed": sdl_passed, "error": "" if sdl_passed else "resident SDL handshake failed"},
+        {"name": "resident-testsprite2", "argv": sprite_argv,
+         "exit_code": sprite_code, "bounded_timeout": False,
+         "continuous_workload": True,
+         "protocol_error": "X Error" in sprite_text or "XIO:" in sprite_text,
+         "log": sprite_log.name, "log_sha256": sha256(sprite_log),
+         "passed": sprite_passed,
+         "error": "" if sprite_passed else "resident testsprite2 did not survive the live cycles"},
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", choices=("shm", "no-shm"), required=True)
@@ -100,6 +191,7 @@ def main() -> int:
     parser.add_argument("--display", type=int, default=99)
     parser.add_argument("--raw-probe", type=pathlib.Path)
     parser.add_argument("--official-timeout", type=float, default=5.0)
+    parser.add_argument("--resident-control-dir", type=pathlib.Path)
     arguments = parser.parse_args()
 
     here = pathlib.Path(__file__).resolve().parent
@@ -160,6 +252,11 @@ def main() -> int:
             20,
         )
     )
+
+    if arguments.resident_control_dir:
+        workloads.extend(run_resident_workloads(
+            programs, artifacts, arguments.resident_control_dir.resolve(), environment
+        ))
     workloads.append(
         run(
             "testdraw2",
