@@ -1877,6 +1877,10 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
   assert_contains "$m12_lib" "$expected"
 done
+assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
+  'https://www.libsdl.org/release/SDL2-2.32.10.tar.gz'
+assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
+  '--retry-all-errors'
 assert_before "$m12_lib" \
   'rm -rf -- "$default" "$asan" "${build}-clang" "$server" "$gwm_build"' \
   'failure_stage=state-capture'

@@ -12,7 +12,7 @@ signature=$archive.sig
 key_page=$output/signing-keys.html
 key=$output/sdl-signing-key.asc
 gnupg=$output/gnupg
-archive_url=https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz
+archive_url=https://www.libsdl.org/release/SDL2-2.32.10.tar.gz
 signature_url=$archive_url.sig
 key_url=https://www.libsdl.org/signing-keys.php
 archive_sha=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
@@ -23,9 +23,11 @@ for tool in curl sha256sum gpg awk tr; do
   command -v "$tool" >/dev/null || { printf 'Missing required tool: %s\n' "$tool" >&2; exit 1; }
 done
 mkdir -p "$output"
-curl -L --fail --silent --show-error -o "$archive" "$archive_url"
-curl -L --fail --silent --show-error -o "$signature" "$signature_url"
-curl -L --fail --silent --show-error -o "$key_page" "$key_url"
+curl_options=(-L --fail --silent --show-error --connect-timeout 20 \
+  --retry 5 --retry-delay 2 --retry-all-errors)
+curl "${curl_options[@]}" -o "$archive" "$archive_url"
+curl "${curl_options[@]}" -o "$signature" "$signature_url"
+curl "${curl_options[@]}" -o "$key_page" "$key_url"
 printf '%s  %s\n%s  %s\n' "$archive_sha" "$archive" "$signature_sha" "$signature" |
   sha256sum --check --strict
 

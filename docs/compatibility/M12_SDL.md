@@ -17,7 +17,7 @@ The pinned source is the official SDL release artifact:
 - release commit: `5d249570393f7a37e037abf22cd6012a4cc56a71`;
 - archive: `SDL2-2.32.10.tar.gz`, 7,630,262 bytes;
 - archive URL:
-  `https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz`;
+  `https://www.libsdl.org/release/SDL2-2.32.10.tar.gz`;
 - archive SHA-256:
   `5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165`;
 - detached signature URL: the archive URL with `.sig` appended;
@@ -28,7 +28,8 @@ The pinned source is the official SDL release artifact:
   `1528635D8053A57F77D1E08630A59377A7763BE6`.
 
 `tests/compat/m12/acquire_sdl.sh` downloads the archive, signature, and key
-page over HTTPS, checks both artifact hashes, imports the published key into
+page from SDL's official HTTPS site with bounded retries, checks both artifact
+hashes, imports the published key into
 an isolated GnuPG home, checks the exact fingerprint, and verifies the
 detached signature from Sam Lantinga. `verify_manifest.py` independently
 checks the frozen manifest and the source files used by the workloads.
