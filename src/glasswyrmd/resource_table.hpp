@@ -37,7 +37,13 @@ enum class CreateWindowStatus {
 };
 
 enum class DestroyWindowStatus { Success, BadWindow, RootPreserved };
-enum class LocalLifecycleStatus { Success, BadWindow, BadMatch, BadValue };
+enum class LocalLifecycleStatus {
+  Success,
+  BadWindow,
+  BadMatch,
+  BadValue,
+  BadAlloc,
+};
 struct LocalConfigure {
   std::optional<std::int32_t> x, y;
   std::optional<std::uint32_t> width, height, border_width;

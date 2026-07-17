@@ -78,5 +78,35 @@ int main() {
                     "unmapping sibling reveals descendant pixels");
   gw::test::require(revealed->at(7, 4) == 0xff101010U,
                     "grandchild clips to ancestor interior");
+
+  lower->attributes.background_source = BackgroundSource::Pixel;
+  lower->attributes.background_pixel = 0x00123456U;
+  LocalConfigure resize;
+  resize.width = 6;
+  resize.height = 5;
+  gw::test::require(
+      resources.configure_local(base + 2, resize) ==
+              LocalLifecycleStatus::Success &&
+          lower->width == 6 && lower->height == 5 && lower->storage &&
+          lower->storage->width() == 6 && lower->storage->height() == 5,
+      "local configure resizes child backing with geometry");
+  gw::test::require(lower->storage->at(0, 0) == 0xffff0000U &&
+                        lower->storage->at(5, 4) == 0xff123456U,
+                    "child backing resize preserves overlap and background");
+  const auto resized = compose_top_level_subtree(resources, base + 1);
+  gw::test::require(resized.has_value() &&
+                        resized->at(7, 5) == 0xff123456U,
+                    "resized child composes through its complete geometry");
+
+  const auto storage_before_failure = lower->storage;
+  LocalConfigure oversized;
+  oversized.width = 65535;
+  oversized.height = 65535;
+  gw::test::require(
+      resources.configure_local(base + 2, oversized) ==
+              LocalLifecycleStatus::BadAlloc &&
+          lower->width == 6 && lower->height == 5 &&
+          lower->storage == storage_before_failure,
+      "failed child backing resize leaves geometry and storage atomic");
   return 0;
 }
