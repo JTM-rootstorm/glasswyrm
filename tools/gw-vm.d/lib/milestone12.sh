@@ -29,6 +29,7 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-logind-state.json milestone12-frame-equivalence.json
   milestone12-software-testsprite-stability.json
   milestone12-gles-testsprite-stability.json
+  milestone12-software-replay.json milestone12-gles-replay.json
   milestone12-extension-stress.json milestone12-facts.env)
 M12_BINARY_ARTIFACTS=(milestone12-software.ppm milestone12-gles.ppm
   milestone12-fullscreen.ppm milestone12-screen.ppm
@@ -107,7 +108,7 @@ scenes=/var/tmp/glasswyrm-m12-scenes
 renderer=/var/tmp/glasswyrm-m12-renderer
 control=/var/tmp/glasswyrm-m12-control
 facts=$artifact_dir/milestone12-facts.env
-failure_stage=prerequisite scenario_exit=1 keyboard= pointer=
+failure_stage=prerequisite scenario_exit=1 keyboard= pointer= run_started=
 declare -A result
 required_results=(historical_default strict_software strict_gles sanitizer clang
   component_builds source_layout api_consumers regressions extension_stress uinput
@@ -230,6 +231,7 @@ validate_milestone12_archive() {
     milestone12-frame-equivalence.json \
     milestone12-software-testsprite-stability.json \
     milestone12-gles-testsprite-stability.json \
+    milestone12-software-replay.json milestone12-gles-replay.json \
     milestone12-extension-stress.json SHA256SUMS; do
     grep -Eq "^(\\./)?$member$" <<<"$listing" || return
   done
@@ -338,6 +340,7 @@ milestone12_runtime_test() {
 milestone12_guest_script_tail() {
   cat <<'GUEST_SCRIPT'
 cleanup() {
+  local journal_status=0
   systemctl stop workload-m12-{software,noshm,gles}.service \
     glasswyrmd-m12-{software,noshm,gles}.service \
     gwcomp-m12-{software,noshm,gles}.service gwm-m12-{software,noshm,gles}.service \
@@ -356,10 +359,21 @@ cleanup() {
   if [[ -n ${getty_unit:-} && ${getty_active_before:-inactive} == active ]]; then
     systemctl start "$getty_unit" >/dev/null 2>&1 || true
   fi
-  journalctl -u 'glasswyrmd*' --no-pager >"$artifact_dir/milestone12-glasswyrmd-journal.log" 2>&1 || true
-  journalctl -u 'gwm*' --no-pager >"$artifact_dir/milestone12-gwm-journal.log" 2>&1 || true
-  journalctl -u 'gwcomp*' --no-pager >"$artifact_dir/milestone12-gwcomp-journal.log" 2>&1 || true
-  if [[ -s $artifact_dir/milestone12-glasswyrmd-journal.log &&
+  if [[ -n $run_started ]]; then
+    journalctl --since "@$run_started" -u 'glasswyrmd*' --no-pager --quiet \
+      >"$artifact_dir/milestone12-glasswyrmd-journal.log" 2>&1 || journal_status=1
+    journalctl --since "@$run_started" -u 'gwm*' --no-pager --quiet \
+      >"$artifact_dir/milestone12-gwm-journal.log" 2>&1 || journal_status=1
+    journalctl --since "@$run_started" -u 'gwcomp*' --no-pager --quiet \
+      >"$artifact_dir/milestone12-gwcomp-journal.log" 2>&1 || journal_status=1
+  else
+    : >"$artifact_dir/milestone12-glasswyrmd-journal.log"
+    : >"$artifact_dir/milestone12-gwm-journal.log"
+    : >"$artifact_dir/milestone12-gwcomp-journal.log"
+    journal_status=1
+  fi
+  if ((journal_status == 0)) &&
+       [[ -s $artifact_dir/milestone12-glasswyrmd-journal.log &&
         -s $artifact_dir/milestone12-gwm-journal.log &&
         -s $artifact_dir/milestone12-gwcomp-journal.log ]]; then result[journal_evidence]=passed; fi
   write_facts
@@ -519,6 +533,7 @@ systemctl mask --runtime --now "$logind_socket" "$logind_unit"
 shm_count() { ipcs -m | awk '$1 ~ /^0x/ {n++} END {print n+0}'; }
 shm_before=$(shm_count); shm_live=$shm_before; eventfd_live=0
 producer_eventfd_live=0 consumer_eventfd_live=0
+run_started=$(date +%s)
 
 failure_stage=input
 systemd-run --unit=gw-uinput-m12.service --property=PrivateDevices=no \
@@ -627,6 +642,139 @@ capture_matching_mirror() {
   done
   return 1
 }
+frame_count() {
+  find "$current_dump_root" -type f -name '*.ppm' | wc -l
+}
+wait_for_frame_progress() {
+  local baseline=$1 count
+  for _ in {1..400}; do
+    count=$(frame_count)
+    if ((count > baseline)); then printf '%s\n' "$count"; return; fi
+    sleep .05
+  done
+  printf 'M12 %s profile did not present a new frame after live recovery.\n' \
+    "$current_name" >&2
+  return 1
+}
+validate_replayed_renderer() {
+  python3 - "$current_renderer_report" "$current_renderer" <<'PY'
+import json,sys
+path,expected=sys.argv[1:]
+records=[json.loads(line) for line in open(path) if line.strip()]
+selections=[item for item in records if item.get('record')=='selection']
+frames=[item for item in records if item.get('record')=='frame' and
+        item.get('disposition')=='complete']
+if not selections or selections[-1].get('selected')!=expected:
+  raise SystemExit(f'replayed compositor did not select forced {expected} renderer')
+if not frames or any(item.get('selected')!=expected for item in frames):
+  raise SystemExit(f'replayed compositor did not complete a {expected} frame')
+uploads=max(item.get('texture_uploads',0) for item in frames)
+cache=max(item.get('texture_cache_bytes',0) for item in frames)
+if expected=='gles' and (uploads < 1 or cache < 1):
+  raise SystemExit('forced GLES replay did not rebuild its texture cache')
+print(selections[-1]['selected'])
+print(uploads)
+print(cache)
+PY
+}
+validate_vt_replay() {
+  python3 - "$current_drm_report" <<'PY'
+import json,sys
+records=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+releases=[item for item in records if item.get('record')=='vt' and
+          item.get('transition')=='release']
+acquires=[item for item in records if item.get('record')=='vt' and
+          item.get('transition')=='acquire']
+resume=[item for item in records if item.get('record')=='damage-copy' and
+        item.get('full_copy_reason')=='vt-resume']
+if not releases or releases[-1].get('master_owned') is not False or \
+   releases[-1].get('full_modeset') is not False:
+  raise SystemExit('VT release did not relinquish DRM master')
+if not acquires or acquires[-1].get('master_owned') is not True or \
+   acquires[-1].get('full_modeset') is not True:
+  raise SystemExit('VT acquire did not restore DRM master and modeset')
+if not resume or resume[-1].get('copied_bytes') != resume[-1].get('full_frame_bytes'):
+  raise SystemExit('VT acquire did not repaint the complete committed frame')
+PY
+}
+run_live_replay_gates() {
+  local close_json=$1 before_scene replayed_scene frames_before frames_after
+  local vt_frames_before vt_frames_after close_status
+  local -a renderer_replay
+  before_scene=$(settled_mirror "$current_dump_root")
+
+  failure_stage=$current_name-gwm-replay
+  systemctl stop "$current_gwm_unit"
+  for _ in {1..200}; do [[ ! -e $current_runtime/gwm.sock ]] && break; sleep .05; done
+  [[ ! -e $current_runtime/gwm.sock ]]
+  systemctl reset-failed "$current_gwm_unit" >/dev/null 2>&1 || true
+  start_gwm; resident_alive; sleep .5
+
+  failure_stage=$current_name-compositor-replay
+  frames_before=$(frame_count)
+  systemctl stop "$current_gwcomp_unit"
+  for _ in {1..200}; do [[ ! -e $current_runtime/gwcomp.sock ]] && break; sleep .05; done
+  [[ ! -e $current_runtime/gwcomp.sock ]]
+  systemctl reset-failed "$current_gwcomp_unit" >/dev/null 2>&1 || true
+  start_gwcomp; resident_alive
+  frames_after=$(wait_for_frame_progress "$frames_before")
+  replayed_scene=$(settled_mirror "$current_dump_root")
+  cmp "$before_scene" "$replayed_scene"
+  readarray -t renderer_replay < <(validate_replayed_renderer)
+  [[ ${renderer_replay[0]} == "$current_renderer" ]]
+
+  failure_stage=$current_name-vt-replay
+  chvt 1; sleep 1; resident_alive
+  systemctl is-active --quiet "$current_server_unit" "$current_gwcomp_unit" \
+    "$current_gwm_unit" "$current_workload_unit"
+  chvt "${target_vt##*/tty}"; sleep 1; resident_alive
+  for _ in {1..200}; do
+    validate_vt_replay 2>/dev/null && break
+    sleep .05
+  done
+  validate_vt_replay
+  vt_frames_before=$(frame_count)
+  "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+    --scenario scroll --result-json "$control/$current_name-post-vt-input.json"
+  grep -Fq '"status":"completed"' "$control/$current_name-post-vt-input.json"
+  vt_frames_after=$(wait_for_frame_progress "$vt_frames_before")
+  resident_alive
+
+  failure_stage=$current_name-close
+  "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+    --scenario close --result-json "$close_json"
+  grep -Fq '"status":"completed"' "$close_json"
+  close_status=completed
+  assert_close_kept_vt
+  wait_path "$current_out/resident-sdl.json"
+  python3 "$source_dir/tests/compat/m12/validate_result.py" \
+    "$current_out/resident-sdl.json"
+  python3 - "$artifact_dir/milestone12-$current_name-replay.json" \
+    "$current_name" "$current_renderer" "$frames_before" "$frames_after" \
+    "$vt_frames_before" "$vt_frames_after" "${renderer_replay[1]}" \
+    "${renderer_replay[2]}" "$close_status" <<'PY'
+import json,sys
+(out,profile,renderer,before,after,vt_before,vt_after,uploads,cache,
+ close_status)=sys.argv[1:]
+json.dump({'schema':1,'profile':profile,'renderer':renderer,'passed':True,
+ 'checks':{'gwm_restart':True,'resident_after_gwm_restart':True,
+ 'compositor_restart':True,'resident_after_compositor_restart':True,
+ 'buffer_replay':int(after)>int(before),'scene_replay_exact':True,
+ 'texture_replay':renderer!='gles' or (int(uploads)>0 and int(cache)>0),
+ 'vt_release':True,'vt_acquire':True,'vt_remodeset':True,
+ 'post_vt_repaint':int(vt_after)>int(vt_before),'resident_after_vt':True,
+ 'close_status_completed':close_status=='completed'},
+ 'frames':{'before_compositor_restart':int(before),
+ 'after_compositor_restart':int(after),'before_vt':int(vt_before),
+ 'after_post_vt_repaint':int(vt_after)},
+ 'renderer_replay':{'texture_uploads':int(uploads),'texture_cache_bytes':int(cache)},
+ 'close_status':close_status},open(out,'w'),sort_keys=True)
+PY
+  if [[ $current_name == gles ]]; then
+    result[gwm_replay]=passed result[compositor_replay]=passed
+    result[vt_replay]=passed result[fullscreen_input_close]=passed
+  fi
+}
 
 start_gwm() {
   systemd-run --unit="$current_gwm_unit" --property=PrivateDevices=yes \
@@ -705,6 +853,7 @@ begin_profile() {
     ((current_eventfds > consumer_eventfd_live)) && consumer_eventfd_live=$current_eventfds
     current_shm=$(shm_count); ((current_shm > shm_live)) && shm_live=$current_shm
   fi
+  return 0
 }
 finish_profile() {
   local accepted_frame=${1:-} latest
@@ -761,41 +910,7 @@ resident_alive
 grep -Fq '"status":"completed"' "$control/software-cursor-input.json"
 capture_scene cursor
 
-failure_stage=gwm-replay
-systemctl stop "$current_gwm_unit"
-for _ in {1..200}; do [[ ! -e $current_runtime/gwm.sock ]] && break; sleep .05; done
-[[ ! -e $current_runtime/gwm.sock ]]
-systemctl reset-failed "$current_gwm_unit" >/dev/null 2>&1 || true
-start_gwm; resident_alive; sleep .5
-result[gwm_replay]=passed
-
-failure_stage=compositor-replay
-frames_before=$(find "$current_dump_root" -type f -name '*.ppm' | wc -l)
-systemctl stop "$current_gwcomp_unit"
-for _ in {1..200}; do [[ ! -e $current_runtime/gwcomp.sock ]] && break; sleep .05; done
-[[ ! -e $current_runtime/gwcomp.sock ]]
-systemctl reset-failed "$current_gwcomp_unit" >/dev/null 2>&1 || true
-start_gwcomp; resident_alive
-for _ in {1..400}; do
-  frames_after=$(find "$current_dump_root" -type f -name '*.ppm' | wc -l)
-  ((frames_after > frames_before)) && break
-  sleep .05
-done
-((frames_after > frames_before)); result[compositor_replay]=passed
-
-failure_stage=vt-replay
-chvt 1; sleep 1; resident_alive
-systemctl is-active --quiet "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit" "$current_workload_unit"
-chvt "${target_vt##*/tty}"; sleep 1; resident_alive
-grep -q '"record":"vt","transition":"release"' "$current_drm_report"
-grep -q '"record":"vt","transition":"acquire"' "$current_drm_report"
-result[vt_replay]=passed
-"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
-  --scenario close --result-json "$control/software-close.json"
-grep -Fq '"status":"completed"' "$control/software-close.json"
-assert_close_kept_vt
-wait_path "$current_out/resident-sdl.json"
-python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
+run_live_replay_gates "$control/software-close.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
   --dump-dir "$current_dump_root" \
   --output-frame "$artifact_dir/milestone12-software-testsprite.ppm" \
@@ -820,7 +935,7 @@ python3 "$source_dir/tests/compat/m12/normalize_fixture_traces.py" \
   --testsprite2 "$artifact_dir/milestone12-testsprite2-trace.json"
 for key in raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
   extension_registry big_requests xfixes damage render composite randr \
-  colormap fullscreen borderless geometry_restore software_frame fullscreen_input_close; do result[$key]=passed; done
+  colormap fullscreen borderless geometry_restore software_frame; do result[$key]=passed; done
 
 failure_stage=fallback-runtime
 begin_profile noshm software no-shm "$software" false MIT-SHM
@@ -850,11 +965,7 @@ wait_path "$current_out/live-control/borderless-ready"
   --scenario scroll --result-json "$control/gles-cursor-input.json"
 grep -Fq '"status":"completed"' "$control/gles-cursor-input.json"
 capture_scene cursor
-"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
-  --scenario close --result-json "$control/gles-close.json"
-assert_close_kept_vt
-wait_path "$current_out/resident-sdl.json"
-python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
+run_live_replay_gates "$control/gles-close.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
   --dump-dir "$current_dump_root" \
   --output-frame "$artifact_dir/milestone12-gles-testsprite.ppm" \
@@ -1011,6 +1122,7 @@ cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{testdraw2-trace,testsprite2-trace}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{raw-little-registry,raw-big-registry}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{frame-equivalence,software-testsprite-stability,gles-testsprite-stability}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{software,gles}-replay.json "$evidence/"
 cp "$artifact_dir"/milestone12-{software-trace,noshm-trace}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-software,renderer-gles,drm-damage-report,sync-report}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-summary,drm-damage-summary,sync-observation}.json "$evidence/"
