@@ -402,6 +402,16 @@ result[source_layout]=passed
 "$source_dir/tests/install/gwipc_staged_consumers_test.sh" "$source_dir" "$software"
 result[api_consumers]=passed result[regressions]=passed
 
+failure_stage=runtime-storage
+rm -rf -- "$default" "$asan" "${build}-clang" "$server" "$gwm_build" \
+  "$gwcomp_build" "$ipc_only"
+available_kib=$(df -Pk /var/tmp | awk 'NR == 2 { print $4 }')
+[[ $available_kib =~ ^[0-9]+$ ]] && ((available_kib >= 2 * 1024 * 1024)) || {
+  printf 'M12 runtime requires at least 2 GiB free in /var/tmp; found %s KiB.\n' \
+    "${available_kib:-unknown}" >&2
+  exit 1
+}
+
 failure_stage=state-capture
 capture_vt_state() {
   python3 - "$target_vt" "$1" <<'PY'

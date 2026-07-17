@@ -1681,6 +1681,11 @@ assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'result[source_layout]=passed' \
   'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'rm -rf -- "$default" "$build" "$asan" "$clang_build"' \
+  'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'M11 runtime requires at least 2 GiB free in /var/tmp'
 
 : >"$command_log"
 run_failure "$work_dir/milestone11-bad-base.out" \
@@ -1870,6 +1875,11 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
   assert_contains "$m12_lib" "$expected"
 done
+assert_before "$m12_lib" \
+  'rm -rf -- "$default" "$asan" "${build}-clang" "$server" "$gwm_build"' \
+  'failure_stage=state-capture'
+assert_contains "$m12_lib" \
+  'M12 runtime requires at least 2 GiB free in /var/tmp'
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
