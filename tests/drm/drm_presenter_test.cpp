@@ -83,12 +83,17 @@ class FakeVtApi final : public session::VirtualTerminalApi {
   bool get_state(int, session::VirtualTerminalState& value) override { value.active = 1; return true; }
   bool get_mode(int, session::VirtualTerminalMode& value) override { value = {}; return true; }
   bool get_kd_mode(int, int& value) override { value = 0; return true; }
+  bool get_keyboard_mode(int, int& value) override { value = 3; return true; }
   bool activate(int, unsigned number) override { log.push_back("activate:" + std::to_string(number)); return true; }
   bool wait_until_active(int, unsigned) override { return true; }
   bool set_process_mode(int, int, int) override { log.push_back("vt_process"); return true; }
   bool set_mode(int, const session::VirtualTerminalMode&) override { log.push_back("restore_vt"); return true; }
   bool set_graphics_mode(int) override { log.push_back("graphics"); return true; }
   bool set_kd_mode(int, int) override { log.push_back("restore_kd"); return true; }
+  bool set_keyboard_mode(int, int value) override {
+    log.push_back("keyboard:" + std::to_string(value));
+    return true;
+  }
   bool acknowledge_release(int) override { log.push_back("release"); return true; }
   bool acknowledge_acquire(int) override { log.push_back("acquire"); return true; }
   void close_terminal(int) noexcept override { log.push_back("close_vt"); }

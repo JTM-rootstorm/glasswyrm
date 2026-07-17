@@ -41,6 +41,7 @@ public:
   [[nodiscard]] virtual bool get_state(int fd, VirtualTerminalState& state) = 0;
   [[nodiscard]] virtual bool get_mode(int fd, VirtualTerminalMode& mode) = 0;
   [[nodiscard]] virtual bool get_kd_mode(int fd, int& mode) = 0;
+  [[nodiscard]] virtual bool get_keyboard_mode(int fd, int& mode) = 0;
   [[nodiscard]] virtual bool activate(int fd, unsigned number) = 0;
   [[nodiscard]] virtual bool wait_until_active(int fd, unsigned number) = 0;
   [[nodiscard]] virtual bool set_process_mode(int fd, int release_signal,
@@ -49,6 +50,7 @@ public:
                                       const VirtualTerminalMode& mode) = 0;
   [[nodiscard]] virtual bool set_graphics_mode(int fd) = 0;
   [[nodiscard]] virtual bool set_kd_mode(int fd, int mode) = 0;
+  [[nodiscard]] virtual bool set_keyboard_mode(int fd, int mode) = 0;
   [[nodiscard]] virtual bool acknowledge_release(int fd) = 0;
   [[nodiscard]] virtual bool acknowledge_acquire(int fd) = 0;
   virtual void close_terminal(int fd) noexcept = 0;
@@ -62,6 +64,7 @@ public:
   [[nodiscard]] bool get_state(int fd, VirtualTerminalState& state) override;
   [[nodiscard]] bool get_mode(int fd, VirtualTerminalMode& mode) override;
   [[nodiscard]] bool get_kd_mode(int fd, int& mode) override;
+  [[nodiscard]] bool get_keyboard_mode(int fd, int& mode) override;
   [[nodiscard]] bool activate(int fd, unsigned number) override;
   [[nodiscard]] bool wait_until_active(int fd, unsigned number) override;
   [[nodiscard]] bool set_process_mode(int fd, int release_signal,
@@ -70,6 +73,7 @@ public:
                               const VirtualTerminalMode& mode) override;
   [[nodiscard]] bool set_graphics_mode(int fd) override;
   [[nodiscard]] bool set_kd_mode(int fd, int mode) override;
+  [[nodiscard]] bool set_keyboard_mode(int fd, int mode) override;
   [[nodiscard]] bool acknowledge_release(int fd) override;
   [[nodiscard]] bool acknowledge_acquire(int fd) override;
   void close_terminal(int fd) noexcept override;
