@@ -36,8 +36,10 @@ DispatchResult image_text8(ServerState& state, const DispatchContext& context,
       static_cast<std::int16_t>(raw_y), text, gc->foreground, gc->background,
       gc->plane_mask, true);
   child_clip.restore(); DispatchResult result;
-  if (!raster.damage.empty() && supported_window_drawable(state.resources(), drawable))
-    for (const auto rectangle : child_clip.visible(raster.damage)) add_window_damage(result, state.resources(), drawable, rectangle);
+  if (!raster.damage.empty())
+    for (const auto rectangle : child_clip.visible(raster.damage))
+      add_drawable_damage(result, state, drawable, rectangle,
+                          context.input.logical_time);
   return result;
 }
 
@@ -86,9 +88,10 @@ DispatchResult poly_text8(ServerState& state, const DispatchContext& context,
     x += static_cast<std::int32_t>(item.text.size()) * kFixedFontAdvance;
   }
   child_clip.restore(); DispatchResult result;
-  if (supported_window_drawable(state.resources(), drawable))
-    for (const auto& rectangle : damage.rectangles())
-      for (const auto visible : child_clip.visible(rectangle)) add_window_damage(result, state.resources(), drawable, visible);
+  for (const auto& rectangle : damage.rectangles())
+    for (const auto visible : child_clip.visible(rectangle))
+      add_drawable_damage(result, state, drawable, visible,
+                          context.input.logical_time);
   return result;
 }
 

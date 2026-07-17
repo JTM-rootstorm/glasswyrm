@@ -1,4 +1,5 @@
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/event_mask.hpp"
@@ -61,6 +62,10 @@ DispatchResult set_selection_owner(ServerState& state,
     return error(context, request, x11::CoreErrorCode::BadAtom, selection);
 
   DispatchResult result;
+  append_xfixes_notifications(
+      result, state.selections().xfixes_notifications(
+                  selection, 0, owner, context.input.logical_time,
+                  change.effective_time));
   if (change.previous_owner &&
       (owner == 0 || change.previous_owner->client != context.client_id ||
        change.previous_owner->window != owner)) {

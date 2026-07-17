@@ -1086,6 +1086,7 @@ if get_option('glasswyrmd')
     ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
     ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
     ['mit-shm', 'mit_shm_test.cpp'],
+    ['xfixes-damage', 'xfixes_damage_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],

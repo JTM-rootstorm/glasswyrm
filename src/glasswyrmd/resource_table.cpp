@@ -124,6 +124,31 @@ ShmSegmentResource* ResourceTable::find_shm_segment(
                   : nullptr;
 }
 
+const XFixesRegionResource* ResourceTable::find_xfixes_region(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<XFixesRegionResource>(&resource->payload)
+                  : nullptr;
+}
+
+XFixesRegionResource* ResourceTable::find_xfixes_region(
+    const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<XFixesRegionResource>(&resource->payload)
+                  : nullptr;
+}
+
+const DamageResource* ResourceTable::find_damage(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<DamageResource>(&resource->payload) : nullptr;
+}
+
+DamageResource* ResourceTable::find_damage(const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<DamageResource>(&resource->payload) : nullptr;
+}
+
 std::shared_ptr<const input::CursorImage> ResourceTable::effective_cursor(
     const std::uint32_t pointer_target) const noexcept {
   auto current = pointer_target;

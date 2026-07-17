@@ -1,4 +1,5 @@
 #include "glasswyrmd/server.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -86,6 +87,19 @@ void Server::remove_closed_clients() {
                                 client->resource_id_base());
       return true;
     }
+    DispatchResult selection_notifications;
+    const auto logical_time = input_snapshot_provider_
+                                  ? input_snapshot_provider_().logical_time
+                                  : std::uint32_t{0};
+    for (const auto& [selection, owner] :
+         state_.selections().owned_by_client(client->identifier()))
+      append_xfixes_notifications(
+          selection_notifications,
+          state_.selections().xfixes_notifications(
+              selection, 2, 0, logical_time, owner.last_change_time));
+    if (!selection_notifications.protocol_events.empty() &&
+        protocol_event_handler_)
+      protocol_event_handler_(selection_notifications.protocol_events);
     const auto cleanup = state_.cleanup_client(client->identifier());
     if (cleanup.resources_destroyed != 0 ||
         cleanup.property_bytes_released != 0) {

@@ -3,6 +3,8 @@
 #include "glasswyrmd/extension_registry.hpp"
 #include "glasswyrmd/request_handlers/common.hpp"
 #include "glasswyrmd/extensions/mit_shm.hpp"
+#include "glasswyrmd/extensions/xfixes.hpp"
+#include "glasswyrmd/extensions/damage.hpp"
 #include "protocol/x11/reply.hpp"
 
 namespace glasswyrm::server {
@@ -34,7 +36,9 @@ DispatchResult dispatch_extension_request(
     case ExtensionKind::MitShm:
       return extensions::dispatch_mit_shm(state, context, request);
     case ExtensionKind::XFixes:
+      return extensions::dispatch_xfixes(state, context, request);
     case ExtensionKind::Damage:
+      return extensions::dispatch_damage(state, context, request);
     case ExtensionKind::Render:
     case ExtensionKind::Composite:
     case ExtensionKind::RandR: break;
