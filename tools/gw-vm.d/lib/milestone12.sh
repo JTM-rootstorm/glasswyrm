@@ -491,12 +491,15 @@ try:
   active=bytearray(struct.calcsize('=HHH'))
   mode=bytearray(struct.calcsize('=BBhhh'))
   kd=bytearray(struct.calcsize('=i'))
+  keyboard=bytearray(struct.calcsize('=i'))
   fcntl.ioctl(fd,0x5603,active,True)
   fcntl.ioctl(fd,0x5601,mode,True)
   fcntl.ioctl(fd,0x4B3B,kd,True)
+  fcntl.ioctl(fd,0x4B44,keyboard,True)
 finally: os.close(fd)
 json.dump({'active':struct.unpack('=HHH',active),'mode':struct.unpack('=BBhhh',mode),
-           'kd':struct.unpack('=i',kd)[0]},open(output,'w'),sort_keys=True)
+           'kd':struct.unpack('=i',kd)[0],
+           'keyboard':struct.unpack('=i',keyboard)[0]},open(output,'w'),sort_keys=True)
 PY
 }
 getty_unit=getty@${target_vt##*/}.service
@@ -568,28 +571,11 @@ d=json.load(open(sys.argv[1]))
 raise SystemExit(0 if all(os.path.exists(f'/proc/{d[k]}') for k in ('sdl_pid','testsprite2_pid')) else 1)
 PY
 }
-restore_close_vt() {
-  local active
-  # The VT switch may land just after the uinput controller has acknowledged
-  # the final key release, so give tty0 a bounded window to expose it.
-  for _ in {1..20}; do
-    active=$(cat /sys/class/tty/tty0/active)
-    [[ $active != ${target_vt##*/} ]] && break
-    sleep .025
-  done
-  if [[ $active != ${target_vt##*/} ]]; then
-    # The acceptance keyboard is a real uinput device, so the kernel VT layer
-    # also observes the GWM Alt+F4 close binding and interprets it as a switch
-    # to tty4. Return to the compositor VT before the SDL client synchronously
-    # tears down its window; otherwise its deferred Unmap remains paused while
-    # the display session is inactive.
-    chvt "${target_vt##*/tty}"
-    for _ in {1..200}; do
-      [[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]] && break
-      sleep .05
-    done
-    [[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]
-  fi
+assert_close_kept_vt() {
+  # The direct session disables kernel console keyboard processing. Give any
+  # delayed console action time to surface, then prove Alt+F4 did not steal VT.
+  sleep .5
+  [[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]
 }
 settled_mirror() {
   local directory=$1 candidate= digest= last_digest= stable=0
@@ -733,7 +719,11 @@ finish_profile() {
   local latest
   latest=$(settled_mirror "$current_dump_root")
   cp "$latest" "$artifact_dir/milestone12-$current_name.ppm"
-  systemctl stop "$current_workload_unit" "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"
+  # A successful bounded workload may exit before cleanup and systemd then
+  # garbage-collects its transient unit. Treat that state as already stopped,
+  # while retaining strict stop checks for the three long-lived services.
+  systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true
+  systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"
   for _ in {1..400}; do
     [[ ! -e /tmp/.X11-unix/X99 && ! -e $current_runtime/gwm.sock && ! -e $current_runtime/gwcomp.sock ]] && break
     sleep .05
@@ -796,7 +786,7 @@ result[vt_replay]=passed
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario close --result-json "$control/software-close.json"
 grep -Fq '"status":"completed"' "$control/software-close.json"
-restore_close_vt
+assert_close_kept_vt
 wait_path "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
@@ -855,7 +845,7 @@ grep -Fq '"status":"completed"' "$control/gles-cursor-input.json"
 capture_scene cursor
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario close --result-json "$control/gles-close.json"
-restore_close_vt
+assert_close_kept_vt
 wait_path "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
@@ -931,7 +921,8 @@ import json,sys
 kb,ka,vb,va=map(lambda p:json.load(open(p)),sys.argv[1:])
 checks={'active VT':(vb['active'][0],va['active'][0]),
         'VT signal':(vb['active'][1],va['active'][1]),
-        'VT mode':(vb['mode'],va['mode']),'KD mode':(vb['kd'],va['kd'])}
+        'VT mode':(vb['mode'],va['mode']),'KD mode':(vb['kd'],va['kd']),
+        'keyboard mode':(vb['keyboard'],va['keyboard'])}
 for label,(before,after) in checks.items():
   if before!=after: raise SystemExit(f'{label} was not restored: {before!r} != {after!r}')
 if vb['active'][2]!=va['active'][2]:

@@ -2068,8 +2068,10 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'latest=$(latest_mirror "$current_dump_root")' \
   'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
   'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
-  'active=$(cat /sys/class/tty/tty0/active)' \
-  'chvt "${target_vt##*/tty}"' \
+  'assert_close_kept_vt' \
+  '[[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]' \
+  'fcntl.ioctl(fd,0x4B44,keyboard,True)' \
+  "'keyboard mode':(vb['keyboard'],va['keyboard'])" \
   server-historical server-game gwcomp-software-headless gwcomp-software-drm \
   gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
   milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
@@ -2094,6 +2096,13 @@ assert_before "$m12_lib" \
   'failure_stage=sdl-acquisition'
 assert_contains "$m12_lib" \
   'after dependency installation'
+assert_contains "$m12_lib" \
+  'systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true'
+assert_contains "$m12_lib" \
+  'systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"'
+assert_before "$m12_lib" \
+  'systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true' \
+  'systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"'
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
