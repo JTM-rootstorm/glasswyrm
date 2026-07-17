@@ -149,6 +149,16 @@ DamageResource* ResourceTable::find_damage(const std::uint32_t xid) noexcept {
   return resource ? std::get_if<DamageResource>(&resource->payload) : nullptr;
 }
 
+const Picture* ResourceTable::find_picture(const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<Picture>(&resource->payload) : nullptr;
+}
+
+Picture* ResourceTable::find_picture(const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<Picture>(&resource->payload) : nullptr;
+}
+
 std::shared_ptr<const input::CursorImage> ResourceTable::effective_cursor(
     const std::uint32_t pointer_target) const noexcept {
   auto current = pointer_target;

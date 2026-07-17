@@ -15,10 +15,10 @@
 namespace glasswyrm::server {
 
 enum class PictureFormatId : std::uint32_t {
-  A1 = 0xFFFFF101U,
-  A8 = 0xFFFFF102U,
-  Xrgb32 = 0xFFFFF103U,
-  Argb32 = 0xFFFFF104U,
+  A1 = 0x1FFFF101U,
+  A8 = 0x1FFFF102U,
+  Xrgb32 = 0x1FFFF103U,
+  Argb32 = 0x1FFFF104U,
 };
 
 struct PictureFormatDescriptor {
@@ -75,12 +75,12 @@ struct PictureAttributes {
 };
 
 struct PictureAttributeUpdate {
-  std::optional<std::uint8_t> repeat;
+  std::optional<std::uint32_t> repeat;
   std::optional<std::uint32_t> alpha_map;
   std::optional<std::int32_t> clip_x_origin;
   std::optional<std::int32_t> clip_y_origin;
-  std::optional<std::uint8_t> component_alpha;
-  std::optional<std::uint8_t> subwindow_mode;
+  std::optional<std::uint32_t> component_alpha;
+  std::optional<std::uint32_t> subwindow_mode;
   std::uint32_t unsupported_mask{};
 };
 

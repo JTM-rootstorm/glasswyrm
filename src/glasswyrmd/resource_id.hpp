@@ -21,7 +21,8 @@ inline constexpr const ScreenModel& kScreenModel =
 [[nodiscard]] constexpr bool is_server_owned_id(
     const std::uint32_t xid, const ScreenModel& screen = kScreenModel) noexcept {
   return xid == screen.root_window || xid == screen.default_colormap ||
-         xid == screen.root_visual;
+         xid == screen.root_visual ||
+         (xid >= 0x1FFFF100U && xid <= 0x1FFFF1FFU);
 }
 
 }  // namespace glasswyrm::server

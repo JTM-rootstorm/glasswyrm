@@ -10,6 +10,7 @@
 #include "glasswyrmd/shm_segment.hpp"
 #include "glasswyrmd/xfixes_region.hpp"
 #include "glasswyrmd/damage_resource.hpp"
+#include "glasswyrmd/picture.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,7 @@ enum class ResourceType {
   ShmSegment,
   XFixesRegion,
   Damage,
+  Picture,
 };
 
 struct ResourceRecord {
@@ -39,7 +41,8 @@ struct ResourceRecord {
   std::optional<ClientId> owner;
   std::variant<WindowResource, PixmapResource, GraphicsContextResource,
                FontResource, CursorResource, ColormapResource,
-               ShmSegmentResource, XFixesRegionResource, DamageResource>
+               ShmSegmentResource, XFixesRegionResource, DamageResource,
+               Picture>
       payload;
 };
 
@@ -113,6 +116,16 @@ enum class DamageStatus {
   BadValue,
   BadAlloc,
 };
+enum class PictureResourceStatus {
+  Success,
+  BadIdChoice,
+  BadPicture,
+  BadDrawable,
+  BadFormat,
+  BadMatch,
+  BadValue,
+  BadAlloc,
+};
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -167,6 +180,7 @@ struct ResourceLimits {
   std::size_t maximum_shm_bytes_per_client{512U * 1024U * 1024U};
   std::size_t maximum_xfixes_regions_per_client{4096};
   std::size_t maximum_damage_resources_per_client{4096};
+  std::size_t maximum_pictures_per_client{8192};
 };
 
 class ResourceTable {
@@ -201,6 +215,8 @@ class ResourceTable {
   [[nodiscard]] const DamageResource* find_damage(
       std::uint32_t xid) const noexcept;
   [[nodiscard]] DamageResource* find_damage(std::uint32_t xid) noexcept;
+  [[nodiscard]] const Picture* find_picture(std::uint32_t xid) const noexcept;
+  [[nodiscard]] Picture* find_picture(std::uint32_t xid) noexcept;
   [[nodiscard]] std::shared_ptr<const input::CursorImage> effective_cursor(
       std::uint32_t pointer_target) const noexcept;
   [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
@@ -226,6 +242,9 @@ class ResourceTable {
       std::uint32_t xid, std::uint32_t drawable, std::uint8_t depth,
       std::uint16_t width, std::uint16_t height);
   [[nodiscard]] FreePixmapStatus free_pixmap(std::uint32_t xid);
+  [[nodiscard]] CreatePixmapStatus name_window_pixmap(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t window);
   [[nodiscard]] CreateGcStatus create_gc(
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       std::uint32_t xid, std::uint32_t drawable, GraphicsContextResource gc);
@@ -276,6 +295,10 @@ class ResourceTable {
                                        std::uint32_t region);
   [[nodiscard]] std::vector<DamageNotification> damage_drawable(
       std::uint32_t drawable, geometry::Rectangle rectangle);
+  [[nodiscard]] PictureResourceStatus create_picture(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, Picture picture);
+  [[nodiscard]] PictureResourceStatus free_picture(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
@@ -323,6 +346,8 @@ class ResourceTable {
  private:
   void destroy_leaf(std::uint32_t xid, CleanupResult& result);
   std::size_t remove_damage_for_drawable(std::uint32_t drawable);
+  std::size_t remove_pictures_for_drawable(std::uint32_t drawable);
+  void recompute_canonical_drawable_bytes() noexcept;
   void recompute_map_states_from(std::uint32_t xid, bool parent_viewable);
 
   ScreenModel screen_;
