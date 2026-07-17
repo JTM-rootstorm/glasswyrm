@@ -266,6 +266,18 @@ PREFLIGHT
   exit 0
 fi
 
+if [[ $script == *'M12 requires /dev/uinput and two usable virtual terminals.'* && $script != *'build=/var/tmp/glasswyrm-build-m12'* ]]; then
+  printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
+  cat <<'PREFLIGHT'
+drm_primary_node=/dev/dri/card0
+drm_connector=Virtual-1
+drm_mode=1024x768
+target_vt=/dev/tty2
+uinput_device=/dev/uinput
+PREFLIGHT
+  exit 0
+fi
+
 if [[ $script == *'sed -n "s/^full_build_commit=//p"'* ]]; then
   printf '%s\n' '75c68dc000000000000000000000000000000000'
   exit 0
@@ -673,6 +685,49 @@ FACTS
       printf '%s\n' 'schema=1' 'kind=milestone11-interactive-rerun' \
         'accepted_milestone11_result=false' ;;
     milestone11-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone12-facts.env)
+      cat <<'FACTS'
+required_base_commit=ae6b6c93a29a1fb985dcea8455650d15c0fec364
+tested_commit=86dab3c000000000000000000000000000000000
+failure_stage=
+scenario_exit=0
+sdl_version=2.32.10
+sdl_source_sha256=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
+api_version=0.7.0
+soversion=0
+wire_version=1.0
+drm_mode=1024x768
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.11.1
+ninja_version=1.13.2
+systemd_version=systemd 257
+mesa_version=25.1.7
+egl_vendor=Mesa Project
+egl_version=1.5
+gles_version=OpenGL ES 3.2
+gl_vendor=Mesa
+gl_renderer=softpipe
+gl_version=OpenGL ES 3.2 Mesa
+gbm_available=true
+renderer_classification=software
+x_servers_absent=true
+clang=passed
+FACTS
+      for result in historical_default strict_software strict_gles sanitizer \
+        component_builds source_layout api_consumers regressions uinput \
+        raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
+        extension_registry big_requests mit_shm no_shm_fallback xfixes damage \
+        render composite randr colormap fullscreen borderless geometry_restore \
+        eventfd_sync missing_token_wait damage_upload damage_scanout \
+        software_frame gles_frame renderer_equality screenshot_equality \
+        fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup \
+        restoration archive_validation journal_evidence; do
+        printf '%s=passed\n' "$result"
+      done
+      ;;
+    milestone12-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone12-*.json|milestone12-*.jsonl) printf '{}\n' ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -716,6 +771,14 @@ set -euo pipefail
 printf 'scp' >>"$GW_VM_TEST_COMMAND_LOG"
 printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
 printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
+source=${@: -2:1}
+destination=${!#}
+if [[ $source == *:* && -n ${GW_VM_TEST_FAIL_M12_ARTIFACT:-} &&
+      $source == *"$GW_VM_TEST_FAIL_M12_ARTIFACT" ]]; then
+  printf 'injected M12 artifact failure for %s\n' \
+    "$GW_VM_TEST_FAIL_M12_ARTIFACT" >&2
+  exit 46
+fi
 if [[ "$*" == *milestone5-policies.tar* ]]; then
   destination=${!#}
   scratch=$(mktemp -d)
@@ -794,6 +857,31 @@ if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
 fi
+if [[ $source == *:*/milestone12-*.ppm ]]; then
+  printf 'P6\n1 1\n255\n000' >"$destination"
+fi
+if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
+  scratch=$(mktemp -d)
+  for name in milestone12-software.ppm milestone12-gles.ppm \
+    milestone12-fullscreen.ppm milestone12-screen.ppm \
+    milestone12-gles-screen.ppm; do
+    printf 'P6\n1 1\n255\n000' >"$scratch/$name"
+  done
+  printf 'schema = 1\n' >"$scratch/clients.toml"
+  for name in milestone12-extension-probe.json milestone12-sdl-probe.json \
+    milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+    milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
+    milestone12-sync-report.jsonl milestone12-renderer-summary.json \
+    milestone12-drm-damage-summary.json milestone12-sync-observation.json \
+    milestone12-kms-before.json milestone12-kms-after.json \
+    milestone12-vt-before.json milestone12-vt-after.json \
+    milestone12-getty-state.json milestone12-logind-state.json; do
+    printf '{}\n' >"$scratch/$name"
+  done
+  (cd "$scratch" && sha256sum ./* >SHA256SUMS && \
+    tar -cf "$destination" ./*)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -808,7 +896,16 @@ case " $* " in
       printf ' M tracked-source.cpp\n'
     fi
     ;;
-  *' rev-parse HEAD '*) printf '86dab3c000000000000000000000000000000000\n' ;;
+  *' rev-parse HEAD '*)
+    rev_parse_count=$(grep -Fc ' <rev-parse> <HEAD>' "$GW_VM_TEST_COMMAND_LOG")
+    if [[ ${GW_VM_TEST_HEAD_DRIFT_AFTER:-0} =~ ^[0-9]+$ &&
+          ${GW_VM_TEST_HEAD_DRIFT_AFTER:-0} -gt 0 &&
+          $rev_parse_count -gt ${GW_VM_TEST_HEAD_DRIFT_AFTER} ]]; then
+      printf '97eac4d000000000000000000000000000000000\n'
+    else
+      printf '86dab3c000000000000000000000000000000000\n'
+    fi
+    ;;
   *' merge-base --is-ancestor '*)
     [[ ${GW_VM_TEST_BAD_BASE:-0} != 1 ]]
     ;;
@@ -1856,6 +1953,76 @@ run_failure "$work_dir/milestone12-wrapper-gate.out" \
   "$repo_root/tools/gw-vm.d/scenarios/milestone12-runtime-test.sh"
 assert_contains "$work_dir/milestone12-wrapper-gate.out" \
   "Action 'milestone12-runtime-test' requires --yes"
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-dirty.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-dirty.out" \
+  'requires committed source outside Plans/'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "source-evidence"'
+
+: >"$command_log"
+run_success "$work_dir/milestone12.out" \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12.out" \
+  'Milestone 12 VM runtime test passed.'
+assert_contains "$artifact_dir/milestone12-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"tested_commit": "86dab3c000000000000000000000000000000000"'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"renderer_equality": "passed"'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"evidence_errors": []'
+assert_file_glob "$artifact_dir/milestone12-efficient-sdl-evidence.tar"
+for artifact in milestone12-runtime-test.log milestone12-meson-test.log \
+  milestone12-source-layout.log milestone12-client-build.log \
+  milestone12-extension-probe.json milestone12-sdl-probe.json \
+  milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+  milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
+  milestone12-sync-report.jsonl milestone12-renderer-summary.json \
+  milestone12-drm-damage-summary.json milestone12-sync-observation.json \
+  milestone12-kms-before.json milestone12-kms-after.json \
+  milestone12-vt-before.json milestone12-vt-after.json \
+  milestone12-getty-state.json milestone12-logind-state.json \
+  milestone12-glasswyrmd-journal.log milestone12-gwm-journal.log \
+  milestone12-gwcomp-journal.log milestone12-facts.env \
+  milestone12-summary.json milestone12-software.ppm milestone12-gles.ppm \
+  milestone12-fullscreen.ppm milestone12-screen.ppm \
+  milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar; do
+  [[ -f $artifact_dir/$artifact ]] ||
+    fail "milestone12 scenario did not create $artifact"
+done
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-artifact-collection.out" \
+  env GW_VM_TEST_FAIL_M12_ARTIFACT=milestone12-fullscreen.ppm \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-artifact-collection.out" \
+  'failed during: artifact-collection'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "artifact-collection"'
+assert_contains "$command_log" \
+  'milestone12-fullscreen.ppm'
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-guest-failure.out" \
+  env GW_VM_TEST_FAIL_MATCH='failure_stage=dependencies' \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-guest-failure.out" \
+  'failed during: guest-runtime'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "guest-runtime"'
+assert_contains "$artifact_dir/milestone12-runtime-test.log" \
+  'injected guest failure for failure_stage=dependencies'
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-head-drift.out" \
+  env GW_VM_TEST_HEAD_DRIFT_AFTER=3 \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "source-identity-changed"'
+assert_contains "$artifact_dir/milestone12-summary.json" '"passed": false'
 
 m12_lib=$repo_root/tools/gw-vm.d/lib/milestone12.sh
 for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
