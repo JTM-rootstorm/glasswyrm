@@ -11,15 +11,19 @@ that an external application works.
 - [M9 request profile](M9_REQUEST_PROFILE.md) summarizes implemented protocol
   scope and acceptance status.
 - [M11 xterm source audit](M11_XTERM_AUDIT.md) records the verified patch 410
-  source/build paths, observed live request set, and evidence boundary.
-- [M11 xterm profile](M11_XTERM.md) states the narrow accepted claim.
+  source/build paths, deterministic A/B bootstrap trace, and evidence boundary.
+- [M11 xterm profile](M11_XTERM.md) states the narrow candidate claim and its
+  remaining exact-fixture gate.
 
 Milestone 9 is complete for only the pinned commands. The Gentoo VM builds the
 verified sources and validates reviewed normalized traces, exact frames,
 combined-client isolation, restart behavior, and archive integrity.
 
-Milestone 11 is complete only for xterm patch 410 under the pinned core-font
-ASCII build and invocation. The Gentoo VM validates interaction, selection,
-VT and compositor-restart recovery, canonical frames, graphical-console
-parity, restoration, and archive integrity. Its passive-grab scope is
-`GrabButton` only; `UngrabButton` and passive key grabs are unsupported.
+Milestone 11 bootstrap evidence is complete only for xterm patch 410 under the
+pinned core-font ASCII build and invocation. Two full Gentoo VM captures at the
+same commit reproduced the normalized trace and validated interaction,
+selection, VT and compositor-restart recovery, canonical frames,
+graphical-console parity, restoration, and archive integrity. Final acceptance
+remains pending until the post-fixture full VM run passes exact comparison.
+The passive-grab scope is `GrabButton` only; `UngrabButton` and passive key
+grabs are unsupported.

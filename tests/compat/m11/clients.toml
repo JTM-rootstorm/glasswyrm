@@ -1,6 +1,14 @@
 schema = 1
-status = "official source and launch profile pinned; Glasswyrm live traces pending"
+status = "source/profile pinned and deterministic A/B bootstrap evidence accepted; post-fixture exact-match VM gate pending"
 source_hash_status = "computed from the official archive and verified by its detached upstream signature"
+bootstrap_tested_commit = "eb8a20f76b24cc7c07459a402603bad5e7b6cc39"
+bootstrap_capture_count = 2
+bootstrap_summary_status = "all mandatory runtime evidence passed except exact_trace=bootstrap while no fixture was committed"
+candidate_normalized_trace_sha256 = "6cc10dc3bbe33afbbb5cd99c82b84fef87dc8252ef506d019a5acf7877affb12"
+candidate_normalized_trace_reproduced = true
+exact_fixture_gate_status = "pending full clean VM rerun after fixture commit"
+bootstrap_screenshot_sha256 = "bd6a1e885c0a633d42f5b61af0e8f355df2ace8fb6a39bb6f4b744c1bd317cdc"
+bootstrap_screenshot_matches_canonical = true
 
 [[client]]
 application = "xterm"
@@ -73,8 +81,8 @@ argv = [
 ]
 bashrc = "tests/compat/m11/m11-bashrc"
 compatibility_claim = "xterm patch 410, core-font ASCII profile, exact command and build options only"
-expected_trace_status = "pending live Glasswyrm capture and review; no M11 trace fixture is accepted yet"
-expected_screenshot_status = "pending live DRM acceptance; no M11 screenshot fixture is accepted yet"
+expected_trace_status = "normalized A/B bootstrap traces are byte-identical at the recorded candidate SHA-256; final post-fixture exact-match VM gate pending"
+expected_screenshot_status = "A/B bootstrap canonical mirrors equal the DRM screenshots at the recorded SHA-256; final post-fixture VM acceptance pending"
 disabled_optional_features = [
   "Xft and FreeType",
   "wide-character and Unicode mode",
