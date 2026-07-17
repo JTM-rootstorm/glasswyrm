@@ -1193,7 +1193,7 @@ cp "$artifact_dir"/milestone12-{software,gles,fullscreen,screen,gles-screen}.ppm
 cp "$artifact_dir"/milestone12-{software,gles}-{sdl-probe,fullscreen,cursor,testsprite}.ppm "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
 cp "$artifact_dir/milestone12-extension-stress.json" "$evidence/"
-cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
+cp "$artifact_dir/milestone12-extension-trace.json" "$evidence/"
 cp "$artifact_dir"/milestone12-{testdraw2-trace,testsprite2-trace}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{raw-little-registry,raw-big-registry}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{frame-equivalence,software-testsprite-stability,gles-testsprite-stability}.json "$evidence/"

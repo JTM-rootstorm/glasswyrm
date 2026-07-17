@@ -2192,6 +2192,9 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
   assert_contains "$m12_lib" "$expected"
 done
+assert_contains "$m12_lib" \
+  'cp "$artifact_dir/milestone12-extension-trace.json" "$evidence/"'
+assert_not_contains "$m12_lib" 'milestone12-{extension-trace}.json'
 assert_before "$m12_lib" \
   'begin_profile gles gles shm "$gles" true' \
   'run_live_replay_gates "$control/gles-close.json"'
