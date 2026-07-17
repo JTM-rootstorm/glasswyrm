@@ -190,6 +190,10 @@ marked accepted:
 
 - the repository SDL probe, `testdraw2`, and `testsprite2` complete their
   frozen checks without protocol errors;
+- after each fullscreen-ready handshake, real relative input clamps the
+  pointer to the output origin and moves it to `(64,64)`; the harness waits
+  for a new, content-stable committed frame before requesting the DRM
+  screenshot, avoiding client-warp and capture-timing ambiguity;
 - fullscreen desktop uses the one 1024x768 output, then exits to the exact
   saved windowed geometry;
 - Motif borderless state remains windowed and preserves geometry;

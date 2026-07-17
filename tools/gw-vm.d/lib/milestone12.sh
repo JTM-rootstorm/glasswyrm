@@ -663,6 +663,16 @@ wait_for_frame_progress() {
     "$current_name" >&2
   return 1
 }
+anchor_pointer_for_capture() {
+  local result_json=$1 frames_before
+  failure_stage=$current_name-fullscreen-anchor
+  frames_before=$(frame_count)
+  "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+    --scenario pointer-anchor --result-json "$result_json"
+  grep -Fq '"status":"completed"' "$result_json"
+  wait_for_frame_progress "$frames_before" >/dev/null
+  settled_mirror "$current_dump_root" >/dev/null
+}
 validate_replayed_renderer() {
   python3 - "$current_renderer_report" "$current_renderer" <<'PY'
 import json,sys
@@ -919,6 +929,7 @@ capture_scene sdl-probe
 grep -Fq '"status":"completed"' "$control/software-input.json"
 : >"$current_out/live-control/enter-fullscreen"
 wait_path "$current_out/live-control/fullscreen-ready"
+anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"
 printf 'ready\nmode=1024x768\n' >"$control/software-screen-ready"
 wait_path "$control/software-screen-captured"
 capture_matching_mirror "$artifact_dir/milestone12-screen.ppm" \
@@ -977,6 +988,7 @@ begin_profile gles gles shm "$gles" true
 capture_scene sdl-probe
 : >"$current_out/live-control/enter-fullscreen"
 wait_path "$current_out/live-control/fullscreen-ready"
+anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"
 printf 'ready\nmode=1024x768\n' >"$control/gles-screen-ready"
 wait_path "$control/gles-screen-captured"
 capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm" \
