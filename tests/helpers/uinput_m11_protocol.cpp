@@ -181,17 +181,18 @@ std::vector<Event> scenario_events(std::string_view name) {
     tap(events, KEY_ENTER);
   } else if (name == "primary-selection") {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
-    // clear leaves the token one fixed bitmap-font row above the prompt. A
-    // double click selects the underscore-delimited word without its newline.
+    // clear leaves the token one fixed bitmap-font row above the prompt.  The
+    // fixed font is 6x13, so drag from the first-cell center through the last
+    // cell without crossing into the following newline.
+    relative(events, REL_X, -19);
     relative(events, REL_Y, -13);
     button(events, BTN_LEFT, true);
-    button(events, BTN_LEFT, false);
-    button(events, BTN_LEFT, true);
+    relative(events, REL_X, 108);
     button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
     // Move from xterm A to the non-overlapping interior of xterm B
     // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
-    relative(events, REL_X, 440);
+    relative(events, REL_X, 351);
     relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false, 250);
@@ -203,8 +204,9 @@ std::vector<Event> scenario_events(std::string_view name) {
   } else if (name == "move" || name == "resize") {
     key(events, KEY_LEFTALT, true);
     button(events, name == "move" ? BTN_LEFT : BTN_RIGHT, true);
-    relative(events, REL_X, name == "move" ? 96 : 72);
-    relative(events, REL_Y, name == "move" ? 64 : 48);
+    // The fixed 6x13 font makes +60x+52 an exact 80x24 -> 90x28 resize.
+    relative(events, REL_X, name == "move" ? 96 : 60);
+    relative(events, REL_Y, name == "move" ? 64 : 52);
     button(events, name == "move" ? BTN_LEFT : BTN_RIGHT, false);
     // The server keeps the interaction active until both its final geometry
     // transaction and cursor publication are accepted.  Give that asynchronous
@@ -213,8 +215,8 @@ std::vector<Event> scenario_events(std::string_view name) {
   } else if (name == "close") {
     // Move from the post-resize pointer location back into xterm A, focus it,
     // and close A while xterm B remains alive.
-    relative(events, REL_X, -608);
-    relative(events, REL_Y, -205);
+    relative(events, REL_X, -596);
+    relative(events, REL_Y, -209);
     button(events, BTN_LEFT, true);
     button(events, BTN_LEFT, false, 250);
     chord(events, KEY_LEFTALT, KEY_F4);
