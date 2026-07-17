@@ -292,6 +292,12 @@ int main(int argc, char **argv) {
     remember_error(&result, "SDL_CreateCursor");
   }
 
+  if (control && (!write_marker(control, "windowed-ready") ||
+                  !wait_for_marker(window, control, "enter-fullscreen"))) {
+    remember_error(&result, "windowed control handshake");
+    goto done;
+  }
+
   if (result.display_mode && SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)
     result.fullscreen_entered = wait_for_fullscreen(
         window, true, result.mode_width, result.mode_height);
@@ -322,8 +328,6 @@ int main(int argc, char **argv) {
   if (!result.borderless) remember_error(&result, "borderless window");
 
   if (control) {
-    SDL_WarpMouseInWindow(window, result.windowed_width - 20,
-                         result.windowed_height - 10);
     SDL_RaiseWindow(window);
     pump_events();
     if (write_marker(control, "borderless-ready"))

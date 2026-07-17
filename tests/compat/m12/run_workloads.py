@@ -120,8 +120,9 @@ def run_resident_workloads(
     environment: dict[str, str],
 ) -> list[dict[str, Any]]:
     control.mkdir(parents=True, exist_ok=True)
-    for name in ("fullscreen-ready", "exit-fullscreen", "borderless-ready",
-                 "resident-ready.json", "resident-release"):
+    for name in ("windowed-ready", "enter-fullscreen", "fullscreen-ready",
+                 "exit-fullscreen", "borderless-ready", "resident-ready.json",
+                 "resident-release"):
         (control / name).unlink(missing_ok=True)
     sdl_log = artifacts / "resident-sdl.log"
     sprite_log = artifacts / "resident-testsprite2.log"
@@ -144,14 +145,14 @@ def run_resident_workloads(
         while time.monotonic() < deadline:
             if sdl.poll() is not None or sprite.poll() is not None:
                 break
-            if (control / "fullscreen-ready").is_file():
+            if (control / "windowed-ready").is_file():
                 ready = True
                 break
             time.sleep(0.02)
         if ready:
             (control / "resident-ready.json").write_text(json.dumps({
                 "schema": 1, "sdl_pid": sdl.pid, "testsprite2_pid": sprite.pid,
-                "fullscreen": True,
+                "stage": "windowed-sdl-probe",
             }, sort_keys=True) + "\n")
         deadline = time.monotonic() + 240
         while ready and time.monotonic() < deadline:

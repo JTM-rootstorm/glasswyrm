@@ -44,6 +44,8 @@ def main() -> int:
 import json,pathlib,sys,time
 args=dict(zip(sys.argv[1::2],sys.argv[2::2])); out=pathlib.Path(args['--output'])
 control=pathlib.Path(args['--control-dir']); control.mkdir(exist_ok=True)
+(control/'windowed-ready').write_text('ready\\n')
+while not (control/'enter-fullscreen').exists(): time.sleep(.01)
 (control/'fullscreen-ready').write_text('ready\\n')
 while not (control/'exit-fullscreen').exists(): time.sleep(.01)
 (control/'borderless-ready').write_text('ready\\n')
@@ -59,6 +61,8 @@ while True: time.sleep(.05)
         def control_handshake() -> None:
             try:
                 wait(control / "resident-ready.json")
+                (control / "enter-fullscreen").write_text("continue\n")
+                wait(control / "fullscreen-ready")
                 (control / "exit-fullscreen").write_text("continue\n")
                 wait(control / "borderless-ready")
                 (control / "close").write_text("close\n")

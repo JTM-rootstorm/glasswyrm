@@ -24,10 +24,16 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-sync-observation.json milestone12-kms-before.json
   milestone12-kms-after.json milestone12-vt-before.json
   milestone12-vt-after.json milestone12-getty-state.json
-  milestone12-logind-state.json milestone12-facts.env)
+  milestone12-logind-state.json milestone12-frame-equivalence.json
+  milestone12-software-testsprite-stability.json
+  milestone12-gles-testsprite-stability.json milestone12-facts.env)
 M12_BINARY_ARTIFACTS=(milestone12-software.ppm milestone12-gles.ppm
   milestone12-fullscreen.ppm milestone12-screen.ppm
-  milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar)
+  milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm
+  milestone12-gles-sdl-probe.ppm milestone12-software-fullscreen.ppm
+  milestone12-gles-fullscreen.ppm milestone12-software-cursor.ppm
+  milestone12-gles-cursor.ppm milestone12-software-testsprite.ppm
+  milestone12-gles-testsprite.ppm milestone12-efficient-sdl-evidence.tar)
 
 milestone12_guest_prerequisite_script() {
   cat <<'GUEST_SCRIPT'
@@ -204,6 +210,10 @@ validate_milestone12_archive() {
   listing=$(tar -tf "$archive") || return
   for member in clients.toml milestone12-software.ppm milestone12-gles.ppm \
     milestone12-fullscreen.ppm milestone12-screen.ppm milestone12-gles-screen.ppm \
+    milestone12-software-sdl-probe.ppm milestone12-gles-sdl-probe.ppm \
+    milestone12-software-fullscreen.ppm milestone12-gles-fullscreen.ppm \
+    milestone12-software-cursor.ppm milestone12-gles-cursor.ppm \
+    milestone12-software-testsprite.ppm milestone12-gles-testsprite.ppm \
     milestone12-extension-probe.json milestone12-sdl-probe.json \
     milestone12-extension-trace.json milestone12-software-trace.jsonl \
     milestone12-noshm-trace.jsonl milestone12-renderer-software.jsonl \
@@ -212,7 +222,10 @@ validate_milestone12_archive() {
     milestone12-drm-damage-summary.json milestone12-sync-observation.json \
     milestone12-kms-before.json milestone12-kms-after.json \
     milestone12-vt-before.json milestone12-vt-after.json \
-    milestone12-getty-state.json milestone12-logind-state.json SHA256SUMS; do
+    milestone12-getty-state.json milestone12-logind-state.json \
+    milestone12-frame-equivalence.json \
+    milestone12-software-testsprite-stability.json \
+    milestone12-gles-testsprite-stability.json SHA256SUMS; do
     grep -Eq "^(\\./)?$member$" <<<"$listing" || return
   done
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m12-evidence.XXXXXX") || return
@@ -520,6 +533,11 @@ settled_mirror() {
   done
   return 1
 }
+capture_scene() {
+  local scene=$1 latest
+  latest=$(settled_mirror "$current_dump_root")
+  cp "$latest" "$artifact_dir/milestone12-$current_name-$scene.ppm"
+}
 
 start_gwm() {
   systemd-run --unit="$current_gwm_unit" --property=PrivateDevices=yes \
@@ -617,17 +635,25 @@ finish_profile() {
 
 failure_stage=software-runtime
 begin_profile software software shm "$software" true
+capture_scene sdl-probe
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario basic-typing --result-json "$control/software-input.json"
 grep -Fq '"status":"completed"' "$control/software-input.json"
-software_fullscreen=$(settled_mirror "$current_dump_root")
-cp "$software_fullscreen" "$artifact_dir/milestone12-fullscreen.ppm"
+: >"$current_out/live-control/enter-fullscreen"
+wait_path "$current_out/live-control/fullscreen-ready"
+capture_scene fullscreen
+cp "$artifact_dir/milestone12-software-fullscreen.ppm" \
+  "$artifact_dir/milestone12-fullscreen.ppm"
 printf 'ready\nmode=1024x768\n' >"$control/software-screen-ready"
 wait_path "$control/software-screen-captured"
 cmp "$artifact_dir/milestone12-fullscreen.ppm" "$artifact_dir/milestone12-screen.ppm"
 : >"$current_out/live-control/exit-fullscreen"
 wait_path "$current_out/live-control/borderless-ready"
 resident_alive
+"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+  --scenario scroll --result-json "$control/software-cursor-input.json"
+grep -Fq '"status":"completed"' "$control/software-cursor-input.json"
+capture_scene cursor
 
 failure_stage=gwm-replay
 systemctl stop "$current_gwm_unit"
@@ -663,7 +689,13 @@ result[vt_replay]=passed
 grep -Fq '"status":"completed"' "$control/software-close.json"
 wait_path "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
+python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
+  --dump-dir "$current_dump_root" \
+  --output-frame "$artifact_dir/milestone12-software-testsprite.ppm" \
+  --output-json "$artifact_dir/milestone12-software-testsprite-stability.json"
 finish_profile
+cmp "$artifact_dir/milestone12-software-testsprite.ppm" \
+  "$artifact_dir/milestone12-software.ppm"
 cat "$renderer"/software-*.jsonl >"$artifact_dir/milestone12-renderer-software.jsonl"
 cat "$artifact_dir"/software/drm-report-*.jsonl >"$artifact_dir/milestone12-drm-damage-report.jsonl"
 cp "$artifact_dir/software/sdl.json" "$artifact_dir/milestone12-sdl-probe.json"
@@ -687,19 +719,37 @@ result[mit_shm]=passed result[no_shm_fallback]=passed
 
 failure_stage=gles-runtime
 begin_profile gles gles shm "$gles" true
-gles_fullscreen=$(settled_mirror "$current_dump_root")
+capture_scene sdl-probe
+: >"$current_out/live-control/enter-fullscreen"
+wait_path "$current_out/live-control/fullscreen-ready"
+capture_scene fullscreen
 printf 'ready\nmode=1024x768\n' >"$control/gles-screen-ready"
 wait_path "$control/gles-screen-captured"
-cmp "$gles_fullscreen" "$artifact_dir/milestone12-gles-screen.ppm"
+cmp "$artifact_dir/milestone12-gles-fullscreen.ppm" \
+  "$artifact_dir/milestone12-gles-screen.ppm"
 : >"$current_out/live-control/exit-fullscreen"
 wait_path "$current_out/live-control/borderless-ready"
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+  --scenario scroll --result-json "$control/gles-cursor-input.json"
+grep -Fq '"status":"completed"' "$control/gles-cursor-input.json"
+capture_scene cursor
+"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario close --result-json "$control/gles-close.json"
 wait_path "$current_out/resident-sdl.json"
+python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
+python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
+  --dump-dir "$current_dump_root" \
+  --output-frame "$artifact_dir/milestone12-gles-testsprite.ppm" \
+  --output-json "$artifact_dir/milestone12-gles-testsprite-stability.json"
 finish_profile
+cmp "$artifact_dir/milestone12-gles-testsprite.ppm" \
+  "$artifact_dir/milestone12-gles.ppm"
 cat "$renderer"/gles-*.jsonl >"$artifact_dir/milestone12-renderer-gles.jsonl"
 cat "$artifact_dir"/gles/drm-report-*.jsonl >>"$artifact_dir/milestone12-drm-damage-report.jsonl"
 cmp "$artifact_dir/milestone12-software.ppm" "$artifact_dir/milestone12-gles.ppm"
+python3 "$source_dir/tests/compat/m12/validate_frame_equivalence.py" \
+  --artifact-dir "$artifact_dir" \
+  --output "$artifact_dir/milestone12-frame-equivalence.json"
 result[gles_frame]=passed result[renderer_equality]=passed result[screenshot_equality]=passed
 
 failure_stage=restoration
@@ -834,8 +884,10 @@ failure_stage=evidence-archive
 evidence=$artifact_dir/evidence; mkdir -p "$evidence"
 cp "$source_dir/tests/compat/m12/clients.toml" "$evidence/"
 cp "$artifact_dir"/milestone12-{software,gles,fullscreen,screen,gles-screen}.ppm "$evidence/"
+cp "$artifact_dir"/milestone12-{software,gles}-{sdl-probe,fullscreen,cursor,testsprite}.ppm "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{frame-equivalence,software-testsprite-stability,gles-testsprite-stability}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{software-trace,noshm-trace}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-software,renderer-gles,drm-damage-report,sync-report}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-summary,drm-damage-summary,sync-observation}.json "$evidence/"
