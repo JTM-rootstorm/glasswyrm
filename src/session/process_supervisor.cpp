@@ -23,10 +23,17 @@ int normalized_status(int status) noexcept {
   return 1;
 }
 
-bool path_ready(const std::string &path, bool requires_socket) noexcept {
+bool path_ready(const std::string &path, bool requires_socket,
+                bool existed_before_spawn, dev_t previous_device,
+                ino_t previous_inode) noexcept {
   struct stat status{};
-  return ::lstat(path.c_str(), &status) == 0 &&
-         (!requires_socket || S_ISSOCK(status.st_mode));
+  if (::lstat(path.c_str(), &status) != 0 ||
+      (requires_socket && !S_ISSOCK(status.st_mode)))
+    return false;
+  // A socket left behind by an interrupted previous session is not evidence
+  // that this child is ready. Wait for the child to publish a new generation.
+  return !existed_before_spawn || status.st_dev != previous_device ||
+         status.st_ino != previous_inode;
 }
 
 bool has_environment_key(const std::string &entry,
@@ -70,6 +77,13 @@ bool ProcessSupervisor::spawn(const ChildSpec &spec, std::ostream &error) {
     error << "glasswyrm-session: empty argv for " << spec.name << '\n';
     return false;
   }
+  struct stat readiness_before{};
+  // Record this before posix_spawn(), since a fast child may replace the path
+  // before the supervisor first polls it.
+  const bool readiness_path_existed =
+      spec.readiness_socket &&
+      ::lstat(spec.readiness_socket->c_str(), &readiness_before) == 0;
+
   std::vector<char *> argv;
   argv.reserve(spec.argv.size() + 1);
   for (const auto &argument : spec.argv)
@@ -124,7 +138,10 @@ bool ProcessSupervisor::spawn(const ChildSpec &spec, std::ostream &error) {
           << std::strerror(result) << '\n';
     return false;
   }
-  children_.push_back({spec, pid, true});
+  children_.push_back(
+      {spec, pid, true, readiness_path_existed,
+       readiness_path_existed ? readiness_before.st_dev : 0,
+       readiness_path_existed ? readiness_before.st_ino : 0});
   return true;
 }
 
@@ -165,7 +182,9 @@ bool ProcessSupervisor::wait_until_ready(
     if (pending_signal && *pending_signal != 0)
       return false;
     if (path_ready(*child.spec.readiness_socket,
-                   child.spec.readiness_requires_socket))
+                   child.spec.readiness_requires_socket,
+                   child.readiness_path_existed, child.readiness_device,
+                   child.readiness_inode))
       return true;
     std::size_t exited = 0;
     if (const auto status = reap_nonblocking(exited, error)) {

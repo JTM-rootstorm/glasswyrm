@@ -66,8 +66,20 @@ int run_fixture(int argc, char **argv) {
                    std::string_view(std::getenv("DISPLAY")) == argv[3]
                ? 0
                : 9;
-  if (mode != "ready" || argc < 5)
+  if (mode == "empty-marker") {
+    struct stat status{};
+    return argc > 3 && ::stat(argv[3], &status) == 0 && status.st_size == 0
+               ? 0
+               : 9;
+  }
+  if ((mode != "ready" && mode != "replace-ready") || argc < 5)
     return 8;
+
+  if (mode == "replace-ready") {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (::unlink(argv[3]) != 0)
+      return 11;
+  }
 
   fixture_name = argv[4];
   if (argc > 5)
@@ -295,6 +307,35 @@ void test_child_failure_and_timeout() {
           "readiness timeout is bounded and reported");
 }
 
+void test_stale_readiness_path_is_not_accepted() {
+  using namespace glasswyrm::session;
+  TempDirectory temp;
+  const auto self = self_path();
+  const std::string marker = temp.path + "/server.sock";
+  {
+    std::ofstream stale(marker);
+    stale << "stale";
+  }
+
+  ChildSpec service = ready_child(self, marker, "service");
+  service.argv[2] = "replace-ready";
+  ChildSpec client{"client",
+                   {self, "--fixture", "empty-marker", marker},
+                   {},
+                   std::nullopt,
+                   true,
+                   false};
+  std::ostringstream error;
+  ProcessSupervisor supervisor({std::chrono::milliseconds(500),
+                                std::chrono::milliseconds(100),
+                                std::chrono::milliseconds(5)});
+  const int result = supervisor.run({service, client}, error);
+  if (result != 0)
+    std::cerr << "stale readiness run: " << result << " " << error.str();
+  require(result == 0,
+          "pre-existing readiness path waits for the child's replacement");
+}
+
 void test_optional_client_and_environment() {
   using namespace glasswyrm::session;
   TempDirectory temp;
@@ -326,6 +367,7 @@ int main(int argc, char **argv) {
   test_cli_rejections();
   test_supervisor_readiness_signal_and_reverse_shutdown();
   test_child_failure_and_timeout();
+  test_stale_readiness_path_is_not_accepted();
   test_optional_client_and_environment();
   if (failures != 0)
     std::cerr << failures << " session launcher test(s) failed\n";
