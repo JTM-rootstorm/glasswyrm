@@ -195,6 +195,9 @@ marked accepted:
 - Motif borderless state remains windowed and preserves geometry;
 - real libinput-path input reaches the live SDL client, clipboard and custom
   cursor paths work, and the close chord produces the real SDL close event;
+- after that close, real relative input clamps the pointer to the output origin
+  and moves it to `(64,64)` before the stable final frame is captured, keeping
+  the exact software/GLES comparison independent of earlier client warps;
 - the SDL probe and official sprite workload remain alive through GWM and
   compositor stop/start, receive replayed policy/buffer/texture state, and
   repaint afterward;

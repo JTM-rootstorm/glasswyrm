@@ -14,10 +14,10 @@ namespace {
 
 using Events = std::vector<Event>;
 
-constexpr std::array<std::string_view, 10> kScenarios{
+constexpr std::array<std::string_view, 11> kScenarios{
     "basic-typing", "repeat",         "scroll", "primary-selection",
     "clipboard-probe", "move",       "resize", "close",
-    "post-vt",      "post-restart",
+    "pointer-anchor", "post-vt",      "post-restart",
 };
 
 void add(Events &events, Device device, std::uint16_t type,
@@ -226,6 +226,14 @@ std::vector<Event> scenario_events(std::string_view name) {
     button(events, BTN_LEFT, true);
     button(events, BTN_LEFT, false, 250);
     chord(events, KEY_LEFTALT, KEY_F4);
+  } else if (name == "pointer-anchor") {
+    // Reset both axes against the output origin before applying a fixed
+    // positive delta. This makes the final cursor position independent of
+    // client-side pointer warps and every preceding acceptance gesture.
+    relative(events, REL_X, -32767);
+    relative(events, REL_Y, -32767);
+    relative(events, REL_X, 64);
+    relative(events, REL_Y, 64);
   } else if (name == "post-vt") {
     text(events, "printf 'M11_VT\\n'");
     tap(events, KEY_ENTER);
