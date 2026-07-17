@@ -1,6 +1,7 @@
 # xterm Patch 410 Compatibility Profile
 
-Status: validated for the exact profile below.
+Status: validated by two deterministic full bootstrap captures for the exact
+profile below; the post-fixture exact-match VM gate is pending.
 
 The only Milestone 11 xterm target is unmodified patch 410 built and launched
 with the exact profile pinned by `tests/compat/m11/clients.toml`. It uses core
@@ -8,7 +9,7 @@ bitmap fonts, ASCII/C locale behavior, a real PTY and Bash, and disables Xft,
 wide characters, luit, toolbar, sixel, ReGIS, Xinerama, input methods, and
 themed Xcursor use.
 
-The accepted claim is limited to:
+The evidence-backed candidate claim is limited to:
 
 - one US `pc105` keymap through explicit libinput keyboard/mouse path devices;
 - one workspace and single DRM/KMS output;
@@ -24,5 +25,11 @@ or multiple workspaces/outputs. The only passive-grab request in the accepted
 profile is `GrabButton`.
 
 See [the source and trace audit](M11_XTERM_AUDIT.md) for the pinned source,
-observed request set, normalized trace, and evidence gates. This narrow result
-must not be generalized to another xterm build or invocation.
+observed request set, normalized trace, and evidence gates. Captures A and B at
+`eb8a20f76b24cc7c07459a402603bad5e7b6cc39` produced byte-identical normalized
+traces with SHA-256
+`6cc10dc3bbe33afbbb5cd99c82b84fef87dc8252ef506d019a5acf7877affb12`
+and passed every runtime evidence gate except the unavailable exact-fixture
+comparison. Final acceptance requires the complete clean VM route to reproduce
+that committed fixture with `exact_trace=passed`. This narrow result must not
+be generalized to another xterm build or invocation.

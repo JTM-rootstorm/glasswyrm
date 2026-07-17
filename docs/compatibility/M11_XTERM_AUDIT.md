@@ -1,13 +1,15 @@
 # Milestone 11 xterm source audit
 
-Status: official patch 410 source, signature, build profile, and launch profile
-pinned; Glasswyrm live traces and runtime acceptance pending.
+Status: official patch 410 source and profile pinned; two full VM bootstrap
+captures at `eb8a20f76b24cc7c07459a402603bad5e7b6cc39` produced identical
+normalized traces and passed every runtime evidence gate except the deliberately
+unavailable exact-fixture comparison. The post-fixture exact-match VM gate is
+still pending.
 
-This document records source-audit facts only. It does not claim that xterm
-runs on Glasswyrm, that the requests below are implemented, or that any M11
-trace or screenshot fixture has been accepted. Those claims require the fixed
-live trace, interactive tests, and DRM acceptance described by the Milestone 11
-plan.
+This document combines the source audit with the reviewed bootstrap evidence
+that selected the fixture. It does not yet declare final Milestone 11
+acceptance: that declaration requires a clean full VM run after the fixture is
+committed and the exact comparison is enabled unconditionally.
 
 ## Verified release identity
 
@@ -107,6 +109,105 @@ The target remains limited to patch 410 under this profile. It is not a claim
 for a distribution's default xterm, Xft, Unicode, themed cursors, the toolbar,
 or another terminal emulator.
 
+## Reviewed deterministic bootstrap evidence
+
+Two complete VM runs, fixture captures A and B, used the same tested, full
+build, and runtime commit:
+
+```text
+eb8a20f76b24cc7c07459a402603bad5e7b6cc39
+```
+
+Both runs completed the full interactive scenario with `scenario_exit=0`.
+Every mandatory summary field passed except `exact_trace`, which correctly
+reported `bootstrap` because no committed fixture existed. Their normalized
+traces are byte-for-byte identical and have candidate fixture SHA-256:
+
+```text
+6cc10dc3bbe33afbbb5cd99c82b84fef87dc8252ef506d019a5acf7877affb12
+```
+
+The raw JSONL traces were retained in both checksum-validated evidence
+archives. Their raw hashes differ, as expected for runtime-specific records;
+normalization removes those identities and produced the identical reviewed
+profile above.
+
+The exact observed request histogram is:
+
+```text
+AllocColor=424                 ChangeProperty=38
+ChangeWindowAttributes=151     ClearArea=46
+CloseFont=3                    ConfigureWindow=6
+ConvertSelection=3             CopyArea=30
+CreateGC=19                    CreateGlyphCursor=17
+CreatePixmap=6                 CreateWindow=6
+DeleteProperty=2               FreeCursor=1
+FreeGC=6                       GetGeometry=5
+GetInputFocus=17               GetKeyboardMapping=6
+GetModifierMapping=6           GetProperty=20
+GetSelectionOwner=4            GrabButton=96
+ImageText8=806                 InternAtom=97
+MapSubwindows=2                MapWindow=2
+OpenFont=9                     PolyLine=6
+PutImage=6                     QueryColors=5
+QueryExtension=6               QueryFont=6
+QueryTree=3                    RecolorCursor=5
+SendEvent=3                    SetSelectionOwner=3
+```
+
+There were no protocol errors, recurring requests, or unknown opcodes. The
+only trace-gated request was exactly 96 `GrabButton` requests; no
+`UngrabButton` or passive key-grab request was observed. The trace recorded
+five application connections and a maximum request length of 9,240 bytes.
+
+The exact event histogram is:
+
+```text
+KeyPress(2)=256                KeyRelease(3)=255
+ButtonPress(4)=13              ButtonRelease(5)=13
+MotionNotify(6)=3              FocusIn(9)=3
+FocusOut(10)=2                 Expose(12)=6
+NoExposure(14)=30              MapNotify(19)=4
+ConfigureNotify(22)=14         PropertyNotify(28)=40
+SelectionClear(29)=1           SelectionRequest(30)=3
+SelectionNotify(31)=3          ClientMessage(33)=1
+```
+
+The reviewed selection path contains `GetSelectionOwner`,
+`SetSelectionOwner`, `ConvertSelection`, and `SendEvent`. The live CLIPBOARD
+probe returned `TARGETS` and `UTF8_STRING`, transferred
+`M11_CLIPBOARD_TOKEN`, and replaced PRIMARY, producing the single
+`SelectionClear`. The single `ClientMessage` is the format-32
+`WM_PROTOCOLS`/`WM_DELETE_WINDOW` close path.
+
+The PTY transcript proves corrected typing, six server-generated repeat
+characters, deterministic sequence output, exact PRIMARY paste into the second
+xterm, and the `M11_VT` and `M11_RESTART` post-transition commands. The uinput
+scenario and acceptance evidence separately prove vertical and horizontal
+wheel scrolling. XCB geometry, ConfigureNotify, GWM policy, Expose, and PTY
+evidence agree on the second xterm's exact transition:
+
+```text
+80x24: 484x316+384+160
+move:  484x316+480+224  (+96,+64)
+90x28: 544x368+480+224
+```
+
+The cursor journal accepted and scanned out left-pointer, xterm-text,
+fleur-move, and bottom-right-resize presentations, including buffer reuse;
+the hidden-glyph typing cursor was also exercised. GWM replay preserved
+Button1 move, Button3 resize, Alt+F4 (`0xffc1`), and the 96-by-64 minimum.
+
+Both runs passed VT suspension/no-delivery/resume, post-VT input, GWM replay,
+compositor replay, live xterm survival, post-restart input, KMS/KD/VT/getty
+restoration, service shutdown, socket/device cleanup, and evidence-archive
+validation. The final canonical mirror and graphical-console screenshot were
+byte-identical with SHA-256:
+
+```text
+bd6a1e885c0a633d42f5b61af0e8f355df2ace8fb6a39bb6f4b744c1bd317cdc
+```
+
 ## Selection paths
 
 Paths are relative to the extracted patch 410 source root.
@@ -128,8 +229,8 @@ Paths are relative to the extracted patch 410 source root.
 
 The resulting `SetSelectionOwner`, `ConvertSelection`, property, selection
 event, and `SendEvent` requests are mediated by Xt. Source inspection anchors
-the behavior, but only a reviewed wire trace can freeze their exact order and
-temporary atoms or properties.
+the behavior; the reviewed normalized bootstrap trace above freezes their exact
+order and temporary atoms or properties for this profile.
 
 ## Pointer and cursor paths
 
@@ -203,9 +304,9 @@ Passive grabs remain a likely startup requirement. `menu.c:3063`
 (`SetupMenus`) always registers `HandlePopupMenu` with `XtRegisterGrabAction`,
 even when the toolbar is disabled. The default translations contain
 Ctrl+Button1, Ctrl+Button2, and Ctrl+Button3 popup actions. Xt may install
-`GrabButton` requests while realizing those translations. `GrabButton` and
-`UngrabButton` must remain trace-gated, but should be expected in the first
-live capture rather than assumed absent.
+`GrabButton` requests while realizing those translations. The reviewed profile
+contains exactly 96 `GrabButton` requests and no `UngrabButton`; only the
+observed `GrabButton` path is accepted.
 
 The only direct keyboard-grab path is the secure-keyboard menu action in
 `menu.c:1018`; ordinary acceptance should not require it unless the trace says
@@ -224,20 +325,17 @@ realizes the shell and installs it with `XSetWMProtocols`; the translation at
 
 The Milestone 11 close binding must therefore send one format-32
 `WM_PROTOCOLS` `ClientMessage` containing `WM_DELETE_WINDOW` to the managed
-top-level shell. This source path does not prove that Glasswyrm currently does
-so.
+top-level shell. The source path alone does not prove delivery; the reviewed
+bootstrap trace's single `ClientMessage` and clean first-xterm shutdown provide
+the matching live evidence.
 
-## Pending evidence
+## Final acceptance gate pending
 
-Before this audit can become an accepted compatibility claim:
-
-1. build patch 410 from the verified archive in the fixed Gentoo guest;
-2. record the exact configure summary and `XTerm(410)` output;
-3. collect and normalize startup, typing, scrolling, selection, paste, move,
-   resize, and close traces from Glasswyrm;
-4. resolve every toolkit-mediated or trace-gated request from those traces;
-5. run the two-xterm PRIMARY and CLIPBOARD scenarios;
-6. capture and review the required DRM screenshots; and
-7. add fixtures only after review.
-
-No trace fixture or runtime result is asserted by this source-audit document.
+The A/B bootstrap evidence is sufficient to select and document the candidate
+fixture. It is not the final exact-fixture acceptance result. After the
+reviewed normalized trace and its checksum are committed, the complete clean
+VM route must run again at the final source commit and report
+`exact_trace=passed`, not `bootstrap`. The final result must also repeat the
+historical clean-snapshot Milestone 10 predecessor, host compiler/sanitizer and
+component gates, screenshot equality, restoration, cleanup, and archive
+validation before Milestone 11 is declared complete.
