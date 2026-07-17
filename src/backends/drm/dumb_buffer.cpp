@@ -67,6 +67,8 @@ DumbBuffer &DumbBuffer::operator=(DumbBuffer &&other) noexcept {
   pitch_ = std::exchange(other.pitch_, 0);
   handle_ = std::exchange(other.handle_, 0);
   framebuffer_id_ = std::exchange(other.framebuffer_id_, 0);
+  completed_generation_ = std::exchange(other.completed_generation_, 0);
+  content_valid_ = std::exchange(other.content_valid_, false);
   return *this;
 }
 
@@ -122,6 +124,40 @@ bool DumbBuffer::copy_from(const std::span<const std::uint32_t> pixels,
     std::memcpy(mapping_ + static_cast<std::size_t>(row) * pitch_,
                 pixels.data() + static_cast<std::size_t>(row) * width_,
                 row_bytes);
+  }
+  error.clear();
+  return true;
+}
+
+bool DumbBuffer::copy_rectangles_from(
+    const std::span<const std::uint32_t> pixels,
+    const std::span<const gw::compositor::Rectangle> rectangles,
+    std::string &error) {
+  const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
+  if (!valid() || !content_valid_ || pixel_count != pixels.size()) {
+    error = "partial copy requires a valid matching DRM dumb buffer";
+    return false;
+  }
+  for (const auto& rectangle : rectangles) {
+    const auto right = std::int64_t{rectangle.x} + rectangle.width;
+    const auto bottom = std::int64_t{rectangle.y} + rectangle.height;
+    if (rectangle.empty() || rectangle.x < 0 || rectangle.y < 0 ||
+        right > width_ || bottom > height_) {
+      error = "partial DRM copy rectangle exceeds the visible buffer";
+      return false;
+    }
+  }
+  for (const auto& rectangle : rectangles) {
+    const auto bytes = static_cast<std::size_t>(rectangle.width) *
+                       kBytesPerPixel;
+    for (std::uint32_t row = 0; row < rectangle.height; ++row) {
+      const auto y = static_cast<std::uint32_t>(rectangle.y) + row;
+      const auto x = static_cast<std::uint32_t>(rectangle.x);
+      std::memcpy(mapping_ + static_cast<std::size_t>(y) * pitch_ +
+                      static_cast<std::size_t>(x) * kBytesPerPixel,
+                  pixels.data() + static_cast<std::size_t>(y) * width_ + x,
+                  bytes);
+    }
   }
   error.clear();
   return true;
@@ -192,6 +228,8 @@ bool DumbBuffer::release(std::string &error) noexcept {
   pitch_ = 0;
   handle_ = 0;
   framebuffer_id_ = 0;
+  completed_generation_ = 0;
+  content_valid_ = false;
   return success;
 }
 
@@ -204,6 +242,8 @@ void DumbBuffer::abandon() noexcept {
   pitch_ = 0;
   handle_ = 0;
   framebuffer_id_ = 0;
+  completed_generation_ = 0;
+  content_valid_ = false;
 }
 
 bool DumbBufferPair::create(DumbBufferApi &api, const std::uint32_t width,

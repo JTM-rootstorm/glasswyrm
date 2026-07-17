@@ -182,6 +182,23 @@ int main() {
               glasswyrm::output::hash_visible_xrgb8888(pixels) &&
           buffer.visible_hash() == 0x4d1416c2755838b5ULL,
       "scanout visible RGB hash equals canonical software-frame hash");
+  buffer.mark_completed(1);
+  const std::vector<std::uint32_t> changed{
+      0xff112233U, 0xff010203U, 0xff778899U, 0xffaabbccU};
+  const std::array partial{gw::compositor::Rectangle{1, 0, 1, 1}};
+  gw::test::require(buffer.copy_rectangles_from(changed, partial, error) &&
+                        buffer.visible_hash() ==
+                            glasswyrm::output::hash_visible_xrgb8888(changed),
+                    "bounded partial copy updates only selected pixels");
+  gw::test::require(buffer.content_valid() &&
+                        buffer.completed_generation() == 1,
+                    "copy does not advance completion metadata");
+  const std::array outside{gw::compositor::Rectangle{2, 0, 1, 1}};
+  gw::test::require(!buffer.copy_rectangles_from(changed, outside, error),
+                    "out-of-bounds partial copy is rejected atomically");
+  buffer.invalidate_content();
+  gw::test::require(!buffer.copy_rectangles_from(changed, partial, error),
+                    "partial copy rejects invalidated content");
   const std::vector<std::uint32_t> wrong_pixels{0xff000000U};
   gw::test::require(!buffer.copy_from(wrong_pixels, error),
                     "mismatched canonical frame rejected");

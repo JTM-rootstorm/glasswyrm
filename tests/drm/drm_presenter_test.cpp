@@ -108,7 +108,8 @@ struct Rig {
   bool initialized{};
 
   Rig(DrmPresentationApi policy, bool atomic = true, bool planes = true,
-      bool fail_atomic = false, bool with_report = true)
+      bool fail_atomic = false, bool with_report = true,
+      bool damage_aware_copy = false)
       : drm({"/dev/dri/card0", DeviceOpenStatus::Success,
              snapshot(atomic, planes), {}}) {
     configure(kms, planes);
@@ -124,6 +125,7 @@ struct Rig {
     config.api = policy;
     config.tty_path = "/dev/tty2";
     config.vt_signals = {SIGUSR1, SIGUSR2};
+    config.damage_aware_copy = damage_aware_copy;
     initialized = presenter->initialize(config, &vt, error);
   }
   ~Rig() {
@@ -135,8 +137,10 @@ struct Rig {
 
 output::SoftwareFrameView frame(std::span<const std::uint32_t> pixels,
                                 std::uint64_t ordinal,
-                                std::uint32_t refresh = 60'000) {
-  return {{1, 2, 2, refresh}, pixels, {}, ordinal, ordinal, ordinal};
+                                std::uint32_t refresh = 60'000,
+                                std::span<const gw::compositor::Rectangle>
+                                    damage = {}) {
+  return {{1, 2, 2, refresh}, pixels, damage, ordinal, ordinal, ordinal};
 }
 
 std::string contents(const std::filesystem::path& path) {
@@ -206,6 +210,59 @@ void presentation_refresh_tolerance() {
       rig.presenter->present(frame(pixels, 2, 61'001)).disposition ==
           output::PresentDisposition::Rejected,
       "presentation rejects refresh outside the selected mode tolerance");
+}
+
+void accumulated_damage_copy_and_vt_fallback() {
+  Rig rig(DrmPresentationApi::Atomic, true, true, false, true, true);
+  const std::array full_damage{gw::compositor::Rectangle{0, 0, 2, 2}};
+  const std::array first{0xff000000U, 0xff000000U, 0xff000000U,
+                         0xff000000U};
+  gw::test::require(
+      rig.presenter->present(frame(first, 1, 60'000, full_damage))
+              .disposition == output::PresentDisposition::Complete,
+      "damage-aware first frame completes");
+
+  const std::array top_left{gw::compositor::Rectangle{0, 0, 1, 1}};
+  const std::array second{0xffff0000U, 0xff000000U, 0xff000000U,
+                          0xff000000U};
+  auto pending = rig.presenter->present(frame(second, 2, 60'000, top_left));
+  rig.drm.queue_page_flip(pending.token, 40, 2);
+  gw::test::require(
+      pending.disposition == output::PresentDisposition::Pending &&
+          rig.presenter->service(POLLIN).kind ==
+              output::BackendEventKind::Complete &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      "damage-aware second buffer first use completes");
+
+  const std::array bottom_right{gw::compositor::Rectangle{1, 1, 1, 1}};
+  const std::array third{0xffff0000U, 0xff000000U, 0xff000000U,
+                         0xff00ff00U};
+  pending = rig.presenter->present(frame(third, 3, 60'000, bottom_right));
+  rig.drm.queue_page_flip(pending.token, 40, 3);
+  gw::test::require(
+      pending.disposition == output::PresentDisposition::Pending &&
+          rig.presenter->service(POLLIN).kind ==
+              output::BackendEventKind::Complete &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      "alternating buffer reuses bounded damage history");
+  const auto report = contents(rig.report.path());
+  gw::test::require(
+      report.find("\"record\":\"damage-copy\",\"generation\":1") !=
+              std::string::npos &&
+          report.find("\"generation\":3,\"buffer\":0") !=
+              std::string::npos &&
+          report.find("\"copied_bytes\":8") != std::string::npos &&
+          report.find("\"history_span\":2") != std::string::npos,
+      "damage report proves two-generation eight-byte copy");
+
+  gw::test::require(
+      rig.presenter->suspend(rig.error) ==
+              output::BackendStateResult::Complete &&
+          rig.presenter->resume(frame(third, 3, 60'000, bottom_right))
+                  .disposition == output::PresentDisposition::Complete &&
+          contents(rig.report.path()).find(
+              "\"full_copy_reason\":\"vt-resume\"") != std::string::npos,
+      "VT resume forces and reports one complete scanout copy");
 }
 
 void zero_sequence_page_flip_completion() {
@@ -378,6 +435,7 @@ void external_session_never_manages_master() {
 int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
+  accumulated_damage_copy_and_vt_fallback();
   zero_sequence_page_flip_completion();
   policy_and_legacy_requests();
   mismatch_resume_and_shutdown_order();
