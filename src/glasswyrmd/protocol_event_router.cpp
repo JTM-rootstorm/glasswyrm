@@ -41,9 +41,24 @@ std::vector<std::uint8_t> encode_for(const ClientConnection& client,
                                           XFixesSelectionNotifyEvent>) {
           return encode_xfixes_selection_notify(
               client.byte_order(), client.last_request_sequence(), value);
-        } else {
+        } else if constexpr (std::is_same_v<Event, DamageNotifyEvent>) {
           return encode_damage_notify(client.byte_order(),
                                       client.last_request_sequence(), value);
+        } else if constexpr (std::is_same_v<
+                                 Event, RandRScreenChangeNotifyEvent>) {
+          return encode_randr_screen_change_notify(
+              client.byte_order(), client.last_request_sequence(), value);
+        } else if constexpr (std::is_same_v<Event,
+                                            RandRCrtcChangeNotifyEvent>) {
+          return encode_randr_crtc_change_notify(
+              client.byte_order(), client.last_request_sequence(), value);
+        } else if constexpr (std::is_same_v<Event,
+                                            RandROutputChangeNotifyEvent>) {
+          return encode_randr_output_change_notify(
+              client.byte_order(), client.last_request_sequence(), value);
+        } else {
+          return encode_randr_output_property_notify(
+              client.byte_order(), client.last_request_sequence(), value);
         }
       },
       event);

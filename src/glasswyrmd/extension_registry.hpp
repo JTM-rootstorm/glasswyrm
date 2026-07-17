@@ -49,7 +49,7 @@ inline constexpr std::array<ExtensionDescriptor, 7> kExtensionRegistry{{
     {"COMPOSITE", ExtensionKind::Composite,
      ExtensionCapability::GameCompat, 133, 0, 0, 0, 0, 0, 4},
     {"RANDR", ExtensionKind::RandR, ExtensionCapability::GameCompat, 134, 67,
-     1, 136, 1, 1, 3},
+     2, 136, 3, 1, 3},
 }};
 
 [[nodiscard]] constexpr bool extension_ranges_are_valid() noexcept {

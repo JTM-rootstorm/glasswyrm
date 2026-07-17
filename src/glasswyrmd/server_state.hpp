@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/atom_table.hpp"
 #include "glasswyrmd/grab_state.hpp"
+#include "glasswyrmd/randr_state.hpp"
 #include "glasswyrmd/resource_table.hpp"
 #include "glasswyrmd/lifecycle_snapshot.hpp"
 #include "glasswyrmd/selection_store.hpp"
@@ -60,6 +61,8 @@ class ServerState {
   }
   [[nodiscard]] GrabState& grabs() noexcept { return grabs_; }
   [[nodiscard]] const GrabState& grabs() const noexcept { return grabs_; }
+  [[nodiscard]] RandRState& randr() noexcept { return randr_; }
+  [[nodiscard]] const RandRState& randr() const noexcept { return randr_; }
   [[nodiscard]] KeyboardControlState& keyboard_control() noexcept {
     return keyboard_control_;
   }
@@ -166,6 +169,8 @@ class ServerState {
     if (!plan) return false;
     for (const auto& entry : plan->postorder)
       (void)staged.selections_.clear_window(entry.xid);
+    for (const auto& entry : plan->postorder)
+      (void)staged.randr_.clear_window(entry.xid);
     if (staged.resources_.commit_destroy_plan(*plan) != DestroyWindowStatus::Success)
       return false;
     if (!staged.commit_lifecycle(evaluated)) return false;
@@ -176,7 +181,10 @@ class ServerState {
   [[nodiscard]] CleanupResult cleanup_client(ClientId owner) {
     (void)selections_.clear_client(owner);
     (void)grabs_.cleanup_client(owner);
-    return resources_.cleanup_client(owner);
+    (void)randr_.clear_client(owner);
+    auto result = resources_.cleanup_client(owner);
+    (void)randr_.prune_windows(resources_);
+    return result;
   }
   [[nodiscard]] bool invariants_hold() const noexcept {
     return resources_.invariants_hold();
@@ -188,6 +196,7 @@ class ServerState {
   AtomTable atoms_;
   SelectionStore selections_;
   GrabState grabs_;
+  RandRState randr_;
   KeyboardControlState keyboard_control_;
   LifecycleSerialSource lifecycle_serials_;
   std::uint32_t focused_window_{screen_.root_window};

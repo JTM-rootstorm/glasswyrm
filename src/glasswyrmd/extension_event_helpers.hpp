@@ -13,6 +13,18 @@ namespace glasswyrm::server {
 [[nodiscard]] std::vector<std::uint8_t> encode_damage_notify(
     gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
     const DamageNotifyEvent& event);
+[[nodiscard]] std::vector<std::uint8_t> encode_randr_screen_change_notify(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const RandRScreenChangeNotifyEvent& event);
+[[nodiscard]] std::vector<std::uint8_t> encode_randr_crtc_change_notify(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const RandRCrtcChangeNotifyEvent& event);
+[[nodiscard]] std::vector<std::uint8_t> encode_randr_output_change_notify(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const RandROutputChangeNotifyEvent& event);
+[[nodiscard]] std::vector<std::uint8_t> encode_randr_output_property_notify(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const RandROutputPropertyNotifyEvent& event);
 
 inline void append_xfixes_notifications(
     DispatchResult& result,

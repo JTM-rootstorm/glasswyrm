@@ -71,6 +71,161 @@ static bool extension_present(xcb_connection_t *connection,
   return result;
 }
 
+static bool probe_randr_profile(xcb_connection_t *connection,
+                                xcb_screen_t *screen, Probe *probe) {
+  xcb_generic_error_t *error = NULL;
+  xcb_randr_query_version_reply_t *version = xcb_randr_query_version_reply(
+      connection, xcb_randr_query_version(connection, 1, 3), &error);
+  bool passed = version && !error && version->major_version == 1 &&
+                version->minor_version == 3;
+  free(error); error = NULL; free(version);
+
+  xcb_randr_get_screen_info_reply_t *screen_info =
+      xcb_randr_get_screen_info_reply(
+          connection, xcb_randr_get_screen_info(connection, screen->root),
+          &error);
+  passed = passed && screen_info && !error && screen_info->root == screen->root &&
+           screen_info->nSizes == 1 && screen_info->rotation == XCB_RANDR_ROTATION_ROTATE_0;
+  free(error); error = NULL; free(screen_info);
+
+  xcb_randr_get_screen_size_range_reply_t *range =
+      xcb_randr_get_screen_size_range_reply(
+          connection,
+          xcb_randr_get_screen_size_range(connection, screen->root), &error);
+  passed = passed && range && !error && range->min_width == screen->width_in_pixels &&
+           range->min_height == screen->height_in_pixels &&
+           range->max_width == screen->width_in_pixels &&
+           range->max_height == screen->height_in_pixels;
+  free(error); error = NULL; free(range);
+
+  xcb_randr_get_screen_resources_reply_t *resources =
+      xcb_randr_get_screen_resources_reply(
+          connection,
+          xcb_randr_get_screen_resources(connection, screen->root), &error);
+  const bool resource_shape = resources && !error &&
+                              resources->num_crtcs == 1 &&
+                              resources->num_outputs == 1 &&
+                              resources->num_modes == 1;
+  passed = passed && resource_shape;
+  free(error); error = NULL;
+  if (!resource_shape) {
+    free(resources);
+    return false;
+  }
+  const xcb_randr_crtc_t crtc = xcb_randr_get_screen_resources_crtcs(resources)[0];
+  const xcb_randr_output_t output =
+      xcb_randr_get_screen_resources_outputs(resources)[0];
+  const xcb_randr_mode_info_t mode =
+      xcb_randr_get_screen_resources_modes(resources)[0];
+  const xcb_timestamp_t config_timestamp = resources->config_timestamp;
+  free(resources);
+
+  xcb_randr_get_screen_resources_current_reply_t *current =
+      xcb_randr_get_screen_resources_current_reply(
+          connection,
+          xcb_randr_get_screen_resources_current(connection, screen->root),
+          &error);
+  passed = passed && current && !error && current->num_crtcs == 1 &&
+           current->num_outputs == 1 && current->num_modes == 1 &&
+           xcb_randr_get_screen_resources_current_crtcs(current)[0] == crtc &&
+           xcb_randr_get_screen_resources_current_outputs(current)[0] == output &&
+           xcb_randr_get_screen_resources_current_modes(current)[0].id == mode.id;
+  free(error); error = NULL; free(current);
+
+  xcb_randr_get_output_info_reply_t *output_info =
+      xcb_randr_get_output_info_reply(
+          connection,
+          xcb_randr_get_output_info(connection, output, config_timestamp),
+          &error);
+  passed = passed && output_info && !error &&
+           output_info->connection == XCB_RANDR_CONNECTION_CONNECTED &&
+           output_info->crtc == crtc && output_info->num_crtcs == 1 &&
+           output_info->num_modes == 1 && output_info->num_preferred == 1 &&
+           output_info->num_clones == 0 && output_info->name_len == 11 &&
+           memcmp(xcb_randr_get_output_info_name(output_info), "Glasswyrm-1", 11) == 0;
+  free(error); error = NULL; free(output_info);
+
+  xcb_randr_get_crtc_info_reply_t *crtc_info = xcb_randr_get_crtc_info_reply(
+      connection, xcb_randr_get_crtc_info(connection, crtc, config_timestamp),
+      &error);
+  passed = passed && crtc_info && !error && crtc_info->x == 0 &&
+           crtc_info->y == 0 && crtc_info->mode == mode.id &&
+           crtc_info->rotation == XCB_RANDR_ROTATION_ROTATE_0 &&
+           crtc_info->num_outputs == 1 &&
+           xcb_randr_get_crtc_info_outputs(crtc_info)[0] == output;
+  free(error); error = NULL; free(crtc_info);
+
+  xcb_randr_list_output_properties_reply_t *properties =
+      xcb_randr_list_output_properties_reply(
+          connection, xcb_randr_list_output_properties(connection, output),
+          &error);
+  passed = passed && properties && !error && properties->num_atoms == 0;
+  free(error); error = NULL; free(properties);
+
+  xcb_randr_query_output_property_reply_t *property_info =
+      xcb_randr_query_output_property_reply(
+          connection,
+          xcb_randr_query_output_property(connection, output, XCB_ATOM_PRIMARY),
+          &error);
+  passed = passed && property_info && !error && !property_info->pending &&
+           !property_info->range && !property_info->immutable;
+  free(error); error = NULL; free(property_info);
+
+  xcb_randr_get_output_property_reply_t *property =
+      xcb_randr_get_output_property_reply(
+          connection,
+          xcb_randr_get_output_property(connection, output, XCB_ATOM_PRIMARY,
+                                        XCB_ATOM_NONE, 0, 64, 0, 0),
+          &error);
+  passed = passed && property && !error && property->format == 0 &&
+           property->type == XCB_ATOM_NONE && property->num_items == 0;
+  free(error); error = NULL; free(property);
+
+  xcb_randr_get_crtc_gamma_size_reply_t *gamma =
+      xcb_randr_get_crtc_gamma_size_reply(
+          connection, xcb_randr_get_crtc_gamma_size(connection, crtc), &error);
+  passed = passed && gamma && !error && gamma->size == 0;
+  free(error); error = NULL; free(gamma);
+
+  xcb_randr_get_output_primary_reply_t *primary =
+      xcb_randr_get_output_primary_reply(
+          connection, xcb_randr_get_output_primary(connection, screen->root),
+          &error);
+  passed = passed && primary && !error && primary->output == output;
+  free(error); error = NULL; free(primary);
+
+  passed = checked(connection,
+                   xcb_randr_select_input_checked(
+                       connection, screen->root,
+                       XCB_RANDR_NOTIFY_MASK_SCREEN_CHANGE |
+                           XCB_RANDR_NOTIFY_MASK_CRTC_CHANGE |
+                           XCB_RANDR_NOTIFY_MASK_OUTPUT_CHANGE |
+                           XCB_RANDR_NOTIFY_MASK_OUTPUT_PROPERTY),
+                   probe, "RANDR SelectInput") && passed;
+
+  xcb_randr_set_crtc_config_reply_t *same = xcb_randr_set_crtc_config_reply(
+      connection,
+      xcb_randr_set_crtc_config(connection, crtc, config_timestamp,
+                                config_timestamp, 0, 0, mode.id,
+                                XCB_RANDR_ROTATION_ROTATE_0, 1, &output),
+      &error);
+  passed = passed && same && !error &&
+           same->status == XCB_RANDR_SET_CONFIG_SUCCESS;
+  free(error); error = NULL; free(same);
+
+  xcb_randr_set_crtc_config_reply_t *rejected =
+      xcb_randr_set_crtc_config_reply(
+          connection,
+          xcb_randr_set_crtc_config(connection, crtc, config_timestamp,
+                                    config_timestamp, 1, 0, mode.id,
+                                    XCB_RANDR_ROTATION_ROTATE_0, 1, &output),
+          &error);
+  passed = passed && rejected && !error &&
+           rejected->status == XCB_RANDR_SET_CONFIG_FAILED;
+  free(error); free(rejected);
+  return passed;
+}
+
 static void json_string(FILE *stream, const char *value) {
   fputc('"', stream);
   for (; *value; ++value) {
@@ -312,12 +467,8 @@ int main(int argc, char **argv) {
   free(error); error = NULL; free(composite);
   if (!probe.composite) fail(&probe, "COMPOSITE QueryVersion failed");
 
-  xcb_randr_query_version_reply_t *randr = xcb_randr_query_version_reply(
-      connection, xcb_randr_query_version(connection, 1, 3), &error);
-  probe.randr = randr && !error && randr->major_version == 1 &&
-                randr->minor_version == 3;
-  free(error); error = NULL; free(randr);
-  if (!probe.randr) fail(&probe, "RANDR QueryVersion failed");
+  probe.randr = probe_randr_profile(connection, screen, &probe);
+  if (!probe.randr) fail(&probe, "RANDR bounded profile failed");
 
   (void)checked(connection, xcb_xfixes_destroy_region_checked(connection, first),
                 &probe, "XFIXES DestroyRegion first");
