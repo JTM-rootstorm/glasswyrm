@@ -1,0 +1,78 @@
+schema = 1
+status = "pinned source and implementation profile; runtime acceptance requires the clean M12 VM gate"
+required_base = "ae6b6c93a29a1fb985dcea8455650d15c0fec364"
+environment = [
+  "LC_ALL=C",
+  "LANG=C",
+  "XMODIFIERS=@im=none",
+  "SESSION_MANAGER=",
+  "XAUTHORITY=/dev/null",
+  "DISPLAY=:99",
+  "SDL_VIDEODRIVER=x11",
+  "SDL_RENDER_DRIVER=software",
+  "SDL_AUDIODRIVER=dummy",
+]
+
+[[source]]
+application = "SDL"
+version = "2.32.10"
+release_tag = "release-2.32.10"
+release_commit = "5d249570393f7a37e037abf22cd6012a4cc56a71"
+source_url = "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz"
+source_sha256 = "5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165"
+source_size_bytes = 7630262
+source_signature_url = "https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz.sig"
+source_signature_sha256 = "9533de95863efb5f3fb47fd22adda9be8f1d438b928b1287cea433d4d2ef10ad"
+signing_key_url = "https://www.libsdl.org/signing-keys.php"
+signing_key_fingerprint = "1528635D8053A57F77D1E08630A59377A7763BE6"
+signature_verification = "OpenPGP good signature from Sam Lantinga <slouken@libsdl.org> using the key published by the official SDL signing-key page"
+build_system = "CMake and Ninja"
+build_arguments = [
+  "-DCMAKE_BUILD_TYPE=Release",
+  "-DSDL_SHARED=ON",
+  "-DSDL_STATIC=OFF",
+  "-DSDL_TESTS=ON",
+  "-DSDL_X11=ON",
+  "-DSDL_X11_SHARED=OFF",
+  "-DSDL_X11_XFIXES=ON",
+  "-DSDL_X11_XRANDR=ON",
+  "-DSDL_X11_XCURSOR=OFF",
+  "-DSDL_X11_XDBE=OFF",
+  "-DSDL_X11_XINPUT=OFF",
+  "-DSDL_X11_XSCRNSAVER=OFF",
+  "-DSDL_X11_XSHAPE=OFF",
+  "-DSDL_WAYLAND=OFF",
+  "-DSDL_KMSDRM=OFF",
+  "-DSDL_OPENGL=OFF",
+  "-DSDL_OPENGLES=OFF",
+  "-DSDL_VULKAN=OFF",
+  "-DSDL_HIDAPI=OFF",
+  "-DSDL_LIBUDEV=OFF",
+  "-DSDL_ALSA=OFF",
+  "-DSDL_JACK=OFF",
+  "-DSDL_PIPEWIRE=OFF",
+  "-DSDL_PULSEAUDIO=OFF",
+  "-DSDL_SNDIO=OFF",
+  "-DSDL_OSS=OFF",
+  "-DSDL_DISKAUDIO=OFF",
+  "-DSDL_DUMMYAUDIO=ON",
+]
+enabled_x11_features = ["core X11", "MIT-SHM", "XFIXES", "XRandR", "software renderer"]
+disabled_features = ["Wayland", "KMSDRM", "OpenGL", "OpenGL ES", "Vulkan", "XInput2", "Xcursor", "XDBE", "XScreenSaver", "Shape", "unneeded audio and joystick backends"]
+
+[[program]]
+name = "testdraw2"
+source_path = "test/testdraw2.c"
+source_sha256 = "e2d67b758d974bd9e07a4dcbe0107fbcf9ed342382a24ed63024699c7459cd5f"
+argv = ["testdraw2", "--video", "x11", "--renderer", "software", "--windows", "1", "--geometry", "640x480", "--position", "64,64", "--blend", "none", "100"]
+determinism = "LD_PRELOAD repository fixed-time shim; harness terminates after the frozen bounded observation frame count"
+expected_extensions = ["BIG-REQUESTS", "MIT-SHM", "XFIXES", "RANDR"]
+[[program]]
+name = "testsprite2"
+source_path = "test/testsprite2.c"
+source_sha256 = "34c32afde10a35f72b6ebe80ede177c26ff70f528c7f76949865072654101ea8"
+asset_path = "test/icon.bmp"
+asset_sha256 = "f7b5cca4aabd94ba4cbaff14bde09ff1424403185e0613d48c77cc450064531e"
+argv = ["testsprite2", "--video", "x11", "--renderer", "software", "--windows", "1", "--geometry", "640x480", "--position", "64,64", "--blend", "none", "--iterations", "120", "100", "icon.bmp"]
+determinism = "the official --iterations value seeds SDLTest_Fuzzer and stops sprite motion after exactly 120 iterations"
+expected_extensions = ["BIG-REQUESTS", "MIT-SHM", "XFIXES", "RANDR"]
