@@ -158,6 +158,10 @@ partial copy smaller than the full frame and the required full-copy fallbacks.
 
 ## Live evidence contract
 
+The harness installs Mesa with `-llvm`, selecting the bounded `softpipe` path
+instead of building LLVM in the fixed 30 GiB guest. Renderer evidence must
+still identify the actual EGL/GLES implementation and classify it as software.
+
 The clean VM run must prove all of the following before this profile can be
 marked accepted:
 

@@ -352,7 +352,8 @@ chmod 0700 "$artifact_dir" "$control"
 
 failure_stage=dependencies
 install -d -m 0755 /etc/portage/package.use
-printf 'media-libs/libglvnd X\n' >/etc/portage/package.use/glasswyrm-m12
+printf 'media-libs/libglvnd X\nmedia-libs/mesa -llvm\n' \
+  >/etc/portage/package.use/glasswyrm-m12
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja dev-build/cmake \
   dev-vcs/git net-misc/curl app-crypt/gnupg app-misc/jq \
   media-libs/mesa x11-libs/libdrm dev-libs/libinput x11-libs/libxkbcommon \
