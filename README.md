@@ -312,10 +312,12 @@ interactive failure can be investigated without repeating the compiler matrix:
 ./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
-This development-only rerun requires the commit-bound guest build and pinned
-xterm cache, and it repeats the live input, VT/restart, restoration, and archive
-path. Its summary explicitly is not an acceptance result; the complete clean
-`milestone11-runtime-test` remains the final gate.
+This development-only rerun requires a guest where the complete M11 build
+matrix previously reached the runtime build and the pinned xterm cache is still
+valid. It reconfigures and incrementally compiles only that runtime tree against
+the current committed source, then repeats the live input, VT/restart,
+restoration, and archive path. Its summary explicitly is not an acceptance
+result; the complete clean `milestone11-runtime-test` remains the final gate.
 
 ## Setup probes
 
