@@ -203,13 +203,17 @@ the narrower diagnostic command can reuse that already-provisioned guest:
 ./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
-The rerun still synchronizes committed source, checks the required VM devices,
-requires the cached runtime and pinned xterm to carry the same exact Git commit
-and pinned xterm source hash, then repeats uinput startup, the live interactions,
-VT and peer-restart cycles, restoration, and evidence archive. It deliberately
-does not reinstall dependencies or rerun the compiler, sanitizer, component,
-source-layout, or staged-consumer matrices. Its summary is named
-`milestone11-interactive-rerun-summary.json` and always records
+The rerun still synchronizes committed source and checks the required VM
+devices. Its marker must prove that a previous complete M11 build reached the
+runtime build, the existing runtime Meson directory must remain reusable, and
+the pinned xterm source hash must match. The command then reconfigures and
+incrementally compiles only that runtime tree against the current commit before
+repeating uinput startup, the live interactions, VT and peer-restart cycles,
+restoration, and evidence archive. It deliberately does not reinstall
+dependencies or rerun the strict compiler, sanitizer, component, source-layout,
+or staged-consumer matrices. Its summary is named
+`interactive-rerun/milestone11-interactive-rerun-summary.json` beneath the
+configured host artifact directory and always records
 `accepted_milestone11_result` as false. It is a development shortcut, not an
 acceptance result: the final clean `milestone11-runtime-test` remains mandatory
 and never skips the earlier gates.
@@ -274,6 +278,9 @@ selection, VT/restart, journal, normalized-trace, DRM frame, graphical-console,
 restoration, facts, and summary evidence plus its checksum-protected archive.
 The summary passes only when the exact pinned xterm patch 410 core-font ASCII
 profile completes every gate and the collected archive validates.
-An interactive diagnostic rerun replaces the latest M11 runtime artifacts and
-writes `milestone11-interactive-rerun-summary.json`; rerun the complete command
-afterward to produce authoritative acceptance evidence.
+An interactive diagnostic rerun uses the separate guest directory
+`/var/tmp/glasswyrm-m11-rerun-artifacts` and host `interactive-rerun/`
+subdirectory, so authoritative full-run evidence is not replaced. Its archive
+contains diagnostic provenance recording both the current runtime rebuild
+commit and the earlier full build commit. Rerun the complete command afterward
+to produce authoritative acceptance evidence.

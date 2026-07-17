@@ -27,12 +27,12 @@ was reviewed as follows:
 | Function | Approximate span | Review disposition |
 | --- | ---: | --- |
 | `CompositorPeer::submit` | 186 | Keeps snapshot validation, retained-cursor replay, and one atomic compositor submission together. Split if another retained surface class is added. |
-| `ServerRuntime::service_input` | 163 | Owns the ordered synthetic-input transaction: provider lifecycle, validation, routing, acknowledgement, and focus publication. Real input remains in separate modules. |
-| `ServerRuntime::service_integrated` | 217 | Is the top-level integrated-cycle coordinator for peer readiness, real-input suspension/resume, replay, and publishing. Its branches share cycle state; split when another input backend or peer role is introduced. |
-| `dispatch_request` | 157 | Is a deliberately flat opcode-to-handler routing shell with behavior implemented in focused request-handler modules. |
-| `RuntimeBridge::service` | 156 | Keeps the peer-pair connection/retry state machine in one transition function so failure and readiness are evaluated atomically. |
+| `ServerRuntime::service_input` | 164 | Owns the ordered synthetic-input transaction: provider lifecycle, validation, routing, acknowledgement, and focus publication. Real input remains in separate modules. |
+| `ServerRuntime::service_integrated` | 218 | Is the top-level integrated-cycle coordinator for peer readiness, real-input suspension/resume, replay, and publishing. Its branches share cycle state; split when another input backend or peer role is introduced. |
+| `dispatch_request` | 155 | Is a deliberately flat opcode-to-handler routing shell with behavior implemented in focused request-handler modules. |
+| `RuntimeBridge::service` | 177 | Keeps the peer-pair connection/retry state machine in one transition function so failure and readiness are evaluated atomically. |
 | `PresentationTransaction::commit` | 306 | Preserves the staged frame transaction and rollback boundary across scene, attachment, presentation, and evidence publication. Existing helpers hold independent calculations. |
-| `gwcomp::run` | 370 | Is process-lifetime orchestration for backend creation, IPC, polling, and orderly shutdown; rendering and DRM policy remain outside it. |
+| `gwcomp::run` | 394 | Is process-lifetime orchestration for backend creation, IPC, polling, and orderly shutdown; rendering and DRM policy remain outside it. |
 | `evaluate` | 202 | Evaluates one immutable WM policy snapshot in deterministic order, including placement, stacking, focus, and transient constraints. |
 
 Most of the M11 VM helper is one quoted, self-contained guest program plus
@@ -40,6 +40,8 @@ host-side screenshot and evidence coordination. Extracting that program would
 add a copied artifact and a host-to-guest version/argument boundary while the
 CLI tests intentionally inspect the exact embedded program. The diagnostic
 `milestone11-interactive-rerun` therefore reuses the same guest program through
-an explicit mode and commit-bound build marker; it cannot accidentally become
-the full acceptance path. Revisit physical extraction if another independent
-scenario needs only a smaller portion of the interactive runtime.
+an explicit mode and a marker retaining full-build provenance. That mode may
+reconfigure and incrementally compile only the existing runtime tree; it cannot
+accidentally become the full acceptance path. Revisit physical extraction if
+another independent scenario needs only a smaller portion of the interactive
+runtime.

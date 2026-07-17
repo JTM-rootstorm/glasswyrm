@@ -15,6 +15,7 @@ work_dir=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-gw-vm-test.XXXXXX")
 fake_bin=${work_dir}/bin
 mkdir -p "$repo_root/artifacts/vm"
 artifact_dir=$(mktemp -d "$repo_root/artifacts/vm/cli-test.XXXXXX")
+rerun_artifact_dir=$artifact_dir/interactive-rerun
 trap 'rm -rf "$work_dir" "$artifact_dir"' EXIT
 overlay_dir=${work_dir}/overlay
 source_dir=${artifact_dir}/source
@@ -262,6 +263,11 @@ drm_mode=1024x768
 target_vt=/dev/tty2
 uinput_device=/dev/uinput
 PREFLIGHT
+  exit 0
+fi
+
+if [[ $script == *'sed -n "s/^full_build_commit=//p"'* ]]; then
+  printf '%s\n' '75c68dc000000000000000000000000000000000'
   exit 0
 fi
 
@@ -632,13 +638,24 @@ drm_mode=1024x768
 keyboard_device=/dev/input/event11
 pointer_device=/dev/input/event12
 pointer_profile=relative-only
-run_mode=interactive-rerun
-tested_commit=86dab3c000000000000000000000000000000000
 canonical_hash=0123456789abcdef
 scanout_hash=0123456789abcdef
 mirror_sha256=aaaaaaaaaaaaaaaa
 screenshot_sha256=aaaaaaaaaaaaaaaa
 FACTS
+      if [[ $artifact == *glasswyrm-m11-rerun-artifacts* ]]; then
+        printf '%s\n' \
+          'run_mode=interactive-rerun' \
+          'tested_commit=86dab3c000000000000000000000000000000000' \
+          'full_build_commit=75c68dc000000000000000000000000000000000' \
+          'runtime_commit=86dab3c000000000000000000000000000000000'
+      else
+        printf '%s\n' \
+          'run_mode=full' \
+          'tested_commit=86dab3c000000000000000000000000000000000' \
+          'full_build_commit=86dab3c000000000000000000000000000000000' \
+          'runtime_commit=86dab3c000000000000000000000000000000000'
+      fi
       for result in strict_default strict_m11 sanitizer clang component_builds source_layout ipc_refactor api_consumers m4_m10_regressions uinput keyboard_ready pointer_ready xkb_keymap core_mapping relative_motion wheel key_repeat cursor_resources cursor_scanout grabs active_grab automatic_grab primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup normalized_trace exact_trace archive_validation journal_evidence; do
         printf '%s=passed\n' "$result"
       done
@@ -652,6 +669,9 @@ FACTS
     milestone11-xterm-trace.json) printf '{"gwm_replay":true,"compositor_replay":true}\n' ;;
     milestone11-xterm-geometry.json) printf '{"schema":1,"status":"passed"}\n' ;;
     milestone11-drm-report*.jsonl) printf '{"state":"active"}\n' ;;
+    milestone11-rerun-provenance.env)
+      printf '%s\n' 'schema=1' 'kind=milestone11-interactive-rerun' \
+        'accepted_milestone11_result=false' ;;
     milestone11-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
@@ -765,6 +785,11 @@ if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
     printf 'P6\n1 1\n255\n000' >"$scratch/$name"
   done
   for name in milestone11-libinput-devices.json milestone11-keymap.json milestone11-xterm-trace.raw.jsonl milestone11-xterm-trace.json milestone11-pty-transcript.log milestone11-xterm-geometry.json milestone11-selection.log milestone11-interactive-wm.log milestone11-gwm-bindings.json milestone11-selection-client-message.json milestone11-session-state.log milestone11-drm-report.jsonl milestone11-drm-report-before-restart.jsonl milestone11-glasswyrmd-journal.log milestone11-selection-probe.json milestone11-xterm-result.json milestone11-kms-before.json milestone11-kms-after.json milestone11-vt-before.json milestone11-vt-after.json scene.jsonl scene-before-restart.jsonl frames.jsonl frames-before-restart.jsonl; do printf '{}\n' >"$scratch/$name"; done
+  if [[ $destination == *interactive-rerun* ]]; then
+    printf '%s\n' 'schema=1' 'kind=milestone11-interactive-rerun' \
+      'accepted_milestone11_result=false' \
+      >"$scratch/milestone11-rerun-provenance.env"
+  fi
   if [[ ${GW_VM_TEST_BAD_M11_ARCHIVE:-0} == 1 ]]; then rm -f "$scratch/scene.jsonl"; fi
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
@@ -1594,21 +1619,56 @@ assert_contains "$work_dir/milestone11-interactive-rerun-no-build.out" \
   'failed during: guest-runtime'
 
 : >"$command_log"
+run_failure "$work_dir/milestone11-interactive-rerun-no-runtime-tree.out" \
+  env GW_VM_TEST_FAIL_MATCH='requires the existing runtime Meson build directory' \
+  "$gw_vm" milestone11-interactive-rerun --yes
+assert_contains "$work_dir/milestone11-interactive-rerun-no-runtime-tree.out" \
+  'failed during: guest-runtime'
+
+: >"$command_log"
 run_success "$work_dir/milestone11-interactive-rerun.out" \
   "$gw_vm" milestone11-interactive-rerun --yes
 assert_contains "$work_dir/milestone11-interactive-rerun.out" \
-  'Diagnostic only: reusing the commit-bound M11 guest build'
+  'Diagnostic only: reusing a prior full M11 build prerequisite'
 assert_contains "$work_dir/milestone11-interactive-rerun.out" \
   'full acceptance remains required'
-assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+assert_contains "$rerun_artifact_dir/milestone11-interactive-rerun-summary.json" \
   '"diagnostic_only": true'
-assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+assert_contains "$rerun_artifact_dir/milestone11-interactive-rerun-summary.json" \
   '"accepted_milestone11_result": false'
-assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+assert_contains "$rerun_artifact_dir/milestone11-interactive-rerun-summary.json" \
   '"passed": true'
+assert_contains "$rerun_artifact_dir/milestone11-interactive-rerun-summary.json" \
+  '"full_build_commit": "75c68dc000000000000000000000000000000000"'
+assert_contains "$rerun_artifact_dir/milestone11-interactive-rerun-summary.json" \
+  '"runtime_commit": "86dab3c000000000000000000000000000000000"'
+[[ -f $rerun_artifact_dir/milestone11-rerun-provenance.env ]] ||
+  fail 'interactive rerun did not collect diagnostic provenance'
+[[ ! -e $artifact_dir/milestone11-interactive-rerun-summary.json ]] ||
+  fail 'interactive rerun summary escaped its diagnostic artifact directory'
 assert_contains "$command_log" '<interactive-rerun>'
-assert_contains "$command_log" 'tested_commit=$tested_commit'
 assert_contains "$command_log" 'if [[ $run_mode == interactive-rerun ]]'
+assert_contains "$command_log" 'full_build_matrix=passed'
+assert_contains "$command_log" \
+  'required_base=9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0'
+assert_contains "$command_log" 'xterm_binary_sha256=%s'
+assert_contains "$command_log" 'full_build_commit=%s'
+assert_contains "$command_log" 'runtime_commit=%s'
+assert_contains "$command_log" 'meson-private/coredata.dat'
+assert_contains "$command_log" 'meson setup "$runtime" "$source_dir" --reconfigure'
+assert_contains "$command_log" 'meson compile -C "$runtime"'
+assert_contains "$command_log" \
+  'session-launcher subtree-compositor server-lifecycle-state'
+assert_contains "$command_log" \
+  'local-lifecycle-dispatch gw-uinput-m11-protocol m11-xterm-acceptance'
+assert_contains "$command_log" \
+  'write_interactive_ready_marker "$full_build_commit" "$tested_commit"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'meson setup "$runtime" "$source_dir" --reconfigure' \
+  'write_interactive_ready_marker "$full_build_commit" "$tested_commit"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'result[source_layout]=passed' \
+  'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
 
 : >"$command_log"
 run_failure "$work_dir/milestone11-bad-base.out" \
