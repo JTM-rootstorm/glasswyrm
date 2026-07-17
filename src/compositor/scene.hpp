@@ -49,6 +49,8 @@ public:
     return initial_snapshot_received_;
   }
   [[nodiscard]] bool snapshot_active() const noexcept { return snapshot_active_; }
+  [[nodiscard]] std::vector<std::uint64_t>
+  pending_damage_surface_ids() const;
 
   [[nodiscard]] std::vector<std::uint64_t> stacking_order() const;
 

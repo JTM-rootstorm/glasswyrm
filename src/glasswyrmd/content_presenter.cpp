@@ -60,7 +60,8 @@ PublishedWindowBuffer* ContentPresenter::ensure_buffer(
       content.staged_buffer->height() == storage.height())
     return content.staged_buffer.get();
   const auto id = buffers_.next_buffer_id();
-  content.staged_buffer = PublishedWindowBuffer::create(id, xid, storage);
+  content.staged_buffer =
+      PublishedWindowBuffer::create(id, xid, storage, synchronization_);
   return content.staged_buffer.get();
 }
 
@@ -74,6 +75,27 @@ CompositorSnapshotSubmission::Damage ContentPresenter::make_damage(
     damage.rectangles.push_back(
         {rectangle.x, rectangle.y, rectangle.width, rectangle.height});
   return damage;
+}
+
+bool ContentPresenter::signal_buffers(
+    const std::span<const CompositorSnapshotSubmission::Damage> damages) noexcept {
+  std::vector<PublishedWindowBuffer*> signaled;
+  signaled.reserve(damages.size());
+  for (const auto& damage : damages) {
+    const auto xid = static_cast<std::uint32_t>(damage.surface_id);
+    auto found = windows_.find(xid);
+    PublishedWindowBuffer* buffer =
+        found != windows_.end() && found->second.staged_buffer
+            ? found->second.staged_buffer.get()
+            : buffers_.current(xid);
+    if (!buffer || !buffer->signal_ready()) {
+      for (auto* prior : signaled) (void)prior->retract_ready();
+      return false;
+    }
+    if (buffer->synchronization() == GWIPC_SYNCHRONIZATION_EVENTFD)
+      signaled.push_back(buffer);
+  }
+  return true;
 }
 
 bool ContentPresenter::prepare_lifecycle(
@@ -112,14 +134,21 @@ bool ContentPresenter::prepare_lifecycle(
       attachment.attach.color.color_space = GWIPC_SDR_COLOR_SPACE_SRGB;
       attachment.attach.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
       attachment.attach.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
-      attachment.attach.synchronization = GWIPC_SYNCHRONIZATION_NONE;
+      attachment.attach.synchronization = buffer->synchronization();
       attachment.fd = buffer->fd();
+      attachment.synchronization_fd = buffer->synchronization_fd();
       submission.buffers.push_back(attachment);
     }
-    if (projected.policy_visible && !dirty.empty())
+    if ((projected.policy_visible ||
+         synchronization_ == GWIPC_SYNCHRONIZATION_EVENTFD) &&
+        !dirty.empty())
       submission.damages.push_back(make_damage(xid, dirty));
     content.pending.clear();
     content.inflight = std::move(dirty);
+  }
+  if (!signal_buffers(submission.damages)) {
+    reject_lifecycle();
+    return false;
   }
   in_flight_ = true;
   return true;
@@ -192,6 +221,11 @@ void ContentPresenter::reject_lifecycle() noexcept {
   in_flight_ = false;
 }
 
+void ContentPresenter::cancel_lifecycle_submission() noexcept {
+  retract_inflight_ready();
+  reject_lifecycle();
+}
+
 bool ContentPresenter::prepare_content(
     const LifecycleSnapshot& snapshot, ResourceTable& resources,
     const std::uint64_t commit, const std::uint64_t generation,
@@ -218,6 +252,10 @@ bool ContentPresenter::prepare_content(
     submission.damages.push_back(make_damage(xid, dirty));
   }
   if (submission.damages.empty()) return false;
+  if (!signal_buffers(submission.damages)) {
+    reject_content();
+    return false;
+  }
   in_flight_ = true;
   return true;
 }
@@ -240,6 +278,23 @@ void ContentPresenter::reject_content() noexcept {
   in_flight_ = false;
 }
 
+void ContentPresenter::cancel_content_submission() noexcept {
+  retract_inflight_ready();
+  reject_content();
+}
+
+void ContentPresenter::retract_inflight_ready() noexcept {
+  for (auto& [xid, content] : windows_) {
+    if (content.inflight.empty()) continue;
+    auto* const buffer = content.staged_buffer
+                             ? content.staged_buffer.get()
+                             : buffers_.current(xid);
+    if (buffer != nullptr &&
+        buffer->synchronization() == GWIPC_SYNCHRONIZATION_EVENTFD)
+      (void)buffer->retract_ready();
+  }
+}
+
 bool ContentPresenter::release(const std::uint64_t buffer_id,
                                const gwipc_buffer_release_reason reason) {
   if (reason == GWIPC_BUFFER_RELEASE_CONSUMER_DONE &&
@@ -257,6 +312,7 @@ bool ContentPresenter::release(const std::uint64_t buffer_id,
 }
 
 void ContentPresenter::peer_disconnected() noexcept {
+  retract_inflight_ready();
   reject_content();
   buffers_.peer_disconnected();
   discarded_buffers_.clear();

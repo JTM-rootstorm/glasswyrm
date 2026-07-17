@@ -84,8 +84,10 @@ bool enqueue_buffer(gwipc_connection* connection,
   message.flags = GWIPC_FLAG_SNAPSHOT_ITEM;
   message.payload = data;
   message.payload_size = size;
-  message.fds = &buffer.fd;
-  message.fd_count = 1;
+  const int fds[2] = {buffer.fd, buffer.synchronization_fd};
+  message.fds = fds;
+  message.fd_count =
+      buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD ? 2 : 1;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
 void forget_cursor(CompositorSnapshotSubmission& submission) {
@@ -108,11 +110,15 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
 CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
                                const bool software_content,
-                               const bool session_state)
+                               const bool session_state,
+                               const bool cpu_buffer_synchronization)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
                  (software_content ? kContentCapabilities
                                    : kMetadataCapabilities) |
-                     (session_state ? GWIPC_CAP_SESSION_STATE : 0),
+                     (session_state ? GWIPC_CAP_SESSION_STATE : 0) |
+                     (cpu_buffer_synchronization
+                          ? GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION
+                          : 0),
                  "glasswyrmd-compositor"),
       screen_(screen), software_content_(software_content),
       session_state_(session_state) {}
@@ -202,7 +208,10 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
   }
   std::set<std::uint64_t> buffer_ids;
   for (const auto& buffer : complete.buffers) {
-    if (buffer.fd < 0 || buffer.attach.buffer_id == 0 ||
+    const bool synchronized =
+        buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD;
+    if (buffer.fd < 0 || synchronized != (buffer.synchronization_fd >= 0) ||
+        buffer.attach.buffer_id == 0 ||
         !buffer_ids.insert(buffer.attach.buffer_id).second ||
         !surface_ids.contains(buffer.attach.surface_id)) {
       error = "invalid buffered compositor attachment";

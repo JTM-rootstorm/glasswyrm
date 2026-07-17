@@ -46,19 +46,23 @@ gw_compositor_geometry_dep = declare_dependency(
   include_directories: [include_directories('.'), gw_include_dir],
 )
 
+gw_render_sources = files(
+  'render/renderer_factory.cpp',
+  'render/renderer_report.cpp',
+  'render/software/blend.cpp',
+  'render/software/renderer.cpp',
+  'render/software/scene_renderer.cpp',
+)
 gw_render_software_lib = static_library(
   'gwcomp-render-software',
-  files(
-    'render/software/blend.cpp',
-    'render/software/renderer.cpp',
-  ),
+  gw_render_sources,
   dependencies: gw_compositor_geometry_dep,
-  include_directories: include_directories('.'),
+  include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 gw_render_software_dep = declare_dependency(
   link_with: gw_render_software_lib,
   dependencies: gw_compositor_geometry_dep,
-  include_directories: include_directories('.'),
+  include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 
   gw_output_lib = static_library(
@@ -219,7 +223,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.6.0',
+    version: '0.7.0',
     soversion: '0',
     install: true,
   )
@@ -254,7 +258,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.6.0',
+    version: '0.7.0',
   )
 endif
 
@@ -452,7 +456,9 @@ if get_option('gwcomp')
   endif
   gwcomp_options_sources = files(
     'gwcomp/options.cpp',
+    'gwcomp/renderer_runtime.cpp',
     'gwcomp/compositor.cpp',
+    'gwcomp/buffer_readiness.cpp',
     'gwcomp/scene_manifest.cpp',
     'gwcomp/runtime.cpp',
     'gwcomp/signal_runtime.cpp',

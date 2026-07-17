@@ -16,6 +16,11 @@ namespace glasswyrm::server {
 
 class ContentPresenter {
  public:
+  explicit ContentPresenter(
+      gwipc_synchronization_mode synchronization =
+          GWIPC_SYNCHRONIZATION_NONE)
+      : synchronization_(synchronization) {}
+
   void damage(std::uint32_t window, geometry::Rectangle rectangle);
 
   [[nodiscard]] bool prepare_lifecycle(
@@ -27,6 +32,7 @@ class ContentPresenter {
   void accept_lifecycle(const LifecycleSnapshot& snapshot,
                         ResourceTable& resources);
   void reject_lifecycle() noexcept;
+  void cancel_lifecycle_submission() noexcept;
 
   [[nodiscard]] bool prepare_content(
       const LifecycleSnapshot& snapshot, ResourceTable& resources,
@@ -34,6 +40,7 @@ class ContentPresenter {
       CompositorContentSubmission& submission);
   void accept_content() noexcept;
   void reject_content() noexcept;
+  void cancel_content_submission() noexcept;
 
   [[nodiscard]] bool release(std::uint64_t buffer_id,
                              gwipc_buffer_release_reason reason);
@@ -63,12 +70,17 @@ class ContentPresenter {
       std::uint32_t xid, const PixelStorage& storage, bool& replaced);
   static CompositorSnapshotSubmission::Damage make_damage(
       std::uint32_t xid, std::span<const geometry::Rectangle> rectangles);
+  [[nodiscard]] bool signal_buffers(
+      std::span<const CompositorSnapshotSubmission::Damage> damages) noexcept;
+  void retract_inflight_ready() noexcept;
 
   PublishedBufferStore buffers_;
   std::map<std::uint32_t, WindowContent> windows_;
   std::set<std::uint64_t> discarded_buffers_;
   bool in_flight_{};
   bool force_replacement_{};
+  gwipc_synchronization_mode synchronization_{
+      GWIPC_SYNCHRONIZATION_NONE};
 };
 
 }  // namespace glasswyrm::server

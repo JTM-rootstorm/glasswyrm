@@ -5,6 +5,7 @@
 #include <linux/memfd.h>
 #include <string>
 #include <sys/mman.h>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 namespace {
@@ -61,5 +62,31 @@ int main() {
   rejected_fd_is_closed(invalid, memfd());
   invalid = attachment(); invalid.storage_size = gw::compositor::BufferMapping::kMaximumMappingBytes + 1;
   rejected_fd_is_closed(invalid, memfd());
+
+  auto synchronized = attachment();
+  synchronized.synchronization = GWIPC_SYNCHRONIZATION_EVENTFD;
+  const int readiness_fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+  gw::test::require(readiness_fd >= 0, "create readiness eventfd");
+  auto synchronized_mapping = gw::compositor::BufferMapping::import(
+      synchronized, memfd(), readiness_fd, error);
+  gw::test::require(
+      synchronized_mapping != nullptr &&
+          synchronized_mapping->consume_readiness(error) ==
+              gw::compositor::BufferReadiness::WouldBlock,
+      "eventfd buffer waits without reading pixels before readiness");
+  const std::uint64_t one = 1;
+  gw::test::require(
+      ::write(synchronized_mapping->readiness_fd(), &one, sizeof(one)) ==
+              static_cast<ssize_t>(sizeof(one)) &&
+          synchronized_mapping->consume_readiness(error) ==
+              gw::compositor::BufferReadiness::Ready,
+      "one eventfd token acquires synchronized buffer readiness");
+  const std::uint64_t two = 2;
+  gw::test::require(
+      ::write(synchronized_mapping->readiness_fd(), &two, sizeof(two)) ==
+              static_cast<ssize_t>(sizeof(two)) &&
+          synchronized_mapping->consume_readiness(error) ==
+              gw::compositor::BufferReadiness::Fatal,
+      "aggregated extra eventfd tokens are protocol-fatal");
   return 0;
 }

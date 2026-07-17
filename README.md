@@ -167,6 +167,20 @@ For the explicit integrated path, start the listeners before the server:
   --compositor-socket /tmp/glasswyrm-gwcomp.sock
 ```
 
+`gwcomp` uses the scalar software scene renderer by default. Milestone 12 adds
+an independent renderer-selection boundary and optional deterministic report:
+
+```sh
+./build/src/gwcomp --renderer software \
+  --renderer-report /tmp/glasswyrm-renderer.jsonl \
+  --ipc-socket /tmp/glasswyrm-gwcomp.sock \
+  --dump-dir /tmp/glasswyrm-dumps
+```
+
+The report path must not already exist. `--renderer auto` honestly records its
+selection and fallback reasons. Forced `--renderer gles` fails at startup when
+the build has no EGL/GLES renderer; it never silently selects software.
+
 `glasswyrmd` does not create `/tmp/.X11-unix/X99` until both peer bootstraps
 are accepted. Mapped windows on this path have policy and scene metadata but no
 client content. Repository-owned raw, XCB, and restart-hold probes exercise the
@@ -381,11 +395,11 @@ core error. It never maps or displays the window.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.6 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.7 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and compositor,
-window-policy, lifecycle, synthetic-input, session-state, and interactive
-policy vocabularies. Wire 1.0 and
+window-policy, lifecycle, synthetic-input, session-state, interactive-policy,
+and eventfd CPU-buffer synchronization vocabularies. Wire 1.0 and
 SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
 control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.

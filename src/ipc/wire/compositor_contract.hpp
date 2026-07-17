@@ -29,7 +29,7 @@ enum class ColorPrimaries : std::uint16_t { Srgb = 1, DisplayP3 = 2 };
 enum class TriState : std::uint8_t { Unknown = 0, False = 1, True = 2 };
 enum class PixelFormat : std::uint16_t { Xrgb8888 = 1, Argb8888 = 2 };
 enum class AlphaSemantics : std::uint16_t { Opaque = 1, Premultiplied = 2 };
-enum class SynchronizationMode : std::uint16_t { None = 0 };
+enum class SynchronizationMode : std::uint16_t { None = 0, EventFd = 1 };
 enum class BufferReleaseReason : std::uint16_t {
   Replaced = 1,
   SurfaceRemoved = 2,

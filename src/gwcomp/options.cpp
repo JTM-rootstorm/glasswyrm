@@ -19,6 +19,7 @@ void print_usage(std::ostream& output) {
       "  drm options: [--connector NAME] [--mode WIDTHxHEIGHT[@MILLIHZ]]\n"
       "               [--drm-api auto|atomic|legacy]\n"
       "               [--mirror-dump-dir PATH] [--drm-report PATH]\n"
+      "  renderer: [--renderer software|gles|auto] [--renderer-report PATH]\n"
       "  common: [--once] [--max-frames N] [--help] [--version]\n";
 }
 
@@ -240,6 +241,28 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
       if (!take_path(argc, argv, index, path, argument, error))
         return ParseOptionsResult::ExitFailure;
       options.scene_manifest = path;
+      continue;
+    }
+    if (argument == "--renderer") {
+      std::string value;
+      if (!take_path(argc, argv, index, value, argument, error))
+        return ParseOptionsResult::ExitFailure;
+      if (value == "software")
+        options.renderer = gw::render::RendererRequest::Software;
+      else if (value == "gles")
+        options.renderer = gw::render::RendererRequest::Gles;
+      else if (value == "auto")
+        options.renderer = gw::render::RendererRequest::Auto;
+      else {
+        error << "gwcomp: --renderer requires software, gles, or auto\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      continue;
+    }
+    if (argument == "--renderer-report") {
+      if (!take_optional_path(argc, argv, index, options.renderer_report,
+                              argument, error))
+        return ParseOptionsResult::ExitFailure;
       continue;
     }
     if (argument == "--once") {

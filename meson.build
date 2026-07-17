@@ -205,6 +205,7 @@ config_data.set10('GW_HAS_DRM_BACKEND', get_option('drm_backend'))
 config_data.set10('GW_HAS_HEADLESS_BACKEND', get_option('headless_backend'))
 config_data.set10('GW_HAS_LIBINPUT_BACKEND', get_option('libinput_backend'))
 config_data.set10('GW_HAS_EXPERIMENTAL', get_option('experimental'))
+config_data.set10('GW_HAS_GLES_RENDERER', false)
 
 configure_file(
   output: 'config.hpp',

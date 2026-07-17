@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/scene_renderer.hpp"
+
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
@@ -30,6 +32,8 @@ struct Options {
   std::optional<std::string> mirror_dump_dir;
   std::optional<std::string> drm_report;
   std::optional<std::string> scene_manifest;
+  gw::render::RendererRequest renderer{gw::render::RendererRequest::Software};
+  std::optional<std::string> renderer_report;
   bool once{false};
   std::optional<std::uint64_t> max_frames;
 };
