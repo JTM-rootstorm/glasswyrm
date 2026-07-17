@@ -34,6 +34,9 @@ std::vector<std::uint8_t> encode_for(const ClientConnection& client,
         else if constexpr (std::is_same_v<Event, x11::SelectionNotifyEvent>)
           return x11::encode_selection_notify(
               client.byte_order(), client.last_request_sequence(), value);
+        else if constexpr (std::is_same_v<Event, x11::UnmapNotifyEvent>)
+          return x11::encode_unmap_notify(
+              client.byte_order(), client.last_request_sequence(), value);
         else if constexpr (std::is_same_v<Event, x11::ClientMessageEvent>)
           return x11::encode_client_message(
               client.byte_order(), client.last_request_sequence(), value);

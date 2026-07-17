@@ -40,7 +40,8 @@ std::vector<std::uint8_t> encode_destroy_notify(
 std::vector<std::uint8_t> encode_unmap_notify(
     const ByteOrder order, const std::uint64_t sequence,
     const UnmapNotifyEvent& event) {
-  auto writer = event_header(order, CoreEventType::UnmapNotify, sequence);
+  auto writer = event_header(order, CoreEventType::UnmapNotify, sequence,
+                             event.synthetic);
   writer.write_u32(event.event);
   writer.write_u32(event.window);
   writer.write_u8(event.from_configure ? 1 : 0);
