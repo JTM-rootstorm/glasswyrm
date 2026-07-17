@@ -102,7 +102,7 @@ int main() {
                                {0xff102030U, 0xff405060U, 0xff708090U,
                                 0xffa0b0c0U}));
   const gw::render::SurfaceAttachmentMap attachments{{10, 20}};
-  const std::array<gw::compositor::Rectangle, 1> damage{{0, 0, 1, 1}};
+  const std::array<gw::compositor::Rectangle, 1> damage{{{0, 0, 1, 1}}};
   glasswyrm::output::SoftwareFrame previous;
   std::string error;
   gw::test::require(previous.configure(1, 2, 2, error), error);
@@ -209,7 +209,7 @@ int main() {
       21, mapping(21, GWIPC_PIXEL_FORMAT_XRGB8888,
                   {0xff102030U, 0xff405060U, 0xff708090U, 0xffa0b0c0U}));
   const gw::render::SurfaceAttachmentMap equivalence_attachments{{10, 21}};
-  const std::array<gw::compositor::Rectangle, 1> full_damage{{0, 0, 2, 2}};
+  const std::array<gw::compositor::Rectangle, 1> full_damage{{{0, 0, 2, 2}}};
   const gw::render::RenderFrameRequest equivalence_request{
       equivalence_scene, stacking, equivalence_mappings,
       equivalence_attachments, full_damage, &previous, 10, 11, 12};
@@ -229,7 +229,7 @@ int main() {
           opaque_gles.metrics.readback_bytes == 16,
       "full opaque GLES output is exact and reports bounded work");
 
-  const std::array<gw::compositor::Rectangle, 1> partial_damage{{1, 1, 1, 1}};
+  const std::array<gw::compositor::Rectangle, 1> partial_damage{{{1, 1, 1, 1}}};
   const gw::render::RenderFrameRequest partial_request{
       equivalence_scene, stacking, equivalence_mappings,
       equivalence_attachments, partial_damage, &opaque_gles.frame,
