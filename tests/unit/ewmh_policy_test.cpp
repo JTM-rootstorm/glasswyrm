@@ -61,7 +61,8 @@ void test_atomic_fullscreen_and_restore(const x11::ByteOrder order) {
   ServerState state(kScreenModel, true);
   constexpr std::uint32_t window = 0x400010;
   create_window(state, 1, window);
-  DispatchContext integrated{1, 0x400000, 0x1fffff, 11, order, true};
+  DispatchContext integrated{1, 0x400000, 0x1fffff, 11, order, true,
+                             InputSnapshot{0, 0, 0, 1, 11}};
   const auto state_atom = state.atoms().find("_NET_WM_STATE").value();
   const auto fullscreen =
       state.atoms().find("_NET_WM_STATE_FULLSCREEN").value();
@@ -70,6 +71,7 @@ void test_atomic_fullscreen_and_restore(const x11::ByteOrder order) {
   const auto* unchanged = state.resources().find_window(window);
   require(result.kind == DispatchKind::DeferredLifecycle &&
               result.deferred_policy && result.deferred_policy->property &&
+              result.deferred_policy->property->notify_time == 11 &&
               result.deferred_policy->window.fullscreen_requested &&
               result.deferred_policy->window.saved_normal_geometry &&
               !unchanged->fullscreen_requested &&

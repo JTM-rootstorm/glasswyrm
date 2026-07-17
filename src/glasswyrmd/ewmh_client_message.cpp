@@ -74,7 +74,8 @@ DispatchResult state_message(ServerState& state,
   return DispatchResult::deferred_policy_change(
       {found->second,
        DeferredPropertyMutation{event.window, property_atom,
-                                std::move(property)},
+                                std::move(property),
+                                context.input.logical_time},
        false});
 }
 
