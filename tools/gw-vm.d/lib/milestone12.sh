@@ -377,6 +377,7 @@ failure_stage=sdl-acquisition
 "$source_dir/tests/compat/m12/acquire_sdl.sh" "$clients/download"
 sdl_archive=$clients/download/SDL2-2.32.10.tar.gz
 [[ $(sha256sum "$sdl_archive" | awk '{print $1}') == 5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 ]]
+failure_stage=client-build
 "$source_dir/tests/compat/m12/build_clients.sh" "$sdl_archive" \
   "$clients/source" "$clients/build" "$clients/install" \
   >"$artifact_dir/milestone12-client-build.log" 2>&1

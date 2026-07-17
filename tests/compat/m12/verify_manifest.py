@@ -21,9 +21,10 @@ PROGRAM_HASHES = {
 REQUIRED_BUILD_ARGUMENTS = {
     "-DSDL_SHARED=ON",
     "-DSDL_STATIC=OFF",
-    "-DSDL_TESTS=ON",
+    "-DSDL_TEST=ON",
+    "-DSDL_TESTS=OFF",
     "-DSDL_X11=ON",
-    "-DSDL_X11_SHARED=OFF",
+    "-DSDL_X11_SHARED=ON",
     "-DSDL_X11_XFIXES=ON",
     "-DSDL_X11_XRANDR=ON",
     "-DSDL_X11_XCURSOR=OFF",
@@ -107,6 +108,12 @@ def main() -> int:
     require(
         set(document.get("environment", ())) == REQUIRED_ENVIRONMENT,
         "runtime environment differs from the frozen profile",
+        errors,
+    )
+    require(
+        document.get("official_program_compile_flags")
+        == ["-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter"],
+        "official program compile flags differ",
         errors,
     )
     sources = document.get("source", [])

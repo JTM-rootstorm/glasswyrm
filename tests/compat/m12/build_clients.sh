@@ -23,8 +23,8 @@ python3 "$here/verify_manifest.py" "$manifest" --archive "$archive" --source-tre
 
 cmake -S "$source" -B "$build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$prefix" \
-  -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=ON -DSDL_TESTS=ON \
-  -DSDL_X11=ON -DSDL_X11_SHARED=OFF -DSDL_X11_XFIXES=ON \
+  -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST=ON -DSDL_TESTS=OFF \
+  -DSDL_X11=ON -DSDL_X11_SHARED=ON -DSDL_X11_XFIXES=ON \
   -DSDL_X11_XRANDR=ON -DSDL_X11_XCURSOR=OFF -DSDL_X11_XDBE=OFF \
   -DSDL_X11_XINPUT=OFF -DSDL_X11_XSCRNSAVER=OFF -DSDL_X11_XSHAPE=OFF \
   -DSDL_WAYLAND=OFF -DSDL_KMSDRM=OFF -DSDL_OPENGL=OFF \
@@ -37,16 +37,23 @@ cmake -S "$source" -B "$build" -G Ninja \
   -DSDL_OSS=OFF -DSDL_ESD=OFF -DSDL_ARTS=OFF -DSDL_NAS=OFF \
   -DSDL_FUSIONSOUND=OFF -DSDL_LIBSAMPLERATE=OFF -DSDL_DISKAUDIO=OFF \
   -DSDL_DUMMYAUDIO=ON
-ninja -C "$build" SDL2 testdraw2 testsprite2
+ninja -C "$build" SDL2 SDL2_test SDL2main
 cmake --install "$build"
 
 export PKG_CONFIG_PATH="$prefix/lib64/pkgconfig:$prefix/lib/pkgconfig"
+official_cflags=(-std=c11 -Wall -Wextra -Werror -Wno-unused-parameter)
+cc "${official_cflags[@]}" "$source/test/testdraw2.c" \
+  -o "$prefix/bin/testdraw2" "$build/libSDL2_test.a" \
+  $(pkg-config --cflags --libs sdl2) -lm
+cc "${official_cflags[@]}" \
+  "$source/test/testsprite2.c" "$source/test/testutils.c" \
+  -o "$prefix/bin/testsprite2" "$build/libSDL2_test.a" \
+  $(pkg-config --cflags --libs sdl2) -lm
 cc -std=c11 -Wall -Wextra -Werror "$here/m12_sdl_probe.c" \
   -o "$prefix/bin/m12_sdl_probe" $(pkg-config --cflags --libs sdl2)
 cc -std=c11 -Wall -Wextra -Werror \
   "$here/m12_xcb_probe.c" "$here/m12_xcb_graphics.c" \
   -o "$prefix/bin/m12_xcb_probe" \
   $(pkg-config --cflags --libs xcb xcb-shm xcb-xfixes xcb-damage xcb-render xcb-composite xcb-randr)
-install -m 0755 "$build/test/testdraw2" "$build/test/testsprite2" "$prefix/bin/"
 install -m 0644 "$source/test/icon.bmp" "$prefix/bin/icon.bmp"
 printf 'M12 external clients built beneath %s\n' "$prefix"

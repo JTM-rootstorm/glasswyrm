@@ -45,8 +45,8 @@ only the X11 software path needed by the tests:
 ```text
 CMAKE_BUILD_TYPE=Release       SDL_SHARED=ON
 SDL_STATIC=OFF                 SDL_TEST=ON
-SDL_TESTS=ON                   SDL_X11=ON
-SDL_X11_SHARED=OFF             SDL_X11_XFIXES=ON
+SDL_TESTS=OFF                  SDL_X11=ON
+SDL_X11_SHARED=ON              SDL_X11_XFIXES=ON
 SDL_X11_XRANDR=ON              SDL_DUMMYAUDIO=ON
 ```
 
@@ -76,6 +76,13 @@ SDL_DISKAUDIO=OFF
 The manifest is authoritative for the exact `-D` arguments. This profile does
 not cover a distribution SDL build with a different dynamic X11 table or
 enabled backend set.
+
+SDL 2.32.10's test CMake project requires the disabled static SDL library.
+The harness therefore builds the unmodified `testdraw2.c` and `testsprite2.c`
+sources directly against `SDL2_test` and the installed shared SDL library.
+The frozen external-source flags retain `-Werror` with only
+`-Wno-unused-parameter` for an intentional callback parameter in
+`testsprite2.c`.
 
 The runtime environment is fixed:
 

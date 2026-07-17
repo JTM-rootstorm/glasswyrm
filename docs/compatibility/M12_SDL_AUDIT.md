@@ -12,6 +12,12 @@ fingerprint `1528635D8053A57F77D1E08630A59377A7763BE6`. Exact URLs, hashes, buil
 switches, program source hashes, environment, and argv are frozen in
 `tests/compat/m12/clients.toml`.
 
+SDL 2.32.10's test-directory CMake logic links every program to
+`SDL2-static`. Because the accepted profile deliberately sets
+`SDL_STATIC=OFF`, the harness builds the two hash-verified, unmodified official
+program sources directly against the upstream `SDL2_test` archive and the
+installed shared SDL library.
+
 ## Audited X11 paths
 
 `SDL_x11framebuffer.c` queries MIT-SHM, allocates a same-process SysV segment,
