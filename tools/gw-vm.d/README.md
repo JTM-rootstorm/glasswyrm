@@ -87,6 +87,7 @@ actions:
 ./tools/gw-vm milestone3-runtime-test --yes
 ./tools/gw-vm milestone4-runtime-test --yes
 ./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm milestone12-runtime-test --yes
 ./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
@@ -284,3 +285,21 @@ subdirectory, so authoritative full-run evidence is not replaced. Its archive
 contains diagnostic provenance recording both the current runtime rebuild
 commit and the earlier full build commit. Rerun the complete command afterward
 to produce authoritative acceptance evidence.
+
+Milestone 12 uses the fixed historical sequence:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone12-runtime-test --yes
+```
+
+The M12 command requires committed source descending from
+`ae6b6c93a29a1fb985dcea8455650d15c0fec364` and the configured internal
+`base` snapshot. It acquires pinned SDL 2.32.10, builds the fixed X11 software
+profile, runs the default/software/GLES/sanitizer and component matrices, and
+exercises SHM and non-SHM SDL workloads against DRM. Canonical and host DRM
+screenshots must compare byte-for-byte. The accepted result is
+`milestone12-summary.json`; its checksum-protected evidence archive and logs
+are collected beneath the configured `artifacts/vm/` path.
