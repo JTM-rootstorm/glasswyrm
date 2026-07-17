@@ -1114,7 +1114,6 @@ if get_option('glasswyrmd')
   foreach unit_case : [
     ['resource-id', 'resource_id_test.cpp'],
     ['resource-table', 'resource_table_test.cpp'],
-    ['window-tree', 'window_tree_test.cpp'],
     ['server-lifecycle-state', 'server_lifecycle_state_test.cpp'],
     ['local-lifecycle-dispatch', 'local_lifecycle_dispatch_test.cpp'],
     ['lifecycle-coordinator', 'lifecycle_coordinator_test.cpp'],
@@ -1147,12 +1146,19 @@ if get_option('glasswyrmd')
       dependencies: gw_server_state_dep,
       include_directories: test_source_root_include,
     )
-    unit_timeout = 10
-    if unit_case[0] == 'window-tree'
-      unit_timeout = 30
-    endif
-    test(unit_case[0], unit_program, timeout: unit_timeout)
+    test(unit_case[0], unit_program, timeout: 10)
   endforeach
+
+  window_tree_test = executable(
+    'window_tree_test',
+    files('unit/window_tree_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('window-tree', window_tree_test, args: ['basic'], timeout: 10)
+  test('window-tree-deep', window_tree_test, args: ['deep'], timeout: 30)
+  test('window-tree-wide', window_tree_test, args: ['wide'], timeout: 30)
+  test('window-tree-mixed', window_tree_test, args: ['mixed'], timeout: 10)
 
   x11_fake_client_lib = static_library(
     'x11-fake-client',
