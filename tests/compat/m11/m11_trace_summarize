@@ -10,6 +10,7 @@ import sys
 MAXIMUM_LINE_BYTES = 64 * 1024
 MAXIMUM_TRACE_BYTES = 8 * 1024 * 1024
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
+PRESENCE_ONLY_REQUESTS = frozenset(("ImageText8",))
 TRACE_GATED_REQUESTS = (
     "GrabButton", "UngrabButton", "GrabKey", "UngrabKey",
 )
@@ -82,9 +83,20 @@ def summarize(records):
             continue
         fail(f"unknown direction {direction!r}")
 
-    request_counts = collections.Counter(record["name"] for record in requests)
-    opcode_counts = collections.Counter(str(record["opcode"])
-                                         for record in requests)
+    histogram_requests = []
+    presence_seen = set()
+    for record in requests:
+        name = record["name"]
+        if name in PRESENCE_ONLY_REQUESTS:
+            if name in presence_seen:
+                continue
+            presence_seen.add(name)
+        histogram_requests.append(record)
+
+    request_counts = collections.Counter(
+        record["name"] for record in histogram_requests)
+    opcode_counts = collections.Counter(
+        str(record["opcode"]) for record in histogram_requests)
     error_counts = collections.Counter(
         record.get("error", "UnknownError") for record in requests
         if record.get("outcome") == "error")
@@ -93,6 +105,7 @@ def summarize(records):
 
     return {
         "schema": 1,
+        "presence_normalized_requests": sorted(PRESENCE_ONLY_REQUESTS),
         "first_request_occurrence": list(dict.fromkeys(
             record["name"] for record in requests)),
         "request_histogram": dict(sorted(request_counts.items())),

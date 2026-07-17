@@ -12,7 +12,7 @@ import tempfile
 requests = {name: 1 for name in (
     "ChangeWindowAttributes", "CreateGlyphCursor", "FreeCursor",
     "RecolorCursor", "GetSelectionOwner", "SetSelectionOwner",
-    "ConvertSelection", "SendEvent", "GrabButton")}
+    "ConvertSelection", "SendEvent", "GrabButton", "ImageText8")}
 events = {str(event_type): count for event_type, count in (
     (2, 3), (3, 1), (4, 4), (5, 4), (6, 1), (22, 1), (28, 1),
     (29, 1), (30, 1), (31, 1), (33, 1))}
@@ -23,10 +23,13 @@ sequence = [
 ]
 fixture = {
     "schema": 1,
+    "presence_normalized_requests": ["ImageText8"],
     "first_request_occurrence": list(requests),
     "request_histogram": requests,
-    "opcode_histogram": {str(index): 1
-                         for index in range(1, len(requests) + 1)},
+    "opcode_histogram": {
+        **{str(index): 1 for index in range(1, len(requests))},
+        "76": 1,
+    },
     "event_histogram": events,
     "event_sequence": sequence,
     "error_histogram": {},
@@ -72,6 +75,22 @@ with tempfile.TemporaryDirectory() as temporary:
     changed = copy.deepcopy(fixture)
     changed["extra"] = 1
     rejected(directory, changed, "unexpected or missing fields")
+
+    changed = copy.deepcopy(fixture)
+    changed["presence_normalized_requests"] = []
+    rejected(directory, changed, "invalid presence_normalized_requests")
+
+    changed = copy.deepcopy(fixture)
+    changed["request_histogram"]["ImageText8"] = 2
+    changed["opcode_histogram"]["76"] = 2
+    rejected(directory, changed,
+             "presence-normalized request count must be one")
+
+    changed = copy.deepcopy(fixture)
+    changed["opcode_histogram"]["76"] = 2
+    changed["opcode_histogram"].pop("1")
+    rejected(directory, changed,
+             "presence-normalized opcode count must be one")
 
     changed = copy.deepcopy(fixture)
     changed["trace_gated_requests"]["GrabButton"] = 2
