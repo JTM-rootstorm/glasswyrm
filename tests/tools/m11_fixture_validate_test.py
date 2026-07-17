@@ -12,7 +12,8 @@ import tempfile
 requests = {name: 1 for name in (
     "ChangeWindowAttributes", "CreateGlyphCursor", "FreeCursor",
     "RecolorCursor", "GetSelectionOwner", "SetSelectionOwner",
-    "ConvertSelection", "SendEvent", "GrabButton", "ImageText8")}
+    "ConvertSelection", "SendEvent", "GrabButton", "ClearArea", "CopyArea",
+    "ImageText8", "PolyLine", "PutImage")}
 events = {str(event_type): count for event_type, count in (
     (2, 3), (3, 1), (4, 4), (5, 4), (6, 1), (22, 1), (28, 1),
     (29, 1), (30, 1), (31, 1), (33, 1))}
@@ -23,12 +24,13 @@ sequence = [
 ]
 fixture = {
     "schema": 1,
-    "presence_normalized_requests": ["ImageText8"],
+    "presence_normalized_requests": [
+        "ClearArea", "CopyArea", "ImageText8", "PolyLine", "PutImage"],
     "first_request_occurrence": list(requests),
     "request_histogram": requests,
     "opcode_histogram": {
-        **{str(index): 1 for index in range(1, len(requests))},
-        "76": 1,
+        **{str(index): 1 for index in range(1, 10)},
+        "61": 1, "62": 1, "65": 1, "72": 1, "76": 1,
     },
     "event_histogram": events,
     "event_sequence": sequence,

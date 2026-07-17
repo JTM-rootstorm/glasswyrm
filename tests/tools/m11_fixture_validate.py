@@ -16,7 +16,14 @@ REQUIRED_REQUESTS = frozenset((
 REQUIRED_EVENT_TYPES = frozenset((2, 3, 4, 5, 6, 22, 28, 29, 30, 31, 33))
 TRACE_GATED_REQUESTS = frozenset(("GrabButton",))
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
-PRESENCE_NORMALIZED_REQUESTS = frozenset(("ImageText8",))
+PRESENCE_NORMALIZED_OPCODES = {
+    "ClearArea": "61",
+    "CopyArea": "62",
+    "ImageText8": "76",
+    "PolyLine": "65",
+    "PutImage": "72",
+}
+PRESENCE_NORMALIZED_REQUESTS = frozenset(PRESENCE_NORMALIZED_OPCODES)
 TRACE_KEYS = frozenset((
     "schema", "presence_normalized_requests", "first_request_occurrence",
     "request_histogram",
@@ -105,7 +112,8 @@ if sum(opcodes.values()) != sum(requests.values()):
     fail("opcode_histogram does not match request_histogram")
 if any(requests.get(name) != 1 for name in PRESENCE_NORMALIZED_REQUESTS):
     fail("presence-normalized request count must be one")
-if opcodes.get("76") != 1:
+if any(opcodes.get(opcode) != 1
+       for opcode in PRESENCE_NORMALIZED_OPCODES.values()):
     fail("presence-normalized opcode count must be one")
 
 first_requests = unique_string_list(trace.get("first_request_occurrence"),

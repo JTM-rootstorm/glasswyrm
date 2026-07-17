@@ -45,7 +45,8 @@ with tempfile.TemporaryDirectory() as directory:
     output = subprocess.check_output([sys.argv[1], path], text=True)
 
 summary = json.loads(output)
-assert summary["presence_normalized_requests"] == ["ImageText8"]
+assert summary["presence_normalized_requests"] == [
+    "ClearArea", "CopyArea", "ImageText8", "PolyLine", "PutImage"]
 assert summary["first_request_occurrence"] == [
     "QueryExtension", "QueryPointer", "ImageText8", "GrabButton", "Unknown"]
 assert summary["request_histogram"] == {
