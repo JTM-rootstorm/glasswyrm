@@ -15,3 +15,4 @@ Current compatibility status:
 - [X11 Milestone 8 synthetic input and event profile](x11-milestone-8.md)
 - [X11 Milestone 9 simple-client profile](x11-milestone-9.md)
 - [X11 Milestone 11 interactive profile](x11-milestone-11.md)
+- [X11 Milestone 12 game-client profile](x11-milestone-12.md)

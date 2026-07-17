@@ -8,5 +8,5 @@ extension compatibility.
 - [Milestone 12 BIG-REQUESTS subset](M12_BIG_REQUESTS.md)
 - [Milestone 12 MIT-SHM subset](M12_MIT_SHM.md)
 - [Milestone 12 XFIXES and DAMAGE subsets](M12_XFIXES_DAMAGE.md)
-- [Milestone 12 RENDER and COMPOSITE target profile](M12_RENDER_COMPOSITE.md)
+- [Milestone 12 RENDER and COMPOSITE profile](M12_RENDER_COMPOSITE.md)
 - [Milestone 12 RANDR subset](M12_RANDR.md)

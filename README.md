@@ -12,6 +12,13 @@ core cursor/grab/selection behavior, interactive GWM bindings, coordinated
 input/VT state, and a session launcher. The pinned xterm patch 410 core-font
 ASCII profile is validated by the live interaction, restart, VT, normalized
 trace, canonical-frame, graphical-console, restoration, and archive gates.
+Milestone 12 implementation adds an opt-in game-compatibility registry,
+bounded BIG-REQUESTS, MIT-SHM, XFIXES, DAMAGE, RENDER, COMPOSITE, and RANDR
+subsets, SDL-oriented EWMH policy, eventfd CPU-buffer readiness, a renderer
+abstraction with optional EGL/GLES composition, and damage-aware DRM copies.
+The exact SDL 2.32.10 software-X11 profile and official workloads are pinned,
+but their external-client claim remains pending until the clean M11-to-M12
+Gentoo VM sequence passes with complete evidence.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -40,9 +47,10 @@ Milestone 10 preserves that canonical software frame and adds an opt-in Linux
 DRM/KMS presenter using XRGB8888 dumb buffers, atomic modesetting when fully
 usable, a legacy fallback, delayed presentation completion, and direct or
 inherited session ownership. Headless remains the default. Milestone 11 builds
-the first real-device and interactive baseline on those boundaries. Broad X11
-application support, the XKB extension, acceleration, and multi-output policy
-remain absent.
+the first real-device and interactive baseline on those boundaries. M12 keeps
+software rendering as the default and adds only a constrained compositor-side
+GLES path; broad X11 application support, the XKB extension, client graphics
+APIs, direct scanout, and multi-output policy remain absent.
 Runtime tools remain placeholders.
 
 ## Build
@@ -115,6 +123,25 @@ With `libinput_backend=false` (the default), Meson does not discover or link
 libinput or libxkbcommon. Enabling it requires `glasswyrmd` and `libgwipc` plus
 libinput, libxkbcommon, xkeyboard-config data, and timerfd support.
 
+The optional M12 compositor renderer is built separately from the DRM
+presenter:
+
+```sh
+meson setup build-m12 \
+  -Dexperimental=true \
+  -Drender_gl=true \
+  -Ddrm_backend=true \
+  -Dlibinput_backend=true \
+  -Dwerror=true
+meson compile -C build-m12
+meson test -C build-m12 --print-errorlogs
+```
+
+`render_gl=true` requires `gwcomp`, EGL 1.5 platform entry points, and OpenGL
+ES 2.0; GBM is optional. The default `render_gl=false` build does not discover
+or link EGL, GLES, or GBM. `experimental=true` builds the M12 server code but
+does not enable it at runtime without `--game-compat`.
+
 `compile_commands.json` is generated in each Meson build directory.
 
 ## Running the setup server
@@ -134,6 +161,7 @@ The complete command line is:
 glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
             [--software-content] [--synthetic-input-socket PATH]
+            [--game-compat] [--disable-extension NAME]...
             [--x11-trace PATH]
             [--libinput-device PATH]...
             [--xkb-rules NAME] [--xkb-model NAME]
@@ -211,6 +239,23 @@ subset only. Add the M8 listener to the same three-process launch with:
 The provider supplies device-like records, never target XIDs. This remains a
 repository-owned toy-client path and does not claim real input or normal
 application compatibility.
+
+Add `--game-compat` only to an integrated software-content launch built with
+`experimental=true`:
+
+```sh
+./build-m12/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock \
+  --software-content \
+  --game-compat
+```
+
+This selects the fixed M12 setup and extension registry. Without it, extension
+discovery remains historically absent. A repeated `--disable-extension NAME`
+is valid only with the game profile and is reserved for explicit fallback
+testing; names and assignments come from the immutable registry. See the
+[Milestone 12 protocol profile](docs/protocols/x11-milestone-12.md).
 
 ## Milestone 9 compatibility work
 
@@ -333,6 +378,33 @@ the current committed source, then repeats the live input, VT/restart,
 restoration, and archive path. Its summary explicitly is not an acceptance
 result; the complete clean `milestone11-runtime-test` remains the final gate.
 
+## Milestone 12 efficient SDL profile
+
+The M12 target is the unmodified SDL 2.32.10 X11 software-renderer build and
+the exact repository probe, official `testdraw2`, and official `testsprite2`
+commands pinned in `tests/compat/m12/clients.toml`. The game profile exposes
+one output and workspace, a bounded extension set, client TrueColor colormaps,
+fullscreen-desktop and borderless policy, and eventfd-synchronized damaged
+buffer publication. The scalar renderer remains canonical; forced GLES uses
+only the constrained compositor renderer and still hands the same
+`SoftwareFrame` to headless or DRM presentation.
+
+This is not yet an accepted compatibility claim. The required release order is:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone12-runtime-test --yes
+```
+
+The final command must prove both byte orders, MIT-SHM and its fallback,
+software/GLES opaque-frame equality, real input/clipboard/cursor/close,
+fullscreen geometry restore, damage-aware upload and scanout metrics,
+GWM/compositor/VT replay, KMS/KD/VT/getty restoration, cleanup, and evidence
+archive integrity. Until it returns a passing summary with no evidence errors,
+the [SDL profile](docs/compatibility/M12_SDL.md) remains explicitly pending.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:
@@ -379,7 +451,8 @@ core error. It never maps or displays the window.
 
 - `glasswyrmd`: owns X11 protocol, resource, input, cursor, grab, and selection
   truth; implements standalone M2, the integrated lifecycle, M8 synthetic
-  input, and the opt-in M11 real-input profile.
+  input, the opt-in M11 real-input profile, and the opt-in M12 extension/EWMH
+  game profile.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
 - `gwcomp`: owns software composition and final display authority; it retains
@@ -387,8 +460,11 @@ core error. It never maps or displays the window.
   through the opt-in M10 DRM/KMS backend. It accepts M6 metadata-only scenes
   without fake buffers and buffered ProtocolServer surfaces in M7
   software-content mode and capability-gated software cursor/session state.
+  M12 adds independent software/GLES renderer selection, eventfd readiness,
+  and damage-aware DRM copies without moving presentation authority.
 - `glasswyrm-session`: unprivileged three-process and optional-client
-  orchestrator for the M11 development session.
+  orchestrator for the M11 development session with additive M12 game-profile
+  and renderer argument forwarding.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
@@ -534,6 +610,17 @@ QXL guest meets that boundary and the command validates atomic scanout,
 graphical-console screenshots, VT switching, input-driven repaint, restoration,
 and the required binary evidence archive.
 
+The Milestone 11 and pending Milestone 12 acceptance commands are:
+
+```sh
+./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm milestone12-runtime-test --yes
+```
+
+M12 must be preceded by the documented reset/M11/reset sequence so the
+historical dependency-absence and pinned xterm boundary are re-proven before
+Mesa, X11 extension libraries, and SDL build dependencies are installed.
+
 ## Compatibility
 
 Glasswyrm claims the standalone behavior documented in
@@ -549,3 +636,7 @@ The [Milestone 11 profile](docs/protocols/x11-milestone-11.md) records the
 accepted interactive subset, while the
 [xterm profile](docs/compatibility/M11_XTERM.md) limits the external-client
 claim to the pinned patch 410 core-font ASCII invocation.
+The [Milestone 12 profile](docs/protocols/x11-milestone-12.md) records the
+implemented opt-in extension and efficient-buffer boundary. Its
+[SDL 2.32.10 profile](docs/compatibility/M12_SDL.md) is pinned but remains
+pending until the clean Gentoo VM evidence gate passes.
