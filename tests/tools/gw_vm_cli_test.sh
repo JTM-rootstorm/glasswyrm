@@ -1757,6 +1757,18 @@ assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   "state=1 result=[12]"
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   "state=2 result=[12]"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "'active VT':(before['active'][0],after['active'][0])"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "'VT signal':(before['active'][1],after['active'][1])"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "'VT mode':(before['mode'],after['mode'])"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  "'KD mode':(before['kd'],after['kd'])"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'VT open-mask changed (observational only)'
+assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'cmp "$artifact_dir/milestone11-vt-before.json"'
 assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   "grep -F 'suspended'"
 assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \

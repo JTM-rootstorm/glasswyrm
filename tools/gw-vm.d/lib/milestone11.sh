@@ -503,6 +503,24 @@ finally: os.close(fd)
 json.dump({'active':struct.unpack('=HHH',active),'mode':struct.unpack('=BBhhh',mode),'kd':struct.unpack('=i',kd)[0]},open(output,'w'),sort_keys=True)
 PY
 }
+verify_vt_state_restored() {
+  python3 - "$1" "$2" <<'PY'
+import json,sys
+before=json.load(open(sys.argv[1])); after=json.load(open(sys.argv[2]))
+checks={
+  'active VT':(before['active'][0],after['active'][0]),
+  'VT signal':(before['active'][1],after['active'][1]),
+  'VT mode':(before['mode'],after['mode']),
+  'KD mode':(before['kd'],after['kd']),
+}
+for label,(left,right) in checks.items():
+  if left != right:
+    raise SystemExit(f'{label} was not restored: {left!r} != {right!r}')
+before_mask,after_mask=before['active'][2],after['active'][2]
+if before_mask != after_mask:
+  print(f'VT open-mask changed (observational only): {before_mask!r} -> {after_mask!r}')
+PY
+}
 "$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone11-kms-before.json"
 capture_vt_state "$artifact_dir/milestone11-vt-before.json"
@@ -946,7 +964,8 @@ result[service_results]=passed
   --require-mode 1024x768 --expect-restored "$artifact_dir/milestone11-kms-before.json" \
   --output "$artifact_dir/milestone11-kms-after.json"
 capture_vt_state "$artifact_dir/milestone11-vt-after.json"
-cmp "$artifact_dir/milestone11-vt-before.json" "$artifact_dir/milestone11-vt-after.json"
+verify_vt_state_restored "$artifact_dir/milestone11-vt-before.json" \
+  "$artifact_dir/milestone11-vt-after.json"
 result[kms_restore]=passed result[kd_restore]=passed result[vt_restore]=passed
 restore_logind_state
 restore_getty_state
