@@ -1,6 +1,6 @@
 # Milestone 12 source-layout audit
 
-Status: implementation layout passes; final VM acceptance is pending.
+Status: accepted implementation layout; final VM acceptance complete.
 
 Required baseline: `ae6b6c93a29a1fb985dcea8455650d15c0fec364`
 
@@ -63,8 +63,8 @@ re-run the guard and reconsider decomposition rather than adding an exception.
 
 ## Current proof boundary
 
-The source-layout script passes at the implementation snapshot with nine
-review items and an empty active allowlist. This proves repository structure,
-not runtime correctness. Strict compiler, sanitizer, component, historical
-regression, and clean Gentoo VM gates remain independently required before
-Milestone 12 can be marked accepted.
+The source-layout script passes at the accepted implementation snapshot with
+nine review items and an empty active allowlist. This proves repository
+structure, not runtime correctness; strict compiler, sanitizer, component,
+historical regression, and clean Gentoo VM gates independently prove the
+remaining acceptance boundaries.

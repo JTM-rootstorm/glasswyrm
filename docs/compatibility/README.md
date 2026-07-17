@@ -33,9 +33,8 @@ compositor-restart recovery, canonical frames, graphical-console parity,
 restoration, and archive integrity. The passive-grab scope is `GrabButton`
 only; `UngrabButton` and passive key grabs are unsupported.
 
-Milestone 12 is not yet an accepted compatibility result. The source,
-signature, build profile, repository probes, and official SDL 2.32.10
-`testdraw2`/`testsprite2` workloads are pinned, but acceptance remains pending
-until the clean M11-to-M12 VM sequence produces a passing M12 summary with no
-evidence errors and a valid checksum-protected archive. Do not generalize the
-pending profile to another SDL build, renderer, or game.
+Milestone 12 is accepted only for the pinned SDL 2.32.10 X11 software-renderer
+build and the exact repository probe and official `testdraw2`/`testsprite2`
+workloads. The clean M11-to-M12 VM sequence produced a passing M12 summary
+with no evidence errors and a valid checksum-protected archive. Do not
+generalize this profile to another SDL build, renderer, or game.
