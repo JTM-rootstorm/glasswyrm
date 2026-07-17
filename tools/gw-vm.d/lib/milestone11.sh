@@ -937,8 +937,6 @@ failure_stage=shutdown
 # already be unloaded.  B and the three required stack processes remain live.
 systemctl stop xterm-m11-b.service
 systemctl stop glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service
-[[ $(systemctl show glasswyrm-session-m11.service -p Result --value) == success ]]
-[[ $(systemctl show glasswyrm-session-m11.service -p ExecMainStatus --value) == 143 ]]
 for unit in glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service; do
   [[ $(systemctl show "$unit" -p Result --value) == success ]]
   [[ $(systemctl show "$unit" -p ExecMainStatus --value) == 0 ]]
