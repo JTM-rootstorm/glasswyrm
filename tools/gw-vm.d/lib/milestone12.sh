@@ -353,7 +353,8 @@ chmod 0700 "$artifact_dir" "$control"
 failure_stage=dependencies
 emerge --oneshot --noreplace dev-build/meson dev-build/ninja dev-build/cmake \
   dev-vcs/git net-misc/curl app-crypt/gnupg app-misc/jq \
-  media-libs/mesa x11-libs/libdrm x11-libs/libinput x11-libs/libxkbcommon \
+  media-libs/mesa x11-libs/libdrm dev-libs/libinput x11-libs/libxkbcommon \
+  x11-misc/xkeyboard-config \
   x11-libs/libX11 x11-libs/libXext x11-libs/libXfixes x11-libs/libXdamage \
   x11-libs/libXrender x11-libs/libXcomposite x11-libs/libXrandr \
   x11-libs/libxcb x11-libs/xcb-util x11-base/xorg-proto
