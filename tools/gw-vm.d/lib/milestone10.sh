@@ -655,13 +655,14 @@ while True:
         frames=[json.loads(line) for line in frames_path.read_text().splitlines() if line.strip()]
         frame=next(r for r in reversed(frames) if r['frame']==flip['ordinal'])
         acknowledgements=json.loads(input_path.read_text())['acknowledgements']
-        delivered=any(r['root_x']==35 and r['root_y']==55 and
-                      r['delivered_event_count']>0 for r in acknowledgements)
+        accepted_input=any(r['root_x']==35 and r['root_y']==55 and
+                           r['result']=='accepted' for r in acknowledgements)
         if (flip['canonical_hash']==flip['scanout_hash'] and
                 flip['canonical_hash']!=expected and
                 frame['commit_id']==flip['commit_id'] and
                 frame['generation']==flip['generation'] and
-                frame['fnv1a64']==flip['canonical_hash'] and delivered): break
+                frame['fnv1a64']==flip['canonical_hash'] and
+                accepted_input): break
     except (IndexError,KeyError,StopIteration,json.JSONDecodeError,FileNotFoundError): pass
     if time.monotonic() >= deadline:
         raise SystemExit('post-VT xeyes repaint lacks correlated input, frame, and page-flip proof')
