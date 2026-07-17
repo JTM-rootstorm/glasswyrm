@@ -60,12 +60,18 @@ std::uint32_t clamp_hint(const std::uint32_t value) {
 void synchronize_window_state(ServerState& state, const std::uint32_t xid,
                               const WindowResource& window) {
   std::vector<std::uint32_t> values;
+  const auto state_atom = atom(state, "_NET_WM_STATE");
+  const auto current = values32(window, state_atom);
   if (window.fullscreen_requested)
     values.push_back(atom(state, "_NET_WM_STATE_FULLSCREEN"));
-  if (window.maximized_requested) {
-    values.push_back(atom(state, "_NET_WM_STATE_MAXIMIZED_VERT"));
-    values.push_back(atom(state, "_NET_WM_STATE_MAXIMIZED_HORZ"));
-  }
+  const auto maximized_vertical =
+      atom(state, "_NET_WM_STATE_MAXIMIZED_VERT");
+  const auto maximized_horizontal =
+      atom(state, "_NET_WM_STATE_MAXIMIZED_HORZ");
+  if (window.maximized_requested || contains(current, maximized_vertical))
+    values.push_back(maximized_vertical);
+  if (window.maximized_requested || contains(current, maximized_horizontal))
+    values.push_back(maximized_horizontal);
   if (window.above_requested)
     values.push_back(atom(state, "_NET_WM_STATE_ABOVE"));
   if (window.focused)
