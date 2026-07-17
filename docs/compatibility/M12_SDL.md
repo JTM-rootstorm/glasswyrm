@@ -96,7 +96,12 @@ DISPLAY=:99
 SDL_VIDEODRIVER=x11
 SDL_RENDER_DRIVER=software
 SDL_AUDIODRIVER=dummy
+LD_PRELOAD=tests/libgw_m9_fixed_time.so
 ```
+
+The VM resolves the preload entry to the software build's existing
+`libgw_m9_fixed_time.so`. The test-only shim freezes realtime calls used for
+upstream workload seeding while leaving monotonic timeout clocks unchanged.
 
 ## Required external programs
 

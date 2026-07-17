@@ -1314,6 +1314,15 @@ test(
   timeout: 10,
 )
 
+m12_workload_environment_test = find_program(
+  'compat/m12/run_workloads_environment_test.py',
+)
+test(
+  'm12-workload-environment',
+  m12_workload_environment_test,
+  timeout: 10,
+)
+
 gw_vm_cli_test = find_program('tools/gw_vm_cli_test.sh')
 test(
   'gw-vm-cli',

@@ -27,6 +27,16 @@ FROZEN_ENVIRONMENT = {
 }
 
 
+def frozen_environment(
+    base: dict[str, str], display: int, fixed_time_preload: pathlib.Path
+) -> dict[str, str]:
+    environment = base.copy()
+    environment.update(FROZEN_ENVIRONMENT)
+    environment["DISPLAY"] = f":{display}"
+    environment["LD_PRELOAD"] = str(fixed_time_preload.resolve())
+    return environment
+
+
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -192,6 +202,7 @@ def main() -> int:
     parser.add_argument("--raw-probe", type=pathlib.Path)
     parser.add_argument("--official-timeout", type=float, default=5.0)
     parser.add_argument("--resident-control-dir", type=pathlib.Path)
+    parser.add_argument("--fixed-time-preload", type=pathlib.Path, required=True)
     arguments = parser.parse_args()
 
     here = pathlib.Path(__file__).resolve().parent
@@ -199,9 +210,11 @@ def main() -> int:
     artifacts = arguments.artifact_dir.resolve()
     programs = arguments.program_dir.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
-    environment.update(FROZEN_ENVIRONMENT)
-    environment["DISPLAY"] = f":{arguments.display}"
+    if not arguments.fixed_time_preload.is_file():
+        parser.error("--fixed-time-preload must name the built fixed-time shim")
+    environment = frozen_environment(
+        os.environ, arguments.display, arguments.fixed_time_preload
+    )
 
     workloads: list[dict[str, Any]] = []
     raw_results: list[dict[str, Any]] = []
@@ -324,7 +337,9 @@ def main() -> int:
     payload = {
         "schema": 1,
         "profile": arguments.profile,
-        "environment": {key: environment[key] for key in FROZEN_ENVIRONMENT},
+        "environment": {
+            key: environment[key] for key in (*FROZEN_ENVIRONMENT, "LD_PRELOAD")
+        },
         "workloads": workloads,
         "checks": checks,
         "passed": all(checks.values()),

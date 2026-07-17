@@ -561,7 +561,8 @@ start_server() {
 start_workload() {
   local command=(python3 "$source_dir/tests/compat/m12/run_workloads.py"
     --profile "$current_profile" --program-dir "$clients/install/bin"
-    --artifact-dir "$current_out")
+    --artifact-dir "$current_out"
+    --fixed-time-preload "$software/tests/libgw_m9_fixed_time.so")
   [[ $current_resident == true ]] && command+=(--resident-control-dir "$current_out/live-control")
   systemd-run --unit="$current_workload_unit" --setenv="LD_LIBRARY_PATH=$clients/install/lib64:$clients/install/lib" \
     --property=RestrictAddressFamilies=AF_UNIX --property=NoNewPrivileges=yes "${command[@]}"
