@@ -1087,6 +1087,8 @@ if get_option('glasswyrmd')
     ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
     ['mit-shm', 'mit_shm_test.cpp'],
     ['xfixes-damage', 'xfixes_damage_test.cpp'],
+    ['damage-add', 'damage_add_test.cpp'],
+    ['xfixes-damage-limits', 'xfixes_damage_limits_test.cpp'],
     ['render-ops', 'render_ops_test.cpp'],
     ['picture-model', 'picture_model_test.cpp'],
     ['composite-state', 'composite_state_test.cpp'],

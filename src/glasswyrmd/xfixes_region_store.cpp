@@ -27,8 +27,12 @@ RegionStatus ResourceTable::create_xfixes_region(
   if (owned_regions(resources_, owner) >=
       limits_.maximum_xfixes_regions_per_client)
     return RegionStatus::BadAlloc;
+  if (rectangles.size() > limits_.maximum_xfixes_region_rectangles)
+    return RegionStatus::BadAlloc;
   auto normalized = normalize_region(rectangles);
   if (!normalized) return RegionStatus::BadValue;
+  if (normalized->size() > limits_.maximum_xfixes_region_rectangles)
+    return RegionStatus::BadAlloc;
   try {
     resources_.emplace(
         xid, ResourceRecord{ResourceType::XFixesRegion, owner,
@@ -62,9 +66,13 @@ RegionStatus ResourceTable::set_xfixes_region(
     const std::span<const geometry::Rectangle> rectangles) {
   auto* region = find_xfixes_region(xid);
   if (!region) return RegionStatus::BadRegion;
+  if (rectangles.size() > limits_.maximum_xfixes_region_rectangles)
+    return RegionStatus::BadAlloc;
   try {
     auto normalized = normalize_region(rectangles);
     if (!normalized) return RegionStatus::BadValue;
+    if (normalized->size() > limits_.maximum_xfixes_region_rectangles)
+      return RegionStatus::BadAlloc;
     region->rectangles = std::move(*normalized);
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;
@@ -79,6 +87,8 @@ RegionStatus ResourceTable::copy_xfixes_region(
   if (!source_region || !destination_region) return RegionStatus::BadRegion;
   try {
     const auto copy = source_region->rectangles;
+    if (copy.size() > limits_.maximum_xfixes_region_rectangles)
+      return RegionStatus::BadAlloc;
     destination_region->rectangles = copy;
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;
@@ -104,6 +114,8 @@ RegionStatus ResourceTable::combine_xfixes_regions(
     else
       return RegionStatus::BadValue;
     if (!result) return RegionStatus::BadAlloc;
+    if (result->size() > limits_.maximum_xfixes_region_rectangles)
+      return RegionStatus::BadAlloc;
     output->rectangles = std::move(*result);
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;
@@ -118,6 +130,8 @@ RegionStatus ResourceTable::translate_xfixes_region(
   try {
     auto translated = translate_region(region->rectangles, dx, dy);
     if (!translated) return RegionStatus::BadValue;
+    if (translated->size() > limits_.maximum_xfixes_region_rectangles)
+      return RegionStatus::BadAlloc;
     region->rectangles = std::move(*translated);
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;
@@ -134,6 +148,8 @@ RegionStatus ResourceTable::extents_xfixes_region(
     const auto extents = region_extents(source_region->rectangles);
     std::vector<geometry::Rectangle> result;
     if (extents.width != 0 && extents.height != 0) result.push_back(extents);
+    if (result.size() > limits_.maximum_xfixes_region_rectangles)
+      return RegionStatus::BadAlloc;
     output->rectangles = std::move(result);
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;

@@ -123,9 +123,12 @@ DispatchResult damage_subtract(ServerState& state,
     if (region != 0 && !state.resources().find_xfixes_region(region))
       return extension_resource_error(ExtensionKind::XFixes, context, request,
                                       region);
-  return damage_status(
-      state.resources().subtract_damage(damage, repair, parts), context,
-      request, damage);
+  auto mutation = state.resources().subtract_damage(damage, repair, parts);
+  auto result = damage_status(mutation.status, context, request, damage);
+  if (mutation.status == DamageStatus::Success)
+    append_damage_notifications(result, mutation.notifications,
+                                context.input.logical_time);
+  return result;
 }
 
 DispatchResult damage_add(ServerState& state, const DispatchContext& context,
@@ -143,11 +146,12 @@ DispatchResult damage_add(ServerState& state, const DispatchContext& context,
   if (!region_resource)
     return extension_resource_error(ExtensionKind::XFixes, context, request,
                                     region);
-  DispatchResult result;
-  for (const auto rectangle : region_resource->rectangles)
-    append_damage_notifications(
-        result, state.resources().damage_drawable(drawable, rectangle),
-        context.input.logical_time);
+  auto mutation = state.resources().add_damage(drawable,
+                                                region_resource->rectangles);
+  auto result = damage_status(mutation.status, context, request, drawable);
+  if (mutation.status == DamageStatus::Success)
+    append_damage_notifications(result, mutation.notifications,
+                                context.input.logical_time);
   return result;
 }
 

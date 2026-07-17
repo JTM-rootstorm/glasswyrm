@@ -116,6 +116,10 @@ enum class DamageStatus {
   BadValue,
   BadAlloc,
 };
+struct DamageMutationResult {
+  DamageStatus status{DamageStatus::Success};
+  std::vector<DamageNotification> notifications;
+};
 enum class PictureResourceStatus {
   Success,
   BadIdChoice,
@@ -179,6 +183,8 @@ struct ResourceLimits {
   std::size_t maximum_shm_segments_per_client{256};
   std::size_t maximum_shm_bytes_per_client{512U * 1024U * 1024U};
   std::size_t maximum_xfixes_regions_per_client{4096};
+  std::size_t maximum_xfixes_region_rectangles{
+      kMaximumXFixesRegionRectangles};
   std::size_t maximum_damage_resources_per_client{4096};
   std::size_t maximum_pictures_per_client{8192};
 };
@@ -288,11 +294,12 @@ class ResourceTable {
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       std::uint32_t xid, std::uint32_t drawable, DamageReportLevel level);
   [[nodiscard]] DamageStatus destroy_damage(std::uint32_t xid);
-  [[nodiscard]] DamageStatus subtract_damage(std::uint32_t xid,
-                                             std::uint32_t repair_region,
-                                             std::uint32_t parts_region);
-  [[nodiscard]] DamageStatus add_damage(std::uint32_t drawable,
-                                       std::uint32_t region);
+  [[nodiscard]] DamageMutationResult subtract_damage(
+      std::uint32_t xid, std::uint32_t repair_region,
+      std::uint32_t parts_region);
+  [[nodiscard]] DamageMutationResult add_damage(
+      std::uint32_t drawable,
+      std::span<const geometry::Rectangle> rectangles);
   [[nodiscard]] std::vector<DamageNotification> damage_drawable(
       std::uint32_t drawable, geometry::Rectangle rectangle);
   [[nodiscard]] PictureResourceStatus create_picture(

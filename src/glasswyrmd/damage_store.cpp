@@ -70,20 +70,20 @@ DamageStatus ResourceTable::destroy_damage(const std::uint32_t xid) {
   return DamageStatus::Success;
 }
 
-DamageStatus ResourceTable::subtract_damage(const std::uint32_t xid,
-                                            const std::uint32_t repair_region,
-                                            const std::uint32_t parts_region) {
+DamageMutationResult ResourceTable::subtract_damage(
+    const std::uint32_t xid, const std::uint32_t repair_region,
+    const std::uint32_t parts_region) {
   auto* damage = find_damage(xid);
-  if (!damage) return DamageStatus::BadDamage;
+  if (!damage) return {DamageStatus::BadDamage, {}};
   const XFixesRegionResource* repair = nullptr;
   XFixesRegionResource* parts = nullptr;
   if (repair_region != 0) {
     repair = find_xfixes_region(repair_region);
-    if (!repair) return DamageStatus::BadValue;
+    if (!repair) return {DamageStatus::BadValue, {}};
   }
   if (parts_region != 0) {
     parts = find_xfixes_region(parts_region);
-    if (!parts) return DamageStatus::BadValue;
+    if (!parts) return {DamageStatus::BadValue, {}};
   }
   try {
     std::optional<std::vector<geometry::Rectangle>> repaired;
@@ -95,53 +95,97 @@ DamageStatus ResourceTable::subtract_damage(const std::uint32_t xid,
       repaired = damage->accumulated;
       remaining = std::vector<geometry::Rectangle>{};
     }
-    if (!repaired || !remaining) return DamageStatus::BadAlloc;
+    if (!repaired || !remaining ||
+        repaired->size() > limits_.maximum_xfixes_region_rectangles ||
+        remaining->size() > limits_.maximum_xfixes_region_rectangles)
+      return {DamageStatus::BadAlloc, {}};
+    std::vector<DamageNotification> notifications;
+    if (!remaining->empty()) {
+      const auto* record = find(xid);
+      const auto drawable_bounds = drawable_geometry(*this, damage->drawable);
+      if (!record || !record->owner || !drawable_bounds)
+        return {DamageStatus::BadDamage, {}};
+      notifications.push_back(
+          {*record->owner, xid, damage->drawable, damage->level,
+           region_extents(*remaining), *drawable_bounds});
+    }
     if (parts) parts->rectangles = std::move(*repaired);
     damage->accumulated = std::move(*remaining);
-    if (damage->accumulated.empty()) damage->non_empty_event_sent = false;
+    damage->non_empty_event_sent = !damage->accumulated.empty();
+    return {DamageStatus::Success, std::move(notifications)};
   } catch (const std::bad_alloc&) {
-    return DamageStatus::BadAlloc;
+    return {DamageStatus::BadAlloc, {}};
   }
-  return DamageStatus::Success;
 }
 
-DamageStatus ResourceTable::add_damage(const std::uint32_t drawable,
-                                       const std::uint32_t region) {
-  if (!drawable_geometry(*this, drawable)) return DamageStatus::BadDrawable;
-  if (!find_xfixes_region(region)) return DamageStatus::BadValue;
-  return DamageStatus::Success;
+DamageMutationResult ResourceTable::add_damage(
+    const std::uint32_t drawable,
+    const std::span<const geometry::Rectangle> rectangles) {
+  const auto geometry = drawable_geometry(*this, drawable);
+  if (!geometry) return {DamageStatus::BadDrawable, {}};
+  try {
+    std::vector<geometry::Rectangle> clipped;
+    clipped.reserve(rectangles.size());
+    for (const auto rectangle : rectangles)
+      if (const auto overlap = glasswyrm::geometry::intersect(*geometry,
+                                                              rectangle))
+        clipped.push_back(*overlap);
+    auto incoming = normalize_region(clipped);
+    if (!incoming) return {DamageStatus::BadAlloc, {}};
+    if (incoming->empty()) return {};
+
+    struct StagedDamage {
+      DamageResource* resource{};
+      std::vector<geometry::Rectangle> accumulated;
+      std::optional<DamageNotification> notification;
+    };
+    std::vector<StagedDamage> staged;
+    for (auto& [xid, record] : resources_) {
+      auto* damage = std::get_if<DamageResource>(&record.payload);
+      if (!damage || damage->drawable != drawable || !record.owner) continue;
+      auto accumulated = union_regions(damage->accumulated, *incoming);
+      if (!accumulated) return {DamageStatus::BadAlloc, {}};
+      if (accumulated->size() > limits_.maximum_xfixes_region_rectangles) {
+        if (limits_.maximum_xfixes_region_rectangles == 0)
+          return {DamageStatus::BadAlloc, {}};
+        accumulated = std::vector<geometry::Rectangle>{*geometry};
+      }
+      const auto previous_bounds = region_extents(damage->accumulated);
+      const auto next_bounds = region_extents(*accumulated);
+      const bool notify = damage->level == DamageReportLevel::NonEmpty
+                              ? damage->accumulated.empty()
+                              : previous_bounds != next_bounds;
+      StagedDamage item{damage, std::move(*accumulated), std::nullopt};
+      if (notify)
+        item.notification = DamageNotification{
+            *record.owner, xid, drawable, damage->level,
+            damage->level == DamageReportLevel::BoundingBox
+                ? next_bounds
+                : region_extents(*incoming),
+            *geometry};
+      staged.push_back(std::move(item));
+    }
+    std::vector<DamageNotification> notifications;
+    notifications.reserve(staged.size());
+    for (auto& item : staged)
+      if (item.notification) notifications.push_back(*item.notification);
+    for (auto& item : staged) {
+      item.resource->accumulated = std::move(item.accumulated);
+      item.resource->non_empty_event_sent = true;
+    }
+    std::ranges::sort(notifications, {}, &DamageNotification::damage);
+    return {DamageStatus::Success, std::move(notifications)};
+  } catch (const std::bad_alloc&) {
+    return {DamageStatus::BadAlloc, {}};
+  }
 }
 
 std::vector<DamageNotification> ResourceTable::damage_drawable(
     const std::uint32_t drawable, const geometry::Rectangle rectangle) {
-  std::vector<DamageNotification> notifications;
-  const auto geometry = drawable_geometry(*this, drawable);
-  const auto clipped = geometry ? glasswyrm::geometry::intersect(*geometry,
-                                                                 rectangle)
-                                : std::nullopt;
-  if (!clipped) return notifications;
-  for (auto& [xid, record] : resources_) {
-    auto* damage = std::get_if<DamageResource>(&record.payload);
-    if (!damage || damage->drawable != drawable || !record.owner) continue;
-    const bool was_empty = damage->accumulated.empty();
-    auto accumulated = union_regions(damage->accumulated,
-                                     std::span<const geometry::Rectangle>(
-                                         &*clipped, 1));
-    if (accumulated)
-      damage->accumulated = std::move(*accumulated);
-    else
-      damage->accumulated = {*geometry};
-    if (damage->level == DamageReportLevel::NonEmpty && !was_empty) continue;
-    damage->non_empty_event_sent = true;
-    notifications.push_back(
-        {*record.owner, xid, drawable, damage->level,
-         damage->level == DamageReportLevel::BoundingBox
-             ? region_extents(damage->accumulated)
-             : *clipped,
-         *geometry});
-  }
-  std::ranges::sort(notifications, {}, &DamageNotification::damage);
-  return notifications;
+  const auto result = add_damage(
+      drawable, std::span<const geometry::Rectangle>(&rectangle, 1));
+  return result.status == DamageStatus::Success ? result.notifications
+                                                 : std::vector<DamageNotification>{};
 }
 
 std::size_t ResourceTable::remove_damage_for_drawable(

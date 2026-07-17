@@ -76,13 +76,15 @@ bool ResourceTable::invariants_hold() const noexcept {
       if (const auto* region =
               std::get_if<XFixesRegionResource>(&resource.payload)) {
         if (resource.type != ResourceType::XFixesRegion ||
-            region->rectangles.size() > kMaximumXFixesRegionRectangles)
+            region->rectangles.size() >
+                limits_.maximum_xfixes_region_rectangles)
           return false;
       }
       if (const auto* damage = std::get_if<DamageResource>(&resource.payload)) {
         if (resource.type != ResourceType::Damage ||
             (!find_window(damage->drawable) && !find_pixmap(damage->drawable)) ||
-            damage->accumulated.size() > kMaximumXFixesRegionRectangles)
+            damage->accumulated.size() >
+                limits_.maximum_xfixes_region_rectangles)
           return false;
       }
       if (const auto* picture = std::get_if<Picture>(&resource.payload)) {
