@@ -100,6 +100,7 @@ if (geometry_value.get('schema')!=1 or geometry_value.get('status')!='passed' or
     raise SystemExit('destination xterm geometry probe identity is invalid')
 initial=geometry_value.get('initial'); moved_geometry=geometry_value.get('moved')
 resized_geometry=geometry_value.get('resized'); size_hints=geometry_value.get('size_hints')
+configure_geometry=geometry_value.get('configure_notify')
 shell=geometry_value.get('shell')
 for name,value in (('initial',initial),('moved',moved_geometry),
                    ('resized',resized_geometry)):
@@ -107,6 +108,11 @@ for name,value in (('initial',initial),('moved',moved_geometry),
             not all(isinstance(item,int) and not isinstance(item,bool)
                     for item in value.values())):
         raise SystemExit(f'destination xterm {name} GetGeometry evidence is invalid')
+if (not isinstance(configure_geometry,dict) or
+        set(configure_geometry)!= {'moved','resized'} or
+        configure_geometry['moved']!=moved_geometry or
+        configure_geometry['resized']!=resized_geometry):
+    raise SystemExit('destination xterm ConfigureNotify payloads do not match GetGeometry')
 if (moved_geometry['x']-initial['x'],moved_geometry['y']-initial['y'])!=(96,64):
     raise SystemExit('destination xterm GetGeometry does not prove the exact move')
 if (moved_geometry['width'],moved_geometry['height'])!=(initial['width'],initial['height']):
@@ -292,6 +298,7 @@ payload={'status':'passed','xterm_pids':[int(x) for x in pids],
          'geometry_acceptance':{'schema':1,'source':'xcb-and-gwm',
              'window_id':geometry_value['window_id'],'title':geometry_value['title'],
              'initial':initial,'moved':moved_geometry,'resized':resized_geometry,
+             'configure_notify':configure_geometry,
              'shell':shell,'configure_notify_count':geometry_value['configure_notify_count'],
              'resize_expose_count':geometry_value['resize_expose_count'],
              'move_geometry_serial':policy_records[move_policy][0],

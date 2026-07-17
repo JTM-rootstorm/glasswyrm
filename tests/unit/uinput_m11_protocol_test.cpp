@@ -126,7 +126,7 @@ int main() {
   const auto paste = protocol::scenario_events("clipboard-probe");
   okay &= expect(paste.size() > 8 &&
                      is_event(paste[0], protocol::Device::pointer, EV_REL,
-                              REL_X, 351) &&
+                              REL_X, 255) &&
                      is_event(paste[1], protocol::Device::pointer, EV_REL,
                               REL_Y, 98) &&
                      is_event(paste[2], protocol::Device::pointer, EV_KEY,
@@ -155,7 +155,7 @@ int main() {
   const auto close = protocol::scenario_events("close");
   okay &= expect(close.size() == 8 &&
                      is_event(close[0], protocol::Device::pointer, EV_REL,
-                              REL_X, -596) &&
+                              REL_X, -500) &&
                      is_event(close[1], protocol::Device::pointer, EV_REL,
                               REL_Y, -209) &&
                      is_event(close[2], protocol::Device::pointer, EV_KEY,

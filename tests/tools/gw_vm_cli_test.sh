@@ -632,6 +632,8 @@ drm_mode=1024x768
 keyboard_device=/dev/input/event11
 pointer_device=/dev/input/event12
 pointer_profile=relative-only
+run_mode=interactive-rerun
+tested_commit=86dab3c000000000000000000000000000000000
 canonical_hash=0123456789abcdef
 scanout_hash=0123456789abcdef
 mirror_sha256=aaaaaaaaaaaaaaaa
@@ -801,7 +803,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone11-interactive-rerun; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -1580,6 +1582,33 @@ assert_contains "$work_dir/milestone11-gate.out" '--yes'
 run_failure "$work_dir/milestone11-wrapper-gate.out" \
   "$repo_root/tools/gw-vm.d/scenarios/milestone11-runtime-test.sh"
 assert_contains "$work_dir/milestone11-wrapper-gate.out" '--yes'
+run_failure "$work_dir/milestone11-interactive-rerun-gate.out" \
+  "$gw_vm" milestone11-interactive-rerun
+assert_contains "$work_dir/milestone11-interactive-rerun-gate.out" '--yes'
+
+: >"$command_log"
+run_failure "$work_dir/milestone11-interactive-rerun-no-build.out" \
+  env GW_VM_TEST_FAIL_MATCH='M11 interactive rerun requires a completed build phase' \
+  "$gw_vm" milestone11-interactive-rerun --yes
+assert_contains "$work_dir/milestone11-interactive-rerun-no-build.out" \
+  'failed during: guest-runtime'
+
+: >"$command_log"
+run_success "$work_dir/milestone11-interactive-rerun.out" \
+  "$gw_vm" milestone11-interactive-rerun --yes
+assert_contains "$work_dir/milestone11-interactive-rerun.out" \
+  'Diagnostic only: reusing the commit-bound M11 guest build'
+assert_contains "$work_dir/milestone11-interactive-rerun.out" \
+  'full acceptance remains required'
+assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+  '"diagnostic_only": true'
+assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+  '"accepted_milestone11_result": false'
+assert_contains "$artifact_dir/milestone11-interactive-rerun-summary.json" \
+  '"passed": true'
+assert_contains "$command_log" '<interactive-rerun>'
+assert_contains "$command_log" 'tested_commit=$tested_commit'
+assert_contains "$command_log" 'if [[ $run_mode == interactive-rerun ]]'
 
 : >"$command_log"
 run_failure "$work_dir/milestone11-bad-base.out" \
@@ -1603,6 +1632,7 @@ assert_not_contains "$command_log" 'dev-libs/libinput'
 run_success "$work_dir/milestone11.out" "$gw_vm" scenario milestone11-runtime-test --yes
 assert_contains "$work_dir/milestone11.out" \
   'reset; milestone10-runtime-test; reset; milestone11-runtime-test'
+assert_contains "$command_log" '<full>'
 assert_contains "$artifact_dir/milestone11-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone11-summary.json" \
   '"required_base_commit": "9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0"'
@@ -1636,6 +1666,7 @@ for expected in /var/tmp/glasswyrm-build-m11 /var/tmp/glasswyrm-build-m11-asan \
   '/run/glasswyrm-m11' '--input-device' '--xkb-layout' '--xkb-model' \
   '--drm-api atomic' '--mirror-dump-dir' '--scene-manifest' \
   '--drm-report' '--x11-trace' '-geometry' '80x24+96+96' '-fn' 'fixed' \
+  '80x24+384+160' '--move-ready' 'xterm-move-ready.json' \
   'm11-bashrc' 'chvt 1' 'systemctl restart gwm-m11.service' \
   'systemctl stop gwcomp-m11.service' 'start_gwcomp' \
   milestone11-drm-report-before-restart.jsonl m11_selection_probe \
@@ -1691,6 +1722,9 @@ assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   '[[ -c /dev/uinput ]]' 'emerge --oneshot'
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'run_input primary-selection' 'run_input clipboard-probe'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'grep -F '\''"status":"ready"'\'' "$move_ready"' \
+  'run_input resize milestone11-interactive-wm.log'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
 assert_contains "$command_log" 'magick <'
 assert_file_glob "$artifact_dir/milestone11-interactive-evidence.tar"

@@ -305,6 +305,18 @@ That command establishes acceptance only when its live trace, interaction,
 VT/restart, canonical-frame, console screenshot, restoration, and archive
 checks all pass.
 
+After that command has completed its build phase at the current commit, a late
+interactive failure can be investigated without repeating the compiler matrix:
+
+```sh
+./tools/gw-vm milestone11-interactive-rerun --yes
+```
+
+This development-only rerun requires the commit-bound guest build and pinned
+xterm cache, and it repeats the live input, VT/restart, restoration, and archive
+path. Its summary explicitly is not an acceptance result; the complete clean
+`milestone11-runtime-test` remains the final gate.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:

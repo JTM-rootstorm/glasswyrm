@@ -196,9 +196,9 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_X, 108);
     button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
-    // Move from xterm A to the non-overlapping interior of xterm B
-    // (80x24+480+160).  Middle-click both focuses B and inserts PRIMARY.
-    relative(events, REL_X, 351);
+    // Move from xterm A into the interior of the newly raised xterm B
+    // (80x24+384+160).  Middle-click both focuses B and inserts PRIMARY.
+    relative(events, REL_X, 255);
     relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false, 250);
@@ -221,7 +221,7 @@ std::vector<Event> scenario_events(std::string_view name) {
   } else if (name == "close") {
     // Move from the post-resize pointer location back into xterm A, focus it,
     // and close A while xterm B remains alive.
-    relative(events, REL_X, -596);
+    relative(events, REL_X, -500);
     relative(events, REL_Y, -209);
     button(events, BTN_LEFT, true);
     button(events, BTN_LEFT, false, 250);

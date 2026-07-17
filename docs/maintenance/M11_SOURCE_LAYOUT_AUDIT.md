@@ -35,11 +35,11 @@ was reviewed as follows:
 | `gwcomp::run` | 370 | Is process-lifetime orchestration for backend creation, IPC, polling, and orderly shutdown; rendering and DRM policy remain outside it. |
 | `evaluate` | 202 | Evaluates one immutable WM policy snapshot in deterministic order, including placement, stacking, focus, and transient constraints. |
 
-The M11 VM helper is 746 lines. Most of that file is one quoted, self-contained
-guest program plus host-side screenshot and evidence coordination. It is below
-the comparable M10 hardware harness (855 lines). Extracting the guest program
-would add a second copied artifact and a host-to-guest version/argument boundary
-while the current CLI tests intentionally inspect the exact embedded program.
-That is not a straightforward behavior-preserving split, so M11 retains the
-single helper. Revisit extraction when a second scenario reuses the M11 guest
-build or interactive-runtime phases.
+Most of the M11 VM helper is one quoted, self-contained guest program plus
+host-side screenshot and evidence coordination. Extracting that program would
+add a copied artifact and a host-to-guest version/argument boundary while the
+CLI tests intentionally inspect the exact embedded program. The diagnostic
+`milestone11-interactive-rerun` therefore reuses the same guest program through
+an explicit mode and commit-bound build marker; it cannot accidentally become
+the full acceptance path. Revisit physical extraction if another independent
+scenario needs only a smaller portion of the interactive runtime.

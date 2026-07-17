@@ -108,6 +108,15 @@ milestone11_guest_script() {
   cat <<'GUEST_SCRIPT'
 set -euo pipefail
 source_dir=$1 artifact_dir=$2 drm_device=$3 connector=$4 target_vt=$5 xterm_sha=$6
+tested_commit=$7 run_mode=$8
+[[ $tested_commit =~ ^[0-9a-f]{40}$ ]] || {
+  printf '%s\n' 'M11 guest runner requires an exact 40-character tested commit.' >&2
+  exit 2
+}
+[[ $run_mode == full || $run_mode == interactive-rerun ]] || {
+  printf 'Unknown M11 guest run mode: %s\n' "$run_mode" >&2
+  exit 2
+}
 build=/var/tmp/glasswyrm-build-m11
 asan=/var/tmp/glasswyrm-build-m11-asan
 runtime=/var/tmp/glasswyrm-build-m11-runtime
@@ -254,7 +263,8 @@ record_facts() {
   ! fuser "$drm_device" "$target_vt" "$keyboard" "$pointer" /dev/uinput >/dev/null 2>&1 && result[device_cleanup]=passed
   {
     printf 'failure_stage=%s\nscenario_exit=%s\n' "$failure_stage" "$scenario_exit"
-    printf 'required_base=%s\ntested_commit=%s\n' '9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0' "$(git -C "$source_dir" rev-parse HEAD 2>/dev/null || echo exported)"
+    printf 'required_base=%s\ntested_commit=%s\nrun_mode=%s\n' \
+      '9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0' "$tested_commit" "$run_mode"
     printf 'api_version=0.6.0\nsoversion=0\nwire_version=1.0\n'
     printf 'compiler_c=%s\ncompiler_cxx=%s\n' "$(cc --version | head -n1)" "$(c++ --version | head -n1)"
     printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' "$(meson --version)" "$(ninja --version)" "$(systemctl --version | head -n1)"
@@ -279,6 +289,35 @@ trap record_facts EXIT
 exec > >(tee -a "$runtime_log") 2>&1
 
 [[ -c /dev/uinput && -c $drm_device && -c $target_vt ]] || exit 30
+if [[ $run_mode == interactive-rerun ]]; then
+  failure_stage=reuse-preflight
+  ready=/var/tmp/glasswyrm-m11-interactive-ready.env
+  [[ -f $ready && ! -L $ready ]] || {
+    printf '%s\n' 'M11 interactive rerun requires a completed build phase from milestone11-runtime-test.' >&2
+    exit 34
+  }
+  grep -Fx "tested_commit=$tested_commit" "$ready"
+  grep -Fx "xterm_sha256=$xterm_sha" "$ready"
+  [[ -x $runtime/src/glasswyrmd && -x $runtime/src/gwm &&
+     -x $runtime/src/gwcomp && -x $runtime/src/glasswyrm-session &&
+     -x $runtime/tests/gw_uinput_m11 ]]
+  xterm_bin=$client_dir/install/bin/xterm
+  [[ -x $xterm_bin ]]
+  "$xterm_bin" -version 2>&1 | tee "$artifact_dir/milestone11-xterm.log" |
+    grep -Fx 'XTerm(410)'
+  xterm_archive=$(find /var/cache/distfiles -maxdepth 1 -type f \
+    -name 'xterm-410.tgz' -print -quit)
+  [[ -n $xterm_archive &&
+     $(sha256sum "$xterm_archive" | awk '{print $1}') == "$xterm_sha" ]]
+  for dependency in libdrm xcb xkbcommon libinput; do
+    pkg-config --exists "$dependency"
+  done
+  for forbidden in x11-base/xorg-server x11-base/xwayland x11-base/xwayland-run \
+    'x11-base/xorg-server[xvfb]' media-libs/mesa gui-libs/wayland; do
+    ! qlist -IC "$forbidden"
+  done
+  x_servers_absent=true; mesa_absent=true
+else
 failure_stage=dependency-installation
 install -d -m 0755 /etc/portage/package.accept_keywords
 printf '=x11-terms/xterm-410 ~amd64\n' \
@@ -394,6 +433,12 @@ result[source_layout]=passed
 failure_stage=uinput-startup
 rm -rf "$runtime"; meson setup "$runtime" "$source_dir" -Dlibinput_backend=true -Ddrm_backend=true -Dheadless_backend=true
 meson compile -C "$runtime"
+{
+  printf 'tested_commit=%s\n' "$tested_commit"
+  printf 'xterm_sha256=%s\n' "$xterm_sha"
+} >/var/tmp/glasswyrm-m11-interactive-ready.env
+fi
+failure_stage=uinput-startup
 capture_vt_state() {
   python3 - "$target_vt" "$1" <<'PY'
 import fcntl,json,os,struct,sys
@@ -583,7 +628,7 @@ systemd-run --unit=xterm-m11-b.service --setenv=DISPLAY=:99 --setenv=LC_ALL=C \
   --setenv=LANG=C --setenv=XMODIFIERS=@im=none --setenv=SESSION_MANAGER= \
   --setenv=XAUTHORITY=/dev/null --setenv=TERM=xterm \
   --setenv="GW_M11_TRANSCRIPT=$transcript" "$xterm_bin" \
-  -geometry 80x24+480+160 -fn fixed -fb fixed -xrm '*cursorBlink:false' \
+  -geometry 80x24+384+160 -fn fixed -fb fixed -xrm '*cursorBlink:false' \
   -xrm '*toolBar:false' -title Glasswyrm-M11-B -e /bin/bash --noprofile \
   --rcfile "$source_dir/tests/compat/m11/m11-bashrc"
 for _ in {1..200}; do systemctl is-active --quiet xterm-m11-b.service && break; sleep .05; done
@@ -598,15 +643,24 @@ sleep .25
 [[ -x $runtime/tests/m11_xterm_geometry_probe ]] || {
   printf '%s\n' 'M11 destination geometry probe is required.' >&2; exit 1;
 }
+move_ready=$input/xterm-move-ready.json
+rm -f "$move_ready"
 DISPLAY=:99 "$runtime/tests/m11_xterm_geometry_probe" \
   --title Glasswyrm-M11-B --xterm-pid "$second_xterm_pid" \
   --move-dx 96 --move-dy 64 --columns 90 --rows 28 \
+  --move-ready "$move_ready" \
   --output "$artifact_dir/milestone11-xterm-geometry.json" &
 geometry_probe_pid=$!
 sleep .1
 kill -0 "$geometry_probe_pid"
 run_input clipboard-probe milestone11-selection.log
 run_input move milestone11-interactive-wm.log
+for _ in {1..200}; do
+  [[ -s $move_ready ]] && break
+  kill -0 "$geometry_probe_pid" 2>/dev/null || break
+  sleep .05
+done
+grep -F '"status":"ready"' "$move_ready"
 run_input resize milestone11-interactive-wm.log
 for _ in {1..200}; do
   kill -0 "$geometry_probe_pid" 2>/dev/null || break
@@ -920,10 +974,15 @@ milestone11_release_guest_waits() {
 }
 
 collect_milestone11_artifacts() {
-  local name failed=0
+  local run_mode=${1:-full} name failed=0
   init_artifacts
   for name in "${M11_TEXT_ARTIFACTS[@]}"; do
     [[ $name == milestone11-runtime-test.log || $name == milestone11-session-state.log ]] && continue
+    if [[ $run_mode == interactive-rerun &&
+          ($name == milestone11-meson-test.log ||
+           $name == milestone11-source-layout.log) ]]; then
+      continue
+    fi
     guest_run_script 'set -euo pipefail; cat "$1"' "$M11_GUEST_ARTIFACT_DIR/$name" >"$ARTIFACTS_PATH_ABS/$name" 2>&1 || failed=1
   done
   for name in "${M11_BINARY_ARTIFACTS[@]}"; do
@@ -932,6 +991,45 @@ collect_milestone11_artifacts() {
       "$SSH_TARGET:$M11_GUEST_ARTIFACT_DIR/$name" "$ARTIFACTS_PATH_ABS/$name" || failed=1
   done
   return "$failed"
+}
+
+write_milestone11_interactive_rerun_summary() {
+  local requested=$1 failure=${2:-}
+  local facts=$ARTIFACTS_PATH_ABS/milestone11-facts.env
+  local out=$ARTIFACTS_PATH_ABS/milestone11-interactive-rerun-summary.json
+  python3 - "$facts" "$out" "$requested" "$failure" \
+    "$M11_REQUIRED_BASE_COMMIT" "${M11_TESTED_COMMIT:-unknown}" <<'PY'
+import json,pathlib,sys
+facts_path,out,requested,failure,base,tested=sys.argv[1:]
+facts={}
+p=pathlib.Path(facts_path)
+if p.is_file():
+  for line in p.read_text(errors='replace').splitlines():
+    key,sep,value=line.partition('=')
+    if sep: facts[key]=value
+required='uinput keyboard_ready pointer_ready xkb_keymap relative_motion wheel key_repeat cursor_resources cursor_scanout grabs primary_selection clipboard_selection property_notify client_message wm_bindings move resize close xterm_alive pty_typing editing scrolling selection_paste deterministic_frame screenshot_equal vt_suspend vt_no_delivery vt_resume post_vt_command gwm_replay compositor_replay xterm_survival post_restart_input kms_restore kd_restore vt_restore getty_restore service_results socket_cleanup device_cleanup normalized_trace archive_validation journal_evidence'.split()
+errors=[f'{key} must be passed' for key in required if facts.get(key)!='passed']
+if facts.get('exact_trace') not in {'passed','bootstrap'}:
+  errors.append('exact_trace must be passed or bootstrap')
+if facts.get('run_mode')!='interactive-rerun':
+  errors.append('run_mode must be interactive-rerun')
+if facts.get('tested_commit')!=tested:
+  errors.append('guest build identity does not match tested commit')
+if facts.get('scenario_exit')!='0':
+  errors.append('scenario_exit must be 0')
+payload={
+  'diagnostic_only':True,
+  'accepted_milestone11_result':False,
+  'required_base_commit':base,
+  'tested_commit':tested,
+  'run_mode':facts.get('run_mode','unknown'),
+  'passed':requested=='true' and not errors,
+  'failure_stage':failure or facts.get('failure_stage',''),
+  'evidence_errors':errors,
+}
+pathlib.Path(out).write_text(json.dumps(payload,indent=2)+'\n')
+if requested=='true' and errors: raise SystemExit(2)
+PY
 }
 
 validate_milestone11_archive() {
@@ -995,10 +1093,22 @@ PY
 }
 
 milestone11_runtime_test() {
-  local approved=$1 failure='' status=0 collection=0 preflight='' script='' guest_pid=0 guest_status=0
-  require_approval milestone11-runtime-test "$approved"; require_vm_domain
+  local approved=$1 run_mode=${2:-full} failure='' status=0 collection=0
+  local preflight='' script='' guest_pid=0 guest_status=0 action
+  [[ $run_mode == full || $run_mode == interactive-rerun ]] ||
+    die "Unknown M11 host run mode '$run_mode'."
+  if [[ $run_mode == full ]]; then
+    action=milestone11-runtime-test
+  else
+    action=milestone11-interactive-rerun
+  fi
+  require_approval "$action" "$approved"; require_vm_domain
   is_true "$SNAPSHOT_ENABLED" || die 'milestone11-runtime-test requires the configured internal base snapshot.'
-  note 'Required gate sequence: reset; milestone10-runtime-test; reset; milestone11-runtime-test. M10 must run before M11 installs libinput, libxkbcommon, xkeyboard-config, and xterm 410.'
+  if [[ $run_mode == full ]]; then
+    note 'Required gate sequence: reset; milestone10-runtime-test; reset; milestone11-runtime-test. M10 must run before M11 installs libinput, libxkbcommon, xkeyboard-config, and xterm 410.'
+  else
+    note 'Diagnostic only: reusing the commit-bound M11 guest build and dependency state. This command does not satisfy Milestone 11 acceptance; finish with the complete milestone11-runtime-test gate.'
+  fi
   init_artifacts; SCENARIO_RECORDS=()
   prepare_milestone11_evidence || { status=$?; failure=source-evidence; }
   [[ -n $failure ]] || vm_boot || { status=$?; failure=boot; }
@@ -1027,6 +1137,7 @@ milestone11_runtime_test() {
     script=$(milestone11_guest_script)
     guest_run_script "$script" "$GUEST_SOURCE_PATH" "$M11_GUEST_ARTIFACT_DIR" \
       "$drm_device" "$connector" "$target_vt" "$M11_XTERM_SHA256" \
+      "$M11_TESTED_COMMIT" "$run_mode" \
       >>"$ARTIFACTS_PATH_ABS/milestone11-runtime-test.log" 2>&1 & guest_pid=$!
     if milestone11_capture_screen screenshot-ready screen-captured milestone11-desktop.ppm "$guest_pid"; then :; else status=$?; failure=desktop-screenshot; milestone11_release_guest_waits; fi
     if [[ -z $failure ]]; then
@@ -1037,12 +1148,39 @@ milestone11_runtime_test() {
     fi
     if wait "$guest_pid"; then :; else guest_status=$?; status=$guest_status; failure=guest-runtime; fi
   fi
-  collect_milestone11_artifacts || collection=$?
+  collect_milestone11_artifacts "$run_mode" || collection=$?
   if ((collection)) && [[ -z $failure ]]; then status=$collection; failure=artifact-collection; fi
   if [[ -z $failure ]] && ! validate_milestone11_archive; then status=1; failure=artifact-validation; fi
-  if [[ -n $failure ]]; then write_milestone11_summary false "$failure" || true; printf 'Milestone 11 VM runtime test failed during: %s\n' "$failure" >&2; print_artifacts >&2; return "${status:-1}"; fi
-  verify_milestone11_source_identity || { write_milestone11_summary false source-identity-changed || true; return 1; }
-  write_milestone11_summary true ''
-  record_scenario milestone11-runtime-test passed "$ARTIFACTS_PATH_ABS/milestone11-runtime-test.log"
-  printf 'Milestone 11 VM runtime test passed.\n'; print_artifacts
+  if [[ -n $failure ]]; then
+    if [[ $run_mode == full ]]; then
+      write_milestone11_summary false "$failure" || true
+    else
+      write_milestone11_interactive_rerun_summary false "$failure" || true
+    fi
+    printf 'Milestone 11 VM %s failed during: %s\n' "$run_mode" "$failure" >&2
+    print_artifacts >&2
+    return "${status:-1}"
+  fi
+  if ! verify_milestone11_source_identity; then
+    if [[ $run_mode == full ]]; then
+      write_milestone11_summary false source-identity-changed || true
+    else
+      write_milestone11_interactive_rerun_summary false source-identity-changed || true
+    fi
+    return 1
+  fi
+  if [[ $run_mode == full ]]; then
+    write_milestone11_summary true ''
+    record_scenario milestone11-runtime-test passed "$ARTIFACTS_PATH_ABS/milestone11-runtime-test.log"
+    printf 'Milestone 11 VM runtime test passed.\n'
+  else
+    write_milestone11_interactive_rerun_summary true ''
+    record_scenario milestone11-interactive-rerun passed "$ARTIFACTS_PATH_ABS/milestone11-runtime-test.log"
+    printf '%s\n' 'Milestone 11 interactive diagnostic rerun passed; full acceptance remains required.'
+  fi
+  print_artifacts
+}
+
+milestone11_interactive_rerun() {
+  milestone11_runtime_test "$1" interactive-rerun
 }
