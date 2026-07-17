@@ -291,6 +291,8 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
       return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
     case LocalLifecycleStatus::BadValue:
       return error(context, request, x11::CoreErrorCode::BadValue);
+    case LocalLifecycleStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
@@ -343,6 +345,8 @@ DispatchResult configure_window(ServerState& state,
       return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
     case LocalLifecycleStatus::BadValue:
       return error(context, request, x11::CoreErrorCode::BadValue);
+    case LocalLifecycleStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
@@ -377,6 +381,8 @@ DispatchResult map_subwindows(ServerState& state,
                             ? x11::CoreErrorCode::BadWindow
                         : transition_status == LocalLifecycleStatus::BadMatch
                             ? x11::CoreErrorCode::BadMatch
+                        : transition_status == LocalLifecycleStatus::BadAlloc
+                            ? x11::CoreErrorCode::BadAlloc
                             : x11::CoreErrorCode::BadValue;
       return error(context, request, code, child);
     }
