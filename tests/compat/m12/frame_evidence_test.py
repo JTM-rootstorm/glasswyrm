@@ -50,6 +50,19 @@ def main() -> int:
             pass
         else:
             return 1
+
+        generation_dumps = root / "generation-dumps"
+        (generation_dumps / "2").mkdir(parents=True)
+        (generation_dumps / "10").mkdir()
+        (generation_dumps / "2" / "frame-999999.ppm").write_bytes(
+            ppm(b"old")
+        )
+        current = generation_dumps / "10" / "frame-000001.ppm"
+        current.write_bytes(ppm(b"new"))
+        if capture.latest(generation_dumps) != current:
+            raise RuntimeError(
+                "stable-frame selection ignored the latest compositor generation"
+            )
     print("M12 frame evidence tests passed")
     return 0
 
