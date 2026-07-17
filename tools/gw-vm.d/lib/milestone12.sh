@@ -596,18 +596,6 @@ settled_mirror() {
   done
   return 1
 }
-latest_mirror() {
-  local directory=$1 candidate=
-  for _ in {1..200}; do
-    candidate=$(find "$directory" -type f -name '*.ppm' -print | sort -V | tail -n1)
-    if [[ -n $candidate && -s $candidate ]]; then
-      printf '%s\n' "$candidate"
-      return
-    fi
-    sleep .05
-  done
-  return 1
-}
 capture_scene() {
   local scene=$1 latest
   # DRM mirror dumps are staged and atomically renamed. The resident workload
@@ -617,16 +605,24 @@ capture_scene() {
   cp "$latest" "$artifact_dir/milestone12-$current_name-$scene.ppm"
 }
 capture_matching_mirror() {
-  local screen=$1 destination=$2 latest
+  local screen=$1 destination=$2 candidate
+  declare -A checked=()
   # A client can publish one final cursor transaction after its readiness
   # marker. Match the immutable host screenshot to the committed DRM mirror
-  # instead of racing that transaction with an earlier sampled frame.
+  # instead of racing that transaction with an earlier sampled frame. Search
+  # retained frames newest-first: the scanout can advance before this process
+  # observes the host's capture marker, but each committed mirror remains an
+  # exact record of the frame that virsh captured.
   for _ in {1..200}; do
-    latest=$(latest_mirror "$current_dump_root") || { sleep .05; continue; }
-    if cmp -s "$latest" "$screen"; then
-      cp "$latest" "$destination"
-      return
-    fi
+    while IFS= read -r candidate; do
+      [[ -n $candidate && -s $candidate ]] || continue
+      [[ ${checked[$candidate]+seen} ]] && continue
+      checked["$candidate"]=1
+      if cmp -s "$candidate" "$screen"; then
+        cp "$candidate" "$destination"
+        return
+      fi
+    done < <(find "$current_dump_root" -type f -name '*.ppm' -print | sort -Vr)
     sleep .05
   done
   return 1

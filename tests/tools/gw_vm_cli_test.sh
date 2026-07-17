@@ -2049,6 +2049,22 @@ assert_contains "$artifact_dir/milestone12-summary.json" \
 assert_contains "$artifact_dir/milestone12-summary.json" '"passed": false'
 
 m12_lib=$repo_root/tools/gw-vm.d/lib/milestone12.sh
+m12_guest_tail=$(bash -c 'source "$1"; milestone12_guest_script_tail' _ "$m12_lib")
+m12_match_function=$(awk '
+  /^capture_matching_mirror\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
+m12_match_dir=$work_dir/m12-mirror-match
+mkdir -p "$m12_match_dir/dumps"
+printf 'captured-frame\n' >"$m12_match_dir/dumps/frame-000001.ppm"
+printf 'newer-frame\n' >"$m12_match_dir/dumps/frame-000002.ppm"
+printf 'captured-frame\n' >"$m12_match_dir/screen.ppm"
+run_success "$m12_match_dir/test.out" timeout 2 bash -c \
+  "$m12_match_function"$'\n''current_dump_root=$1; capture_matching_mirror "$2" "$3"' \
+  _ "$m12_match_dir/dumps" "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm"
+cmp "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm" ||
+  fail 'M12 retained-frame matcher did not preserve the captured frame'
 for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   /var/tmp/glasswyrm-build-m12 /var/tmp/glasswyrm-build-m12-asan \
   /var/tmp/glasswyrm-build-m12-software /var/tmp/glasswyrm-build-m12-gles \
@@ -2065,7 +2081,7 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   '--game-compat' '--disable-extension' MIT-SHM run_workloads.py \
   'StandardOutput=journal' 'StandardError=journal' \
   m12_extension_stress_probe milestone12-extension-stress.json \
-  'latest=$(latest_mirror "$current_dump_root")' \
+  'done < <(find "$current_dump_root" -type f -name '\''*.ppm'\'' -print | sort -Vr)' \
   'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
   'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
   'assert_close_kept_vt' \
