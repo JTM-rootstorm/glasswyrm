@@ -1867,7 +1867,8 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   /var/tmp/glasswyrm-m12-dumps /var/tmp/glasswyrm-m12-scenes \
   /var/tmp/glasswyrm-m12-renderer /var/tmp/glasswyrm-m12-control \
   /var/tmp/glasswyrm-m12-artifacts dev-libs/libinput \
-  x11-misc/xkeyboard-config 'media-libs/libglvnd X' 2.32.10 \
+  x11-misc/xkeyboard-config 'media-libs/libglvnd X' \
+  'media-libs/mesa -llvm' 2.32.10 \
   5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 \
   -Dexperimental=false -Drender_gl=false -Drender_gl=true \
   '--game-compat' '--disable-extension' MIT-SHM run_workloads.py \
