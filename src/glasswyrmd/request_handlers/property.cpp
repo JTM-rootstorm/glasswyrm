@@ -155,7 +155,8 @@ DispatchResult change_property(ServerState& state,
           {found->second,
            DeferredPropertyMutation{
                window, property_atom,
-               staged_window->properties.at(property_atom)},
+               staged_window->properties.at(property_atom),
+               context.input.logical_time},
            false});
     }
     state = std::move(staged);
@@ -215,7 +216,8 @@ DispatchResult delete_property(ServerState& state,
         return error(context, request, x11::CoreErrorCode::BadImplementation);
       return DispatchResult::deferred_policy_change(
           {found->second,
-           DeferredPropertyMutation{window, property_atom, std::nullopt},
+           DeferredPropertyMutation{window, property_atom, std::nullopt,
+                                    context.input.logical_time},
            false});
     }
     state = std::move(staged);

@@ -165,6 +165,7 @@ struct DeferredPropertyMutation {
   std::uint32_t window{};
   std::uint32_t atom{};
   std::optional<Property> value;
+  std::uint32_t notify_time{};
 };
 
 struct DeferredPolicyMutation {

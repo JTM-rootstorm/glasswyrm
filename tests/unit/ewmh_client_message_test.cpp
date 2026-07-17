@@ -17,7 +17,8 @@ void test_messages(const x11::ByteOrder order) {
   ServerState state(kScreenModel, true);
   constexpr std::uint32_t window = 0x400010;
   create_window(state, 7, window);
-  DispatchContext context{1, 0x400000, 0x1fffff, 31, order, true};
+  DispatchContext context{1, 0x400000, 0x1fffff, 31, order, true,
+                          InputSnapshot{0, 0, 0, 1, 31}};
   const auto net_state = state.atoms().find("_NET_WM_STATE").value();
   const auto fullscreen =
       state.atoms().find("_NET_WM_STATE_FULLSCREEN").value();
@@ -28,6 +29,7 @@ void test_messages(const x11::ByteOrder order) {
                      {1, fullscreen, above, 1, 0}));
   require(result.kind == DispatchKind::DeferredLifecycle &&
               result.deferred_policy && result.deferred_policy->property &&
+              result.deferred_policy->property->notify_time == 31 &&
               result.deferred_policy->window.fullscreen_requested &&
               result.deferred_policy->window.above_requested &&
               !state.resources().find_window(window)->fullscreen_requested,

@@ -3,7 +3,9 @@
 #ifdef GW_SERVER_HAS_IPC
 
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "glasswyrmd/protocol_event_router.hpp"
 #include "input/input_router.hpp"
+#include "protocol/x11/event_mask.hpp"
 #include "protocol/x11/reply.hpp"
 
 #include <algorithm>
@@ -157,6 +159,19 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     for (const auto& client : server_.clients_)
       recipients.push_back(client.get());
     EventRouter router(server_.state_.resources());
+    if (mutation != pending_mutations_.end() && mutation->second.property) {
+      const auto& property = *mutation->second.property;
+      ProtocolEventIntent intent;
+      intent.delivery = ProtocolEventDelivery::WindowMask;
+      intent.window = property.window;
+      intent.mask = gw::protocol::x11::event_mask::PropertyChange;
+      intent.event = gw::protocol::x11::PropertyNotifyEvent{
+          property.window, property.atom, property.notify_time,
+          property.value ? gw::protocol::x11::PropertyNotifyState::NewValue
+                         : gw::protocol::x11::PropertyNotifyState::Deleted};
+      ProtocolEventRouter property_router(server_.state_.resources());
+      (void)property_router.route(intent, recipients);
+    }
     if (operation->kind == LifecycleOperationKind::Destroy &&
         mutation != pending_mutations_.end() && mutation->second.destroy) {
       for (const auto& item : mutation->second.destroy->postorder) {
