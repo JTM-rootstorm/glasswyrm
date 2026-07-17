@@ -296,7 +296,8 @@ x_servers_absent=true; mesa_absent=true
 xterm_archive=$(find /var/cache/distfiles -maxdepth 1 -type f -name 'xterm-410.tgz' -print -quit)
 [[ -n $xterm_archive && $(sha256sum "$xterm_archive" | awk '{print $1}') == "$xterm_sha" ]]
 fetch_xterm_identity() {
-  local name=$1 url=$2 sha=$3 output=$4 cache=/var/cache/distfiles/$name
+  local name=$1 url=$2 sha=$3 output=$4
+  local cache=/var/cache/distfiles/$name
   if [[ -f $cache && $(sha256sum "$cache" | awk '{print $1}') == "$sha" ]]; then
     cp "$cache" "$output"
   else
