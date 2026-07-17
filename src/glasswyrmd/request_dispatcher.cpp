@@ -1,5 +1,6 @@
 #include "glasswyrmd/request_dispatcher.hpp"
 
+#include "glasswyrmd/extension_dispatcher.hpp"
 #include "glasswyrmd/request_handlers/common.hpp"
 #include "protocol/x11/core.hpp"
 
@@ -13,6 +14,8 @@ DispatchResult dispatch_request(ServerState& state,
                                 const DispatchContext& context,
                                 const x11::FramedRequest& request) {
   try {
+    if (request.opcode >= 128)
+      return dispatch_extension_request(context, request);
     switch (static_cast<x11::CoreOpcode>(request.opcode)) {
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);
@@ -90,6 +93,15 @@ DispatchResult dispatch_request(ServerState& state,
         return list_fonts(context, request);
       case x11::CoreOpcode::AllocColor:
         return alloc_color(state, context, request);
+      case x11::CoreOpcode::CreateColormap:
+        return create_colormap(state, context, request);
+      case x11::CoreOpcode::FreeColormap:
+        return free_colormap(state, context, request);
+      case x11::CoreOpcode::InstallColormap:
+      case x11::CoreOpcode::UninstallColormap:
+        return install_colormap(state, context, request);
+      case x11::CoreOpcode::ListInstalledColormaps:
+        return list_installed_colormaps(state, context, request);
       case x11::CoreOpcode::AllocNamedColor:
         return named_color(state, context, request, true);
       case x11::CoreOpcode::FreeColors:

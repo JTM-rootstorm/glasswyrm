@@ -154,6 +154,17 @@ namespace x11 = gw::protocol::x11;
 [[nodiscard]] DispatchResult query_colors(const ServerState&,
                                           const DispatchContext&,
                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_colormap(ServerState&,
+                                             const DispatchContext&,
+                                             const x11::FramedRequest&);
+[[nodiscard]] DispatchResult free_colormap(ServerState&,
+                                           const DispatchContext&,
+                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult install_colormap(const ServerState&,
+                                              const DispatchContext&,
+                                              const x11::FramedRequest&);
+[[nodiscard]] DispatchResult list_installed_colormaps(
+    const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult create_cursor(ServerState&, const DispatchContext&,
                                            const x11::FramedRequest&);
 [[nodiscard]] DispatchResult create_glyph_cursor(

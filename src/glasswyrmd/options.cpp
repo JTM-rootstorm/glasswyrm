@@ -1,6 +1,7 @@
 #include "glasswyrmd/options.hpp"
 
 #include "config.hpp"
+#include "glasswyrmd/extension_registry.hpp"
 
 #include <sys/stat.h>
 
@@ -21,6 +22,7 @@ void print_usage(std::ostream &output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
             "[--software-content] [--synthetic-input-socket PATH] "
+            "[--game-compat] [--disable-extension NAME]... "
             "[--x11-trace PATH] [--libinput-device PATH]... "
             "[--xkb-rules NAME] [--xkb-model NAME] [--xkb-layout NAME] "
             "[--xkb-variant NAME] [--xkb-options LIST] "
@@ -110,6 +112,33 @@ ArgumentResult parse_base_argument(std::string_view argument, int &index,
       return ArgumentResult::ExitFailure;
     }
     options.software_content = true;
+    return ArgumentResult::Parsed;
+  }
+  if (argument == "--game-compat") {
+    if (options.game_compat) {
+      error << "glasswyrmd: duplicate option: --game-compat\n";
+      return ArgumentResult::ExitFailure;
+    }
+    options.game_compat = true;
+    return ArgumentResult::Parsed;
+  }
+  if (argument == "--disable-extension") {
+    if (++index >= argc || argv[index][0] == '\0') {
+      error << "glasswyrmd: --disable-extension requires an extension name\n";
+      return ArgumentResult::ExitFailure;
+    }
+    const std::string name = argv[index];
+    if (!known_extension_name(name)) {
+      error << "glasswyrmd: unknown extension for --disable-extension: "
+            << name << '\n';
+      return ArgumentResult::ExitFailure;
+    }
+    if (std::ranges::find(options.disabled_extensions, name) !=
+        options.disabled_extensions.end()) {
+      error << "glasswyrmd: duplicate --disable-extension: " << name << '\n';
+      return ArgumentResult::ExitFailure;
+    }
+    options.disabled_extensions.push_back(name);
     return ArgumentResult::Parsed;
   }
   if (argument == "--synthetic-input-socket" || argument == "--x11-trace") {
@@ -254,6 +283,21 @@ ParseOptionsResult validate_options(const Options &options,
   if (options.software_content && !options.integrated()) {
     error << "glasswyrmd: --software-content requires --wm-socket and "
              "--compositor-socket\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.game_compat && !GW_HAS_EXPERIMENTAL) {
+    error << "glasswyrmd: --game-compat is unavailable because this build "
+             "does not include experimental features\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.game_compat &&
+      (!options.integrated() || !options.software_content)) {
+    error << "glasswyrmd: --game-compat requires integrated mode and "
+             "--software-content\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (!options.game_compat && !options.disabled_extensions.empty()) {
+    error << "glasswyrmd: --disable-extension requires --game-compat\n";
     return ParseOptionsResult::ExitFailure;
   }
   if (options.synthetic_input_socket && !options.integrated()) {

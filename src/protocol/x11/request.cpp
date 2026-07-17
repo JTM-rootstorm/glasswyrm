@@ -38,6 +38,11 @@ RequestFramer::consume(const std::span<const std::uint8_t> input) {
       status_ = inspect_header();
     }
     if (status_ == RequestFrameStatus::NeedMore &&
+        request_.bytes.size() == kBigRequestHeaderSize &&
+        expected_size_ == kBigRequestHeaderSize) {
+      status_ = inspect_extended_header();
+    }
+    if (status_ == RequestFrameStatus::NeedMore &&
         request_.bytes.size() == expected_size_) {
       status_ = RequestFrameStatus::Complete;
     }
@@ -59,16 +64,31 @@ void RequestFramer::reset() {
   request_.bytes.reserve(kCoreRequestHeaderSize);
 }
 
+void RequestFramer::enable_big_requests(
+    const std::uint32_t maximum_length_units) {
+  if (maximum_length_units < 2 ||
+      maximum_length_units > kMaximumBigRequestLengthUnits)
+    throw std::invalid_argument("invalid BIG-REQUESTS length limit");
+  big_requests_enabled_ = true;
+  maximum_big_length_units_ = maximum_length_units;
+}
+
 RequestFrameStatus RequestFramer::inspect_header() noexcept {
   request_.opcode = request_.bytes[0];
   request_.data = request_.bytes[1];
   ByteReader reader(std::span<const std::uint8_t>(request_.bytes).subspan(2),
                     order_);
-  if (!reader.read_u16(request_.length_units)) {
+  std::uint16_t ordinary_length_units{};
+  if (!reader.read_u16(ordinary_length_units)) {
     return RequestFrameStatus::TruncatedInput;
   }
+  request_.length_units = ordinary_length_units;
   if (request_.length_units == 0) {
-    return RequestFrameStatus::ZeroLength;
+    if (!big_requests_enabled_) return RequestFrameStatus::ZeroLength;
+    request_.header_size = kBigRequestHeaderSize;
+    expected_size_ = kBigRequestHeaderSize;
+    request_.bytes.reserve(kBigRequestHeaderSize);
+    return RequestFrameStatus::NeedMore;
   }
   if (request_.length_units > maximum_length_units_) {
     return RequestFrameStatus::TooLarge;
@@ -78,6 +98,23 @@ RequestFrameStatus RequestFramer::inspect_header() noexcept {
   if (!size || *size < kCoreRequestHeaderSize) {
     return RequestFrameStatus::TooLarge;
   }
+  expected_size_ = *size;
+  request_.bytes.reserve(expected_size_);
+  return RequestFrameStatus::NeedMore;
+}
+
+RequestFrameStatus RequestFramer::inspect_extended_header() noexcept {
+  ByteReader reader(std::span<const std::uint8_t>(request_.bytes).subspan(4),
+                    order_);
+  if (!reader.read_u32(request_.length_units))
+    return RequestFrameStatus::TruncatedInput;
+  if (request_.length_units < 2 ||
+      request_.length_units > maximum_big_length_units_)
+    return RequestFrameStatus::TooLarge;
+  const auto size = core::checked_multiply(
+      static_cast<std::size_t>(request_.length_units), std::size_t{4});
+  if (!size || *size < kBigRequestHeaderSize)
+    return RequestFrameStatus::TooLarge;
   expected_size_ = *size;
   request_.bytes.reserve(expected_size_);
   return RequestFrameStatus::NeedMore;

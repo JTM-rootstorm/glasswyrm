@@ -137,6 +137,11 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 72: return "PutImage";
     case 74: return "PolyText8";
     case 76: return "ImageText8";
+    case 78: return "CreateColormap";
+    case 79: return "FreeColormap";
+    case 81: return "InstallColormap";
+    case 82: return "UninstallColormap";
+    case 83: return "ListInstalledColormaps";
     case 84: return "AllocColor";
     case 85: return "AllocNamedColor";
     case 88: return "FreeColors";

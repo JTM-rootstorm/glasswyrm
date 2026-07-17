@@ -45,7 +45,7 @@ void Server::accept_clients() {
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
           expose_intent_handler_, trace_.get(), input_snapshot_provider_,
-          protocol_event_handler_));
+          protocol_event_handler_, &extensions_, options_.game_compat));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));

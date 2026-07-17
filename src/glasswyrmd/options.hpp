@@ -35,6 +35,8 @@ struct Options {
   std::uint32_t repeat_delay_ms = 500;
   std::uint32_t repeat_rate_hz = 25;
   bool software_content = false;
+  bool game_compat = false;
+  std::vector<std::string> disabled_extensions;
 
   [[nodiscard]] bool integrated() const noexcept {
     return wm_socket.has_value() && compositor_socket.has_value();

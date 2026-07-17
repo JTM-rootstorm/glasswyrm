@@ -1039,6 +1039,7 @@ if get_option('glasswyrmd')
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
     ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
+    ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],
