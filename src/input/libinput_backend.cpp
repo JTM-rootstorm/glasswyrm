@@ -189,6 +189,14 @@ InputServiceResult LibinputBackend::drain(const InputDrainBudget budget,
   return result;
 }
 
+void LibinputBackend::warp_pointer(const std::int32_t x,
+                                   const std::int32_t y) noexcept {
+  pointer_x_ = clamp_coordinate(x, root_width_);
+  pointer_y_ = clamp_coordinate(y, root_height_);
+  relative_x_ = 0;
+  relative_y_ = 0;
+}
+
 void LibinputBackend::convert(const LibinputEvent &event,
                               InputServiceResult &result,
                               const bool publish_records) {
