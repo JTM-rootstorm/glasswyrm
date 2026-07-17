@@ -151,6 +151,13 @@ void test_cli_and_argv() {
                                         "/tmp/drm",
                                         "--x11-trace",
                                         "/tmp/x11",
+                                        "--game-compat",
+                                        "--disable-extension",
+                                        "MIT-SHM",
+                                        "--renderer",
+                                        "auto",
+                                        "--renderer-report",
+                                        "/tmp/renderer",
                                         "--client",
                                         "xterm",
                                         "-name",
@@ -173,11 +180,23 @@ void test_cli_and_argv() {
                   {"gwm", "--ipc-socket", "/run/user/0/gw/gwm.sock"}),
           "gwm argv is exact");
   require(plan.children[1].argv.front() == "gwcomp" &&
-              plan.children[1].argv[2] == "drm",
-          "gwcomp argv selects DRM directly");
+              plan.children[1].argv[2] == "drm" &&
+              std::find(plan.children[1].argv.begin(),
+                        plan.children[1].argv.end(), "auto") !=
+                  plan.children[1].argv.end() &&
+              std::find(plan.children[1].argv.begin(),
+                        plan.children[1].argv.end(), "/tmp/renderer") !=
+                  plan.children[1].argv.end(),
+          "gwcomp argv selects DRM and the requested renderer directly");
   require(std::find(plan.children[2].argv.begin(), plan.children[2].argv.end(),
                     "--libinput-device") != plan.children[2].argv.end(),
           "server argv includes real input devices");
+  require(std::find(plan.children[2].argv.begin(), plan.children[2].argv.end(),
+                    "--game-compat") != plan.children[2].argv.end() &&
+              std::find(plan.children[2].argv.begin(),
+                        plan.children[2].argv.end(), "MIT-SHM") !=
+                  plan.children[2].argv.end(),
+          "server argv carries the game profile and extension override");
   require(
       plan.children[3].argv ==
           std::vector<std::string>({"xterm", "-name", "hello world", "$()"}),
@@ -210,6 +229,21 @@ void test_cli_rejections() {
   std::string detail;
   require(!make_runtime_paths(long_path, paths, detail),
           "overlong Unix socket paths are rejected");
+
+  std::vector<std::string> disabled_without_profile = {
+      "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "99",
+      "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+      "--connector", "Virtual-1", "--mode", "1024x768", "--input-device",
+      "/dev/input/event0", "--disable-extension", "MIT-SHM"};
+  auto disabled_argv = mutable_argv(disabled_without_profile);
+  Options disabled_options;
+  std::ostringstream disabled_error;
+  require(parse_options(static_cast<int>(disabled_argv.size()),
+                        disabled_argv.data(), disabled_options, output,
+                        disabled_error) == ParseOptionsResult::ExitFailure &&
+              disabled_error.str().find("requires --game-compat") !=
+                  std::string::npos,
+          "extension overrides require the game profile");
 }
 
 glasswyrm::session::ChildSpec ready_child(const std::string &self,
