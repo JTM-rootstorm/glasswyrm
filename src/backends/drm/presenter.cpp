@@ -182,8 +182,7 @@ output::PresentResult DrmPresenter::present_initial(
   headless::StagedFrameDump mirror;
   StagedDrmReport report;
   DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, hash, FullCopyReason::None, damage_copy,
-                     error) ||
+  if (!copy_frame_to(target, frame, hash, FullCopyReason::None, damage_copy, error) ||
       target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("initial-copy", error); fatal_ = true;
@@ -498,9 +497,8 @@ bool DrmPresenter::present_committed_frame(std::string& error) {
   const output::SoftwareFrameView frame{
       config_.output, committed_pixels_, {}, 0, committed_generation_, 0};
   DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, committed_hash_,
-                     FullCopyReason::VirtualTerminalResume, damage_copy,
-                     error) ||
+  if (!copy_frame_to(target, frame, committed_hash_, FullCopyReason::VirtualTerminalResume,
+                     damage_copy, error) ||
       target.visible_hash() != committed_hash_) {
     if (error.empty()) error = "re-modeset scanout hash differs from committed frame";
     return false;
