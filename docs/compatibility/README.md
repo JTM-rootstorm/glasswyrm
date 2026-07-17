@@ -15,6 +15,10 @@ that an external application works.
   and evidence boundary.
 - [M11 xterm profile](M11_XTERM.md) states the narrow accepted claim and its
   presence-normalization boundary.
+- [M12 SDL source audit](M12_SDL_AUDIT.md) records the pinned SDL 2.32.10
+  X11 paths, official program hashes, and implementation boundary.
+- [M12 SDL profile](M12_SDL.md) freezes the exact build, commands, supported
+  SHM/fallback paths, evidence contract, and explicit exclusions.
 
 Milestone 9 is complete for only the pinned commands. The Gentoo VM builds the
 verified sources and validates reviewed normalized traces, exact frames,
@@ -28,3 +32,10 @@ gate passing. The accepted run validates interaction, selection, VT and
 compositor-restart recovery, canonical frames, graphical-console parity,
 restoration, and archive integrity. The passive-grab scope is `GrabButton`
 only; `UngrabButton` and passive key grabs are unsupported.
+
+Milestone 12 is not yet an accepted compatibility result. The source,
+signature, build profile, repository probes, and official SDL 2.32.10
+`testdraw2`/`testsprite2` workloads are pinned, but acceptance remains pending
+until the clean M11-to-M12 VM sequence produces a passing M12 summary with no
+evidence errors and a valid checksum-protected archive. Do not generalize the
+pending profile to another SDL build, renderer, or game.
