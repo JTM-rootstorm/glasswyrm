@@ -97,20 +97,20 @@ int main() {
   const auto primary = protocol::scenario_events("primary-selection");
   okay &= expect(primary.size() == 5 &&
                      is_event(primary[0], protocol::Device::pointer, EV_REL,
+                              REL_X, -19) &&
+                     is_event(primary[1], protocol::Device::pointer, EV_REL,
                               REL_Y, -13) &&
-                     is_event(primary[1], protocol::Device::pointer, EV_KEY,
-                              BTN_LEFT, 1) &&
                      is_event(primary[2], protocol::Device::pointer, EV_KEY,
-                              BTN_LEFT, 0) &&
-                     is_event(primary[3], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
+                     is_event(primary[3], protocol::Device::pointer, EV_REL,
+                              REL_X, 108) &&
                      is_event(primary[4], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 0) && primary[4].delay_ms == 250,
-                 "PRIMARY drag selects the known xterm A output row");
+                 "PRIMARY drag selects the exact xterm A token");
   const auto paste = protocol::scenario_events("clipboard-probe");
   okay &= expect(paste.size() > 8 &&
                      is_event(paste[0], protocol::Device::pointer, EV_REL,
-                              REL_X, 440) &&
+                              REL_X, 351) &&
                      is_event(paste[1], protocol::Device::pointer, EV_REL,
                               REL_Y, 98) &&
                      is_event(paste[2], protocol::Device::pointer, EV_KEY,
@@ -122,19 +122,26 @@ int main() {
                  "PRIMARY paste targets and focuses xterm B before editing");
   for (const auto name : {"move", "resize"}) {
     const auto interaction = protocol::scenario_events(name);
+    const bool move = std::string_view(name) == "move";
     okay &= expect(interaction.size() == 6 &&
+                       is_event(interaction[1], protocol::Device::pointer,
+                                EV_KEY, move ? BTN_LEFT : BTN_RIGHT, 1) &&
+                       is_event(interaction[2], protocol::Device::pointer,
+                                EV_REL, REL_X, move ? 96 : 60) &&
+                       is_event(interaction[3], protocol::Device::pointer,
+                                EV_REL, REL_Y, move ? 64 : 52) &&
                        is_event(interaction.back(),
                                 protocol::Device::keyboard, EV_KEY,
                                 KEY_LEFTALT, 0) &&
                        interaction.back().delay_ms == 250,
-                   "interactive pointer gesture settles before the next scenario");
+                   "interactive pointer gesture has exact delta and settles");
   }
   const auto close = protocol::scenario_events("close");
   okay &= expect(close.size() == 8 &&
                      is_event(close[0], protocol::Device::pointer, EV_REL,
-                              REL_X, -608) &&
+                              REL_X, -596) &&
                      is_event(close[1], protocol::Device::pointer, EV_REL,
-                              REL_Y, -205) &&
+                              REL_Y, -209) &&
                      is_event(close[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(close[3], protocol::Device::pointer, EV_KEY,
