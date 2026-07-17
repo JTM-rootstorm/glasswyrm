@@ -253,6 +253,7 @@ DispatchResult destroy_window(ServerState& state,
                       selection, 1, 0, context.input.logical_time,
                       owner.last_change_time));
     (void)state.selections().clear_window(item.xid);
+    (void)state.randr().clear_window(item.xid);
   }
   return result;
 }

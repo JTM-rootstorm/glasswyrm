@@ -107,6 +107,36 @@ struct DamageNotifyEvent {
   glasswyrm::geometry::Rectangle geometry{};
 };
 
+struct RandRScreenChangeNotifyEvent {
+  std::uint16_t rotation{};
+  std::uint32_t timestamp{};
+  std::uint32_t config_timestamp{};
+  std::uint32_t root{};
+  std::uint32_t request_window{};
+  std::uint16_t size_id{};
+  std::uint16_t subpixel_order{};
+  std::uint16_t width{}, height{}, width_millimeters{}, height_millimeters{};
+};
+
+struct RandRCrtcChangeNotifyEvent {
+  std::uint32_t timestamp{}, window{}, crtc{}, mode{};
+  std::uint16_t rotation{};
+  std::int16_t x{}, y{};
+  std::uint16_t width{}, height{};
+};
+
+struct RandROutputChangeNotifyEvent {
+  std::uint32_t timestamp{}, config_timestamp{}, window{}, output{}, crtc{};
+  std::uint32_t mode{};
+  std::uint16_t rotation{};
+  std::uint8_t connection{}, subpixel_order{};
+};
+
+struct RandROutputPropertyNotifyEvent {
+  std::uint32_t window{}, output{}, atom{}, timestamp{};
+  std::uint8_t status{};
+};
+
 using ProtocolEvent = std::variant<
     gw::protocol::x11::PropertyNotifyEvent,
     gw::protocol::x11::SelectionClearEvent,
@@ -114,7 +144,11 @@ using ProtocolEvent = std::variant<
     gw::protocol::x11::SelectionNotifyEvent,
     gw::protocol::x11::ClientMessageEvent,
     XFixesSelectionNotifyEvent,
-    DamageNotifyEvent>;
+    DamageNotifyEvent,
+    RandRScreenChangeNotifyEvent,
+    RandRCrtcChangeNotifyEvent,
+    RandROutputChangeNotifyEvent,
+    RandROutputPropertyNotifyEvent>;
 
 enum class ProtocolEventDelivery { DirectClient, WindowOwner, WindowMask };
 

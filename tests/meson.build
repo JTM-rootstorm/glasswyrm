@@ -1087,6 +1087,9 @@ if get_option('glasswyrmd')
     ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
     ['mit-shm', 'mit_shm_test.cpp'],
     ['xfixes-damage', 'xfixes_damage_test.cpp'],
+    ['randr-reporting', 'randr_reporting_test.cpp'],
+    ['randr-config', 'randr_config_test.cpp'],
+    ['randr-event-wire', 'randr_event_wire_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],

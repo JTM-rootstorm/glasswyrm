@@ -13,7 +13,7 @@ only accepted names; aliases are not added.
 | DAMAGE | 131 | 66 | 1 | 130 | 1 | 1.1 |
 | RENDER | 132 | 0 | 0 | 131 | 5 | 0.11 |
 | COMPOSITE | 133 | 0 | 0 | 0 | 0 | 0.4 |
-| RANDR | 134 | 67 | 1 | 136 | 1 | 1.3 |
+| RANDR | 134 | 67 | 2 | 136 | 3 | 1.3 |
 
 `ListExtensions` returns enabled names in ascending major-opcode order. A
 per-extension disable switch can remove a registry entry without changing any
