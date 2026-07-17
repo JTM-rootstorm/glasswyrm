@@ -82,6 +82,9 @@ namespace x11 = gw::protocol::x11;
                                         const x11::FramedRequest&);
 [[nodiscard]] DispatchResult warp_pointer(ServerState&, const DispatchContext&,
                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult set_input_focus(ServerState&,
+                                             const DispatchContext&,
+                                             const x11::FramedRequest&);
 [[nodiscard]] DispatchResult intern_atom(ServerState&, const DispatchContext&,
                                          const x11::FramedRequest&);
 [[nodiscard]] DispatchResult get_atom_name(ServerState&, const DispatchContext&,

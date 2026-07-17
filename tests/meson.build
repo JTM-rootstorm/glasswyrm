@@ -1129,6 +1129,7 @@ if get_option('glasswyrmd')
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
     ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
+    ['set-input-focus-dispatch', 'set_input_focus_dispatch_test.cpp'],
     ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
     ['mit-shm', 'mit_shm_test.cpp'],
     ['xfixes-damage', 'xfixes_damage_test.cpp'],

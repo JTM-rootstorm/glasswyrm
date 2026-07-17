@@ -53,6 +53,71 @@ DispatchResult get_input_focus(const ServerState& state,
   return {std::move(reply).finish()};
 }
 
+DispatchResult set_input_focus(ServerState& state,
+                               const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (!exact_size(request, 12))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 2)
+    return error(context, request, x11::CoreErrorCode::BadValue,
+                 request.data);
+
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t focus{}, time{};
+  if (!reader.read_u32(focus) || !reader.read_u32(time))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  // CurrentTime resolves to the server's logical input clock. Requests from
+  // the future are ignored, as required by the core protocol. The accepted
+  // SDL profile uses CurrentTime.
+  if (time != 0 &&
+      static_cast<std::int32_t>(time - context.input.logical_time) > 0)
+    return {};
+
+  // None (0) and PointerRoot (1) are protocol sentinels, not ordinary window
+  // IDs. The current GWM policy always selects one visible managed top-level,
+  // so these values can only be represented while focus is already at root.
+  if (focus == 0 || focus == 1) {
+    if (state.focused_window() == state.screen().root_window) return {};
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  }
+
+  const auto* window = state.resources().find_window(focus);
+  if (!window)
+    return error(context, request, x11::CoreErrorCode::BadWindow, focus);
+  if (window->map_state != MapState::Viewable)
+    return error(context, request, x11::CoreErrorCode::BadMatch, focus);
+  if (!state.resources().is_policy_candidate(focus) ||
+      window->cleanup_pending || window->attributes.override_redirect)
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  if (state.focused_window() == focus) return {};
+
+  auto snapshot = state.lifecycle_snapshot();
+  auto found = snapshot.windows.find(focus);
+  if (found == snapshot.windows.end())
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  if (context.integrated_lifecycle)
+    return DispatchResult::deferred_policy_change(
+        {found->second, std::nullopt, true});
+
+  const auto serial = state.next_lifecycle_serial();
+  if (!serial)
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
+  for (auto& [xid, candidate] : snapshot.windows) {
+    candidate.focused = xid == focus;
+  }
+  found = snapshot.windows.find(focus);
+  found->second.focus_serial = *serial;
+  snapshot.focused_window = focus;
+  if (!state.commit_lifecycle(snapshot))
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  return {};
+}
+
 std::uint32_t immediate_child_at(const ResourceTable& resources,
                                  const WindowResource& parent,
                                  const std::int64_t root_x,

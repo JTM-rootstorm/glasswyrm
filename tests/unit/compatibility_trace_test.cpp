@@ -26,6 +26,7 @@ int main() {
   require(x11_request_name(35) == "AllowEvents");
   require(x11_request_name(38) == "QueryPointer");
   require(x11_request_name(41) == "WarpPointer");
+  require(x11_request_name(42) == "SetInputFocus");
   require(x11_request_name(44) == "QueryKeymap");
   require(x11_request_name(45) == "OpenFont");
   require(x11_request_name(65) == "PolyLine");
