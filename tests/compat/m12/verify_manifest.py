@@ -49,6 +49,7 @@ REQUIRED_ENVIRONMENT = {
     "SDL_VIDEODRIVER=x11",
     "SDL_RENDER_DRIVER=software",
     "SDL_AUDIODRIVER=dummy",
+    "LD_PRELOAD=tests/libgw_m9_fixed_time.so",
 }
 
 

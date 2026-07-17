@@ -21,6 +21,7 @@ environment = [
   "SDL_VIDEODRIVER=x11",
   "SDL_RENDER_DRIVER=software",
   "SDL_AUDIODRIVER=dummy",
+  "LD_PRELOAD=tests/libgw_m9_fixed_time.so",
 ]
 official_program_compile_flags = [
   "-std=c11",
@@ -97,7 +98,7 @@ name = "testdraw2"
 source_path = "test/testdraw2.c"
 source_sha256 = "e2d67b758d974bd9e07a4dcbe0107fbcf9ed342382a24ed63024699c7459cd5f"
 argv = ["testdraw2", "--video", "x11", "--renderer", "software", "--windows", "1", "--geometry", "640x480", "--position", "64,64", "--blend", "none", "100"]
-determinism = "LD_PRELOAD repository fixed-time shim; harness terminates after the frozen bounded observation frame count"
+determinism = "LD_PRELOAD repository fixed-time shim; harness terminates after the frozen bounded observation interval"
 expected_extensions = ["BIG-REQUESTS", "MIT-SHM", "XFIXES", "RANDR"]
 [[program]]
 name = "testsprite2"
