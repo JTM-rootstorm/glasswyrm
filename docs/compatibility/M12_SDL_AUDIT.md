@@ -60,16 +60,22 @@ barriers are not required because the accepted profile does not request mouse
 confinement.
 
 `SDL_x11clipboard.c` creates an unmapped core window and uses the ordinary
-selection/property protocol. `SDL_x11xfixes.c` negotiates XFIXES and subscribes
-the root window to owner-change notifications for CLIPBOARD and PRIMARY. The
-accepted XFIXES version is 2.0; pointer-barrier symbols may exist in the SDL
-dynamic table but are outside the frozen workload.
+selection/property protocol. `SDL_x11xfixes.c` can negotiate XFIXES and
+subscribe the root window to owner-change notifications for CLIPBOARD and
+PRIMARY. In SDL 2.32.10, however, `SDL_x11sym.h` places
+`XIBarrierReleasePointer` in the same shared-symbol module as XFIXES. The pinned
+build disables XInput2, so that lookup keeps `SDL_X11_HAVE_XFIXES` false. The
+SDL API probe and exact official drawing workloads therefore do not query
+XFIXES. Their frozen query profile is `BIG-REQUESTS`, the normalized `OTHER`
+class, RANDR, then MIT-SHM. Raw/XCB probes independently require XFIXES 2.0 plus
+selection and region behavior; pointer barriers remain outside the workload.
 
-The dynamic X11 symbol table confirms the required core colormap/window,
-MIT-SHM, XFIXES selection, and XRandR entry points. Optional XInput2, Xcursor,
-Shape, XScreenSaver, XDBE, Wayland, KMSDRM, and client graphics APIs are
-disabled at build time so their presence is not part of the compatibility
-contract.
+The dynamic X11 symbol table declares the core colormap/window, MIT-SHM,
+XFIXES selection, and XRandR entry points requested by this build. Runtime
+availability is established by the trace and raw/XCB probes, rather than the
+declaration alone. Optional XInput2, Xcursor, Shape, XScreenSaver, XDBE,
+Wayland, KMSDRM, and client graphics APIs are disabled at build time so their
+presence is not part of the compatibility contract.
 
 ## Official workloads
 

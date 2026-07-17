@@ -51,6 +51,7 @@ REQUIRED_ENVIRONMENT = {
     "SDL_AUDIODRIVER=dummy",
     "LD_PRELOAD=tests/libgw_m9_fixed_time.so",
 }
+OFFICIAL_EXTENSION_QUERIES = ["BIG-REQUESTS", "OTHER", "RANDR", "MIT-SHM"]
 
 
 def digest(path: pathlib.Path) -> str:
@@ -138,12 +139,22 @@ def main() -> int:
         build_arguments = set(source.get("build_arguments", ()))
         require(REQUIRED_BUILD_ARGUMENTS <= build_arguments, "required SDL build arguments are missing", errors)
         require(len(build_arguments) == len(source.get("build_arguments", ())), "duplicate SDL build argument", errors)
+        require(
+            source.get("xfixes_runtime_evidence") == "raw-xcb-only",
+            "XFIXES runtime evidence boundary differs",
+            errors,
+        )
 
     programs = {item.get("name"): item for item in document.get("program", [])}
     require(set(programs) == {"testdraw2", "testsprite2"}, "official program set differs", errors)
     for program in programs.values():
         path = program.get("source_path", "")
         require(program.get("source_sha256") == PROGRAM_HASHES.get(path), f"hash differs for {path}", errors)
+        require(
+            program.get("expected_extension_queries") == OFFICIAL_EXTENSION_QUERIES,
+            f"extension query profile differs for {path}",
+            errors,
+        )
     sprite = programs.get("testsprite2", {})
     require(sprite.get("asset_sha256") == PROGRAM_HASHES["test/icon.bmp"], "icon.bmp hash differs", errors)
     require("--iterations" in sprite.get("argv", ()), "testsprite2 must use bounded iterations", errors)
