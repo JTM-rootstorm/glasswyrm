@@ -321,6 +321,8 @@ if get_option('glasswyrmd')
       'glasswyrmd/resource_invariants.cpp',
       'glasswyrmd/atom_table.cpp',
       'glasswyrmd/server_state.cpp',
+      'glasswyrmd/ewmh.cpp',
+      'glasswyrmd/ewmh_client_message.cpp',
       'glasswyrmd/randr_state.cpp',
       'glasswyrmd/lifecycle_snapshot.cpp',
       'glasswyrmd/lifecycle_coordinator.cpp',

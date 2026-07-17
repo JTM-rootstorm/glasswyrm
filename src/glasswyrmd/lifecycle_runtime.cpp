@@ -107,6 +107,22 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
     committed = staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
+  } else if (active && mutation != pending_mutations_.end() &&
+             mutation->second.property) {
+    auto staged = server_.state_;
+    const auto& property = *mutation->second.property;
+    bool property_committed = false;
+    if (property.value) {
+      property_committed =
+          staged.resources().change_property(
+              property.window, property.atom, *property.value,
+              PropertyMode::Replace) == PropertyMutationStatus::Success;
+    } else {
+      property_committed =
+          staged.resources().delete_property(property.window, property.atom);
+    }
+    committed = property_committed && staged.commit_lifecycle(snapshot);
+    if (committed) server_.state_ = std::move(staged);
   } else {
     committed = server_.state_.commit_lifecycle(snapshot);
   }
@@ -309,6 +325,35 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
     if (result.deferred_override_redirect) {
       operation.kind = LifecycleOperationKind::OverrideChange;
       found->second.override_redirect = *result.deferred_override_redirect;
+    } else if (result.deferred_policy) {
+      operation.kind = LifecycleOperationKind::PolicyChange;
+      const auto applied_x = found->second.applied_x;
+      const auto applied_y = found->second.applied_y;
+      const auto applied_width = found->second.applied_width;
+      const auto applied_height = found->second.applied_height;
+      const auto stacking = found->second.stacking;
+      const auto visible = found->second.policy_visible;
+      const auto focused = found->second.focused;
+      const auto old_x = found->second.requested_x;
+      const auto old_y = found->second.requested_y;
+      const auto old_width = found->second.requested_width;
+      const auto old_height = found->second.requested_height;
+      found->second = result.deferred_policy->window;
+      found->second.applied_x = applied_x;
+      found->second.applied_y = applied_y;
+      found->second.applied_width = applied_width;
+      found->second.applied_height = applied_height;
+      found->second.stacking = stacking;
+      found->second.policy_visible = visible;
+      found->second.focused = focused;
+      if (result.deferred_policy->request_focus)
+        found->second.focus_serial = *serial;
+      if (found->second.requested_x != old_x ||
+          found->second.requested_y != old_y ||
+          found->second.requested_width != old_width ||
+          found->second.requested_height != old_height)
+        found->second.geometry_serial = *serial;
+      mutation.property = result.deferred_policy->property;
     } else if (result.deferred_configure) {
       operation.kind = LifecycleOperationKind::Configure;
       const auto& request = *result.deferred_configure;
@@ -358,6 +403,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
                  ? gw::protocol::x11::CoreOpcode::ConfigureWindow
              : result.deferred_override_redirect
                  ? gw::protocol::x11::CoreOpcode::ChangeWindowAttributes
+             : result.deferred_policy && result.deferred_policy->property
+                 ? gw::protocol::x11::CoreOpcode::ChangeProperty
+             : result.deferred_policy
+                 ? gw::protocol::x11::CoreOpcode::SendEvent
              : result.deferred_map ? gw::protocol::x11::CoreOpcode::MapWindow
                                    : gw::protocol::x11::CoreOpcode::UnmapWindow),
          0}));

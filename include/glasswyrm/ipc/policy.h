@@ -32,6 +32,11 @@ typedef enum gwipc_policy_result {
   GWIPC_POLICY_REJECTED_LIMIT = 6,
   GWIPC_POLICY_REJECTED_UNSUPPORTED_METADATA = 7,
 } gwipc_policy_result;
+enum {
+  GWIPC_POLICY_WINDOW_FLAG_ABOVE = UINT32_C(1) << 0,
+  GWIPC_POLICY_WINDOW_FLAG_BYPASS_COMPOSITOR = UINT32_C(1) << 1,
+  GWIPC_POLICY_WINDOW_FLAG_INPUT_DISABLED = UINT32_C(1) << 2,
+};
 
 typedef struct gwipc_policy_context_upsert {
   size_t struct_size; uint32_t root_window_id, workspace_id; uint64_t output_id;

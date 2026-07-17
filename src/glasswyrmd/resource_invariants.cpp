@@ -84,11 +84,13 @@ bool ResourceTable::invariants_hold() const noexcept {
     calculated_property_bytes += window_property_bytes(*window);
     if (xid != screen_.root_window) {
       const auto* parent = find_window(window->parent);
+      const bool server_proxy = xid == 4 && !resource.owner;
       if (parent == nullptr ||
           std::count(parent->children.begin(), parent->children.end(), xid) != 1 ||
-          !resource.owner) {
+          (!resource.owner && !server_proxy)) {
         return false;
       }
+      if (server_proxy) continue;
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(),

@@ -183,4 +183,28 @@ std::size_t ResourceTable::resource_count_by_owner(
   return iterator == resources_by_owner_.end() ? 0 : iterator->second.size();
 }
 
+bool ResourceTable::create_server_proxy_window(const std::uint32_t xid) {
+  if (xid == 0 || resources_.contains(xid)) return false;
+  WindowResource proxy;
+  proxy.parent = screen_.root_window;
+  proxy.width = 1;
+  proxy.height = 1;
+  proxy.requested_width = 1;
+  proxy.requested_height = 1;
+  proxy.depth = screen_.root_depth;
+  proxy.window_class = WindowClass::InputOutput;
+  proxy.visual = screen_.root_visual;
+  proxy.attributes.colormap = screen_.default_colormap;
+  try {
+    resources_.emplace(
+        xid, ResourceRecord{ResourceType::Window, std::nullopt,
+                            std::move(proxy)});
+    find_window(screen_.root_window)->children.push_back(xid);
+    return true;
+  } catch (...) {
+    resources_.erase(xid);
+    return false;
+  }
+}
+
 }  // namespace glasswyrm::server

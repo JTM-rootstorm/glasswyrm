@@ -1,4 +1,5 @@
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/ewmh_client_message.hpp"
 #include "glasswyrmd/extension_event_helpers.hpp"
 
 #include "protocol/x11/byte_cursor.hpp"
@@ -188,8 +189,6 @@ DispatchResult send_event(ServerState& state, const DispatchContext& context,
   std::uint32_t window = 0, message_type = 0;
   if (!reader.read_u32(window) || !reader.read_u32(message_type))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  if (window != destination)
-    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   if (!state.atoms().valid(message_type))
     return error(context, request, x11::CoreErrorCode::BadAtom, message_type);
 
@@ -218,6 +217,11 @@ DispatchResult send_event(ServerState& state, const DispatchContext& context,
   } else {
     return error(context, request, x11::CoreErrorCode::BadValue, detail);
   }
+  if (auto handled = handle_ewmh_client_message(
+          state, context, request, destination, event))
+    return std::move(*handled);
+  if (window != destination)
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   result.protocol_events.push_back(window_event(
       destination, event_mask, request.data != 0, std::move(event)));
   return result;

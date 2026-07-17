@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace glasswyrm::input {
@@ -27,6 +28,18 @@ enum class MapState : std::uint8_t {
 };
 enum class LifecycleStackMode : std::uint8_t { None, Above, Below };
 enum class BackgroundSource : std::uint8_t { None, ParentRelative, Pixel };
+enum class PolicyWindowType : std::uint8_t {
+  Unknown = 0,
+  Normal = 1,
+  Dialog = 2,
+  Utility = 3,
+};
+enum class PolicyDecoration : std::uint8_t { Unknown = 0, False = 1, True = 2 };
+
+struct SavedWindowGeometry {
+  std::int32_t x{}, y{};
+  std::uint32_t width{}, height{}, border_width{};
+};
 
 struct WindowAttributes {
   BackgroundSource background_source{BackgroundSource::None};
@@ -80,6 +93,18 @@ struct WindowResource {
   std::shared_ptr<PixelStorage> storage;
   std::unordered_map<std::uint64_t, std::uint32_t> event_selections;
   std::unordered_map<std::uint32_t, Property> properties;
+  std::uint32_t transient_for{};
+  PolicyWindowType policy_window_type{PolicyWindowType::Normal};
+  PolicyDecoration decoration_preference{PolicyDecoration::Unknown};
+  bool fullscreen_requested{};
+  bool maximized_requested{};
+  bool above_requested{};
+  bool bypass_compositor{};
+  bool attention_requested{};
+  bool input_requested{true};
+  std::uint32_t minimum_width{}, minimum_height{};
+  std::uint32_t maximum_width{}, maximum_height{};
+  std::optional<SavedWindowGeometry> saved_normal_geometry;
 };
 
 struct WindowCreateSpec {

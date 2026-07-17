@@ -59,6 +59,24 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
     case LifecycleOperationKind::OverrideChange:
       target->second.override_redirect = source->second.override_redirect;
       break;
+    case LifecycleOperationKind::PolicyChange: {
+      const auto applied_x = target->second.applied_x;
+      const auto applied_y = target->second.applied_y;
+      const auto applied_width = target->second.applied_width;
+      const auto applied_height = target->second.applied_height;
+      const auto stacking = target->second.stacking;
+      const auto visible = target->second.policy_visible;
+      const auto focused = target->second.focused;
+      target->second = source->second;
+      target->second.applied_x = applied_x;
+      target->second.applied_y = applied_y;
+      target->second.applied_width = applied_width;
+      target->second.applied_height = applied_height;
+      target->second.stacking = stacking;
+      target->second.policy_visible = visible;
+      target->second.focused = focused;
+      break;
+    }
     case LifecycleOperationKind::Focus:
       target->second.focus_serial = source->second.focus_serial;
       break;

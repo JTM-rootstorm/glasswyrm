@@ -10,6 +10,12 @@
 namespace glasswyrm::wm {
 namespace {
 
+constexpr std::uint32_t kAboveFlag = 1U << 0;
+constexpr std::uint32_t kBypassCompositorFlag = 1U << 1;
+constexpr std::uint32_t kInputDisabledFlag = 1U << 2;
+constexpr std::uint32_t kKnownWindowFlags =
+    kAboveFlag | kBypassCompositorFlag | kInputDisabledFlag;
+
 bool extent_fits(const std::int32_t origin, const std::uint32_t extent) {
   return extent != 0 &&
          static_cast<std::int64_t>(origin) + extent - 1 <=
@@ -47,7 +53,8 @@ EvaluationError validate(const RawState& raw) {
         window.requested_height == 0 ||
         window.requested_width > maximum_window_extent ||
         window.requested_height > maximum_window_extent ||
-        window.border_width > maximum_border_width || window.flags != 0 ||
+        window.border_width > maximum_border_width ||
+        (window.flags & ~kKnownWindowFlags) != 0 ||
         !known_window_type || !known_decoration || !known_stack_mode ||
         (window.stack_serial == 0 &&
          (window.stack_sibling != 0 || window.stack_mode != StackMode::None)) ||
@@ -93,7 +100,9 @@ EvaluationError validate(const RawState& raw) {
 }
 
 auto stack_key(const RawWindow& window) {
-  return std::tuple(window.map_serial, window.creation_serial, window.window_id);
+  return std::tuple((window.flags & kAboveFlag) != 0,
+                    window.map_serial, window.creation_serial,
+                    window.window_id);
 }
 
 bool decoration(const RawWindow& raw, const AppliedState state) {
@@ -393,7 +402,9 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
 
   std::vector<std::uint32_t> focus;
   for (const auto& [id, window] : raw.windows)
-    if (policy.windows.at(id).visible && !window.override_redirect) focus.push_back(id);
+    if (policy.windows.at(id).visible && !window.override_redirect &&
+        (window.flags & kInputDisabledFlag) == 0)
+      focus.push_back(id);
   if (!focus.empty()) {
     const bool has_explicit = std::any_of(focus.begin(), focus.end(), [&](const auto id) {
       return raw.windows.at(id).focus_serial != 0;

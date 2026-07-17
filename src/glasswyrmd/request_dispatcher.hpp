@@ -161,6 +161,18 @@ struct ProtocolEventIntent {
   ProtocolEvent event;
 };
 
+struct DeferredPropertyMutation {
+  std::uint32_t window{};
+  std::uint32_t atom{};
+  std::optional<Property> value;
+};
+
+struct DeferredPolicyMutation {
+  LifecycleWindow window;
+  std::optional<DeferredPropertyMutation> property;
+  bool request_focus{};
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -171,6 +183,7 @@ struct DispatchResult {
   bool deferred_destroy{false};
   bool deferred_map{false};
   std::optional<bool> deferred_override_redirect;
+  std::optional<DeferredPolicyMutation> deferred_policy;
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
@@ -207,6 +220,13 @@ struct DispatchResult {
     result.kind = DispatchKind::DeferredLifecycle;
     result.deferred_window = window;
     result.deferred_override_redirect = value;
+    return result;
+  }
+  static DispatchResult deferred_policy_change(DeferredPolicyMutation change) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = change.window.xid;
+    result.deferred_policy = std::move(change);
     return result;
   }
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glasswyrmd/atom_table.hpp"
+#include "glasswyrmd/ewmh.hpp"
 #include "glasswyrmd/grab_state.hpp"
 #include "glasswyrmd/randr_state.hpp"
 #include "glasswyrmd/resource_table.hpp"
@@ -45,10 +46,11 @@ class LifecycleSerialSource {
 
 class ServerState {
  public:
-  explicit ServerState(ScreenModel screen = kScreenModel)
-      : screen_(screen), resources_(screen) {}
+  explicit ServerState(ScreenModel screen = kScreenModel,
+                       bool game_compat = false);
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
+  [[nodiscard]] bool game_compat() const noexcept { return game_compat_; }
   [[nodiscard]] ResourceTable& resources() noexcept { return resources_; }
   [[nodiscard]] const ResourceTable& resources() const noexcept {
     return resources_;
@@ -112,6 +114,20 @@ class ServerState {
       window->stack_serial = intent.stack_serial;
       window->stack_sibling = intent.stack_sibling;
       window->stack_mode = intent.stack_mode;
+      window->transient_for = intent.transient_for;
+      window->policy_window_type = intent.policy_window_type;
+      window->decoration_preference = intent.decoration_preference;
+      window->fullscreen_requested = intent.fullscreen_requested;
+      window->maximized_requested = intent.maximized_requested;
+      window->above_requested = intent.above_requested;
+      window->bypass_compositor = intent.bypass_compositor;
+      window->attention_requested = intent.attention_requested;
+      window->input_requested = intent.input_requested;
+      window->minimum_width = intent.minimum_width;
+      window->minimum_height = intent.minimum_height;
+      window->maximum_width = intent.maximum_width;
+      window->maximum_height = intent.maximum_height;
+      window->saved_normal_geometry = intent.saved_normal_geometry;
       window->attributes.override_redirect = intent.override_redirect;
       policy.push_back({xid, intent.applied_x, intent.applied_y,
                         intent.applied_width, intent.applied_height,
@@ -120,6 +136,7 @@ class ServerState {
     }
     if (!staged.apply_policy(policy)) return false;
     *this = std::move(staged);
+    synchronize_ewmh_root_properties(*this);
     return true;
   }
   [[nodiscard]] std::optional<LifecycleSnapshot> propose_create_lifecycle(
@@ -184,6 +201,7 @@ class ServerState {
     (void)randr_.clear_client(owner);
     auto result = resources_.cleanup_client(owner);
     (void)randr_.prune_windows(resources_);
+    synchronize_ewmh_root_properties(*this);
     return result;
   }
   [[nodiscard]] bool invariants_hold() const noexcept {
@@ -192,6 +210,7 @@ class ServerState {
 
  private:
   ScreenModel screen_;
+  bool game_compat_{};
   ResourceTable resources_;
   AtomTable atoms_;
   SelectionStore selections_;
