@@ -575,9 +575,25 @@ settled_mirror() {
   done
   return 1
 }
+latest_mirror() {
+  local directory=$1 candidate=
+  for _ in {1..200}; do
+    candidate=$(find "$directory" -type f -name '*.ppm' -print | sort -V | tail -n1)
+    if [[ -n $candidate && -s $candidate ]]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+    sleep .05
+  done
+  return 1
+}
 capture_scene() {
   local scene=$1 latest
-  latest=$(settled_mirror "$current_dump_root")
+  # DRM mirror dumps are staged and atomically renamed. The resident sprite
+  # workload continuously produces new frames, so waiting for an unchanged
+  # latest filename can never converge; sample a complete post-stage frame.
+  sleep .1
+  latest=$(latest_mirror "$current_dump_root")
   cp "$latest" "$artifact_dir/milestone12-$current_name-$scene.ppm"
 }
 
