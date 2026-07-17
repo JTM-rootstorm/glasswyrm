@@ -16,6 +16,8 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-extension-probe.json milestone12-sdl-probe.json
   milestone12-testdraw2.log milestone12-testsprite2.log
   milestone12-extension-trace.json milestone12-software-trace.jsonl
+  milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json
+  milestone12-raw-little-registry.json milestone12-raw-big-registry.json
   milestone12-noshm-trace.jsonl milestone12-renderer-software.jsonl
   milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl
   milestone12-sync-report.jsonl milestone12-glasswyrmd-journal.log
@@ -216,6 +218,8 @@ validate_milestone12_archive() {
     milestone12-software-testsprite.ppm milestone12-gles-testsprite.ppm \
     milestone12-extension-probe.json milestone12-sdl-probe.json \
     milestone12-extension-trace.json milestone12-software-trace.jsonl \
+    milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json \
+    milestone12-raw-little-registry.json milestone12-raw-big-registry.json \
     milestone12-noshm-trace.jsonl milestone12-renderer-software.jsonl \
     milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
     milestone12-sync-report.jsonl milestone12-renderer-summary.json \
@@ -761,6 +765,14 @@ cp "$artifact_dir/software/xcb.json" "$artifact_dir/milestone12-extension-probe.
 cp "$artifact_dir/software/testdraw2.log" "$artifact_dir/milestone12-testdraw2.log"
 cp "$artifact_dir/software/testsprite2.log" "$artifact_dir/milestone12-testsprite2.log"
 cp "$artifact_dir/software/extension-trace.json" "$artifact_dir/milestone12-software-trace.jsonl"
+cp "$artifact_dir/software/raw-little-registry.json" \
+  "$artifact_dir/milestone12-raw-little-registry.json"
+cp "$artifact_dir/software/raw-big-registry.json" \
+  "$artifact_dir/milestone12-raw-big-registry.json"
+python3 "$source_dir/tests/compat/m12/normalize_fixture_traces.py" \
+  --trace "$artifact_dir/milestone12-software-trace.jsonl" \
+  --testdraw2 "$artifact_dir/milestone12-testdraw2-trace.json" \
+  --testsprite2 "$artifact_dir/milestone12-testsprite2-trace.json"
 for key in raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
   extension_registry big_requests xfixes damage render composite randr \
   colormap fullscreen borderless geometry_restore software_frame fullscreen_input_close; do result[$key]=passed; done
@@ -948,6 +960,8 @@ cp "$artifact_dir"/milestone12-{software,gles}-{sdl-probe,fullscreen,cursor,test
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
 cp "$artifact_dir/milestone12-extension-stress.json" "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{testdraw2-trace,testsprite2-trace}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{raw-little-registry,raw-big-registry}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{frame-equivalence,software-testsprite-stability,gles-testsprite-stability}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{software-trace,noshm-trace}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-software,renderer-gles,drm-damage-report,sync-report}.jsonl "$evidence/"

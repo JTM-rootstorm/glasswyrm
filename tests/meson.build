@@ -115,6 +115,13 @@ test(
   args: [meson.project_source_root() / 'tests/fixtures/m11'],
   timeout: 10,
 )
+m12_fixture_validate = find_program('compat/m12/validate_fixtures.py')
+test(
+  'm12-fixture-checksum',
+  m12_fixture_validate,
+  args: [meson.project_source_root() / 'tests/fixtures/m12'],
+  timeout: 10,
+)
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
@@ -1336,6 +1343,24 @@ m12_trace_validator_test = find_program('compat/m12/validate_trace_test.py')
 test(
   'm12-trace-validator',
   m12_trace_validator_test,
+  timeout: 10,
+)
+
+m12_fixture_trace_test = find_program(
+  'compat/m12/normalize_fixture_traces_test.py',
+)
+test(
+  'm12-fixture-trace-normalizer',
+  m12_fixture_trace_test,
+  timeout: 10,
+)
+
+m12_fixture_promotion_test = find_program(
+  'compat/m12/promote_fixtures_test.py',
+)
+test(
+  'm12-fixture-promotion',
+  m12_fixture_promotion_test,
   timeout: 10,
 )
 

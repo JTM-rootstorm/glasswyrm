@@ -25,6 +25,12 @@ Repository tools:
   result JSON. The official programs are intentionally bounded by the harness;
   their unmodified event loops are not patched to exit.
 - `validate_result.py` and `validate_fixtures.py` reject incomplete evidence.
+- `normalize_fixture_traces.py` selects the final ordered official SDL clients
+  and removes transport-only IDs, sequences, and recurring counts while
+  retaining extension, image-transport, RANDR, EWMH-class, and error evidence.
+- `promote_fixtures.py` accepts only a checksum-valid evidence archive paired
+  with a fully passing M12 summary, stages the Section 37 fixture set, and
+  records its exact provenance. Raw traces remain runtime evidence.
 
 Typical build shape:
 

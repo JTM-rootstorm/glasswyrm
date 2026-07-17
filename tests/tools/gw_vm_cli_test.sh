@@ -876,6 +876,8 @@ if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
   printf 'schema = 1\n' >"$scratch/clients.toml"
   for name in milestone12-extension-probe.json milestone12-sdl-probe.json \
     milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+    milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json \
+    milestone12-raw-little-registry.json milestone12-raw-big-registry.json \
     milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
     milestone12-sync-report.jsonl milestone12-renderer-summary.json \
     milestone12-drm-damage-summary.json milestone12-sync-observation.json \
@@ -1990,6 +1992,8 @@ for artifact in milestone12-runtime-test.log milestone12-meson-test.log \
   milestone12-source-layout.log milestone12-client-build.log \
   milestone12-extension-probe.json milestone12-sdl-probe.json \
   milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+  milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json \
+  milestone12-raw-little-registry.json milestone12-raw-big-registry.json \
   milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
   milestone12-sync-report.jsonl milestone12-renderer-summary.json \
   milestone12-drm-damage-summary.json milestone12-sync-observation.json \
