@@ -172,11 +172,29 @@ bool same_size(const Geometry left, const Geometry right) {
   return left.width == right.width && left.height == right.height;
 }
 
+bool same_geometry(const Geometry left, const Geometry right) {
+  return left.x == right.x && left.y == right.y && same_size(left, right);
+}
+
+void write_move_ready(const std::string& path, const Geometry value) {
+  const auto temporary = path + ".tmp";
+  std::ofstream stream(temporary);
+  require(stream.good(), "could not open move-ready marker");
+  stream << "{\"status\":\"ready\",\"geometry\":";
+  write_geometry(stream, value);
+  stream << "}\n";
+  stream.close();
+  require(stream.good(), "could not write move-ready marker");
+  require(std::rename(temporary.c_str(), path.c_str()) == 0,
+          "could not publish move-ready marker");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) try {
   std::string title;
   std::string output;
+  std::string move_ready;
   pid_t xterm_pid{};
   std::int32_t move_dx{};
   std::int32_t move_dy{};
@@ -188,6 +206,7 @@ int main(int argc, char** argv) try {
     const std::string_view value(argv[++index]);
     if (argument == "--title") title = value;
     else if (argument == "--output") output = value;
+    else if (argument == "--move-ready") move_ready = value;
     else if (argument == "--xterm-pid") xterm_pid = std::stoi(std::string(value));
     else if (argument == "--move-dx") move_dx = std::stoi(std::string(value));
     else if (argument == "--move-dy") move_dy = std::stoi(std::string(value));
@@ -195,10 +214,11 @@ int main(int argc, char** argv) try {
     else if (argument == "--rows") rows = std::stoul(std::string(value));
     else throw std::runtime_error("unknown option: " + std::string(argument));
   }
-  require(!title.empty() && !output.empty() && xterm_pid > 0 && columns > 0 &&
-              rows > 0,
+  require(!title.empty() && !output.empty() && !move_ready.empty() &&
+              xterm_pid > 0 && columns > 0 && rows > 0,
           "usage: m11_xterm_geometry_probe --title TITLE --xterm-pid PID "
-          "--move-dx N --move-dy N --columns N --rows N --output PATH");
+          "--move-dx N --move-dy N --columns N --rows N --move-ready PATH "
+          "--output PATH");
 
   int screen_index = 0;
   xcb_connection_t* raw = xcb_connect(nullptr, &screen_index);
@@ -244,6 +264,8 @@ int main(int argc, char** argv) try {
                                  rows * hints.height_increment)};
   std::optional<Geometry> moved;
   std::optional<Geometry> resized;
+  std::optional<Geometry> moved_notify;
+  std::optional<Geometry> resized_notify;
   std::uint32_t configure_notifies = 0;
   std::uint32_t resize_exposes = 0;
   const auto deadline = std::chrono::steady_clock::now() +
@@ -259,16 +281,24 @@ int main(int argc, char** argv) try {
     }
     const auto type = event->response_type & 0x7fU;
     if (type == XCB_CONFIGURE_NOTIFY) {
+      const auto* notify =
+          reinterpret_cast<const xcb_configure_notify_event_t*>(event.get());
+      if (notify->window != *window) continue;
       ++configure_notifies;
+      const Geometry notified{notify->x, notify->y, notify->width,
+                              notify->height};
       const auto current = geometry(connection.get(), *window);
-      if (!moved && current.x == expected_move.x &&
-          current.y == expected_move.y && same_size(current, initial))
+      if (!moved && same_geometry(notified, expected_move) &&
+          same_geometry(current, expected_move)) {
+        moved_notify = notified;
         moved = current;
-      if (moved && current.x == expected_resize.x &&
-          current.y == expected_resize.y &&
-          current.width == expected_resize.width &&
-          current.height == expected_resize.height)
+        write_move_ready(move_ready, current);
+      }
+      if (moved && same_geometry(notified, expected_resize) &&
+          same_geometry(current, expected_resize)) {
+        resized_notify = notified;
         resized = current;
+      }
     } else if (type == XCB_EXPOSE && resized) {
       ++resize_exposes;
     }
@@ -301,7 +331,12 @@ int main(int argc, char** argv) try {
   write_geometry(stream, *moved);
   stream << ",\n  \"resized\": ";
   write_geometry(stream, *resized);
-  stream << ",\n  \"size_hints\": {\"base_width\":" << hints.base_width
+  stream << ",\n  \"configure_notify\": {\"moved\":";
+  write_geometry(stream, *moved_notify);
+  stream << ",\"resized\":";
+  write_geometry(stream, *resized_notify);
+  stream << "},";
+  stream << "\n  \"size_hints\": {\"base_width\":" << hints.base_width
          << ",\"base_height\":" << hints.base_height
          << ",\"width_increment\":" << hints.width_increment
          << ",\"height_increment\":" << hints.height_increment << "},\n"

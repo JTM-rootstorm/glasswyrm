@@ -87,6 +87,7 @@ actions:
 ./tools/gw-vm milestone3-runtime-test --yes
 ./tools/gw-vm milestone4-runtime-test --yes
 ./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -195,6 +196,24 @@ trace, selection, interaction, VT/restart, frame, graphical-console,
 restoration, and archive evidence. A successful summary is the accepted M11
 VM result; the existence of the command alone is not.
 
+When a failure occurs after the M11 dependency and build matrix has completed,
+the narrower diagnostic command can reuse that already-provisioned guest:
+
+```sh
+./tools/gw-vm milestone11-interactive-rerun --yes
+```
+
+The rerun still synchronizes committed source, checks the required VM devices,
+requires the cached runtime and pinned xterm to carry the same exact Git commit
+and pinned xterm source hash, then repeats uinput startup, the live interactions,
+VT and peer-restart cycles, restoration, and evidence archive. It deliberately
+does not reinstall dependencies or rerun the compiler, sanitizer, component,
+source-layout, or staged-consumer matrices. Its summary is named
+`milestone11-interactive-rerun-summary.json` and always records
+`accepted_milestone11_result` as false. It is a development shortcut, not an
+acceptance result: the final clean `milestone11-runtime-test` remains mandatory
+and never skips the earlier gates.
+
 ## Safety
 
 Snapshot reset, emerge, unmerge, and the complete packaging test change guest
@@ -255,3 +274,6 @@ selection, VT/restart, journal, normalized-trace, DRM frame, graphical-console,
 restoration, facts, and summary evidence plus its checksum-protected archive.
 The summary passes only when the exact pinned xterm patch 410 core-font ASCII
 profile completes every gate and the collected archive validates.
+An interactive diagnostic rerun replaces the latest M11 runtime artifacts and
+writes `milestone11-interactive-rerun-summary.json`; rerun the complete command
+afterward to produce authoritative acceptance evidence.

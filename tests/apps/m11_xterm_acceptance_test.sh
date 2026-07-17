@@ -13,12 +13,12 @@ cat >"$work/trace.json" <<'EOF'
 EOF
 printf '{"status":"passed","selection":"CLIPBOARD","targets":["TARGETS","UTF8_STRING"],"token":"M11_CLIPBOARD_TOKEN","primary_replaced":true}\n' >"$work/selection.json"
 cat >"$work/geometry.json" <<'EOF'
-{"schema":1,"status":"passed","title":"Glasswyrm-M11-B","window_id":4194305,"initial":{"x":480,"y":160,"width":484,"height":316},"moved":{"x":576,"y":224,"width":484,"height":316},"resized":{"x":576,"y":224,"width":544,"height":368},"size_hints":{"base_width":4,"base_height":4,"width_increment":6,"height_increment":13},"shell":{"columns":90,"rows":28},"configure_notify_count":2,"resize_expose_count":1}
+{"schema":1,"status":"passed","title":"Glasswyrm-M11-B","window_id":4194305,"initial":{"x":384,"y":160,"width":484,"height":316},"moved":{"x":480,"y":224,"width":484,"height":316},"resized":{"x":480,"y":224,"width":544,"height":368},"configure_notify":{"moved":{"x":480,"y":224,"width":484,"height":316},"resized":{"x":480,"y":224,"width":544,"height":368}},"size_hints":{"base_width":4,"base_height":4,"width_increment":6,"height_increment":13},"shell":{"columns":90,"rows":28},"configure_notify_count":2,"resize_expose_count":1}
 EOF
 cat >"$work/wm.log" <<'EOF'
 move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64
-gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+576+224 stack=0
-gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+576+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+480+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+480+224 stack=0
 EOF
 cat >"$work/server.log" <<'EOF'
 glasswyrmd: cursor publication accepted kind=left-pointer x=0 y=0 visible=1 buffer=attached
@@ -95,13 +95,20 @@ if run_acceptance "$work/bad-bindings.json" >/dev/null 2>&1; then
 fi
 cat >"$work/wm.log" <<'EOF'
 move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64
-gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+576+224 stack=0
-gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+576+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+480+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+480+224 stack=0
 EOF
 cp "$work/geometry.json" "$work/geometry-good.json"
 sed 's/"columns":90/"columns":89/' "$work/geometry-good.json" >"$work/geometry.json"
 if run_acceptance "$work/bad-shell-dimensions.json" >/dev/null 2>&1; then
   printf '%s\n' 'acceptance helper accepted incorrect shell dimensions' >&2
+  exit 1
+fi
+cp "$work/geometry-good.json" "$work/geometry.json"
+sed 's/\"configure_notify\":{\"moved\":{\"x\":480/\"configure_notify\":{\"moved\":{\"x\":479/' \
+  "$work/geometry-good.json" >"$work/geometry.json"
+if run_acceptance "$work/bad-configure-payload.json" >/dev/null 2>&1; then
+  printf '%s\n' 'acceptance helper accepted mismatched ConfigureNotify geometry' >&2
   exit 1
 fi
 cp "$work/geometry-good.json" "$work/geometry.json"
@@ -113,8 +120,8 @@ if run_acceptance "$work/bad-policy-geometry.json" >/dev/null 2>&1; then
 fi
 cat >"$work/wm.log" <<'EOF'
 move_button=1 resize_button=3 close_keysym=0xffc1 minimum_width=96 minimum_height=64
-gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+576+224 stack=0
-gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+576+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=10 requested=484x316+480+224 stack=0
+gwm: lifecycle window upsert id=4194305 geometry=11 requested=544x368+480+224 stack=0
 EOF
 sed -E 's/x=-?[0-9]+ y=-?[0-9]+/x=0 y=0/g' \
   "$work/server-good.log" >"$work/server.log"

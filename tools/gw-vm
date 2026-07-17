@@ -71,6 +71,8 @@ Commands:
   milestone9-runtime-test --yes     Validate pinned M9 X11 applications.
   milestone10-runtime-test --yes    Validate M10 DRM/KMS presentation in the VM.
   milestone11-runtime-test --yes    Validate the M11 interactive desktop in the VM.
+  milestone11-interactive-rerun --yes
+                                    Rerun only M11 live interaction diagnostics.
   scenario NAME [ARGS]              Run a fixed named scenario.
 
 Examples:
@@ -89,6 +91,7 @@ Examples:
   ./tools/gw-vm milestone9-runtime-test --yes
   ./tools/gw-vm milestone10-runtime-test --yes
   ./tools/gw-vm milestone11-runtime-test --yes
+  ./tools/gw-vm milestone11-interactive-rerun --yes
 
 Generated output is written beneath artifacts/vm/.
 EOF
@@ -295,6 +298,7 @@ run_named_scenario() {
     milestone9-runtime-test) action_milestone9 "$@" ;;
     milestone10-runtime-test) action_milestone10 "$@" ;;
     milestone11-runtime-test) action_milestone11 "$@" ;;
+    milestone11-interactive-rerun) action_milestone11_interactive_rerun "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
 }
@@ -391,6 +395,12 @@ action_milestone11() {
   milestone11_runtime_test "$approved"
 }
 
+action_milestone11_interactive_rerun() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone11_interactive_rerun "$approved"
+}
+
 main() {
   if [[ "${1:-}" == "--config" ]]; then
     (($# >= 2)) || die "--config requires a path."
@@ -458,6 +468,7 @@ main() {
     milestone9-runtime-test) action_milestone9 "$@" ;;
     milestone10-runtime-test) action_milestone10 "$@" ;;
     milestone11-runtime-test) action_milestone11 "$@" ;;
+    milestone11-interactive-rerun) action_milestone11_interactive_rerun "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;
   esac
