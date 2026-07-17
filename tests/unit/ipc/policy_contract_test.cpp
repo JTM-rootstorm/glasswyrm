@@ -157,6 +157,12 @@ void invalid_values() {
   require(decode(encode(window), dw) == CodecStatus::Ok &&
               dw.map_serial == window.map_serial,
           "unmapped window retains its ordering serial");
+  window.flags = 0x7U;
+  require(decode(encode(window), dw) == CodecStatus::Ok && dw.flags == 0x7U,
+          "bounded EWMH policy flags round trip");
+  window.flags = 0x8U;
+  require(decode(encode(window), dw) == CodecStatus::InvalidValue,
+          "unknown policy window flags are rejected");
   PolicyWindowState state{10,
                           0,
                           2,

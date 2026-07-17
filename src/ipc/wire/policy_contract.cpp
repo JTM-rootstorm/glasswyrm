@@ -9,6 +9,7 @@ bool extent(std::int32_t p, std::uint32_t n) {
                   std::numeric_limits<std::int32_t>::max();
 }
 bool tri(std::uint16_t v) { return v <= 2; }
+constexpr std::uint32_t kKnownPolicyWindowFlags = 0x7U;
 } // namespace
 std::vector<std::uint8_t> encode(const PolicyContextUpsert &v) {
   ByteWriter w;
@@ -96,7 +97,7 @@ CodecStatus decode(std::span<const std::uint8_t> b, PolicyWindowUpsert &v) {
   if (!x.window_id || !x.requested_width || !x.requested_height || wt > 3 ||
       mi > 1 || o > 1 || !tri(d) || f > 1 || m > 1 || n > 1 || a > 1 ||
       !x.creation_serial || (mi != 0 && x.map_serial == 0) ||
-      x.flags || z16 || z)
+      (x.flags & ~kKnownPolicyWindowFlags) != 0 || z16 || z)
     return CodecStatus::InvalidValue;
   v = x;
   return CodecStatus::Ok;
