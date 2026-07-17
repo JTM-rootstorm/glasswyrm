@@ -122,6 +122,8 @@ namespace x11 = gw::protocol::x11;
     const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult bell(
     const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult force_screen_saver(
+    const DispatchContext&, const x11::FramedRequest&);
 
 [[nodiscard]] DispatchResult get_input_focus(const ServerState&,
                                              const DispatchContext&,

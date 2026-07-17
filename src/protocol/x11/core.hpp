@@ -57,6 +57,7 @@ enum class CoreOpcode : std::uint8_t {
   ChangeKeyboardControl = 102,
   GetKeyboardControl = 103,
   Bell = 104,
+  ForceScreenSaver = 115,
   GetPointerMapping = 117,
   GetModifierMapping = 119,
   GetInputFocus = 43,
