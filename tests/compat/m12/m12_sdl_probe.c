@@ -126,6 +126,17 @@ static bool wait_for_geometry(SDL_Window *window, int x, int y, int width,
   return false;
 }
 
+static bool wait_for_input_focus(SDL_Window *window) {
+  const uint32_t deadline = SDL_GetTicks() + 3000U;
+  do {
+    pump_events();
+    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0) return true;
+    SDL_Delay(10);
+  } while ((int32_t)(SDL_GetTicks() - deadline) < 0);
+  SDL_SetError("input focus acknowledgement timed out");
+  return false;
+}
+
 static void json_string(FILE *stream, const char *value) {
   fputc('"', stream);
   for (const unsigned char *cursor = (const unsigned char *)value; *cursor;
@@ -292,10 +303,22 @@ int main(int argc, char **argv) {
     remember_error(&result, "SDL_CreateCursor");
   }
 
-  if (control && (!write_marker(control, "windowed-ready") ||
-                  !wait_for_marker(window, control, "enter-fullscreen"))) {
-    remember_error(&result, "windowed control handshake");
-    goto done;
+  if (control) {
+    if (!write_marker(control, "windowed-ready") ||
+        !wait_for_marker(window, control, "raise-window")) {
+      remember_error(&result, "windowed control handshake");
+      goto done;
+    }
+    SDL_RaiseWindow(window);
+    if (!wait_for_input_focus(window)) {
+      remember_error(&result, "windowed raise focus");
+      goto done;
+    }
+    if (!write_marker(control, "raised-ready") ||
+        !wait_for_marker(window, control, "enter-fullscreen")) {
+      remember_error(&result, "raised control handshake");
+      goto done;
+    }
   }
 
   if (result.display_mode && SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0)

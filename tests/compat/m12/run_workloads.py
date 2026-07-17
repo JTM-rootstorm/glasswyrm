@@ -120,9 +120,9 @@ def run_resident_workloads(
     environment: dict[str, str],
 ) -> list[dict[str, Any]]:
     control.mkdir(parents=True, exist_ok=True)
-    for name in ("windowed-ready", "enter-fullscreen", "fullscreen-ready",
-                 "exit-fullscreen", "borderless-ready", "resident-ready.json",
-                 "resident-release"):
+    for name in ("windowed-ready", "raise-window", "raised-ready",
+                 "enter-fullscreen", "fullscreen-ready", "exit-fullscreen",
+                 "borderless-ready", "resident-ready.json", "resident-release"):
         (control / name).unlink(missing_ok=True)
     sdl_log = artifacts / "resident-sdl.log"
     sprite_log = artifacts / "resident-testsprite2.log"

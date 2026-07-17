@@ -190,6 +190,9 @@ marked accepted:
 
 - the repository SDL probe, `testdraw2`, and `testsprite2` complete their
   frozen checks without protocol errors;
+- before the initial SDL scene capture, both resident client surfaces are
+  visible and the SDL probe acknowledges input focus after its controlled
+  raise, removing cross-client map-order ambiguity;
 - after each fullscreen-ready handshake, real relative input clamps the
   pointer to the output origin and moves it to `(64,64)`; the harness waits
   for a new, content-stable committed frame before requesting the DRM
