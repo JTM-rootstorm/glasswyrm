@@ -2,9 +2,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 typedef struct ProbeResult {
   bool initialized;
@@ -41,6 +44,53 @@ static void pump_events(void) {
   while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_FIRSTEVENT,
                         SDL_LASTEVENT) > 0) {
   }
+}
+
+static bool control_path(char *path, size_t size, const char *directory,
+                         const char *name) {
+  const int written = snprintf(path, size, "%s/%s", directory, name);
+  return written > 0 && (size_t)written < size;
+}
+
+static bool write_marker(const char *directory, const char *name) {
+  char path[512];
+  if (!control_path(path, sizeof(path), directory, name)) return false;
+  FILE *stream = fopen(path, "wx");
+  if (!stream) return false;
+  const bool wrote = fprintf(stream, "ready\n") == 6;
+  return fclose(stream) == 0 && wrote;
+}
+
+static bool wait_for_marker(SDL_Window *window, const char *directory,
+                            const char *name) {
+  char path[512];
+  if (!control_path(path, sizeof(path), directory, name)) return false;
+  const uint32_t deadline = SDL_GetTicks() + 180000U;
+  do {
+    pump_events();
+    (void)SDL_UpdateWindowSurface(window);
+    if (access(path, F_OK) == 0) return true;
+    if (errno != ENOENT) return false;
+    SDL_Delay(10);
+  } while ((int32_t)(SDL_GetTicks() - deadline) < 0);
+  return false;
+}
+
+static bool wait_for_real_close(SDL_Window *window) {
+  const uint32_t id = SDL_GetWindowID(window);
+  const uint32_t deadline = SDL_GetTicks() + 180000U;
+  do {
+    SDL_Event event;
+    (void)SDL_UpdateWindowSurface(window);
+    while (SDL_PollEvent(&event)) {
+      if (event.type == SDL_QUIT ||
+          (event.type == SDL_WINDOWEVENT && event.window.windowID == id &&
+           event.window.event == SDL_WINDOWEVENT_CLOSE))
+        return true;
+    }
+    SDL_Delay(10);
+  } while ((int32_t)(SDL_GetTicks() - deadline) < 0);
+  return false;
 }
 
 static bool wait_for_fullscreen(SDL_Window *window, bool expected,
@@ -149,9 +199,24 @@ static bool write_result(const char *path, const ProbeResult *result) {
 
 int main(int argc, char **argv) {
   const char *output = NULL;
-  if (argc == 3 && strcmp(argv[1], "--output") == 0) output = argv[2];
+  const char *control = NULL;
+  for (int index = 1; index < argc; ++index) {
+    if (strcmp(argv[index], "--output") == 0 && index + 1 < argc)
+      output = argv[++index];
+    else if (strcmp(argv[index], "--control-dir") == 0 && index + 1 < argc)
+      control = argv[++index];
+    else {
+      output = NULL;
+      break;
+    }
+  }
   if (!output) {
-    fprintf(stderr, "Usage: %s --output RESULT.json\n", argv[0]);
+    fprintf(stderr, "Usage: %s --output RESULT.json [--control-dir DIRECTORY]\n",
+            argv[0]);
+    return 2;
+  }
+  if (control && mkdir(control, 0700) != 0 && errno != EEXIST) {
+    fprintf(stderr, "could not create SDL control directory: %s\n", control);
     return 2;
   }
 
@@ -231,6 +296,11 @@ int main(int argc, char **argv) {
     result.fullscreen_entered = wait_for_fullscreen(
         window, true, result.mode_width, result.mode_height);
   if (!result.fullscreen_entered) remember_error(&result, "fullscreen desktop enter");
+  if (control && (!write_marker(control, "fullscreen-ready") ||
+                  !wait_for_marker(window, control, "exit-fullscreen"))) {
+    remember_error(&result, "fullscreen control handshake");
+    goto done;
+  }
   if (SDL_SetWindowFullscreen(window, 0) == 0) {
     result.fullscreen_exited = wait_for_fullscreen(window, false, 0, 0);
     SDL_SetWindowPosition(window, result.windowed_x, result.windowed_y);
@@ -251,19 +321,24 @@ int main(int argc, char **argv) {
                                         result.windowed_height);
   if (!result.borderless) remember_error(&result, "borderless window");
 
-  SDL_Event close_event;
-  SDL_zero(close_event);
-  close_event.type = SDL_WINDOWEVENT;
-  close_event.window.type = SDL_WINDOWEVENT;
-  close_event.window.windowID = SDL_GetWindowID(window);
-  close_event.window.event = SDL_WINDOWEVENT_CLOSE;
-  if (SDL_PushEvent(&close_event) == 1) {
-    SDL_Event received;
-    while (SDL_PollEvent(&received))
-      if (received.type == SDL_WINDOWEVENT &&
-          received.window.windowID == close_event.window.windowID &&
-          received.window.event == SDL_WINDOWEVENT_CLOSE)
-        result.close_event = true;
+  if (control) {
+    if (write_marker(control, "borderless-ready"))
+      result.close_event = wait_for_real_close(window);
+  } else {
+    SDL_Event close_event;
+    SDL_zero(close_event);
+    close_event.type = SDL_WINDOWEVENT;
+    close_event.window.type = SDL_WINDOWEVENT;
+    close_event.window.windowID = SDL_GetWindowID(window);
+    close_event.window.event = SDL_WINDOWEVENT_CLOSE;
+    if (SDL_PushEvent(&close_event) == 1) {
+      SDL_Event received;
+      while (SDL_PollEvent(&received))
+        if (received.type == SDL_WINDOWEVENT &&
+            received.window.windowID == close_event.window.windowID &&
+            received.window.event == SDL_WINDOWEVENT_CLOSE)
+          result.close_event = true;
+    }
   }
   if (!result.close_event) remember_error(&result, "close event");
 
