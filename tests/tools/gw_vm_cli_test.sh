@@ -715,7 +715,7 @@ x_servers_absent=true
 clang=passed
 FACTS
       for result in historical_default strict_software strict_gles sanitizer \
-        component_builds source_layout api_consumers regressions uinput \
+        component_builds source_layout api_consumers regressions extension_stress uinput \
         raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
         extension_registry big_requests mit_shm no_shm_fallback xfixes damage \
         render composite randr colormap fullscreen borderless geometry_restore \
@@ -864,7 +864,11 @@ if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
   scratch=$(mktemp -d)
   for name in milestone12-software.ppm milestone12-gles.ppm \
     milestone12-fullscreen.ppm milestone12-screen.ppm \
-    milestone12-gles-screen.ppm; do
+    milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm \
+    milestone12-gles-sdl-probe.ppm milestone12-software-fullscreen.ppm \
+    milestone12-gles-fullscreen.ppm milestone12-software-cursor.ppm \
+    milestone12-gles-cursor.ppm milestone12-software-testsprite.ppm \
+    milestone12-gles-testsprite.ppm; do
     printf 'P6\n1 1\n255\n000' >"$scratch/$name"
   done
   printf 'schema = 1\n' >"$scratch/clients.toml"
@@ -875,7 +879,12 @@ if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
     milestone12-drm-damage-summary.json milestone12-sync-observation.json \
     milestone12-kms-before.json milestone12-kms-after.json \
     milestone12-vt-before.json milestone12-vt-after.json \
-    milestone12-getty-state.json milestone12-logind-state.json; do
+    milestone12-getty-state.json milestone12-logind-state.json \
+    milestone12-frame-equivalence.json \
+    milestone12-software-testsprite-stability.json \
+    milestone12-gles-testsprite-stability.json \
+    milestone12-extension-stress.json milestone12-software-trace.jsonl \
+    milestone12-noshm-trace.jsonl; do
     printf '{}\n' >"$scratch/$name"
   done
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && \
@@ -1985,11 +1994,20 @@ for artifact in milestone12-runtime-test.log milestone12-meson-test.log \
   milestone12-kms-before.json milestone12-kms-after.json \
   milestone12-vt-before.json milestone12-vt-after.json \
   milestone12-getty-state.json milestone12-logind-state.json \
+  milestone12-frame-equivalence.json \
+  milestone12-software-testsprite-stability.json \
+  milestone12-gles-testsprite-stability.json \
+  milestone12-extension-stress.json milestone12-software-trace.jsonl \
+  milestone12-noshm-trace.jsonl \
   milestone12-glasswyrmd-journal.log milestone12-gwm-journal.log \
   milestone12-gwcomp-journal.log milestone12-facts.env \
   milestone12-summary.json milestone12-software.ppm milestone12-gles.ppm \
   milestone12-fullscreen.ppm milestone12-screen.ppm \
-  milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar; do
+  milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm \
+  milestone12-gles-sdl-probe.ppm milestone12-software-fullscreen.ppm \
+  milestone12-gles-fullscreen.ppm milestone12-software-cursor.ppm \
+  milestone12-gles-cursor.ppm milestone12-software-testsprite.ppm \
+  milestone12-gles-testsprite.ppm milestone12-efficient-sdl-evidence.tar; do
   [[ -f $artifact_dir/$artifact ]] ||
     fail "milestone12 scenario did not create $artifact"
 done
@@ -2028,9 +2046,8 @@ m12_lib=$repo_root/tools/gw-vm.d/lib/milestone12.sh
 for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   /var/tmp/glasswyrm-build-m12 /var/tmp/glasswyrm-build-m12-asan \
   /var/tmp/glasswyrm-build-m12-software /var/tmp/glasswyrm-build-m12-gles \
-  /var/tmp/glasswyrm-build-m12-default /var/tmp/glasswyrm-build-m12-server \
-  /var/tmp/glasswyrm-build-m12-gwm /var/tmp/glasswyrm-build-m12-gwcomp \
-  /var/tmp/glasswyrm-build-m12-ipc-only /var/tmp/glasswyrm-m12-clients \
+  /var/tmp/glasswyrm-build-m12-default /var/tmp/glasswyrm-build-m12-components \
+  /var/tmp/glasswyrm-m12-clients \
   /var/tmp/glasswyrm-m12-dumps /var/tmp/glasswyrm-m12-scenes \
   /var/tmp/glasswyrm-m12-renderer /var/tmp/glasswyrm-m12-control \
   /var/tmp/glasswyrm-m12-artifacts dev-libs/libinput \
@@ -2039,6 +2056,9 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 \
   -Dexperimental=false -Drender_gl=false -Drender_gl=true \
   '--game-compat' '--disable-extension' MIT-SHM run_workloads.py \
+  m12_extension_stress_probe milestone12-extension-stress.json \
+  server-historical server-game gwcomp-software-headless gwcomp-software-drm \
+  gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
   milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
   milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar \
   'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
@@ -2049,7 +2069,7 @@ assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
   '--retry-all-errors'
 assert_before "$m12_lib" \
-  'rm -rf -- "$default" "$asan" "${build}-clang" "$server" "$gwm_build"' \
+  'rm -rf -- "$default" "$asan" "${build}-clang" "$components"' \
   'failure_stage=state-capture'
 assert_contains "$m12_lib" \
   'M12 runtime requires at least 2 GiB free in /var/tmp'
