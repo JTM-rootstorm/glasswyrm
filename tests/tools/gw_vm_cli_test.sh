@@ -2169,6 +2169,8 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   "'close_status_completed':close_status=='completed'" \
   '--scenario pointer-anchor' \
   'testsprite_alive' \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"' \
   "'pointer_anchor_completed':anchor_status=='completed'" \
   "'post_anchor_repaint':int(anchor_after)>int(anchor_before)" \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
@@ -2191,6 +2193,27 @@ assert_before "$m12_lib" \
 assert_before "$m12_lib" \
   '--scenario pointer-anchor' \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"'
+assert_before "$m12_lib" \
+  '--scenario pointer-anchor --result-json "$result_json"' \
+  'grep -Fq '\''"status":"completed"'\'' "$result_json"'
+assert_before "$m12_lib" \
+  'grep -Fq '\''"status":"completed"'\'' "$result_json"' \
+  'wait_for_frame_progress "$frames_before" >/dev/null'
+assert_before "$m12_lib" \
+  'wait_for_frame_progress "$frames_before" >/dev/null' \
+  'settled_mirror "$current_dump_root" >/dev/null'
+assert_before "$m12_lib" \
+  'wait_path "$current_out/live-control/fullscreen-ready"' \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"'
+assert_before "$m12_lib" \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"' \
+  '>"$control/software-screen-ready"'
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"'
+assert_before "$m12_lib" \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"' \
+  '>"$control/gles-screen-ready"'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
   'https://www.libsdl.org/release/SDL2-2.32.10.tar.gz'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \

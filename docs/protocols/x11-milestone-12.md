@@ -173,8 +173,9 @@ sources, build switches, commands, and hashes are frozen in
 Live acceptance uses the fixed Gentoo VM scenario to prove the raw and XCB
 extension probes, MIT-SHM and non-SHM fallback, official SDL workloads, real
 input/clipboard/cursor/close, fullscreen restore, software and GLES equality,
-DRM screenshot parity, VT and process restart replay, restoration, cleanup,
-and archive integrity. See the
+DRM screenshot parity after a real-input pointer anchor and stable committed
+frame, VT and process restart replay, restoration, cleanup, and archive
+integrity. See the
 [SDL profile](../compatibility/M12_SDL.md).
 
 ## Explicitly unsupported
