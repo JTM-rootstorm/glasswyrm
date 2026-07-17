@@ -46,10 +46,6 @@ for status in /sys/class/drm/"$card"-*/status; do
   break
 done
 [[ -n $connector ]] || { printf '%s\n' 'M12 requires a connected exact 1024x768 output.' >&2; exit 32; }
-[[ -r /dev/dri/renderD128 || -d /usr/lib64/dri || -d /usr/lib/dri ]] || {
-  printf '%s\n' 'M12 requires a Mesa render node or driver directory.' >&2
-  exit 33
-}
 printf 'drm_primary_node=%s\n' "$primary"
 printf 'drm_connector=%s\n' "$connector"
 printf 'drm_mode=1024x768\n'
@@ -268,7 +264,7 @@ milestone12_runtime_test() {
   [[ -n $failure ]] || vm_boot || { status=$?; failure=boot; }
   if [[ -z $failure ]]; then
     preflight=$(guest_run_script "$(milestone12_guest_prerequisite_script)" 2>&1) || {
-      status=$?; failure=graphical-input-egl-prerequisite;
+      status=$?; failure=graphical-input-prerequisite;
     }
     printf '%s\n' "$preflight" | tee "$ARTIFACTS_PATH_ABS/milestone12-runtime-test.log"
   fi
@@ -365,6 +361,13 @@ for forbidden in x11-base/xorg-server x11-base/xwayland x11-misc/xvfb; do
   ! qlist -IC "$forbidden" 2>/dev/null | grep -q . || { printf 'Forbidden package installed: %s\n' "$forbidden" >&2; exit 1; }
 done
 x_servers_absent=true
+
+failure_stage=graphics-dependencies
+pkg-config --exists egl glesv2 gbm
+[[ -r /dev/dri/renderD128 || -d /usr/lib64/dri || -d /usr/lib/dri ]] || {
+  printf '%s\n' 'M12 requires a Mesa render node or driver directory after dependency installation.' >&2
+  exit 33
+}
 
 failure_stage=sdl-acquisition
 "$source_dir/tests/compat/m12/acquire_sdl.sh" "$clients/download"

@@ -1880,6 +1880,14 @@ assert_before "$m12_lib" \
   'failure_stage=state-capture'
 assert_contains "$m12_lib" \
   'M12 runtime requires at least 2 GiB free in /var/tmp'
+assert_before "$m12_lib" \
+  'emerge --oneshot --noreplace' \
+  'pkg-config --exists egl glesv2 gbm'
+assert_before "$m12_lib" \
+  'pkg-config --exists egl glesv2 gbm' \
+  'failure_stage=sdl-acquisition'
+assert_contains "$m12_lib" \
+  'after dependency installation'
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
