@@ -43,7 +43,8 @@ cmake --install "$build"
 export PKG_CONFIG_PATH="$prefix/lib64/pkgconfig:$prefix/lib/pkgconfig"
 cc -std=c11 -Wall -Wextra -Werror "$here/m12_sdl_probe.c" \
   -o "$prefix/bin/m12_sdl_probe" $(pkg-config --cflags --libs sdl2)
-cc -std=c11 -Wall -Wextra -Werror "$here/m12_xcb_probe.c" \
+cc -std=c11 -Wall -Wextra -Werror \
+  "$here/m12_xcb_probe.c" "$here/m12_xcb_graphics.c" \
   -o "$prefix/bin/m12_xcb_probe" \
   $(pkg-config --cflags --libs xcb xcb-shm xcb-xfixes xcb-damage xcb-render xcb-composite xcb-randr)
 install -m 0755 "$build/test/testdraw2" "$build/test/testsprite2" "$prefix/bin/"

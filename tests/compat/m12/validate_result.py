@@ -17,10 +17,54 @@ SDL_CHECKS = {
 XCB_CHECKS = {
     "registry", "big_requests", "mit_shm", "xfixes_version",
     "selection_notify", "region_algebra", "damage_version",
-    "damage_notify", "damage_subtract", "render_version",
-    "composite_version", "randr_version",
+    "damage_notify", "damage_subtract", "render_version", "render_formats",
+    "render_exact_pixels", "composite_version", "composite_named_lifetime",
+    "randr_version", "randr_reporting", "recoverable_errors",
 }
-RAW_SCENARIOS = {"registry", "big-requests", "xfixes-damage", "errors"}
+XCB_EVIDENCE_KEYS = {
+    "registry_major", "registry_event", "registry_error",
+    "render_over_pixel", "composite_named_pixel",
+    "randr_output", "randr_crtc", "randr_mode",
+}
+RAW_SCENARIOS = {
+    "registry", "big-requests", "shm", "xfixes-damage",
+    "render-composite", "randr", "errors",
+}
+
+RAW_CHECKS = {
+    "registry": {
+        "BIG-REQUESTS", "MIT-SHM", "XFIXES", "DAMAGE", "RENDER",
+        "Composite", "RANDR", "stable_list", "unknown_absent",
+    },
+    "big-requests": {"enable", "extended_put_image"},
+    "shm": {"query_version", "attach_put_get_detach", "completion_event"},
+    "xfixes-damage": {
+        "xfixes_version", "damage_version", "region_algebra",
+        "selection_notify", "damage_notify", "damage_subtract",
+    },
+    "render-composite": {
+        "render_version", "render_formats", "render_exact_over",
+        "composite_version", "composite_named_lifetime",
+    },
+    "randr": {
+        "version", "resources", "output_crtc_primary",
+        "idempotent_and_rejected_config", "bad_output_recoverable",
+    },
+    "errors": {
+        "bad_region", "bad_damage", "unsupported_minor", "malformed_length",
+        "malformed_client_isolated", "connection_continues",
+    },
+}
+
+RAW_EVIDENCE_KEYS = {
+    "registry": {"assignments", "list_extensions"},
+    "big-requests": {"maximum_units", "upload_bytes"},
+    "shm": {"version", "event_base", "error_base", "round_trip_xrgb"},
+    "xfixes-damage": {"xfixes_version", "damage_version", "region_extents", "damage_id"},
+    "render-composite": {"render_formats", "render_over_pixel", "composite_named_pixels_sha_sample"},
+    "randr": {"version", "event_base", "error_base", "output", "crtc", "mode", "output_name"},
+    "errors": {"bad_region", "bad_damage", "unsupported_minor", "bad_length"},
+}
 
 
 def main() -> int:
@@ -51,11 +95,23 @@ def main() -> int:
     elif probe == "m12_xcb_probe":
         if set(checks) != XCB_CHECKS:
             errors.append("XCB check set differs from the frozen schema")
+        evidence = result.get("evidence")
+        if not isinstance(evidence, dict) or set(evidence) != XCB_EVIDENCE_KEYS:
+            errors.append("XCB evidence fields differ from the frozen schema")
     elif probe == "m12_raw_probe":
         if result.get("byte_order") not in {"little", "big"}:
             errors.append("raw byte_order is invalid")
         if result.get("scenario") not in RAW_SCENARIOS:
             errors.append("raw scenario is invalid")
+        scenario = result.get("scenario")
+        if scenario in RAW_CHECKS and set(checks) != RAW_CHECKS[scenario]:
+            errors.append("raw check fields differ from the frozen scenario schema")
+        evidence = result.get("evidence")
+        if scenario in RAW_EVIDENCE_KEYS and (
+            not isinstance(evidence, dict)
+            or set(evidence) != RAW_EVIDENCE_KEYS[scenario]
+        ):
+            errors.append("raw evidence fields differ from the frozen scenario schema")
     elif probe is None and result.get("profile") in {"shm", "no-shm"}:
         workloads = result.get("workloads")
         if not isinstance(workloads, list) or not workloads:
