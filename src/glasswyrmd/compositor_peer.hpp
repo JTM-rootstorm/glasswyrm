@@ -82,6 +82,12 @@ public:
 
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
+  [[nodiscard]] bool prepare_replay_buffers(std::string& error);
+  [[nodiscard]] bool rearm_snapshot_buffers(
+      const CompositorSnapshotSubmission& submission, std::string& error);
+  [[nodiscard]] bool rearm_content_buffers(
+      const std::vector<CompositorSnapshotSubmission::Damage>& damages,
+      std::string& error);
   [[nodiscard]] PeerProcessOutcome drain(std::string &error);
   void promote_replay_snapshot();
 

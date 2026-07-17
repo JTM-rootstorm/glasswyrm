@@ -5,6 +5,7 @@
 #include "glasswyrmd/policy_peer.hpp"
 
 #include <chrono>
+#include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -13,6 +14,7 @@
 #include <string>
 #include <sys/wait.h>
 #include <thread>
+#include <utility>
 #include <unistd.h>
 #include <vector>
 
@@ -172,9 +174,14 @@ glasswyrm::server::CompositorSnapshotSubmission buffered_project(
     attachment.attach.pixel_format = GWIPC_PIXEL_FORMAT_XRGB8888;
     attachment.attach.alpha_semantics = GWIPC_ALPHA_OPAQUE;
     attachment.attach.color = surface.color;
-    attachment.attach.synchronization = GWIPC_SYNCHRONIZATION_NONE;
+    attachment.attach.synchronization = buffer->synchronization();
     attachment.fd = buffer->fd();
+    attachment.synchronization_fd = buffer->synchronization_fd();
     submission.buffers.push_back(attachment);
+    glasswyrm::server::CompositorSnapshotSubmission::Damage damage;
+    damage.surface_id = surface.surface_id;
+    damage.rectangles.push_back({0, 0, buffer->width(), buffer->height()});
+    submission.damages.push_back(std::move(damage));
   }
   return submission;
 }
@@ -249,16 +256,20 @@ int main(int argc, char **argv) {
   require(pixels.has_value(), "create restart pixels");
   pixels->fill({0, 0, 32, 24}, 0x0000aa44U);
   auto buffer = glasswyrm::server::PublishedWindowBuffer::create(
-      1, 100, *pixels);
+      1, 100, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);
   require(buffer != nullptr, "create restart publication buffer");
   auto first_compositor =
       launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-1");
   glasswyrm::server::CompositorPeer buffered(
-      buffered_socket, gw::protocol::x11::kScreenModel, true);
+      buffered_socket, gw::protocol::x11::kScreenModel, true, false, true);
   synchronize(buffered);
-  require(buffered.submit(buffered_project(2, buffer.get()), error),
+  require(buffer->signal_ready() &&
+              buffered.submit(buffered_project(2, buffer.get()), error),
           error.c_str());
   drive(buffered);
+  errno = 0;
+  require(!buffer->retract_ready() && errno == EAGAIN,
+          "first compositor consumes the publication readiness token");
   require(buffered.submit(buffered_project(3, nullptr), error), error.c_str());
   drive(buffered);
   require(buffered.replay_input().buffers.size() == 1 &&
@@ -290,15 +301,54 @@ int main(int argc, char **argv) {
   drive(buffered);
   require(buffered.replay_input().surfaces.size() == 2 &&
               buffered.replay_input().policies.size() == 1 &&
-              buffered.replay_input().buffers.size() == 2,
-          "lifecycle snapshots retain the accepted policy-free cursor and buffer");
+              buffered.replay_input().buffers.size() == 2 &&
+              buffered.replay_input().damages.empty(),
+          "replay retains cursor and buffers but no consumed one-shot damage");
   stop(first_compositor);
   auto second_compositor =
       launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-2");
   synchronize(buffered);
   require(buffered.state() ==
               glasswyrm::server::PeerBootstrapState::Synchronized,
-          "buffered peer reconnect replays retained attachment");
+          "buffered peer reconnect rearms and replays retained attachment");
+  errno = 0;
+  require(!buffer->retract_ready() && errno == EAGAIN,
+          "reconnecting compositor consumes exactly one rearmed token");
+  glasswyrm::server::CompositorContentSubmission resumed_content{7, 7, {}};
+  glasswyrm::server::CompositorSnapshotSubmission::Damage resumed_damage;
+  resumed_damage.surface_id = (UINT64_C(1) << 32U) | 100U;
+  resumed_damage.rectangles.push_back({0, 0, buffer->width(), buffer->height()});
+  resumed_content.damages.push_back(std::move(resumed_damage));
+  require(buffered.submit_content(resumed_content, error), error.c_str());
+  drive(buffered);
+  errno = 0;
+  require(!buffer->retract_ready() && errno == EAGAIN,
+          "resumed content rearms a token consumed by reconnect replay");
+  auto replacement = glasswyrm::server::PublishedWindowBuffer::create(
+      2, 100, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);
+  require(replacement != nullptr && replacement->signal_ready(),
+          "prepare interrupted replacement buffer");
+  auto interrupted = buffered_project(8, replacement.get());
+  require(replacement->retract_ready(),
+          "simulate disconnect retracting replacement readiness");
   stop(second_compositor);
+  auto third_compositor =
+      launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-3");
+  synchronize(buffered);
+  require(buffered.submit(interrupted, error), error.c_str());
+  drive(buffered);
+  errno = 0;
+  require(!replacement->retract_ready() && errno == EAGAIN,
+          "resumed snapshot rearms its retracted replacement buffer");
+  stop(third_compositor);
+  require(replacement->signal_ready(),
+          "pre-signal retained reconnect buffer");
+  auto fourth_compositor =
+      launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-4");
+  synchronize(buffered);
+  errno = 0;
+  require(!replacement->retract_ready() && errno == EAGAIN,
+          "reconnect normalizes an existing readiness token without doubling");
+  stop(fourth_compositor);
   return 0;
 }
