@@ -80,6 +80,9 @@ Startup proceeds only after each dependency exposes its socket:
 
 Each readiness wait has a ten-second monotonic deadline. A process exit,
 spawn error, or timeout aborts startup and returns a nonzero status.
+If a readiness path already exists when its process is spawned, the launcher
+waits for that path to be replaced before accepting it. This prevents a socket
+left by an interrupted session from releasing the next dependency early.
 
 ## Supervision and shutdown
 

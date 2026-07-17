@@ -43,6 +43,9 @@ private:
     ChildSpec spec;
     pid_t pid = -1;
     bool running = false;
+    bool readiness_path_existed = false;
+    dev_t readiness_device = 0;
+    ino_t readiness_inode = 0;
   };
 
   [[nodiscard]] bool spawn(const ChildSpec &spec, std::ostream &error);
