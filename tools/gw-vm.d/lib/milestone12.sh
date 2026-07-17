@@ -568,6 +568,29 @@ d=json.load(open(sys.argv[1]))
 raise SystemExit(0 if all(os.path.exists(f'/proc/{d[k]}') for k in ('sdl_pid','testsprite2_pid')) else 1)
 PY
 }
+restore_close_vt() {
+  local active
+  # The VT switch may land just after the uinput controller has acknowledged
+  # the final key release, so give tty0 a bounded window to expose it.
+  for _ in {1..20}; do
+    active=$(cat /sys/class/tty/tty0/active)
+    [[ $active != ${target_vt##*/} ]] && break
+    sleep .025
+  done
+  if [[ $active != ${target_vt##*/} ]]; then
+    # The acceptance keyboard is a real uinput device, so the kernel VT layer
+    # also observes the GWM Alt+F4 close binding and interprets it as a switch
+    # to tty4. Return to the compositor VT before the SDL client synchronously
+    # tears down its window; otherwise its deferred Unmap remains paused while
+    # the display session is inactive.
+    chvt "${target_vt##*/tty}"
+    for _ in {1..200}; do
+      [[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]] && break
+      sleep .05
+    done
+    [[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]
+  fi
+}
 settled_mirror() {
   local directory=$1 candidate= digest= last_digest= stable=0
   for _ in {1..600}; do
@@ -773,6 +796,7 @@ result[vt_replay]=passed
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario close --result-json "$control/software-close.json"
 grep -Fq '"status":"completed"' "$control/software-close.json"
+restore_close_vt
 wait_path "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
@@ -831,6 +855,7 @@ grep -Fq '"status":"completed"' "$control/gles-cursor-input.json"
 capture_scene cursor
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario close --result-json "$control/gles-close.json"
+restore_close_vt
 wait_path "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
 python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
