@@ -18,6 +18,7 @@ struct UnmapNotifyEvent {
   std::uint32_t event{0};
   std::uint32_t window{0};
   bool from_configure{false};
+  bool synthetic{false};
 };
 
 struct MapNotifyEvent {

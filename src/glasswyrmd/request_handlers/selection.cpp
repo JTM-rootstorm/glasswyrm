@@ -183,6 +183,26 @@ DispatchResult send_event(ServerState& state, const DispatchContext& context,
     return result;
   }
 
+  if (type == x11::CoreEventType::UnmapNotify) {
+    std::uint32_t event_window = 0, window = 0;
+    std::uint8_t from_configure = 0;
+    constexpr auto kWithdrawMask = x11::event_mask::SubstructureNotify |
+                                   x11::event_mask::SubstructureRedirect;
+    if (detail != 0 || request.data != 0 || event_mask != kWithdrawMask ||
+        !reader.read_u32(event_window) || !reader.read_u32(window) ||
+        !reader.read_u8(from_configure) || !reader.skip(19) ||
+        event_window != destination || from_configure != 0)
+      return error(context, request, x11::CoreErrorCode::BadValue,
+                   static_cast<std::uint32_t>(raw_type));
+    const auto* record = state.resources().find_window(window);
+    if (!record || record->parent != destination)
+      return error(context, request, x11::CoreErrorCode::BadWindow, window);
+    result.protocol_events.push_back(window_event(
+        destination, event_mask, false,
+        x11::UnmapNotifyEvent{event_window, window, false, true}));
+    return result;
+  }
+
   if (type != x11::CoreEventType::ClientMessage)
     return error(context, request, x11::CoreErrorCode::BadValue, raw_type);
 

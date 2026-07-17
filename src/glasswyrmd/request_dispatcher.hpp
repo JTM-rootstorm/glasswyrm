@@ -142,6 +142,7 @@ using ProtocolEvent = std::variant<
     gw::protocol::x11::SelectionClearEvent,
     gw::protocol::x11::SelectionRequestEvent,
     gw::protocol::x11::SelectionNotifyEvent,
+    gw::protocol::x11::UnmapNotifyEvent,
     gw::protocol::x11::ClientMessageEvent,
     XFixesSelectionNotifyEvent,
     DamageNotifyEvent,

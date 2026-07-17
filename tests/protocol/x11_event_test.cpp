@@ -37,6 +37,11 @@ int main() {
       {18, 0, 0x23, 0x45, 1, 2, 3, 4, 0xa0, 0xb0, 0xc0, 0xd0, 1},
       "unmap big");
   ok &= expect(
+      x11::encode_unmap_notify(x11::ByteOrder::LittleEndian, 7,
+                               {0x01020304, 0xa0b0c0d0, false, true}),
+      {0x92, 0, 7, 0, 4, 3, 2, 1, 0xd0, 0xc0, 0xb0, 0xa0},
+      "synthetic unmap little");
+  ok &= expect(
       x11::encode_map_notify(x11::ByteOrder::LittleEndian, 7,
                              {0x01020304, 0xa0b0c0d0, true}),
       {19, 0, 7, 0, 4, 3, 2, 1, 0xd0, 0xc0, 0xb0, 0xa0, 1},

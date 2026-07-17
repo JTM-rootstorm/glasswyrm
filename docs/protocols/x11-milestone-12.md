@@ -133,6 +133,11 @@ ordinary lifecycle transaction to `gwm`; borderless windowed state does not
 imply fullscreen. `gwcomp` remains the only final composition authority, and
 M12 performs no direct scanout.
 
+The core `SendEvent` boundary also accepts the exact ICCCM withdraw
+notification emitted by SDL/Xlib: a synthetic `UnmapNotify` from a direct
+child to its parent with the combined substructure notify/redirect mask.
+Other client-forged structural events remain rejected.
+
 ## Efficient buffer and renderer boundary
 
 Game-compatible published CPU buffers use additive GWIPC API 0.7 eventfd
