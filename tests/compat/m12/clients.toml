@@ -1,6 +1,16 @@
 schema = 1
 status = "pinned source and implementation profile; runtime acceptance requires the clean M12 VM gate"
 required_base = "ae6b6c93a29a1fb985dcea8455650d15c0fec364"
+fixture_contract = "tests/fixtures/m12/result-contract.json"
+fixture_contract_sha256 = "684f9fd7b8ddb0813e75070df52132c69732101f5c05d68faa869d4fc9de2e6f"
+expected_frame_artifacts = [
+  "milestone12-software.ppm",
+  "milestone12-gles.ppm",
+  "milestone12-fullscreen.ppm",
+  "milestone12-screen.ppm",
+  "milestone12-gles-screen.ppm",
+]
+frame_acceptance = "runtime-generated canonical and DRM captures must be byte-identical and checksum-protected in the accepted evidence archive"
 environment = [
   "LC_ALL=C",
   "LANG=C",
@@ -47,13 +57,27 @@ build_arguments = [
   "-DSDL_OPENGLES=OFF",
   "-DSDL_VULKAN=OFF",
   "-DSDL_HIDAPI=OFF",
+  "-DSDL_JOYSTICK=OFF",
+  "-DSDL_HAPTIC=OFF",
+  "-DSDL_SENSOR=OFF",
   "-DSDL_LIBUDEV=OFF",
+  "-DSDL_DBUS=OFF",
+  "-DSDL_IBUS=OFF",
+  "-DSDL_DUMMYVIDEO=OFF",
+  "-DSDL_OFFSCREEN=OFF",
+  "-DSDL_RPI=OFF",
+  "-DSDL_VIVANTE=OFF",
   "-DSDL_ALSA=OFF",
   "-DSDL_JACK=OFF",
   "-DSDL_PIPEWIRE=OFF",
   "-DSDL_PULSEAUDIO=OFF",
   "-DSDL_SNDIO=OFF",
   "-DSDL_OSS=OFF",
+  "-DSDL_ESD=OFF",
+  "-DSDL_ARTS=OFF",
+  "-DSDL_NAS=OFF",
+  "-DSDL_FUSIONSOUND=OFF",
+  "-DSDL_LIBSAMPLERATE=OFF",
   "-DSDL_DISKAUDIO=OFF",
   "-DSDL_DUMMYAUDIO=ON",
 ]

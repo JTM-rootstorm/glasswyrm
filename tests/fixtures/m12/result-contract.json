@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "profiles": [
+    "shm",
+    "no-shm"
+  ],
+  "raw_byte_orders": [
+    "little",
+    "big"
+  ],
+  "raw_scenarios": [
+    "registry",
+    "big-requests",
+    "xfixes-damage",
+    "errors"
+  ],
+  "official_programs": [
+    "testdraw2",
+    "testsprite2"
+  ],
+  "sdl_checks": [
+    "initialized",
+    "x11_driver",
+    "display_mode",
+    "window_created",
+    "surface_updated",
+    "clipboard_round_trip",
+    "custom_cursor",
+    "fullscreen_entered",
+    "fullscreen_exited",
+    "geometry_restored",
+    "borderless",
+    "close_event"
+  ],
+  "xcb_checks": [
+    "registry",
+    "big_requests",
+    "mit_shm",
+    "xfixes_version",
+    "selection_notify",
+    "region_algebra",
+    "damage_version",
+    "damage_notify",
+    "damage_subtract",
+    "render_version",
+    "composite_version",
+    "randr_version"
+  ]
+}
