@@ -46,7 +46,7 @@ inline constexpr std::array<ExtensionDescriptor, 7> kExtensionRegistry{{
      66, 1, 130, 1, 1, 1},
     {"RENDER", ExtensionKind::Render, ExtensionCapability::GameCompat, 132,
      0, 0, 131, 5, 0, 11},
-    {"COMPOSITE", ExtensionKind::Composite,
+    {"Composite", ExtensionKind::Composite,
      ExtensionCapability::GameCompat, 133, 0, 0, 0, 0, 0, 4},
     {"RANDR", ExtensionKind::RandR, ExtensionCapability::GameCompat, 134, 67,
      2, 136, 3, 1, 3},

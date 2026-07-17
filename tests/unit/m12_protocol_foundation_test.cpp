@@ -92,6 +92,14 @@ void test_registry(const x11::ByteOrder order) {
           "disabled extension is absent");
   result = dispatch_request(state, context, query_extension(order, "render"));
   require(result.output[8] == 0, "extension names remain case-sensitive");
+  result = dispatch_request(state, context,
+                            query_extension(order, "Composite"));
+  require(result.output[8] == 1 && result.output[9] == 133,
+          "canonical Composite extension name is discoverable");
+  result = dispatch_request(state, context,
+                            query_extension(order, "COMPOSITE"));
+  require(result.output[8] == 0,
+          "non-canonical Composite capitalization remains absent");
 
   result = dispatch_request(
       state, context, finish(header(order, 99, 0, 1), 99));
