@@ -206,7 +206,10 @@ std::vector<Event> scenario_events(std::string_view name) {
     relative(events, REL_X, name == "move" ? 96 : 72);
     relative(events, REL_Y, name == "move" ? 64 : 48);
     button(events, name == "move" ? BTN_LEFT : BTN_RIGHT, false);
-    key(events, KEY_LEFTALT, false);
+    // The server keeps the interaction active until both its final geometry
+    // transaction and cursor publication are accepted.  Give that asynchronous
+    // boundary time to settle before the controller starts the next scenario.
+    key(events, KEY_LEFTALT, false, 250);
   } else if (name == "close") {
     // Move from the post-resize pointer location back into xterm A, focus it,
     // and close A while xterm B remains alive.

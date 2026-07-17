@@ -120,6 +120,15 @@ int main() {
                      is_event(paste[4], protocol::Device::keyboard, EV_KEY,
                               KEY_LEFTCTRL, 1),
                  "PRIMARY paste targets and focuses xterm B before editing");
+  for (const auto name : {"move", "resize"}) {
+    const auto interaction = protocol::scenario_events(name);
+    okay &= expect(interaction.size() == 6 &&
+                       is_event(interaction.back(),
+                                protocol::Device::keyboard, EV_KEY,
+                                KEY_LEFTALT, 0) &&
+                       interaction.back().delay_ms == 250,
+                   "interactive pointer gesture settles before the next scenario");
+  }
   const auto close = protocol::scenario_events("close");
   okay &= expect(close.size() == 8 &&
                      is_event(close[0], protocol::Device::pointer, EV_REL,
