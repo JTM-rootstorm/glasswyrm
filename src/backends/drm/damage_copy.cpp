@@ -29,6 +29,7 @@ std::string_view full_copy_reason_name(const FullCopyReason reason) noexcept {
     case FullCopyReason::FirstUse: return "first-use";
     case FullCopyReason::HistoryMiss: return "history-miss";
     case FullCopyReason::DamageUnavailable: return "damage-unavailable";
+    case FullCopyReason::CanonicalMismatch: return "canonical-mismatch";
     case FullCopyReason::VirtualTerminalResume: return "vt-resume";
   }
   return "unknown";
@@ -49,6 +50,7 @@ DamageCopyPlan DamageCopyHistory::full_plan(
     result.rectangles.push_back({0, 0, width_, height_});
   DamageRegion normalized({0, 0, width_, height_});
   if (completed_damage.empty() ||
+      reason == FullCopyReason::CanonicalMismatch ||
       reason == FullCopyReason::VirtualTerminalResume) {
     normalized.add_full_output();
   } else {

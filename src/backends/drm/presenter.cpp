@@ -182,7 +182,8 @@ output::PresentResult DrmPresenter::present_initial(
   headless::StagedFrameDump mirror;
   StagedDrmReport report;
   DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, FullCopyReason::None, damage_copy, error) ||
+  if (!copy_frame_to(target, frame, hash, FullCopyReason::None, damage_copy,
+                     error) ||
       target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("initial-copy", error); fatal_ = true;
@@ -238,8 +239,8 @@ output::PresentResult DrmPresenter::present_flip(
   value.next_front_index = 1U - front_index_;
   value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
-  if (!copy_frame_to(target, frame, FullCopyReason::None, value.damage_copy,
-                     error) ||
+  if (!copy_frame_to(target, frame, hash, FullCopyReason::None,
+                     value.damage_copy, error) ||
       target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("flip-copy", error);
@@ -497,8 +498,9 @@ bool DrmPresenter::present_committed_frame(std::string& error) {
   const output::SoftwareFrameView frame{
       config_.output, committed_pixels_, {}, 0, committed_generation_, 0};
   DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, FullCopyReason::VirtualTerminalResume,
-                     damage_copy, error) ||
+  if (!copy_frame_to(target, frame, committed_hash_,
+                     FullCopyReason::VirtualTerminalResume, damage_copy,
+                     error) ||
       target.visible_hash() != committed_hash_) {
     if (error.empty()) error = "re-modeset scanout hash differs from committed frame";
     return false;

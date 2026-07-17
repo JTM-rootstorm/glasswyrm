@@ -15,7 +15,8 @@ std::uint64_t saturating_add(const std::uint64_t left,
 
 bool DrmPresenter::copy_frame_to(
     DumbBuffer& target, const output::SoftwareFrameView& frame,
-    const FullCopyReason forced_reason, DamageCopyPlan& plan,
+    const std::uint64_t expected_hash, const FullCopyReason forced_reason,
+    DamageCopyPlan& plan,
     std::string& error) {
   if (!config_.damage_aware_copy) return target.copy_from(frame.pixels, error);
   if (!damage_history_) {
@@ -25,9 +26,21 @@ bool DrmPresenter::copy_frame_to(
   plan = damage_history_->plan(target.content_valid(),
                                target.completed_generation(),
                                frame.generation, frame.damage, forced_reason);
-  return plan.full_copy()
-      ? target.copy_from(frame.pixels, error)
-      : target.copy_rectangles_from(frame.pixels, plan.rectangles, error);
+  const bool copied = plan.full_copy()
+                          ? target.copy_from(frame.pixels, error)
+                          : target.copy_rectangles_from(frame.pixels,
+                                                        plan.rectangles, error);
+  if (!copied || plan.full_copy() || target.visible_hash() == expected_hash)
+    return copied;
+
+  // Damage is an optimization hint, never a correctness boundary. If an
+  // upstream producer changed pixels outside its advertised region, recover
+  // before KMS submission and retain full-output history for this generation.
+  plan = damage_history_->plan(target.content_valid(),
+                               target.completed_generation(),
+                               frame.generation, frame.damage,
+                               FullCopyReason::CanonicalMismatch);
+  return target.copy_from(frame.pixels, error);
 }
 
 DamageCopyReport DrmPresenter::damage_copy_report(

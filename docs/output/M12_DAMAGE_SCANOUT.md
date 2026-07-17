@@ -25,6 +25,7 @@ A complete frame is copied when:
 - a dumb buffer is used for the first time;
 - its generation has fallen outside the eight-frame history;
 - the current frame has no usable damage;
+- a bounded copy does not reproduce the canonical software-frame hash;
 - virtual-terminal ownership has just been reacquired.
 
 Buffer creation or a mode-size change also starts with invalid contents and
@@ -40,7 +41,7 @@ a `damage-copy` JSON record beside its modeset or flip record. It contains:
 - normalized `copy_rectangles`;
 - `history_span`;
 - `full_copy_reason` (`none`, `first-use`, `history-miss`,
-  `damage-unavailable`, or `vt-resume`);
+  `damage-unavailable`, `canonical-mismatch`, or `vt-resume`);
 - saturating cumulative byte totals and `cumulative_copy_ratio_ppm`.
 
 The ratio uses overflow-safe intermediate arithmetic. Evidence is committed

@@ -109,7 +109,8 @@ class DrmPresenter final : public output::PresentationBackend,
                                    std::string& error);
   [[nodiscard]] bool copy_frame_to(
       DumbBuffer& target, const output::SoftwareFrameView& frame,
-      FullCopyReason forced_reason, DamageCopyPlan& plan,
+      std::uint64_t expected_hash, FullCopyReason forced_reason,
+      DamageCopyPlan& plan,
       std::string& error);
   [[nodiscard]] DamageCopyReport damage_copy_report(
       const DumbBuffer& target, const DamageCopyPlan& plan,
