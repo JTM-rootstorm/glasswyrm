@@ -15,6 +15,8 @@ or GWIPC authority.
   signal handling.
 - [Hardware validation](M10_HARDWARE_VALIDATION.md): VM and spare-VT
   procedures, evidence, recovery, and current acceptance status.
+- [Milestone 12 damage-aware scanout](M12_DAMAGE_SCANOUT.md): completed-buffer
+  generations, bounded damage history, full-copy fallbacks, and copy evidence.
 
 The VT lifecycle also documents the capability-gated M11 coordination which
 suspends server-owned libinput before display release and resumes it after

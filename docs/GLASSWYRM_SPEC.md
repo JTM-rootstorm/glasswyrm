@@ -397,6 +397,16 @@ back saved KMS state before removing Glasswyrm framebuffers, then restores DRM
 master and terminal ownership in order. The detailed contract is recorded in
 [`docs/output/`](output/).
 
+Milestone 12 keeps that authority split while making the CPU-buffer path
+explicit and damage-aware. An opt-in game profile in `glasswyrmd` owns the
+bounded X11 extension, colormap, and EWMH behavior; `gwm` owns fullscreen,
+borderless, restore-geometry, stacking, and focus policy; and `gwcomp` selects
+the scalar reference or constrained EGL/GLES scene renderer before presenting
+the same component-neutral frame. Additive GWIPC API 0.7 eventfd readiness
+orders producer writes before compositor reads, and completed DRM buffer
+generations bound the scanout copy region. This profile adds no client GPU API,
+direct scanout, output reconfiguration, or second display authority.
+
 The process boundaries must carry explicit metadata. It is not acceptable for `glasswyrmd` or `gwm` to reduce a surface to only "draw this window here" information.
 
 The server/WM policy contract should include at least:
@@ -462,7 +472,7 @@ Early likely extension subset:
 - `MIT-SHM`
 - `XFIXES`
 - `DAMAGE`
-- `COMPOSITE`
+- `Composite`
 - `RANDR` subset
 - `RENDER` subset
 - `PRESENT` subset later
@@ -1049,6 +1059,21 @@ Passive grabs cover only the observed `GrabButton` path; `UngrabButton` and
 passive key grabs remain unsupported. This is not a broader xterm, Xt/Xaw,
 toolkit, Unicode, or X11 compatibility claim.
 
+Milestone 12 implementation adds a static `--game-compat` registry with
+bounded BIG-REQUESTS 1.0, MIT-SHM 1.1, XFIXES 2.0, DAMAGE 1.1, RENDER 0.11,
+COMPOSITE 0.4, and RANDR 1.3 subsets. It also adds depth-8/depth-32 pixmaps,
+client TrueColor colormaps, SDL-oriented EWMH fullscreen and borderless
+policy, GWIPC API 0.7 eventfd CPU-buffer readiness, an internal renderer
+abstraction, an opt-in EGL/GLES 2.0 compositor renderer, and completed-damage
+DRM copies. Software rendering remains the default and canonical reference;
+wire 1.0 and SOVERSION 0 remain unchanged. The only external target is the
+exact SDL 2.32.10 X11 software-renderer profile with the pinned repository
+probe and official `testdraw2`/`testsprite2` workloads. Host implementation
+tests and evidence validators do not accept that target by themselves: the
+clean M11-to-M12 Gentoo VM sequence, software/GLES and DRM image evidence,
+real interaction, restart/VT recovery, restoration, cleanup, and archive gates
+must pass before M12 is marked complete.
+
 ## 26. Definition of done
 
 For any implementation task, done means:
@@ -1069,7 +1094,7 @@ These should be resolved through future design notes or implementation experienc
 - Whether to use CMake instead of Meson if project needs change.
 - Whether to vendor `xcb-proto` XML or require it as a build-time dependency.
 - Whether a nested X11 backend remains useful after the M10 DRM/KMS path.
-- Whether first GL path should use EGL/GLES or desktop OpenGL.
+- Whether a renderer beyond the bounded M12 EGL/GLES compositor is useful.
 - Whether Vulkan should be a serious early render backend or postponed.
 - Exact configuration format.
 - How much ICCCM/EWMH behavior to implement before toolkit work.
