@@ -569,12 +569,20 @@ raise SystemExit(0 if all(os.path.exists(f'/proc/{d[k]}') for k in ('sdl_pid','t
 PY
 }
 settled_mirror() {
-  local directory=$1 candidate= last= stable=0
+  local directory=$1 candidate= digest= last_digest= stable=0
   for _ in {1..600}; do
     candidate=$(find "$directory" -type f -name '*.ppm' -print | sort -V | tail -n1)
-    if [[ -n $candidate && -s $candidate && $candidate == "$last" ]]; then
-      stable=$((stable + 1)); ((stable >= 10)) && { printf '%s\n' "$candidate"; return; }
-    else last=$candidate; stable=0; fi
+    if [[ -n $candidate && -s $candidate ]]; then
+      digest=$(sha256sum "$candidate")
+      digest=${digest%% *}
+      if [[ $digest == "$last_digest" ]]; then
+        stable=$((stable + 1))
+        ((stable >= 10)) && { printf '%s\n' "$candidate"; return; }
+      else
+        last_digest=$digest
+        stable=0
+      fi
+    fi
     sleep .05
   done
   return 1
@@ -593,12 +601,26 @@ latest_mirror() {
 }
 capture_scene() {
   local scene=$1 latest
-  # DRM mirror dumps are staged and atomically renamed. The resident sprite
-  # workload continuously produces new frames, so waiting for an unchanged
-  # latest filename can never converge; sample a complete post-stage frame.
-  sleep .1
-  latest=$(latest_mirror "$current_dump_root")
+  # DRM mirror dumps are staged and atomically renamed. The resident workload
+  # keeps committing after its deterministic animation stops, so stabilize on
+  # content rather than a filename that necessarily changes each frame.
+  latest=$(settled_mirror "$current_dump_root")
   cp "$latest" "$artifact_dir/milestone12-$current_name-$scene.ppm"
+}
+capture_matching_mirror() {
+  local screen=$1 destination=$2 latest
+  # A client can publish one final cursor transaction after its readiness
+  # marker. Match the immutable host screenshot to the committed DRM mirror
+  # instead of racing that transaction with an earlier sampled frame.
+  for _ in {1..200}; do
+    latest=$(latest_mirror "$current_dump_root") || { sleep .05; continue; }
+    if cmp -s "$latest" "$screen"; then
+      cp "$latest" "$destination"
+      return
+    fi
+    sleep .05
+  done
+  return 1
 }
 
 start_gwm() {
@@ -704,11 +726,12 @@ capture_scene sdl-probe
 grep -Fq '"status":"completed"' "$control/software-input.json"
 : >"$current_out/live-control/enter-fullscreen"
 wait_path "$current_out/live-control/fullscreen-ready"
-capture_scene fullscreen
-cp "$artifact_dir/milestone12-software-fullscreen.ppm" \
-  "$artifact_dir/milestone12-fullscreen.ppm"
 printf 'ready\nmode=1024x768\n' >"$control/software-screen-ready"
 wait_path "$control/software-screen-captured"
+capture_matching_mirror "$artifact_dir/milestone12-screen.ppm" \
+  "$artifact_dir/milestone12-software-fullscreen.ppm"
+cp "$artifact_dir/milestone12-software-fullscreen.ppm" \
+  "$artifact_dir/milestone12-fullscreen.ppm"
 cmp "$artifact_dir/milestone12-fullscreen.ppm" "$artifact_dir/milestone12-screen.ppm"
 : >"$current_out/live-control/exit-fullscreen"
 wait_path "$current_out/live-control/borderless-ready"
@@ -794,9 +817,10 @@ begin_profile gles gles shm "$gles" true
 capture_scene sdl-probe
 : >"$current_out/live-control/enter-fullscreen"
 wait_path "$current_out/live-control/fullscreen-ready"
-capture_scene fullscreen
 printf 'ready\nmode=1024x768\n' >"$control/gles-screen-ready"
 wait_path "$control/gles-screen-captured"
+capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm" \
+  "$artifact_dir/milestone12-gles-fullscreen.ppm"
 cmp "$artifact_dir/milestone12-gles-fullscreen.ppm" \
   "$artifact_dir/milestone12-gles-screen.ppm"
 : >"$current_out/live-control/exit-fullscreen"

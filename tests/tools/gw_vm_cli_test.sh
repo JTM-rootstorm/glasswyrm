@@ -2066,6 +2066,8 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'StandardOutput=journal' 'StandardError=journal' \
   m12_extension_stress_probe milestone12-extension-stress.json \
   'latest=$(latest_mirror "$current_dump_root")' \
+  'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
+  'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
   server-historical server-game gwcomp-software-headless gwcomp-software-drm \
   gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
   milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
