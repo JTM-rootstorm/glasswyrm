@@ -158,9 +158,15 @@ std::vector<Event> scenario_events(std::string_view name) {
     text(events, "D\\n'");
     tap(events, KEY_ENTER);
   } else if (name == "repeat") {
-    key(events, KEY_A, true, 700);
+    // Put the held key in a bounded scratch command whose output proves that
+    // glasswyrmd generated more key presses than this scenario injected.  The
+    // 680 ms release falls halfway between the default 660 ms and 700 ms
+    // repeat ticks (500 ms delay, 25 Hz), avoiding a release/expiry tie while
+    // preserving the production repeat profile exercised by the VM.
+    text(events, "printf 'M11_REPEAT_%s\\n' ");
+    key(events, KEY_A, true, 680);
     key(events, KEY_A, false);
-    chord(events, KEY_LEFTCTRL, KEY_U);
+    tap(events, KEY_ENTER);
   } else if (name == "scroll") {
     text(events, "seq 40");
     tap(events, KEY_ENTER);

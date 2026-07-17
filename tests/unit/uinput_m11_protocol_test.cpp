@@ -79,6 +79,22 @@ int main() {
   okay &= expect(protocol::encode_request("unknown").empty(),
                  "unknown scenario cannot be encoded");
 
+  const auto repeat = protocol::scenario_events("repeat");
+  const auto held_key = std::ranges::find_if(
+      repeat, [](const protocol::Event &event) {
+        return is_event(event, protocol::Device::keyboard, EV_KEY, KEY_A, 1) &&
+               event.delay_ms == 680;
+      });
+  okay &= expect(
+      held_key != repeat.end() && std::distance(held_key, repeat.end()) == 4 &&
+          is_event(*std::next(held_key), protocol::Device::keyboard, EV_KEY,
+                   KEY_A, 0) &&
+          is_event(*std::next(held_key, 2), protocol::Device::keyboard, EV_KEY,
+                   KEY_ENTER, 1) &&
+          is_event(*std::next(held_key, 3), protocol::Device::keyboard, EV_KEY,
+                   KEY_ENTER, 0),
+      "repeat uses one midpoint-held key and executes its bounded proof command");
+
   const auto scroll = protocol::scenario_events("scroll");
   const auto pointer_start = std::ranges::find_if(
       scroll, [](const protocol::Event &event) {
