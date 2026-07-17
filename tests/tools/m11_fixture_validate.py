@@ -16,8 +16,10 @@ REQUIRED_REQUESTS = frozenset((
 REQUIRED_EVENT_TYPES = frozenset((2, 3, 4, 5, 6, 22, 28, 29, 30, 31, 33))
 TRACE_GATED_REQUESTS = frozenset(("GrabButton",))
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
+PRESENCE_NORMALIZED_REQUESTS = frozenset(("ImageText8",))
 TRACE_KEYS = frozenset((
-    "schema", "first_request_occurrence", "request_histogram",
+    "schema", "presence_normalized_requests", "first_request_occurrence",
+    "request_histogram",
     "opcode_histogram", "error_histogram", "reply_requests",
     "recurring_requests", "extension_queries", "unknown_opcodes",
     "trace_gated_requests", "event_histogram", "event_sequence",
@@ -85,6 +87,12 @@ if trace.get("error_histogram") != {}:
 if trace.get("unknown_opcodes") != []:
     fail("accepted trace must not contain unknown opcodes")
 
+presence_normalized = unique_string_list(
+    trace.get("presence_normalized_requests"),
+    "presence_normalized_requests")
+if set(presence_normalized) != PRESENCE_NORMALIZED_REQUESTS:
+    fail("invalid presence_normalized_requests")
+
 requests = positive_histogram(trace.get("request_histogram"),
                               "request_histogram")
 events = positive_histogram(trace.get("event_histogram"),
@@ -95,6 +103,10 @@ if any(int(opcode) > 255 for opcode in opcodes):
     fail("invalid opcode_histogram")
 if sum(opcodes.values()) != sum(requests.values()):
     fail("opcode_histogram does not match request_histogram")
+if any(requests.get(name) != 1 for name in PRESENCE_NORMALIZED_REQUESTS):
+    fail("presence-normalized request count must be one")
+if opcodes.get("76") != 1:
+    fail("presence-normalized opcode count must be one")
 
 first_requests = unique_string_list(trace.get("first_request_occurrence"),
                                     "first_request_occurrence")

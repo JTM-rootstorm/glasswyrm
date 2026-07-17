@@ -19,6 +19,12 @@ records = [
     {"direction": "request", "client": 7, "sequence": 3, "opcode": 38,
      "name": "QueryPointer", "length": 8, "outcome": "success",
      "error": None},
+    {"direction": "request", "client": 7, "sequence": 4, "opcode": 76,
+     "name": "ImageText8", "length": 12, "outcome": "success",
+     "error": None},
+    {"direction": "request", "client": 7, "sequence": 5, "opcode": 76,
+     "name": "ImageText8", "length": 40, "outcome": "success",
+     "error": None},
     {"direction": "event", "client": 7, "sequence": 3,
      "event_type": 2, "window": 0x200001},
     {"direction": "event", "client": 7, "sequence": 3,
@@ -39,11 +45,14 @@ with tempfile.TemporaryDirectory() as directory:
     output = subprocess.check_output([sys.argv[1], path], text=True)
 
 summary = json.loads(output)
+assert summary["presence_normalized_requests"] == ["ImageText8"]
 assert summary["first_request_occurrence"] == [
-    "QueryExtension", "QueryPointer", "GrabButton", "Unknown"]
+    "QueryExtension", "QueryPointer", "ImageText8", "GrabButton", "Unknown"]
 assert summary["request_histogram"] == {
-    "GrabButton": 1, "QueryExtension": 1, "QueryPointer": 2, "Unknown": 1}
-assert summary["opcode_histogram"] == {"28": 1, "38": 2, "98": 1, "250": 1}
+    "GrabButton": 1, "ImageText8": 1, "QueryExtension": 1,
+    "QueryPointer": 2, "Unknown": 1}
+assert summary["opcode_histogram"] == {
+    "28": 1, "38": 2, "76": 1, "98": 1, "250": 1}
 assert summary["error_histogram"] == {"BadRequest": 1}
 assert summary["reply_requests"] == ["QueryExtension"]
 assert summary["recurring_requests"] == ["QueryPointer"]
@@ -54,7 +63,7 @@ assert summary["event_histogram"] == {"2": 2}
 assert summary["event_sequence"] == [
     {"client": 7, "event_type": 2}, {"client": 7, "event_type": 2}]
 assert summary["application_connection_count"] == 1
-assert summary["maximum_request_length"] == 24
+assert summary["maximum_request_length"] == 40
 
 with tempfile.TemporaryDirectory() as directory:
     invalid = pathlib.Path(directory) / "invalid.jsonl"

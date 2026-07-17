@@ -1,5 +1,8 @@
 {
   "schema": 1,
+  "presence_normalized_requests": [
+    "ImageText8"
+  ],
   "first_request_occurrence": [
     "QueryExtension",
     "CreateGC",
@@ -61,7 +64,7 @@
     "GetProperty": 20,
     "GetSelectionOwner": 4,
     "GrabButton": 96,
-    "ImageText8": 806,
+    "ImageText8": 1,
     "InternAtom": 97,
     "MapSubwindows": 2,
     "MapWindow": 2,
@@ -104,7 +107,7 @@
     "62": 30,
     "65": 6,
     "72": 6,
-    "76": 806,
+    "76": 1,
     "84": 424,
     "91": 5,
     "94": 17,
