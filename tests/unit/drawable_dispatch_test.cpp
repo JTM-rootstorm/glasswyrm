@@ -179,6 +179,97 @@ int main() {
     gw::test::require(result.output.empty()&&bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
                       "one-plane depth-one XYPixmap uses the bitmap upload path");
 
+    state.resources().find_gc(base+8)->foreground=0;
+    state.resources().find_gc(base+8)->background=1;
+    x11::ByteWriter z_pixmap_image(order); z_pixmap_image.write_u8(72); z_pixmap_image.write_u8(2); z_pixmap_image.write_u16(7);
+    z_pixmap_image.write_u32(base+7); z_pixmap_image.write_u32(base+8); z_pixmap_image.write_u16(3); z_pixmap_image.write_u16(1);
+    z_pixmap_image.write_u16(0); z_pixmap_image.write_u16(0); z_pixmap_image.write_u8(0); z_pixmap_image.write_u8(1); z_pixmap_image.write_u16(0);
+    z_pixmap_image.write_u8(0b00000010); z_pixmap_image.write_padding(3);
+    result=dispatch_request(state,context,finish(std::move(z_pixmap_image),x11::CoreOpcode::PutImage,2));
+    gw::test::require(result.output.empty()&&bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
+                      "depth-one ZPixmap stores LSBFirst source bits independent of GC colors");
+
+    x11::ByteWriter short_z_pixmap(order); short_z_pixmap.write_u8(72); short_z_pixmap.write_u8(2); short_z_pixmap.write_u16(6);
+    short_z_pixmap.write_u32(base+7); short_z_pixmap.write_u32(base+8); short_z_pixmap.write_u16(3); short_z_pixmap.write_u16(1);
+    short_z_pixmap.write_u16(0); short_z_pixmap.write_u16(0); short_z_pixmap.write_u8(0); short_z_pixmap.write_u8(1); short_z_pixmap.write_u16(0);
+    result=dispatch_request(state,context,finish(std::move(short_z_pixmap),x11::CoreOpcode::PutImage,2));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadLength)&&
+                      bitmap->at(0,0)==0&&bitmap->at(1,0)==1&&bitmap->at(2,0)==0,
+                      "short depth-one ZPixmap is atomic BadLength");
+
+    x11::ByteWriter stippled_gc(order); stippled_gc.write_u8(55); stippled_gc.write_u8(0); stippled_gc.write_u16(7);
+    stippled_gc.write_u32(base+11); stippled_gc.write_u32(base+1);
+    stippled_gc.write_u32((1U<<3U)|(1U<<8U)|(1U<<11U));
+    stippled_gc.write_u32(0x00ffffffU); stippled_gc.write_u32(3); stippled_gc.write_u32(base+7);
+    result=dispatch_request(state,context,finish(std::move(stippled_gc),x11::CoreOpcode::CreateGC,0));
+    const auto* retained_stipple=state.resources().find_gc(base+11)->stipple.get();
+    gw::test::require(result.output.empty()&&retained_stipple&&
+                      state.resources().find_gc(base+11)->fill_style==3&&
+                      state.resources().find_gc(base+11)->background==0x00ffffffU,
+                      "Xaw opaque-stippled CreateGC mask");
+
+    x11::ByteWriter bad_stipple(order); bad_stipple.write_u8(56); bad_stipple.write_u8(0); bad_stipple.write_u16(4);
+    bad_stipple.write_u32(base+11); bad_stipple.write_u32(1U<<11U); bad_stipple.write_u32(base+6);
+    result=dispatch_request(state,context,finish(std::move(bad_stipple),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadPixmap)&&
+                      state.resources().find_gc(base+11)->stipple.get()==retained_stipple,
+                      "invalid GCStipple is atomic BadPixmap");
+
+    x11::ByteWriter bad_combination(order); bad_combination.write_u8(56); bad_combination.write_u8(0); bad_combination.write_u16(5);
+    bad_combination.write_u32(base+2); bad_combination.write_u32((1U<<8U)|(1U<<11U));
+    bad_combination.write_u32(3); bad_combination.write_u32(base+6);
+    result=dispatch_request(state,context,finish(std::move(bad_combination),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadPixmap)&&
+                      state.resources().find_gc(base+2)->fill_style==0&&!state.resources().find_gc(base+2)->stipple,
+                      "combined fill-style and invalid stipple change is atomic");
+
+    x11::ByteWriter wrong_depth(order); wrong_depth.write_u8(55); wrong_depth.write_u8(0); wrong_depth.write_u16(5);
+    wrong_depth.write_u32(base+12); wrong_depth.write_u32(base+1); wrong_depth.write_u32(1U<<11U); wrong_depth.write_u32(base+1);
+    result=dispatch_request(state,context,finish(std::move(wrong_depth),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+12),"GCStipple requires depth-one pixmap");
+
+    x11::ByteWriter tiled_style(order); tiled_style.write_u8(56); tiled_style.write_u8(0); tiled_style.write_u16(4);
+    tiled_style.write_u32(base+11); tiled_style.write_u32(1U<<8U); tiled_style.write_u32(1);
+    result=dispatch_request(state,context,finish(std::move(tiled_style),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation)&&
+                      state.resources().find_gc(base+11)->fill_style==3,"unsupported valid fill style is atomic");
+
+    x11::ByteWriter invalid_style(order); invalid_style.write_u8(56); invalid_style.write_u8(0); invalid_style.write_u16(4);
+    invalid_style.write_u32(base+11); invalid_style.write_u32(1U<<8U); invalid_style.write_u32(4);
+    result=dispatch_request(state,context,finish(std::move(invalid_style),x11::CoreOpcode::ChangeGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadValue)&&
+                      state.resources().find_gc(base+11)->fill_style==3,"invalid fill style is atomic BadValue");
+
+    x11::ByteWriter free_stipple(order); free_stipple.write_u8(54); free_stipple.write_u8(0); free_stipple.write_u16(2); free_stipple.write_u32(base+7);
+    result=dispatch_request(state,context,finish(std::move(free_stipple),x11::CoreOpcode::FreePixmap,0));
+    gw::test::require(result.output.empty()&&!state.resources().find_pixmap(base+7)&&
+                      state.resources().find_gc(base+11)->stipple.get()==retained_stipple,
+                      "GC retains freed stipple storage");
+
+    x11::ByteWriter stippled_fill(order); stippled_fill.write_u8(70); stippled_fill.write_u8(0); stippled_fill.write_u16(5);
+    stippled_fill.write_u32(base+1); stippled_fill.write_u32(base+11);
+    stippled_fill.write_u16(static_cast<std::uint16_t>(-1)); stippled_fill.write_u16(0);
+    stippled_fill.write_u16(5); stippled_fill.write_u16(1);
+    result=dispatch_request(state,context,finish(std::move(stippled_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(0,0)==0xffffffffU&&
+                      state.resources().find_pixmap(base+1)->pixels()->at(1,0)==0xff000000U,
+                      "opaque stipple is drawable-anchored and clipped");
+
+    x11::ByteWriter patterned_polygon(order); patterned_polygon.write_u8(69); patterned_polygon.write_u8(0); patterned_polygon.write_u16(7);
+    patterned_polygon.write_u32(base+1); patterned_polygon.write_u32(base+11); patterned_polygon.write_u8(2); patterned_polygon.write_u8(0); patterned_polygon.write_u16(0);
+    patterned_polygon.write_u16(0); patterned_polygon.write_u16(0); patterned_polygon.write_u16(2); patterned_polygon.write_u16(0); patterned_polygon.write_u16(0); patterned_polygon.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(patterned_polygon),x11::CoreOpcode::FillPoly,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
+                      "patterned FillPoly is explicitly unsupported");
+
+    x11::ByteWriter patterned_arc(order); patterned_arc.write_u8(71); patterned_arc.write_u8(0); patterned_arc.write_u16(6);
+    patterned_arc.write_u32(base+1); patterned_arc.write_u32(base+11); patterned_arc.write_u16(0); patterned_arc.write_u16(0);
+    patterned_arc.write_u16(2); patterned_arc.write_u16(2); patterned_arc.write_u16(0); patterned_arc.write_u16(360*64);
+    result=dispatch_request(state,context,finish(std::move(patterned_arc),x11::CoreOpcode::PolyFillArc,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),
+                      "patterned PolyFillArc is explicitly unsupported");
+
     WindowCreateSpec parent; parent.xid=base+9; parent.parent=state.screen().root_window;
     parent.width=8; parent.height=8; parent.window_class=WindowClass::InputOutput;
     gw::test::require(state.resources().create_window(1,base,mask,parent)==CreateWindowStatus::Success,
@@ -187,6 +278,36 @@ int main() {
     child.border_width=1; child.width=2; child.height=2; child.window_class=WindowClass::InputOutput;
     gw::test::require(state.resources().create_window(1,base,mask,child)==CreateWindowStatus::Success,
                       "nested child");
+    gw::test::require(state.resources().open_font(1,base,mask,base+13)==OpenFontStatus::Success,
+                      "xterm client font");
+    x11::ByteWriter child_gc(order); child_gc.write_u8(55); child_gc.write_u8(0); child_gc.write_u16(6);
+    child_gc.write_u32(base+14); child_gc.write_u32(base+10); child_gc.write_u32(0x4008);
+    child_gc.write_u32(0x00ffffffU); child_gc.write_u32(base+13);
+    result=dispatch_request(state,context,finish(std::move(child_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.empty()&&state.resources().find_gc(base+14)&&
+                      state.resources().find_gc(base+14)->depth==24&&
+                      state.resources().find_gc(base+14)->background==0x00ffffffU,
+                      "CreateGC accepts nested depth-24 InputOutput drawable");
+
+    WindowCreateSpec input_only; input_only.xid=base+15; input_only.parent=base+9;
+    input_only.width=2; input_only.height=2; input_only.window_class=WindowClass::InputOnly;
+    gw::test::require(state.resources().create_window(1,base,mask,input_only)==CreateWindowStatus::Success,
+                      "InputOnly GC target");
+    x11::ByteWriter input_only_gc(order); input_only_gc.write_u8(55); input_only_gc.write_u8(0); input_only_gc.write_u16(4);
+    input_only_gc.write_u32(base+16); input_only_gc.write_u32(base+15); input_only_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(input_only_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+16),"CreateGC rejects InputOnly drawable");
+
+    WindowCreateSpec incompatible_window=child; incompatible_window.xid=base+17;
+    gw::test::require(state.resources().create_window(1,base,mask,incompatible_window)==CreateWindowStatus::Success,
+                      "incompatible depth GC target");
+    state.resources().find_window(base+17)->depth=1;
+    x11::ByteWriter wrong_depth_gc(order); wrong_depth_gc.write_u8(55); wrong_depth_gc.write_u8(0); wrong_depth_gc.write_u16(4);
+    wrong_depth_gc.write_u32(base+18); wrong_depth_gc.write_u32(base+17); wrong_depth_gc.write_u32(0);
+    result=dispatch_request(state,context,finish(std::move(wrong_depth_gc),x11::CoreOpcode::CreateGC,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadMatch)&&
+                      !state.resources().find_gc(base+18),"CreateGC rejects incompatible window depth");
     x11::ByteWriter child_fill(order); child_fill.write_u8(70); child_fill.write_u8(0); child_fill.write_u16(5);
     child_fill.write_u32(base+10); child_fill.write_u32(base+2);
     child_fill.write_u16(0); child_fill.write_u16(0); child_fill.write_u16(2); child_fill.write_u16(2);

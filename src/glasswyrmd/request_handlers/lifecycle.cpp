@@ -146,7 +146,8 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   }
 
   auto decoded = decode_window_attributes(reader, value_mask, spec.attributes,
-                                          state.screen().default_colormap);
+                                          state.screen().default_colormap,
+                                          state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad_value);
   spec.attributes = decoded.attributes;
   spec.initial_event_mask = decoded.event_mask.value_or(0);
@@ -238,6 +239,8 @@ DispatchResult destroy_window(ServerState& state,
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
+  for (const auto& item : destroyed->postorder)
+    (void)state.selections().clear_window(item.xid);
   return result;
 }
 
@@ -288,6 +291,8 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
       return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
     case LocalLifecycleStatus::BadValue:
       return error(context, request, x11::CoreErrorCode::BadValue);
+    case LocalLifecycleStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
@@ -340,6 +345,8 @@ DispatchResult configure_window(ServerState& state,
       return error(context, request, x11::CoreErrorCode::BadMatch, decoded.window);
     case LocalLifecycleStatus::BadValue:
       return error(context, request, x11::CoreErrorCode::BadValue);
+    case LocalLifecycleStatus::BadAlloc:
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
   return error(context, request, x11::CoreErrorCode::BadImplementation);
 }
@@ -374,6 +381,8 @@ DispatchResult map_subwindows(ServerState& state,
                             ? x11::CoreErrorCode::BadWindow
                         : transition_status == LocalLifecycleStatus::BadMatch
                             ? x11::CoreErrorCode::BadMatch
+                        : transition_status == LocalLifecycleStatus::BadAlloc
+                            ? x11::CoreErrorCode::BadAlloc
                             : x11::CoreErrorCode::BadValue;
       return error(context, request, code, child);
     }

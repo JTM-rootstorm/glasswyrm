@@ -30,3 +30,13 @@ GWIPC_0.5 {
     gwipc_contract_encode_synthetic_*;
     gwipc_decoded_synthetic_*;
 } GWIPC_0.4;
+
+GWIPC_0.6 {
+  global:
+    gwipc_contract_encode_policy_bindings_upsert;
+    gwipc_decoded_policy_bindings_upsert;
+    gwipc_contract_encode_session_state_change;
+    gwipc_decoded_session_state_change;
+    gwipc_contract_encode_session_state_acknowledged;
+    gwipc_decoded_session_state_acknowledged;
+} GWIPC_0.5;

@@ -44,7 +44,8 @@ void Server::accept_clients() {
           descriptor, next_client_identifier_++, *resource_base, state_,
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
-          expose_intent_handler_, trace_.get(), input_snapshot_provider_));
+          expose_intent_handler_, trace_.get(), input_snapshot_provider_,
+          protocol_event_handler_));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));

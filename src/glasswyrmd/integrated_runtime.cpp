@@ -15,18 +15,37 @@ namespace glasswyrm::server {
 int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
 #ifdef GW_SERVER_HAS_IPC
   server_.input_snapshot_provider_ = [this] {
-    return InputSnapshot{input_state_.pointer_x(), input_state_.pointer_y(),
-                         input_state_.mask(), input_state_.pointer_target(),
-                         input_state_.time()};
+    InputSnapshot snapshot;
+    snapshot.root_x = input_state_.pointer_x();
+    snapshot.root_y = input_state_.pointer_y();
+    snapshot.state_mask = input_state_.mask();
+    snapshot.pointer_target = input_state_.pointer_target();
+    snapshot.logical_time = input_state_.time();
+    snapshot.keymap = input_state_.query_keymap();
+#if GW_HAS_LIBINPUT_BACKEND
+    if (real_input_) {
+      snapshot.keyboard_mapping = real_input_->keyboard_mapping();
+      snapshot.set_global_auto_repeat = [this](const bool enabled) {
+        return real_input_ && real_input_->set_global_auto_repeat(enabled);
+      };
+    }
+#endif
+    return snapshot;
   };
   if (!server_.options_.integrated()) return 0;
 
   bridge_ = std::make_unique<RuntimeBridge>(
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
-      server_.options_.software_content);
+      server_.options_.software_content, server_.options_.real_input_enabled());
   if (server_.options_.software_content) {
     content_presenter_ = std::make_unique<ContentPresenter>();
+#if GW_HAS_LIBINPUT_BACKEND
+    if (server_.options_.real_input_enabled()) {
+      cursor_presenter_ = std::make_unique<CursorPresenter>();
+      cursor_dirty_ = true;
+    }
+#endif
     server_.drawable_damage_handler_ = [this](
         const std::vector<DrawableDamage>& damage) {
       for (const auto& item : damage)
@@ -63,6 +82,11 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   if (SignalRuntime::stop_requested()) return 2;
 
   initialize_lifecycle();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (server_.options_.real_input_enabled() &&
+      (!initialize_interactive_policy() || !initialize_real_input()))
+      return 1;
+#endif
   if (server_.options_.synthetic_input_socket) {
     input_peer_ = std::make_unique<SyntheticInputPeer>(
         *server_.options_.synthetic_input_socket);
@@ -95,11 +119,78 @@ bool ServerRuntime::service_integrated(const short policy_events,
                  error.c_str());
     return false;
   }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (!bridge_->ready()) {
+    abort_interactive();
+    (void)server_.state_.grabs().suspend();
+  }
+#endif
+  const bool compositor_reset = bridge_->take_compositor_reset();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (!suspend_real_input_for_compositor_reset(compositor_reset)) return false;
+  if (!service_session_changes()) return false;
+  if (!resume_real_input_after_compositor_reset()) return false;
+#endif
   std::vector<CompositorBufferRelease> compositor_releases;
-  if (content_presenter_) {
-    if (bridge_->take_compositor_reset())
-      content_presenter_->peer_disconnected();
+  if (content_presenter_ || cursor_presenter_) {
+    if (compositor_reset) {
+      if (cursor_presenter_) {
+        bridge_->forget_cursor_replay();
+        cursor_presenter_->peer_disconnected();
+#if GW_HAS_LIBINPUT_BACKEND
+        cursor_submission_interactive_ = false;
+        cursor_submission_diagnostic_.reset();
+#endif
+        cursor_dirty_ = true;
+      }
+      if (content_presenter_)
+        content_presenter_->peer_disconnected();
+    }
     compositor_releases = bridge_->take_buffer_releases();
+  }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (cursor_presenter_) {
+    if (bridge_->cursor_rejected_ready()) {
+      cursor_presenter_->reject();
+      cursor_submission_interactive_ = false;
+      cursor_submission_diagnostic_.reset();
+      bridge_->clear_transaction_result();
+      if (cursor_replay_attempted_) {
+        std::fprintf(stderr, "glasswyrmd: repeated cursor frame rejection\n");
+        return false;
+      }
+      cursor_replay_attempted_ = true;
+      cursor_force_buffer_ = true;
+      cursor_dirty_ = true;
+    } else if (bridge_->cursor_result_ready()) {
+      const bool interactive_cursor = cursor_submission_interactive_;
+      cursor_submission_interactive_ = false;
+      cursor_presenter_->accept();
+      cursor_replay_attempted_ = false;
+      bridge_->clear_transaction_result();
+      if (cursor_submission_diagnostic_) {
+        const auto& publication = *cursor_submission_diagnostic_;
+        const auto kind = glasswyrm::input::cursor_kind_name(publication.kind);
+        std::fprintf(stderr,
+                     "glasswyrmd: cursor publication accepted kind=%.*s "
+                     "x=%d y=%d visible=%u buffer=%s\n",
+                     static_cast<int>(kind.size()), kind.data(), publication.x,
+                     publication.y, publication.visible ? 1U : 0U,
+                     publication.buffer_attached ? "attached" : "reused");
+        cursor_submission_diagnostic_.reset();
+      }
+      if (interactive_cursor)
+        complete_interactive_cursor_publication();
+      if (lifecycle_ && lifecycle_->pending_count() != 0 &&
+          !lifecycle_->resume()) {
+        std::fprintf(stderr,
+                     "glasswyrmd: could not resume lifecycle after cursor frame\n");
+        return false;
+      }
+    }
+  }
+#endif
+  if (content_presenter_) {
     if (bridge_->content_rejected_ready()) {
       content_presenter_->reject_content();
       bridge_->clear_transaction_result();
@@ -194,9 +285,17 @@ bool ServerRuntime::service_integrated(const short policy_events,
       content_presenter_->accept_lifecycle(lifecycle_->committed(),
                                            server_.state_.resources());
   }
-  if (content_presenter_) {
+  if (content_presenter_ || cursor_presenter_) {
     for (const auto& release : compositor_releases) {
-      if (!content_presenter_->release(release.buffer_id, release.reason)) {
+      const bool cursor_buffer =
+          release.buffer_id >= CursorPresenter::kFirstBufferId;
+      const bool released =
+          cursor_buffer
+              ? cursor_presenter_ && cursor_presenter_->release(
+                                        release.buffer_id, release.reason)
+              : content_presenter_ && content_presenter_->release(
+                                         release.buffer_id, release.reason);
+      if (!released) {
         std::fprintf(stderr,
                      "glasswyrmd: invalid compositor buffer release id=%llu reason=%u\n",
                      static_cast<unsigned long long>(release.buffer_id),
@@ -209,6 +308,9 @@ bool ServerRuntime::service_integrated(const short policy_events,
                    static_cast<unsigned>(release.reason));
     }
   }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (!service_cursor()) return false;
+#endif
   if (content_presenter_ && lifecycle_ &&
       lifecycle_->phase() == CoordinatorPhase::Idle &&
       bridge_->transaction_idle() && !content_presenter_->frame_in_flight() &&

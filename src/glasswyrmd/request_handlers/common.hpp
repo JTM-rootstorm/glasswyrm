@@ -92,6 +92,36 @@ namespace x11 = gw::protocol::x11;
                                           const x11::FramedRequest&);
 [[nodiscard]] DispatchResult list_properties(ServerState&, const DispatchContext&,
                                              const x11::FramedRequest&);
+[[nodiscard]] DispatchResult set_selection_owner(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult get_selection_owner(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult convert_selection(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult send_event(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult grab_pointer(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult ungrab_pointer(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult grab_button(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult change_active_pointer_grab(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult grab_keyboard(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult ungrab_keyboard(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult allow_events(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult query_keymap(
+    const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult change_keyboard_control(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult get_keyboard_control(
+    const ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult bell(
+    const DispatchContext&, const x11::FramedRequest&);
 
 [[nodiscard]] DispatchResult get_input_focus(const ServerState&,
                                              const DispatchContext&,
@@ -124,5 +154,15 @@ namespace x11 = gw::protocol::x11;
 [[nodiscard]] DispatchResult query_colors(const ServerState&,
                                           const DispatchContext&,
                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_cursor(ServerState&, const DispatchContext&,
+                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_glyph_cursor(
+    ServerState&, const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult free_cursor(ServerState&, const DispatchContext&,
+                                         const x11::FramedRequest&);
+[[nodiscard]] DispatchResult recolor_cursor(ServerState&, const DispatchContext&,
+                                            const x11::FramedRequest&);
+[[nodiscard]] DispatchResult query_best_size(
+    const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 
 }  // namespace glasswyrm::server::request_handlers

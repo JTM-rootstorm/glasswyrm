@@ -231,4 +231,52 @@ CodecStatus decode(std::span<const std::uint8_t> b, PolicyAcknowledged &v) {
   v = x;
   return CodecStatus::Ok;
 }
+std::vector<std::uint8_t> encode(const PolicyBindingsUpsert &v) {
+  ByteWriter w;
+  w.u16(v.move_modifiers);
+  w.u16(v.resize_modifiers);
+  w.u16(v.close_modifiers);
+  w.u16(0);
+  w.u8(v.move_button);
+  w.u8(v.resize_button);
+  w.u16(0);
+  w.u32(v.close_keysym);
+  w.u32(v.minimum_width);
+  w.u32(v.minimum_height);
+  w.u8(v.raise_on_focus);
+  w.u8(v.consume_wm_bindings);
+  w.u16(0);
+  w.u32(0);
+  return std::move(w).take();
+}
+CodecStatus decode(std::span<const std::uint8_t> b,
+                   PolicyBindingsUpsert &v) {
+  ByteReader r(b);
+  PolicyBindingsUpsert x;
+  std::uint16_t z16a, z16b, z16c;
+  std::uint8_t raise, consume;
+  std::uint32_t z32;
+  if (!r.u16(x.move_modifiers) || !r.u16(x.resize_modifiers) ||
+      !r.u16(x.close_modifiers) || !r.u16(z16a) ||
+      !r.u8(x.move_button) || !r.u8(x.resize_button) || !r.u16(z16b) ||
+      !r.u32(x.close_keysym) || !r.u32(x.minimum_width) ||
+      !r.u32(x.minimum_height) || !r.u8(raise) || !r.u8(consume) ||
+      !r.u16(z16c) || !r.u32(z32))
+    return CodecStatus::Truncated;
+  if (!r.done()) return CodecStatus::TrailingData;
+  x.raise_on_focus = raise;
+  x.consume_wm_bindings = consume;
+  constexpr std::uint16_t kCoreModifierMask = UINT16_C(0x00ff);
+  constexpr std::uint32_t kMaximumDimension = UINT32_C(16384);
+  if (((x.move_modifiers | x.resize_modifiers | x.close_modifiers) &
+       ~kCoreModifierMask) != 0 ||
+      x.move_button < 1 || x.move_button > 9 || x.resize_button < 1 ||
+      x.resize_button > 9 || !x.close_keysym || !x.minimum_width ||
+      !x.minimum_height || x.minimum_width > kMaximumDimension ||
+      x.minimum_height > kMaximumDimension || raise > 1 || consume > 1 ||
+      z16a || z16b || z16c || z32)
+    return CodecStatus::InvalidValue;
+  v = x;
+  return CodecStatus::Ok;
+}
 } // namespace gw::ipc::wire

@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -170,6 +171,30 @@ void protocol_server_buffered_scene() {
   require_clean_restore(rig);
 }
 
+void protocol_server_cursor_scanout() {
+  PresenterHarness rig({}, true);
+  IpcHarness ipc(rig.root / "cursor.sock", ProducerKind::ProtocolServer);
+  ipc.send_cursor_snapshot(31, UINT32_C(0xff0000ff), 32,
+                           UINT32_C(0xffff0000), 1);
+  const auto result = ipc.dispatch_until_frame(*rig.compositor);
+  const auto events = ipc.drain_client();
+  const auto frame_path = rig.mirror_frame(1);
+  std::ifstream frame_stream(frame_path, std::ios::binary);
+  const std::string frame{std::istreambuf_iterator<char>(frame_stream), {}};
+  constexpr std::string_view header = "P6\n2 2\n255\n";
+  const auto manifest = rig.scene_manifest_contents();
+  gw::test::require(
+      result.accepted_frame && gw::test::drm_ipc::has_ack(events, 1) &&
+          frame.starts_with(header) && frame.size() >= header.size() + 3 &&
+          static_cast<std::uint8_t>(frame[header.size()]) == 0xff &&
+          static_cast<std::uint8_t>(frame[header.size() + 1]) == 0 &&
+          static_cast<std::uint8_t>(frame[header.size() + 2]) == 0 &&
+          manifest.find("\"surface_count\":1") != std::string::npos &&
+          manifest.find("\"cursor_surface\":{") != std::string::npos,
+      "software cursor is present in the canonical frame scanned out by fake DRM");
+  require_clean_restore(rig);
+}
+
 void timeout_hup_and_disconnect_restore() {
   auto now = gw::compositor::PresentationTiming::Clock::time_point{};
   gw::compositor::PresentationTiming timing;
@@ -279,6 +304,7 @@ void diagnostic_failures_do_not_acknowledge() {
 int main() {
   m4_async_ipc_ordering_and_vt();
   protocol_server_buffered_scene();
+  protocol_server_cursor_scanout();
   timeout_hup_and_disconnect_restore();
   diagnostic_failures_do_not_acknowledge();
   return 0;

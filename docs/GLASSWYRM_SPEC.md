@@ -956,7 +956,7 @@ M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
-M11 Interactive desktop baseline
+M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
 M14 Variable refresh rate
@@ -1028,6 +1028,26 @@ The configured QXL guest validates the real primary node, atomic KMS
 presentation, exact graphical-console screenshots, VT release/acquire,
 post-acquire repaint, ordered restoration, and the checksum-protected evidence
 archive.
+
+Milestone 11 adds an opt-in libinput path backend and libxkbcommon US pc105
+engine inside `glasswyrmd`, preserving the M8 synthetic profile. It adds
+bounded core cursor, grab, selection, keyboard-control, and client-event
+behavior; capability-gated session-state and GWM interactive bindings through
+GWIPC API 0.6; a software cursor composed by `gwcomp`; and the unprivileged
+`glasswyrm-session` orchestrator. The intended external target is only xterm
+patch 410 under the pinned core-font ASCII profile. Two full bootstrap runs at
+`eb8a20f76b24cc7c07459a402603bad5e7b6cc39` reproduced the presence-normalized
+live trace and validated typing, scrolling, selection exchange, interactive
+move/resize/close, VT and compositor-restart recovery, canonical DRM frames,
+graphical-console screenshots, ordered restoration, and evidence-archive
+integrity. The clean full exact run at
+`53ec4879b858b96a9b7e8734fb173d037cbc683b` reproduced the committed fixture
+with every summary field passing and no evidence errors, accepting this narrow
+profile. The repository release sequence still repeats the host matrix and
+clean M10/M11 VM order at the final documentation HEAD.
+Passive grabs cover only the observed `GrabButton` path; `UngrabButton` and
+passive key grabs remain unsupported. This is not a broader xterm, Xt/Xaw,
+toolkit, Unicode, or X11 compatibility claim.
 
 ## 26. Definition of done
 

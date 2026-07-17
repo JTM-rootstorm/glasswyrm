@@ -74,11 +74,17 @@ const char *tri(gwipc_tri_state value) {
 
 const char *boolean(bool value) { return value ? "true" : "false"; }
 
+bool cursor_surface(const gwipc_surface_upsert& surface) {
+  return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+}
+
 std::vector<std::uint64_t> manifest_order(const Scene &scene) {
   std::vector<std::uint64_t> visible;
   std::vector<std::uint64_t> hidden;
-  for (const auto &[id, surface] : scene.surfaces)
+  for (const auto &[id, surface] : scene.surfaces) {
+    if (cursor_surface(surface)) continue;
     (surface.visible ? visible : hidden).push_back(id);
+  }
   std::ranges::sort(visible, [&](const auto left, const auto right) {
     const auto &a = scene.surfaces.at(left);
     const auto &b = scene.surfaces.at(right);
@@ -122,6 +128,16 @@ bool SceneManifest::describe(const std::uint64_t commit_id,
     return false;
   }
   auto order = manifest_order(scene);
+  const gwipc_surface_upsert* cursor = nullptr;
+  for (const auto& [id, surface] : scene.surfaces) {
+    static_cast<void>(id);
+    if (!cursor_surface(surface)) continue;
+    if (cursor) {
+      error = "scene manifest has more than one cursor surface";
+      return false;
+    }
+    cursor = &surface;
+  }
   std::uint64_t hash = kFnvOffset;
   constexpr std::string_view tag = "glasswyrm-scene-v1";
   hash_bytes(hash,
@@ -141,6 +157,10 @@ bool SceneManifest::describe(const std::uint64_t commit_id,
                        gwipc_contract_encode_surface_policy_upsert, error))
       return false;
   }
+  if (cursor &&
+      !hash_contract(hash, *cursor, gwipc_contract_encode_surface_upsert,
+                     error))
+    return false;
 
   std::ostringstream output;
   output << "{\"commit_id\":" << commit_id << ",\"generation\":" << generation
@@ -178,13 +198,25 @@ bool SceneManifest::describe(const std::uint64_t commit_id,
            << "\",\"direct_scanout_eligible\":\""
            << tri(policy.direct_scanout_eligible) << "\"}";
   }
-  output << "]}\n";
+  output << ']';
+  if (cursor) {
+    output << ",\"cursor_surface\":{\"surface_id\":" << cursor->surface_id
+           << ",\"output_id\":" << cursor->output_id
+           << ",\"x\":" << cursor->logical_x
+           << ",\"y\":" << cursor->logical_y
+           << ",\"width\":" << cursor->logical_width
+           << ",\"height\":" << cursor->logical_height
+           << ",\"visible\":" << boolean(cursor->visible)
+           << ",\"format\":\"ARGB8888Premultiplied\"}";
+  }
+  output << "}\n";
   if (!output.good()) {
     error = "scene manifest serialization failed";
     return false;
   }
   result.hash = hash;
   result.surface_count = static_cast<std::uint32_t>(order.size());
+  result.cursor_count = cursor ? 1U : 0U;
   json = output.str();
   return true;
 }

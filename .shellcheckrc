@@ -1,0 +1,5 @@
+# tools/gw-vm loads milestone libraries through SCRIPT_DIR, so ShellCheck cannot
+# resolve those source directives statically even with -x. The loaded libraries
+# also share configuration variables and pass deliberately single-quoted scripts
+# to the guest, making these three diagnostics false positives for this harness.
+disable=SC1091,SC2034,SC2016

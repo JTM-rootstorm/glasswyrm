@@ -65,7 +65,7 @@ void ServerRuntime::service_input(const short listener_events,
           record.root_x, record.root_y, server_.state_.screen().width_pixels,
           server_.state_.screen().height_pixels);
       const auto old_target = input_state_.pointer_target();
-      const auto new_target = glasswyrm::input::hit_test_top_level(
+      const auto new_target = glasswyrm::input::hit_test_deepest_viewable(
           server_.state_.resources(), x, y);
       (void)input_state_.accept_time(record.time_ms);
       input_state_.set_pointer(x, y, new_target);
@@ -107,7 +107,8 @@ void ServerRuntime::service_input(const short listener_events,
           input_state_.pointer_x(), input_state_.pointer_y(),
           input_state_.pointer_target(), recipients);
       input_state_ = staged;
-      const auto target = input_state_.pointer_target();
+      const auto target = glasswyrm::input::managed_top_level_ancestor(
+          server_.state_.resources(), input_state_.pointer_target());
       const auto* window = server_.state_.resources().find_window(target);
       const bool requests_focus =
           record.pressed && record.detail == 1 && window &&

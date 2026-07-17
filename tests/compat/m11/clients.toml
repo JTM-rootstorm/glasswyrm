@@ -1,0 +1,103 @@
+schema = 1
+status = "accepted for the pinned profile by a clean full exact-match VM run"
+source_hash_status = "computed from the official archive and verified by its detached upstream signature"
+bootstrap_tested_commit = "eb8a20f76b24cc7c07459a402603bad5e7b6cc39"
+bootstrap_capture_count = 2
+bootstrap_summary_status = "all mandatory runtime evidence passed except exact_trace=bootstrap while no fixture was committed"
+fixture_sha256 = "702e014eb33d67f9fa719ff0f133782b950a83a153c882394f53d8606f229834"
+fixture_reproduced_from_bootstrap_captures = true
+presence_normalized_requests = ["ClearArea", "CopyArea", "ImageText8", "PolyLine", "PutImage"]
+raw_drawing_count_status = "checksum-protected archives retain exact counts; observed ImageText8 800 or 806 and PolyLine 6 or 7"
+focused_exact_diagnostic_status = "passed; diagnostic-only and not final Milestone 11 acceptance"
+accepted_tested_commit = "53ec4879b858b96a9b7e8734fb173d037cbc683b"
+accepted_summary_status = "passed=true, scenario_exit=0, exact_trace=passed, evidence_errors empty"
+exact_fixture_gate_status = "passed in clean full VM acceptance"
+bootstrap_screenshot_sha256 = "bd6a1e885c0a633d42f5b61af0e8f355df2ace8fb6a39bb6f4b744c1bd317cdc"
+bootstrap_screenshot_matches_canonical = true
+
+[[client]]
+application = "xterm"
+version = "patch 410"
+release_date = "2026-05-01"
+source_url = "https://invisible-island.net/archives/xterm/xterm-410.tgz"
+source_sha256 = "7ba9fbb303dd3d95d06ca24360d019048d84e5822dc6fe722cd77369bdbf231f"
+source_size_bytes = 1627227
+source_signature_url = "https://invisible-island.net/archives/xterm/xterm-410.tgz.asc"
+source_signature_sha256 = "f1acdd6a4516417b3a5149609ac6bd9b36aff6cc4b965dea95cd780d64ec98ce"
+signature_key_url = "https://invisible-island.net/public/dickey%40invisible-island.net-rsa3072.asc"
+signature_key_sha256 = "eec7eccb51a27ae633784d1b1ef42eb775130c782ea51a6c47fa7a901484d6db"
+signature_key_fingerprint = "19882D92DDA4C400C22C0D56CC2AF4472167BE03"
+signature_key_id = "CC2AF4472167BE03"
+signature_algorithm = "RSA3072/SHA-512"
+signature_created_utc = "2026-05-01T23:56:20Z"
+signature_verification = "GnuPG GOODSIG and VALIDSIG against the key published by the official upstream HTTPS key page"
+source_snapshot_commit = "not available from the upstream CVS-derived release archive"
+build_source = "unmodified verified upstream release archive"
+configure_arguments = [
+  "--enable-openpty",
+  "--disable-freetype",
+  "--disable-wide-chars",
+  "--disable-luit",
+  "--disable-toolbar",
+  "--disable-sixel-graphics",
+  "--disable-regis-graphics",
+  "--without-xinerama",
+  "--disable-xcursor",
+  "--disable-tek4014",
+  "--disable-session-mgt",
+  "--disable-input-method",
+  "--disable-active-icon",
+  "--disable-desktop",
+  "--disable-print-graphics",
+  "--disable-screen-dumps",
+]
+verified_configure_profile = [
+  "openpty through libutil",
+  "core Xaw, Xmu, Xt, and Xlib",
+  "core bitmap fonts",
+  "FreeType and Xft disabled",
+  "wide characters and luit disabled",
+  "toolbar, ReGIS, sixel, Xinerama, and Xcursor disabled",
+]
+expected_binary_version = "XTerm(410)"
+environment = [
+  "LC_ALL=C",
+  "LANG=C",
+  "XMODIFIERS=@im=none",
+  "SESSION_MANAGER=",
+  "XAUTHORITY=/dev/null",
+  "DISPLAY=:99",
+  "TERM=xterm",
+]
+acceptance_environment = [
+  "GW_M11_TRANSCRIPT=/var/tmp/glasswyrm-m11-artifacts/milestone11-pty-transcript.log",
+]
+acceptance_environment_note = "VM-only evidence hook implemented by the exact rcfile; ordinary launches leave it unset"
+argv_note = "The non-wide-character build omits xterm's unavailable and redundant -u8 runtime option"
+argv = [
+  "xterm",
+  "-geometry", "80x24+96+96",
+  "-fn", "fixed",
+  "-fb", "fixed",
+  "-xrm", "*cursorBlink:false",
+  "-xrm", "*toolBar:false",
+  "-title", "Glasswyrm-M11",
+  "-e", "/bin/bash", "--noprofile", "--rcfile", "tests/compat/m11/m11-bashrc",
+]
+bashrc = "tests/compat/m11/m11-bashrc"
+compatibility_claim = "xterm patch 410, core-font ASCII profile, exact command and build options only"
+expected_trace_status = "accepted clean full VM run reproduces the committed presence-normalized fixture at the recorded SHA-256 with exact_trace=passed"
+expected_screenshot_status = "accepted clean full VM canonical mirror equals the DRM screenshot at the recorded SHA-256"
+disabled_optional_features = [
+  "Xft and FreeType",
+  "wide-character and Unicode mode",
+  "luit",
+  "toolbar",
+  "ReGIS",
+  "sixel",
+  "Xinerama",
+  "Xcursor themes",
+  "Tektronix 4014",
+  "session management",
+  "input methods",
+]

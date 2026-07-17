@@ -10,15 +10,37 @@ constexpr std::array kRetryDelays = {
     std::chrono::milliseconds(50),  std::chrono::milliseconds(100),
     std::chrono::milliseconds(200), std::chrono::milliseconds(400),
     std::chrono::milliseconds(800), std::chrono::milliseconds(1000)};
+
+void forget_cursor(CompositorSnapshotSubmission& submission) {
+  std::vector<std::uint64_t> cursor_surfaces;
+  for (const auto& surface : submission.surfaces)
+    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
+      cursor_surfaces.push_back(surface.surface_id);
+  const auto is_cursor = [&](const std::uint64_t surface_id) {
+    return std::ranges::find(cursor_surfaces, surface_id) !=
+           cursor_surfaces.end();
+  };
+  std::erase_if(submission.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  std::erase_if(submission.buffers, [&](const auto& buffer) {
+    return is_cursor(buffer.attach.surface_id);
+  });
+  std::erase_if(submission.damages, [&](const auto& damage) {
+    return is_cursor(damage.surface_id);
+  });
+}
 }
 
 RuntimeBridge::RuntimeBridge(std::string policy_path,
                              std::string compositor_path,
                              const gw::protocol::x11::ScreenModel screen,
                              const std::chrono::milliseconds deadline,
-                             const bool software_content)
+                             const bool software_content,
+                             const bool session_state)
     : policy_(std::move(policy_path), screen),
-      compositor_(std::move(compositor_path), screen, software_content),
+      compositor_(std::move(compositor_path), screen, software_content,
+                  session_state),
       deadline_duration_(deadline) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
@@ -60,13 +82,34 @@ bool RuntimeBridge::service(const short policy_revents,
     }
     if (policy_outcome == PeerProcessOutcome::Disconnected ||
         compositor_outcome == PeerProcessOutcome::Disconnected) {
-      if (compositor_outcome == PeerProcessOutcome::Disconnected)
-        compositor_reset_ = true;
+      const bool policy_disconnected =
+          policy_outcome == PeerProcessOutcome::Disconnected;
+      bool compositor_disconnected =
+          compositor_outcome == PeerProcessOutcome::Disconnected;
+      const bool policy_in_flight =
+          transaction_stage_ == TransactionStage::Policy;
+      const bool compositor_in_flight =
+          transaction_stage_ == TransactionStage::Compositor ||
+          transaction_stage_ == TransactionStage::Content ||
+          transaction_stage_ == TransactionStage::Cursor ||
+          transaction_stage_ == TransactionStage::Replay;
       resume_transaction_stage_ = transaction_stage_;
       recovering_ = true;
-      policy_.disconnect();
-      compositor_.disconnect();
-      stage_ = Stage::Policy;
+      if (policy_disconnected) policy_.disconnect();
+      if (compositor_disconnected) compositor_.disconnect();
+
+      // Preserve an unaffected peer across an idle peer restart.  An in-flight
+      // transaction still uses the conservative paired reconnect so its reply
+      // cannot race replay on the retained transport.
+      if (policy_disconnected && compositor_in_flight) {
+        compositor_.disconnect();
+        compositor_disconnected = true;
+      }
+      if (compositor_disconnected && policy_in_flight) policy_.disconnect();
+      compositor_reset_ = compositor_reset_ || compositor_disconnected;
+      stage_ = policy_.state() == PeerBootstrapState::Disconnected
+                   ? Stage::Policy
+                   : Stage::Compositor;
       deadline_ = now + deadline_duration_;
       retry_index_ = 0;
       schedule_retry(now);
@@ -77,6 +120,8 @@ bool RuntimeBridge::service(const short policy_revents,
     if (compositor_outcome == PeerProcessOutcome::SemanticRejected)
       transaction_stage_ = transaction_stage_ == TransactionStage::Content
                                ? TransactionStage::ContentRejected
+                           : transaction_stage_ == TransactionStage::Cursor
+                               ? TransactionStage::CursorRejected
                            : transaction_stage_ == TransactionStage::Replay
                                ? TransactionStage::ReplayRejected
                                : TransactionStage::CompositorRejected;
@@ -89,6 +134,9 @@ bool RuntimeBridge::service(const short policy_revents,
     if (transaction_stage_ == TransactionStage::Content &&
         compositor_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::ContentComplete;
+    if (transaction_stage_ == TransactionStage::Cursor &&
+        compositor_.state() == PeerBootstrapState::Synchronized)
+      transaction_stage_ = TransactionStage::CursorComplete;
     if (transaction_stage_ == TransactionStage::Replay &&
         compositor_.state() == PeerBootstrapState::Synchronized)
       transaction_stage_ = TransactionStage::ReplayComplete;
@@ -165,6 +213,13 @@ bool RuntimeBridge::service(const short policy_revents,
           error = resume_error;
           return false;
         }
+        if (resume_transaction_stage_ == TransactionStage::Cursor) {
+          if (!compositor_.submit(pending_compositor_, resume_error)) {
+            error = resume_error;
+            return false;
+          }
+          transaction_stage_ = TransactionStage::Cursor;
+        }
         if (resume_transaction_stage_ == TransactionStage::Replay &&
             !submit_replay(pending_compositor_, resume_error)) {
           error = resume_error;
@@ -174,8 +229,10 @@ bool RuntimeBridge::service(const short policy_revents,
             resume_transaction_stage_ == TransactionStage::PolicyRejected ||
             resume_transaction_stage_ == TransactionStage::Complete ||
             resume_transaction_stage_ == TransactionStage::ContentComplete ||
+            resume_transaction_stage_ == TransactionStage::CursorComplete ||
             resume_transaction_stage_ == TransactionStage::CompositorRejected ||
             resume_transaction_stage_ == TransactionStage::ContentRejected ||
+            resume_transaction_stage_ == TransactionStage::CursorRejected ||
             resume_transaction_stage_ == TransactionStage::ReplayComplete ||
             resume_transaction_stage_ == TransactionStage::ReplayRejected)
           transaction_stage_ = resume_transaction_stage_;
@@ -224,6 +281,30 @@ bool RuntimeBridge::submit_content(
   transaction_stage_ = TransactionStage::Content;
   return true;
 }
+bool RuntimeBridge::submit_cursor(
+    const CompositorCursorSubmission& submission,
+    const std::uint64_t commit_id, const std::uint64_t generation,
+    std::string& error) {
+  if (!ready() || transaction_stage_ != TransactionStage::None) {
+    error = "cursor submission attempted while transaction stage is busy";
+    return false;
+  }
+  if (!compositor_.submit_cursor(submission, commit_id, generation, error))
+    return false;
+  pending_compositor_ = compositor_.replay_input();
+  pending_compositor_.commit_id = commit_id;
+  pending_compositor_.generation = generation;
+  std::erase_if(pending_compositor_.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  pending_compositor_.surfaces.push_back(submission.surface);
+  pending_compositor_.buffers.clear();
+  pending_compositor_.damages.clear();
+  if (submission.buffer) pending_compositor_.buffers.push_back(*submission.buffer);
+  if (submission.damage) pending_compositor_.damages.push_back(*submission.damage);
+  transaction_stage_ = TransactionStage::Cursor;
+  return true;
+}
 bool RuntimeBridge::submit_replay(
     const CompositorSnapshotSubmission& submission, std::string& error) {
   if (!ready() || transaction_stage_ != TransactionStage::None) {
@@ -248,6 +329,12 @@ bool RuntimeBridge::content_result_ready() const noexcept {
 bool RuntimeBridge::content_rejected_ready() const noexcept {
   return transaction_stage_ == TransactionStage::ContentRejected;
 }
+bool RuntimeBridge::cursor_result_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::CursorComplete;
+}
+bool RuntimeBridge::cursor_rejected_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::CursorRejected;
+}
 bool RuntimeBridge::replay_result_ready() const noexcept {
   return transaction_stage_ == TransactionStage::ReplayComplete;
 }
@@ -256,6 +343,20 @@ bool RuntimeBridge::replay_rejected_ready() const noexcept {
 }
 bool RuntimeBridge::transaction_idle() const noexcept {
   return transaction_stage_ == TransactionStage::None;
+}
+
+void RuntimeBridge::forget_cursor_replay() noexcept {
+  compositor_.forget_cursor_replay();
+  forget_cursor(pending_compositor_);
+  const auto cursor_stage = [](const TransactionStage stage) {
+    return stage == TransactionStage::Cursor ||
+           stage == TransactionStage::CursorComplete ||
+           stage == TransactionStage::CursorRejected;
+  };
+  if (cursor_stage(transaction_stage_))
+    transaction_stage_ = TransactionStage::None;
+  if (cursor_stage(resume_transaction_stage_))
+    resume_transaction_stage_ = TransactionStage::None;
 }
 
 bool RuntimeBridge::prepare_rollback() noexcept {

@@ -19,11 +19,12 @@ std::size_t window_property_bytes(const WindowResource& window) noexcept {
 bool ResourceTable::invariants_hold() const noexcept {
   const auto* root = find_window(screen_.root_window);
   if (root == nullptr || root->parent != 0 || !find(screen_.root_window) ||
-      find(screen_.root_window)->owner.has_value()) {
+      find(screen_.root_window)->owner.has_value() || !root_default_cursor_) {
     return false;
   }
   std::size_t calculated_property_bytes = 0;
   std::size_t calculated_drawable_bytes = 0;
+  std::size_t calculated_cursor_bytes = 0;
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
@@ -40,7 +41,22 @@ bool ResourceTable::invariants_hold() const noexcept {
         return false;
       if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload))
         calculated_drawable_bytes += pixmap->byte_size();
+      if (const auto* cursor = std::get_if<CursorResource>(&resource.payload)) {
+        if (!cursor->image) return false;
+        calculated_cursor_bytes += cursor->image->byte_size();
+      }
       continue;
+    }
+    if (window->attributes.cursor_inherit) {
+      if (window->attributes.cursor != 0 || window->attributes.cursor_image)
+        return false;
+    } else {
+      if (!window->attributes.cursor_image) return false;
+      if (window->attributes.cursor != 0) {
+        const auto* cursor = find_cursor(window->attributes.cursor);
+        if (!cursor || cursor->image != window->attributes.cursor_image)
+          return false;
+      }
     }
     calculated_property_bytes += window_property_bytes(*window);
     if (xid != screen_.root_window) {
@@ -68,6 +84,7 @@ bool ResourceTable::invariants_hold() const noexcept {
     return false;
   }
   if (calculated_drawable_bytes != canonical_drawable_bytes_) return false;
+  if (calculated_cursor_bytes != total_cursor_bytes_) return false;
   for (const auto& [owner, ids] : resources_by_owner_) {
     for (const auto xid : ids) {
       const auto* resource = find(xid);

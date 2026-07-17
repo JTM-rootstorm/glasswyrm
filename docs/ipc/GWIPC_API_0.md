@@ -2,7 +2,7 @@
 
 ## Version And ABI
 
-The installed C API is version 0.4.0 and the shared library has SOVERSION 0.
+The installed C API is version 0.6.0 and the shared library has SOVERSION 0.
 `gwipc_get_api_version()` reports the library API version;
 `gwipc_get_max_wire_version()` independently reports the highest supported wire
 version. ABI compatibility must not be inferred from wire compatibility.
@@ -16,8 +16,26 @@ connection.
 
 API 0 remains additive. API 0.1 transport consumers, API 0.2 compositor
 contract consumers, and API 0.3 policy consumers retain their symbols and wire
-encodings. API 0.4 adds lifecycle records and sequence-returning enqueue
-without changing wire 1.0.
+encodings. API 0.4 adds lifecycle records and sequence-returning enqueue;
+API 0.5 adds synthetic-input contracts; and API 0.6 adds session-state and
+interactive-policy contracts plus cursor-surface capability negotiation.
+Wire 1.0 remains unchanged.
+
+## Installed Consumer Matrix
+
+`tests/install/gwipc_staged_consumers_test.sh` installs the selected build into
+an isolated `DESTDIR`, resolves `gwipc` only through that staged `pkg-config`
+file, and compiles, links, and runs C and C++ consumers for every additive API
+generation from 0.1 through 0.6. Run it after compiling the build tree:
+
+```sh
+tests/install/gwipc_staged_consumers_test.sh "$PWD" "$PWD/build-m11"
+```
+
+The Milestone 11 VM acceptance invokes the same matrix before declaring its API
+consumer result passed. The consumer sources intentionally use only the API
+surface available in their named generation; no source-tree include path or
+build-tree library path is accepted by the staged runner.
 
 ## Typed Control And Contracts
 
@@ -32,6 +50,13 @@ API 0.2. `<glasswyrm/ipc/policy.h>` adds API 0.3 structures and encode/decode
 accessors for policy context, raw-window updates and removal, policy commits,
 evaluated window state, and correlated acknowledgements. Contract payloads and
 decoded contracts use the existing API 0.2 ownership functions.
+
+`<glasswyrm/ipc/input.h>` contains API 0.5 synthetic-input records.
+`<glasswyrm/ipc/session.h>` adds API 0.6 `SessionStateChange` and correlated
+`SessionStateAcknowledged` records. API 0.6 also extends
+`<glasswyrm/ipc/policy.h>` with `PolicyBindingsUpsert`. The new capability bits
+are SessionState, InteractivePolicy, and CursorSurface; cursor publication
+reuses the existing surface, buffer, damage, and frame contracts.
 
 All public input structures begin with `struct_size` and end with reserved-zero
 storage. Boolean, enum, identifier, dimension, flag, and serial constraints are

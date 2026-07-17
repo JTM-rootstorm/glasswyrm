@@ -87,6 +87,11 @@ class IpcHarness {
 
   void send_snapshot(std::uint64_t buffer_id, std::uint32_t pixel,
                      std::uint64_t commit_id);
+  void send_cursor_snapshot(std::uint64_t normal_buffer_id,
+                            std::uint32_t normal_pixel,
+                            std::uint64_t cursor_buffer_id,
+                            std::uint32_t cursor_pixel,
+                            std::uint64_t commit_id);
   void send_replacement(std::uint64_t buffer_id, std::uint32_t pixel,
                         std::uint64_t commit_id);
   void send_damage_commit(std::uint64_t commit_id);
@@ -127,6 +132,9 @@ class IpcHarness {
   void enqueue_policy(std::uint32_t flags);
   void enqueue_buffer(std::uint64_t buffer_id, std::uint32_t pixel,
                       std::uint32_t flags);
+  void enqueue_cursor(std::uint32_t flags);
+  void enqueue_cursor_buffer(std::uint64_t buffer_id, std::uint32_t pixel,
+                             std::uint32_t flags);
   void enqueue_commit(std::uint64_t commit_id);
   [[nodiscard]] Message next_server_message();
 

@@ -10,8 +10,10 @@ int main() {
 
   const gwipc_api_version api = gwipc_get_api_version();
   const gwipc_wire_version wire = gwipc_get_max_wire_version();
-  const gwipc_listener_options listener{sizeof(gwipc_listener_options)};
-  const gwipc_connection_options connection{sizeof(gwipc_connection_options)};
+  gwipc_listener_options listener{};
+  listener.struct_size = sizeof(listener);
+  gwipc_connection_options connection{};
+  connection.struct_size = sizeof(connection);
   glasswyrm::ipc::Listener listener_handle;
   glasswyrm::ipc::Connection connection_handle;
 

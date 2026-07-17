@@ -124,7 +124,7 @@ void hash_byte(std::uint64_t& hash, const std::uint8_t value) {
 template <class Value>
 void hash_little(std::uint64_t& hash, Value value) {
   using Unsigned = std::make_unsigned_t<Value>;
-  auto bits = static_cast<Unsigned>(value);
+  auto bits = static_cast<std::uint64_t>(static_cast<Unsigned>(value));
   for (std::size_t index = 0; index < sizeof(Value); ++index) {
     hash_byte(hash, static_cast<std::uint8_t>(bits));
     bits >>= 8U;
@@ -160,6 +160,25 @@ std::uint64_t policy_hash(const PolicyState& policy) {
 }
 
 }  // namespace
+
+std::uint64_t interactive_policy_hash(
+    const PolicyState& policy, const InteractiveBindings& bindings) noexcept {
+  std::uint64_t hash = UINT64_C(14695981039346656037);
+  constexpr std::string_view tag = "glasswyrm-policy-v2";
+  for (const char byte : tag) hash_byte(hash, static_cast<std::uint8_t>(byte));
+  hash_little(hash, policy.hash);
+  hash_little(hash, bindings.move_modifiers);
+  hash_little(hash, bindings.resize_modifiers);
+  hash_little(hash, bindings.close_modifiers);
+  hash_little(hash, bindings.move_button);
+  hash_little(hash, bindings.resize_button);
+  hash_little(hash, bindings.close_keysym);
+  hash_little(hash, bindings.minimum_width);
+  hash_little(hash, bindings.minimum_height);
+  hash_little(hash, static_cast<std::uint8_t>(bindings.raise_on_focus));
+  hash_little(hash, static_cast<std::uint8_t>(bindings.consume_wm_bindings));
+  return hash;
+}
 
 std::array<std::uint8_t, 64> encode_policy_window_state(
     const WindowState& state) noexcept {

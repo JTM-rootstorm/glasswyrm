@@ -70,27 +70,62 @@ LocalLifecycleStatus ResourceTable::configure_local(
         configure.stack_mode == LifecycleStackMode::None)
       return LocalLifecycleStatus::BadMatch;
   }
+
+  const auto width = static_cast<std::uint16_t>(
+      configure.width.value_or(window->width));
+  const auto height = static_cast<std::uint16_t>(
+      configure.height.value_or(window->height));
+  std::shared_ptr<PixelStorage> resized_storage;
+  std::optional<std::vector<std::uint32_t>> reordered_children;
+  try {
+    if (window->storage &&
+        (window->storage->width() != width ||
+         window->storage->height() != height)) {
+      const auto initial =
+          window->attributes.background_source == BackgroundSource::Pixel
+              ? window->attributes.background_pixel
+              : PixelStorage::kOpaqueBlack;
+      auto replacement =
+          window->storage->resize_preserving_overlap(width, height, initial);
+      if (!replacement)
+        return LocalLifecycleStatus::BadAlloc;
+      resized_storage =
+          std::make_shared<PixelStorage>(std::move(*replacement));
+    }
+    if (configure.stack_mode != LifecycleStackMode::None) {
+      reordered_children = parent->children;
+      std::erase(*reordered_children, xid);
+      if (!configure.sibling) {
+        if (configure.stack_mode == LifecycleStackMode::Above)
+          reordered_children->push_back(xid);
+        else
+          reordered_children->insert(reordered_children->begin(), xid);
+      } else {
+        auto position = std::find(reordered_children->begin(),
+                                  reordered_children->end(),
+                                  *configure.sibling);
+        if (configure.stack_mode == LifecycleStackMode::Above)
+          ++position;
+        reordered_children->insert(position, xid);
+      }
+    }
+  } catch (const std::bad_alloc&) {
+    return LocalLifecycleStatus::BadAlloc;
+  }
+
   if (configure.x) window->x = static_cast<std::int16_t>(*configure.x);
   if (configure.y) window->y = static_cast<std::int16_t>(*configure.y);
-  if (configure.width) window->width = static_cast<std::uint16_t>(*configure.width);
-  if (configure.height) window->height = static_cast<std::uint16_t>(*configure.height);
+  window->width = width;
+  window->height = height;
   if (configure.border_width)
     window->border_width = static_cast<std::uint16_t>(*configure.border_width);
+  if (resized_storage)
+    window->storage = std::move(resized_storage);
   window->requested_x = window->x; window->requested_y = window->y;
   window->requested_width = window->width; window->requested_height = window->height;
   window->requested_border_width = window->border_width;
-  if (configure.stack_mode != LifecycleStackMode::None) {
-    std::erase(parent->children, xid);
-    if (!configure.sibling) {
-      if (configure.stack_mode == LifecycleStackMode::Above) parent->children.push_back(xid);
-      else parent->children.insert(parent->children.begin(), xid);
-    } else {
-      auto position = std::find(parent->children.begin(), parent->children.end(),
-                                *configure.sibling);
-      if (configure.stack_mode == LifecycleStackMode::Above) ++position;
-      parent->children.insert(position, xid);
-    }
-  }
+  if (reordered_children)
+    parent->children = std::move(*reordered_children);
   return LocalLifecycleStatus::Success;
 }
 

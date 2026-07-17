@@ -79,8 +79,8 @@ CreateGcStatus ResourceTable::create_gc(
   std::uint8_t depth = 0;
   if (drawable == screen_.root_window) depth = screen_.root_depth;
   else if (const auto* window = find_window(drawable)) {
-    if (window->parent != screen_.root_window ||
-        window->window_class != WindowClass::InputOutput)
+    if (window->window_class != WindowClass::InputOutput ||
+        window->depth != screen_.root_depth)
       return CreateGcStatus::BadMatch;
     depth = window->depth;
   }

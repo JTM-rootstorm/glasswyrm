@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -18,11 +19,16 @@ inline constexpr std::int16_t kFixedFontAdvance = 6;
 inline constexpr std::int16_t kFixedFontAscent = 10;
 inline constexpr std::int16_t kFixedFontDescent = 3;
 
+enum class FontIdentity { Fixed, Cursor, Nil2 };
+
 struct FontResource {
   std::uint32_t canonical{kDefaultFontXid};
+  FontIdentity identity{FontIdentity::Fixed};
 };
 
 [[nodiscard]] bool matches_fixed_font(std::string_view name) noexcept;
+[[nodiscard]] std::optional<FontIdentity> font_identity(
+    std::string_view name) noexcept;
 [[nodiscard]] std::array<std::uint8_t, 7> fixed_glyph(std::uint8_t character) noexcept;
 
 struct TextRasterResult {

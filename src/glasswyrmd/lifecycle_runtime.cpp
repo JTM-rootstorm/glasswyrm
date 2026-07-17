@@ -71,7 +71,11 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   if (active) {
     EventRouter router(server_.state_.resources());
     transition_before_ = router.capture(active->window);
-    if (input_peer_)
+    if (input_peer_
+#if GW_HAS_LIBINPUT_BACKEND
+        || real_input_
+#endif
+    )
       input_transition_before_ = router.capture_input_transition(
           server_.state_.focused_window(), input_state_.pointer_target());
   }
@@ -87,6 +91,10 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   } else if (active && mutation != pending_mutations_.end() &&
              mutation->second.destroy) {
     auto staged = server_.state_;
+    for (const auto& item : mutation->second.destroy->postorder) {
+      (void)staged.selections().clear_window(item.xid);
+      (void)staged.grabs().cleanup_window(item.xid);
+    }
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
     committed = committed && staged.commit_lifecycle(snapshot);
@@ -94,6 +102,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   } else if (active && mutation != pending_mutations_.end() &&
              mutation->second.cleanup) {
     auto staged = server_.state_;
+    (void)staged.selections().clear_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
     committed = staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
@@ -106,6 +115,9 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   if (content_presenter_)
     content_presenter_->accept_lifecycle(snapshot, server_.state_.resources());
+#if GW_HAS_LIBINPUT_BACKEND
+  if (cursor_presenter_) mark_cursor_dirty();
+#endif
   return true;
 }
 
@@ -186,9 +198,13 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
         }
       }
     }
-    if (input_peer_ && input_transition_before_ &&
+    if ((input_peer_
+#if GW_HAS_LIBINPUT_BACKEND
+         || real_input_
+#endif
+         ) && input_transition_before_ &&
         operation->kind != LifecycleOperationKind::Focus) {
-      const auto new_target = glasswyrm::input::hit_test_top_level(
+      const auto new_target = glasswyrm::input::hit_test_deepest_viewable(
           server_.state_.resources(), input_state_.pointer_x(),
           input_state_.pointer_y());
       input_state_.set_pointer(input_state_.pointer_x(), input_state_.pointer_y(),
@@ -197,6 +213,11 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
           *input_transition_before_, server_.state_.focused_window(), new_target,
           input_state_, recipients);
     }
+#if GW_HAS_LIBINPUT_BACKEND
+    if (real_input_ && input_transition_before_ &&
+        input_transition_before_->focus != server_.state_.focused_window())
+      real_input_->focus_changed(server_.state_.focused_window());
+#endif
   }
   if (operation && operation->kind == LifecycleOperationKind::Focus &&
       pending_focus_input_) {
@@ -231,12 +252,21 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     }
     pending_focus_input_.reset();
   }
+#if GW_HAS_LIBINPUT_BACKEND
+  if (operation && operation->kind == LifecycleOperationKind::Focus &&
+      pending_real_focus_)
+    complete_real_focus(success);
+#endif
   (void)requester;
   transition_before_.reset();
   input_transition_before_.reset();
   pending_mutations_.erase(token);
   if (cleanup_base) server_.pending_resource_bases_.erase(*cleanup_base);
   bridge_->clear_transaction_result();
+#if GW_HAS_LIBINPUT_BACKEND
+  if (operation)
+    complete_interactive_lifecycle(*operation, success);
+#endif
 }
 
 bool ServerRuntime::defer_lifecycle(ClientConnection& client,
@@ -306,7 +336,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
   operation.proposed = std::move(proposed);
   const auto token = operation.token;
   pending_mutations_.emplace(token, std::move(mutation));
-  const auto status = content_presenter_ && content_presenter_->frame_in_flight()
+  const auto status =
+      content_presenter_ &&
+              (content_presenter_->frame_in_flight() ||
+               (cursor_presenter_ && !bridge_->transaction_idle()))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status == EnqueueStatus::Queued) {
@@ -338,7 +371,12 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
 
 void ServerRuntime::cancel_client_lifecycle(
     const std::uint64_t client, const std::uint32_t resource_base) {
+#if GW_HAS_LIBINPUT_BACKEND
+  if (real_input_)
+    real_input_->client_cleanup();
+#endif
   lifecycle_->cancel_client(client);
+  (void)server_.state_.selections().clear_client(client);
   auto plan = server_.state_.resources().prepare_client_cleanup(client);
   if (!plan.affects_policy) {
     (void)server_.state_.resources().commit_client_cleanup(plan);
@@ -364,7 +402,9 @@ void ServerRuntime::cancel_client_lifecycle(
   mutation.cleanup = std::move(plan);
   pending_mutations_.emplace(token, std::move(mutation));
   const auto cleanup_status =
-      content_presenter_ && content_presenter_->frame_in_flight()
+      content_presenter_ &&
+              (content_presenter_->frame_in_flight() ||
+               (cursor_presenter_ && !bridge_->transaction_idle()))
           ? lifecycle_->enqueue_priority_paused(std::move(operation))
           : lifecycle_->enqueue_priority(std::move(operation));
   if (cleanup_status != EnqueueStatus::Queued) {

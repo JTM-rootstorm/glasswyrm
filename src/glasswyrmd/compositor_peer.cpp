@@ -13,7 +13,7 @@ constexpr gwipc_capabilities kMetadataCapabilities =
     GWIPC_CAP_WINDOW_LIFECYCLE;
 constexpr gwipc_capabilities kContentCapabilities =
     kMetadataCapabilities | GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
-    GWIPC_CAP_DAMAGE_REGIONS;
+    GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_CURSOR_SURFACE;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -32,7 +32,8 @@ struct DecodedDelete {
 template <class T, class Encoder>
 bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
                       std::uint32_t flags, const T &value, Encoder encoder,
-                      std::uint64_t *out_sequence = nullptr) {
+                      std::uint64_t *out_sequence = nullptr,
+                      std::uint64_t reply_to = 0) {
   gwipc_contract_payload *raw = nullptr;
   if (encoder(&value, &raw) != GWIPC_STATUS_OK)
     return false;
@@ -45,6 +46,7 @@ bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
   message.flags = flags;
   message.payload = data;
   message.payload_size = size;
+  message.reply_to = reply_to;
   if (out_sequence)
     return gwipc_connection_enqueue_with_sequence(
                connection, &message, out_sequence) == GWIPC_STATUS_OK;
@@ -86,16 +88,34 @@ bool enqueue_buffer(gwipc_connection* connection,
   message.fd_count = 1;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
+void forget_cursor(CompositorSnapshotSubmission& submission) {
+  std::set<std::uint64_t> cursor_surfaces;
+  for (const auto& surface : submission.surfaces)
+    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
+      cursor_surfaces.insert(surface.surface_id);
+  std::erase_if(submission.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  std::erase_if(submission.buffers, [&](const auto& buffer) {
+    return cursor_surfaces.contains(buffer.attach.surface_id);
+  });
+  std::erase_if(submission.damages, [&](const auto& damage) {
+    return cursor_surfaces.contains(damage.surface_id);
+  });
+}
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
-                               const bool software_content)
+                               const bool software_content,
+                               const bool session_state)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
-                 software_content ? kContentCapabilities
-                                  : kMetadataCapabilities,
+                 (software_content ? kContentCapabilities
+                                   : kMetadataCapabilities) |
+                     (session_state ? GWIPC_CAP_SESSION_STATE : 0),
                  "glasswyrmd-compositor"),
-      screen_(screen), software_content_(software_content) {}
+      screen_(screen), software_content_(software_content),
+      session_state_(session_state) {}
 
 bool CompositorPeer::connect(std::string &error) {
   disconnect();
@@ -114,42 +134,74 @@ bool CompositorPeer::send_bootstrap(std::string &error) {
 
 bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
                             std::string &error) {
+  auto complete = submission;
+  const auto has_submitted_cursor = std::ranges::any_of(
+      complete.surfaces, [](const auto& surface) {
+        return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+      });
+  if (!has_submitted_cursor) {
+    const auto retained = std::ranges::find_if(
+        replay_input_.surfaces, [](const auto& surface) {
+          return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+        });
+    if (retained != replay_input_.surfaces.end())
+      complete.surfaces.push_back(*retained);
+  }
   if (!transport_.established() ||
       (state_ != PeerBootstrapState::Connecting &&
        state_ != PeerBootstrapState::Synchronized) ||
-      submission.commit_id == 0 || submission.generation == 0 ||
-      submission.surfaces.size() != submission.policies.size()) {
+      complete.commit_id == 0 || complete.generation == 0) {
     error = "compositor peer is not ready for a complete metadata snapshot";
     return false;
   }
   std::set<std::uint64_t> surface_ids;
+  std::set<std::uint64_t> normal_surface_ids;
   std::set<std::uint64_t> policy_ids;
-  for (const auto &surface : submission.surfaces)
-    if (surface.presentation_flags !=
+  std::size_t cursor_count = 0;
+  for (const auto &surface : complete.surfaces) {
+    const bool cursor =
+        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+    const bool valid_cursor =
+        cursor && software_content_ && surface.x11_window_id == 0 &&
+        surface.parent_surface_id == 0 && surface.output_id == 1 &&
+        surface.logical_width > 0 && surface.logical_width <= 64 &&
+        surface.logical_height > 0 && surface.logical_height <= 64 &&
+        surface.transform == GWIPC_TRANSFORM_NORMAL &&
+        surface.opacity == GWIPC_OPACITY_ONE &&
+        surface.scale_numerator == 1 && surface.scale_denominator == 1 &&
+        surface.fullscreen_eligible == GWIPC_TRI_STATE_UNKNOWN &&
+        surface.direct_scanout_eligible == GWIPC_TRI_STATE_UNKNOWN;
+    const bool valid_normal =
+        !cursor &&
+        surface.presentation_flags ==
             (software_content_ ? 0U
-                               : GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) ||
-        surface.x11_window_id == 0 ||
-        !surface_ids.insert(surface.surface_id).second) {
+                               : GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) &&
+        surface.x11_window_id != 0;
+    if ((!valid_cursor && !valid_normal) ||
+        !surface_ids.insert(surface.surface_id).second ||
+        (cursor && ++cursor_count > 1)) {
       error = "invalid metadata-only surface submission";
       return false;
     }
-  for (const auto &policy : submission.policies)
+    if (!cursor) normal_surface_ids.insert(surface.surface_id);
+  }
+  for (const auto &policy : complete.policies)
     if (policy.surface_id == 0 || policy.x11_window_id == 0 ||
         !policy_ids.insert(policy.surface_id).second) {
       error = "invalid surface policy submission";
       return false;
     }
-  if (surface_ids != policy_ids) {
+  if (normal_surface_ids != policy_ids) {
     error = "surface and policy IDs do not match";
     return false;
   }
   if (!software_content_ &&
-      (!submission.buffers.empty() || !submission.damages.empty())) {
+      (!complete.buffers.empty() || !complete.damages.empty())) {
     error = "metadata-only compositor submission contains pixel content";
     return false;
   }
   std::set<std::uint64_t> buffer_ids;
-  for (const auto& buffer : submission.buffers) {
+  for (const auto& buffer : complete.buffers) {
     if (buffer.fd < 0 || buffer.attach.buffer_id == 0 ||
         !buffer_ids.insert(buffer.attach.buffer_id).second ||
         !surface_ids.contains(buffer.attach.surface_id)) {
@@ -157,18 +209,20 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
       return false;
     }
   }
-  for (const auto& damage : submission.damages)
+  for (const auto& damage : complete.damages)
     if (!surface_ids.contains(damage.surface_id) || damage.rectangles.empty()) {
       error = "invalid buffered compositor damage";
       return false;
     }
-  for (const auto &surface : submission.surfaces) {
+  for (const auto &surface : complete.surfaces) {
+    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
+      continue;
     const auto policy =
-        std::find_if(submission.policies.begin(), submission.policies.end(),
+        std::find_if(complete.policies.begin(), complete.policies.end(),
                      [&](const auto &item) {
                        return item.surface_id == surface.surface_id;
                      });
-    if (policy == submission.policies.end() ||
+    if (policy == complete.policies.end() ||
         policy->x11_window_id != surface.x11_window_id) {
       error = "surface and policy X11 IDs do not match";
       return false;
@@ -176,13 +230,13 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
   }
   auto *connection = transport_.connection();
   const auto count = static_cast<std::uint32_t>(
-      1 + submission.surfaces.size() + submission.policies.size() +
-      submission.buffers.size() + submission.damages.size());
+      1 + complete.surfaces.size() + complete.policies.size() +
+      complete.buffers.size() + complete.damages.size());
   gwipc_snapshot_begin begin{sizeof(begin),
-                             submission.commit_id,
+                             complete.commit_id,
                              GWIPC_SNAPSHOT_COMPLETE_SESSION,
                              0,
-                             submission.generation,
+                             complete.generation,
                              count,
                              {}};
   gwipc_output_upsert output{};
@@ -201,12 +255,12 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
   output.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
   output.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
   gwipc_snapshot_end end{
-      sizeof(end), submission.commit_id, submission.generation, count, {}};
+      sizeof(end), complete.commit_id, complete.generation, count, {}};
   gwipc_frame_commit commit{};
   commit.struct_size = sizeof(commit);
-  commit.commit_id = submission.commit_id;
+  commit.commit_id = complete.commit_id;
   commit.output_id = 1;
-  commit.producer_generation = submission.generation;
+  commit.producer_generation = complete.generation;
   if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                        gwipc_control_encode_snapshot_begin) ||
       !enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
@@ -215,7 +269,7 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
     error = "could not queue compositor snapshot header";
     return false;
   }
-  for (const auto &surface : submission.surfaces) {
+  for (const auto &surface : complete.surfaces) {
     if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_UPSERT,
                           GWIPC_FLAG_SNAPSHOT_ITEM, surface,
                           gwipc_contract_encode_surface_upsert)) {
@@ -223,7 +277,7 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
       return false;
     }
   }
-  for (const auto &policy : submission.policies) {
+  for (const auto &policy : complete.policies) {
     if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,
                           GWIPC_FLAG_SNAPSHOT_ITEM, policy,
                           gwipc_contract_encode_surface_policy_upsert)) {
@@ -231,13 +285,13 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
       return false;
     }
   }
-  for (const auto& buffer : submission.buffers) {
+  for (const auto& buffer : complete.buffers) {
     if (!enqueue_buffer(connection, buffer)) {
       error = "could not queue buffered compositor attachment";
       return false;
     }
   }
-  for (const auto& damage : submission.damages) {
+  for (const auto& damage : complete.damages) {
     gwipc_surface_damage value{};
     value.struct_size = sizeof(value);
     value.surface_id = damage.surface_id;
@@ -259,10 +313,34 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
     error = "could not queue compositor bootstrap";
     return false;
   }
-  pending_ = submission;
+  pending_ = std::move(complete);
   content_submission_ = false;
   state_ = PeerBootstrapState::AwaitingReply;
   return true;
+}
+
+bool CompositorPeer::submit_cursor(
+    const CompositorCursorSubmission& submission,
+    const std::uint64_t commit_id, const std::uint64_t generation,
+    std::string& error) {
+  if (!software_content_ || commit_id == 0 || generation == 0 ||
+      submission.surface.presentation_flags !=
+          GWIPC_SURFACE_PRESENTATION_CURSOR) {
+    error = "invalid cursor compositor submission";
+    return false;
+  }
+  auto complete = replay_input_;
+  complete.commit_id = commit_id;
+  complete.generation = generation;
+  std::erase_if(complete.surfaces, [](const auto& surface) {
+    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  });
+  complete.surfaces.push_back(submission.surface);
+  complete.buffers.clear();
+  complete.damages.clear();
+  if (submission.buffer) complete.buffers.push_back(*submission.buffer);
+  if (submission.damage) complete.damages.push_back(*submission.damage);
+  return submit(complete, error);
 }
 
 bool CompositorPeer::submit_content(
@@ -312,6 +390,37 @@ std::vector<CompositorBufferRelease> CompositorPeer::take_releases() {
   return result;
 }
 
+std::vector<CompositorSessionStateChange>
+CompositorPeer::take_session_state_changes() {
+  auto result = std::move(session_state_changes_);
+  session_state_changes_.clear();
+  return result;
+}
+
+bool CompositorPeer::acknowledge_session_state(
+    const CompositorSessionStateChange& request,
+    const gwipc_session_state_result result, std::string& error) {
+  if (!session_state_ || !transport_.established() || request.sequence == 0) {
+    error = "compositor session state reply is unavailable";
+    return false;
+  }
+  gwipc_session_state_acknowledged acknowledged{};
+  acknowledged.struct_size = sizeof(acknowledged);
+  acknowledged.generation = request.change.generation;
+  acknowledged.state = request.change.state;
+  acknowledged.result = result;
+  if (!enqueue_contract(transport_.connection(),
+                        GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,
+                        GWIPC_FLAG_REPLY, acknowledged,
+                        gwipc_contract_encode_session_state_acknowledged,
+                        nullptr, request.sequence)) {
+    error = "could not queue compositor session state acknowledgement";
+    return false;
+  }
+  error.clear();
+  return true;
+}
+
 void CompositorPeer::promote_replay_snapshot() {
   CompositorSnapshotSubmission replay = pending_;
   replay.buffers.clear();
@@ -343,6 +452,24 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     if (status != GWIPC_STATUS_OK) {
       error = "compositor peer receive failed";
       return PeerProcessOutcome::Fatal;
+    }
+    if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
+        session_state_) {
+      gwipc_decoded_contract* raw_change = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw_change) !=
+          GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedDelete> decoded_change(
+          raw_change);
+      const auto* change =
+          gwipc_decoded_session_state_change(decoded_change.get());
+      if (!change || change->generation == 0) {
+        error = "invalid compositor session state change";
+        return PeerProcessOutcome::Fatal;
+      }
+      session_state_changes_.push_back(
+          {*change, gwipc_message_sequence(message.get())});
+      continue;
     }
     if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE &&
         software_content_) {
@@ -415,9 +542,15 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
       state_ = PeerBootstrapState::Failed;
     return outcome;
   }
-  if (state_ == PeerBootstrapState::Synchronized && software_content_)
+  if (state_ == PeerBootstrapState::Synchronized &&
+      (software_content_ || session_state_))
     return drain(error);
   return PeerProcessOutcome::Progress;
+}
+
+void CompositorPeer::forget_cursor_replay() noexcept {
+  forget_cursor(replay_input_);
+  forget_cursor(pending_);
 }
 
 void CompositorPeer::disconnect() noexcept {
@@ -426,5 +559,6 @@ void CompositorPeer::disconnect() noexcept {
   commit_sequence_ = 0;
   content_submission_ = false;
   releases_.clear();
+  session_state_changes_.clear();
 }
 } // namespace glasswyrm::server

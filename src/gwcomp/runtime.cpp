@@ -1,5 +1,6 @@
 #include "gwcomp/contract_dispatch.hpp"
 #include "gwcomp/runtime.hpp"
+#include "gwcomp/session_state_coordinator.hpp"
 #include "gwcomp/signal_runtime.hpp"
 
 #include "backends/output/presentation_backend.hpp"
@@ -13,6 +14,7 @@
 
 #include <glasswyrm/ipc.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -35,7 +37,8 @@ constexpr std::uint64_t kCommonCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_SURFACE_STATE |
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
 constexpr std::uint64_t kOfferedCapabilities =
-    kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE;
+    kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE |
+    GWIPC_CAP_CURSOR_SURFACE;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 
@@ -76,6 +79,12 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
     return false;
   }
   return true;
+}
+
+int minimum_timeout(const int left, const int right) {
+  if (left < 0) return right;
+  if (right < 0) return left;
+  return std::min(left, right);
 }
 
 
@@ -171,6 +180,8 @@ int run(const Options& options) {
   bool stopping = false;
   bool vt_release_requested = false;
   bool vt_acquire_requested = false;
+  bool buffered_work_pending = false;
+  SessionStateCoordinator session_state;
   int exit_status = 0;
   std::optional<std::uint64_t> pending_reply_sequence;
   while (!stopping) {
@@ -186,8 +197,12 @@ int run(const Options& options) {
         {signals.poll_fd(), POLLIN, 0},
         {compositor.presentation_poll_fd(),
          compositor.presentation_poll_events(), 0}};
+    const int runtime_timeout =
+        minimum_timeout(compositor.presentation_timeout_ms(),
+                        session_state.timeout_ms());
     const int count =
-        ::poll(descriptors, 4, compositor.presentation_timeout_ms());
+        ::poll(descriptors, 4, buffered_work_pending ? 0 : runtime_timeout);
+    buffered_work_pending = false;
     if (count < 0) {
       if (errno == EINTR) continue;
       std::perror("gwcomp: poll");
@@ -239,24 +254,62 @@ int run(const Options& options) {
     if (vt_release_requested && !compositor.presentation_pending() &&
         !compositor.presentation_suspended()) {
       std::string vt_error;
-      if (!compositor.suspend_presentation(vt_error)) {
+      if (session_state.enabled() &&
+          session_state.state() == CoordinatedSessionState::Active) {
+        GwipcSessionStateRequestSink sink(producer.get());
+        if (!producer || !session_state.request_inactive(sink, vt_error)) {
+          std::fprintf(stderr, "gwcomp: VT release coordination failed: %s\n",
+                       vt_error.c_str());
+          stopping = true;
+          exit_status = 1;
+        }
+      } else if (!session_state.waiting() &&
+                 (!session_state.enabled() ||
+                  session_state.state() ==
+                      CoordinatedSessionState::Inactive) &&
+                 !compositor.suspend_presentation(vt_error)) {
         std::fprintf(stderr, "gwcomp: VT release failed: %s\n",
                      vt_error.c_str());
         stopping = true;
         exit_status = 1;
-      } else {
+      } else if (!session_state.waiting() &&
+                 (!session_state.enabled() ||
+                  session_state.state() ==
+                      CoordinatedSessionState::Inactive)) {
         vt_release_requested = false;
       }
     }
     if (!stopping && vt_acquire_requested &&
         compositor.presentation_suspended()) {
       std::string vt_error;
-      if (!compositor.resume_presentation(vt_error)) {
+      if (session_state.enabled() &&
+          session_state.state() == CoordinatedSessionState::Inactive) {
+        if (!compositor.resume_presentation(vt_error)) {
+          std::fprintf(stderr, "gwcomp: VT acquire failed: %s\n",
+                       vt_error.c_str());
+          stopping = true;
+          exit_status = 1;
+        } else {
+          GwipcSessionStateRequestSink sink(producer.get());
+          if (!producer || !session_state.request_active(sink, vt_error)) {
+            std::fprintf(stderr,
+                         "gwcomp: VT acquire coordination failed: %s\n",
+                         vt_error.c_str());
+            stopping = true;
+            exit_status = 1;
+          }
+        }
+      } else if (!session_state.waiting() &&
+                 (!session_state.enabled() ||
+                  session_state.state() == CoordinatedSessionState::Active) &&
+                 !compositor.resume_presentation(vt_error)) {
         std::fprintf(stderr, "gwcomp: VT acquire failed: %s\n",
                      vt_error.c_str());
         stopping = true;
         exit_status = 1;
-      } else {
+      } else if (!session_state.waiting() &&
+                 (!session_state.enabled() ||
+                  session_state.state() == CoordinatedSessionState::Active)) {
         vt_acquire_requested = false;
       }
     }
@@ -293,12 +346,77 @@ int run(const Options& options) {
       } else {
         compositor.set_peer_profile(*peer_profile);
         peer_validated = true;
+        session_state.configure(
+            peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&
+            (info.capabilities & GWIPC_CAP_SESSION_STATE) != 0);
       }
     }
+    if (producer && peer_validated && session_state.waiting()) {
+      std::size_t session_messages = 0;
+      std::size_t session_payload_bytes = 0;
+      while (!stopping && producer && peer_validated &&
+             session_state.waiting() &&
+             session_messages < kMaximumMessagesPerTurn &&
+             session_payload_bytes < kMaximumPayloadBytesPerTurn) {
+        gwipc_message* raw_message = nullptr;
+        if (gwipc_connection_receive(producer.get(), &raw_message) !=
+            GWIPC_STATUS_OK)
+          break;
+        std::unique_ptr<gwipc_message, MessageDeleter> message(raw_message);
+        std::size_t size = 0;
+        (void)gwipc_message_payload(message.get(), &size);
+        session_payload_bytes += size;
+        ++session_messages;
+        if (gwipc_message_type(message.get()) ==
+            GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) {
+          gwipc_session_state_acknowledged acknowledged{};
+          std::uint64_t reply_to = 0;
+          std::string coordination_error;
+          if (!decode_session_state_acknowledgement(
+                  message.get(), acknowledged, reply_to, coordination_error) ||
+              !session_state.acknowledge(reply_to, acknowledged,
+                                         coordination_error)) {
+            std::fprintf(stderr, "gwcomp: session coordination failed: %s\n",
+                         coordination_error.c_str());
+            stopping = true;
+            exit_status = 1;
+          } else if (vt_acquire_requested &&
+                     session_state.state() ==
+                         CoordinatedSessionState::Active) {
+            vt_acquire_requested = false;
+          }
+        } else {
+          const auto dispatch = dispatch_contract_message(
+              producer.get(), message.get(), peer_role, *peer_profile,
+              options.max_frames, compositor);
+          accepted_any_frame = accepted_any_frame || dispatch.accepted_frame;
+          stop_after_flush = stop_after_flush || dispatch.stop_after_flush;
+          if (dispatch.pending_frame)
+            pending_reply_sequence = dispatch.reply_sequence;
+          if (dispatch.fatal) {
+            stopping = true;
+            exit_status = 1;
+          }
+        }
+      }
+      if (session_state.waiting() &&
+          (session_messages == kMaximumMessagesPerTurn ||
+           session_payload_bytes >= kMaximumPayloadBytesPerTurn))
+        buffered_work_pending = true;
+    }
+    std::string session_error;
+    if (!stopping && !session_state.check_timeout(session_error)) {
+      std::fprintf(stderr, "gwcomp: session coordination failed: %s\n",
+                   session_error.c_str());
+      stopping = true;
+      exit_status = 1;
+    }
+    if (stopping) continue;
     std::size_t messages = 0;
     std::size_t payload_bytes = 0;
     while (producer && peer_validated && !compositor.presentation_pending() &&
            !compositor.presentation_suspended() && !vt_release_requested &&
+           !session_state.waiting() &&
            messages < kMaximumMessagesPerTurn &&
            payload_bytes < kMaximumPayloadBytesPerTurn) {
       gwipc_message* raw_message = nullptr;
@@ -323,6 +441,12 @@ int run(const Options& options) {
         break;
       }
     }
+    if (producer && peer_validated && !compositor.presentation_pending() &&
+        !compositor.presentation_suspended() && !vt_release_requested &&
+        !session_state.waiting() &&
+        (messages == kMaximumMessagesPerTurn ||
+         payload_bytes >= kMaximumPayloadBytesPerTurn))
+      buffered_work_pending = true;
     if (producer && gwipc_connection_get_state(producer.get()) ==
                         GWIPC_CONNECTION_CLOSED) {
       if (compositor.presentation_pending()) {
@@ -333,6 +457,14 @@ int run(const Options& options) {
         continue;
       }
       std::fprintf(stderr, "gwcomp: producer disconnected, cleared surfaces=0 buffers=0\n");
+      const bool coordination_was_pending = session_state.waiting();
+      session_state.peer_disconnected();
+      if (coordination_was_pending) {
+        std::fprintf(stderr,
+                     "gwcomp: producer disconnected during session coordination\n");
+        stopping = true;
+        exit_status = 1;
+      }
       compositor.disconnect();
       producer.reset();
       peer_validated = false;

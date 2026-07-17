@@ -5,5 +5,3 @@
 #
 # Keep entries exceptional and reviewed. The line count is intentionally exact so
 # any edit forces the exception to be reconsidered.
-
-src/ipc/connection.cpp | 1361 | GWIPC connection state machine, transport I/O, handshake, queueing, and contract dispatch | These operations share one private connection representation and invariants across the stable C ABI; splitting them during the pre-DRM decomposition would increase hidden coupling and risk GWIPC 0.5.0 wire and ABI drift without creating a DRM boundary | M11 IPC-internals review

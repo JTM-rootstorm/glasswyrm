@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly BASE_COMMIT='fe0faab39f7a6d28157ee6b96a4f6292a0b7984e'
+readonly BASE_COMMIT='9c1cbfb72858b8307f9d9d0a6dc53ac1235ecba0'
 readonly DEFAULT_LIMIT=1000
-readonly M10_LIMIT=600
+readonly MATERIAL_LIMIT=600
 readonly COORDINATOR_LIMIT=500
 readonly MAIN_LIMIT=250
 readonly FUNCTION_TARGET=100
@@ -78,7 +78,7 @@ done < "${allowlist_file}"
 baseline_available=1
 if ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}^{commit}" 2>/dev/null; then
   baseline_available=0
-  printf 'source-layout: note: baseline commit unavailable; enforcing the 600-line M10 budget on every non-allowlisted file\n' >&2
+  printf 'source-layout: note: baseline commit unavailable; enforcing the 600-line material-change budget on every non-allowlisted file\n' >&2
 fi
 
 is_materially_rewritten() {
@@ -167,10 +167,10 @@ while IFS= read -r -d '' absolute_path; do
   material=0
 
   if (( ! baseline_available )); then
-    # Release and VM source exports intentionally omit .git. Applying the M10
-    # budget to every file except the one reviewed hard-default exception is a
-    # conservative substitute for baseline-aware change classification.
-    if [[ -z ${allowed_lines[${path}]+set} ]]; then material=1; fi
+    # Release and VM source exports intentionally omit .git. Applying the
+    # 600-line budget to every source file is a conservative substitute for
+    # baseline-aware change classification.
+    material=1
   elif ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}:${path}" 2>/dev/null; then
     introduced=1
   else
@@ -193,8 +193,8 @@ while IFS= read -r -d '' absolute_path; do
     seen_allowlist["${path}"]=1
   fi
 
-  if (( (introduced || material) && lines > M10_LIMIT )); then
-    fail "${path} has ${lines} lines; new/materially rewritten M10 files are limited to ${M10_LIMIT}"
+  if (( (introduced || material) && lines > MATERIAL_LIMIT )); then
+    fail "${path} has ${lines} lines; new/materially rewritten files are limited to ${MATERIAL_LIMIT}"
   fi
 
   case "${path}" in
@@ -211,19 +211,21 @@ while IFS= read -r -d '' absolute_path; do
 
   case "${path}" in
     src/glasswyrmd/request_dispatcher.cpp)
-      (( lines > 450 )) && fail "${path} has ${lines} lines; M10 routing-shell limit is 450"
+      (( lines > 450 )) && fail "${path} has ${lines} lines; routing-shell limit is 450"
       ;;
     src/glasswyrmd/resource_table.cpp|src/glasswyrmd/server.cpp)
-      (( lines > 500 )) && fail "${path} has ${lines} lines; M10 final limit is 500"
+      (( lines > 500 )) && fail "${path} has ${lines} lines; final limit is 500"
       ;;
     src/gwcomp/compositor.cpp)
-      (( lines > 600 )) && fail "${path} has ${lines} lines; M10 final limit is 600"
+      (( lines > 600 )) && fail "${path} has ${lines} lines; final limit is 600"
+      ;;
+    src/ipc/connection.cpp)
+      (( lines > 350 )) && fail "${path} has ${lines} lines; M11 connection-shell limit is 350"
       ;;
   esac
 
-  if (( introduced )) && [[ -n ${allowed_lines[${path}]+set} ]] &&
-     [[ ${path} =~ (drm|vt|present|runtime) ]]; then
-    fail "new M10 DRM/VT/presentation/runtime file may not be allowlisted: ${path}"
+  if (( introduced )) && [[ -n ${allowed_lines[${path}]+set} ]]; then
+    fail "new source file may not be allowlisted: ${path}"
   fi
 
   case "${path}" in
