@@ -72,7 +72,8 @@ class ClientConnection {
                    InputSnapshotProvider input_snapshot_provider = {},
                    ProtocolEventHandler protocol_event_handler = {},
                    const ExtensionRegistry* extensions = nullptr,
-                   bool game_compat = false);
+                   bool game_compat = false,
+                   std::optional<std::uint32_t> peer_uid = std::nullopt);
   ~ClientConnection();
 
   ClientConnection(const ClientConnection&) = delete;
@@ -152,6 +153,7 @@ class ClientConnection {
   ProtocolEventHandler protocol_event_handler_;
   const ExtensionRegistry* extensions_{nullptr};
   bool game_compat_{false};
+  std::optional<std::uint32_t> peer_uid_;
 };
 
 }  // namespace glasswyrm::server

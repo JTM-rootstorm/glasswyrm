@@ -80,6 +80,8 @@ static_assert(extension_ranges_are_valid());
 find_extension(std::string_view name) noexcept;
 [[nodiscard]] const ExtensionDescriptor*
 find_extension(std::uint8_t major_opcode) noexcept;
+[[nodiscard]] const ExtensionDescriptor*
+find_extension(ExtensionKind kind) noexcept;
 [[nodiscard]] bool known_extension_name(std::string_view name) noexcept;
 
 class ExtensionRegistry {

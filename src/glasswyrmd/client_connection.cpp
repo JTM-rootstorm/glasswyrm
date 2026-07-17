@@ -26,7 +26,8 @@ ClientConnection::ClientConnection(const int descriptor,
                                    InputSnapshotProvider input_snapshot_provider,
                                    ProtocolEventHandler protocol_event_handler,
                                    const ExtensionRegistry* extensions,
-                                   const bool game_compat)
+                                   const bool game_compat,
+                                   std::optional<std::uint32_t> peer_uid)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -40,7 +41,8 @@ ClientConnection::ClientConnection(const int descriptor,
       input_snapshot_provider_(std::move(input_snapshot_provider)),
       protocol_event_handler_(std::move(protocol_event_handler)),
       extensions_(extensions),
-      game_compat_(game_compat) {
+      game_compat_(game_compat),
+      peer_uid_(peer_uid) {
   if (trace_) trace_->connection(identifier_, "accepted");
 }
 
@@ -226,7 +228,7 @@ void ClientConnection::process_input(
                                       input_snapshot_provider_
                                           ? input_snapshot_provider_()
                                           : InputSnapshot{},
-                                      extensions_};
+                                      extensions_, peer_uid_};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
         if (trace_) {

@@ -38,6 +38,7 @@ RequestFramer::consume(const std::span<const std::uint8_t> input) {
       status_ = inspect_header();
     }
     if (status_ == RequestFrameStatus::NeedMore &&
+        request_.header_size == kBigRequestHeaderSize &&
         request_.bytes.size() == kBigRequestHeaderSize &&
         expected_size_ == kBigRequestHeaderSize) {
       status_ = inspect_extended_header();

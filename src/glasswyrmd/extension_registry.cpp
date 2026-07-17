@@ -17,6 +17,12 @@ find_extension(const std::uint8_t major_opcode) noexcept {
   return found == kExtensionRegistry.end() ? nullptr : &*found;
 }
 
+const ExtensionDescriptor* find_extension(const ExtensionKind kind) noexcept {
+  const auto found =
+      std::ranges::find(kExtensionRegistry, kind, &ExtensionDescriptor::kind);
+  return found == kExtensionRegistry.end() ? nullptr : &*found;
+}
+
 bool known_extension_name(const std::string_view name) noexcept {
   return find_extension(name) != nullptr;
 }

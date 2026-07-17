@@ -51,6 +51,11 @@ bool ResourceTable::invariants_hold() const noexcept {
         if (!cursor->image) return false;
         calculated_cursor_bytes += cursor->image->byte_size();
       }
+      if (const auto* segment =
+              std::get_if<ShmSegmentResource>(&resource.payload)) {
+        if (!segment->mapping || segment->size == 0 || segment->shmid < 0)
+          return false;
+      }
       continue;
     }
     if (window->attributes.cursor_inherit) {
