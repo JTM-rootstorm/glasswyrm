@@ -40,6 +40,17 @@ struct InputSnapshot {
 };
 
 struct DispatchContext {
+  DispatchContext(ClientId client, std::uint32_t base, std::uint32_t mask,
+                  std::uint64_t request_sequence,
+                  gw::protocol::x11::ByteOrder order,
+                  bool lifecycle = false, InputSnapshot snapshot = {},
+                  const ExtensionRegistry* extension_registry = nullptr,
+                  std::optional<std::uint32_t> uid = std::nullopt)
+      : client_id(client), resource_base(base), resource_mask(mask),
+        sequence(request_sequence), byte_order(order),
+        integrated_lifecycle(lifecycle), input(std::move(snapshot)),
+        extensions(extension_registry), peer_uid(uid) {}
+
   ClientId client_id{0};
   std::uint32_t resource_base{0};
   std::uint32_t resource_mask{0};
@@ -49,6 +60,7 @@ struct DispatchContext {
   bool integrated_lifecycle{false};
   InputSnapshot input{};
   const ExtensionRegistry* extensions{nullptr};
+  std::optional<std::uint32_t> peer_uid;
 };
 
 enum class StructuralTransitionKind { Map, Unmap, Configure, Destroy };

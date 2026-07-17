@@ -15,7 +15,7 @@ DispatchResult dispatch_request(ServerState& state,
                                 const x11::FramedRequest& request) {
   try {
     if (request.opcode >= 128)
-      return dispatch_extension_request(context, request);
+      return dispatch_extension_request(state, context, request);
     switch (static_cast<x11::CoreOpcode>(request.opcode)) {
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);

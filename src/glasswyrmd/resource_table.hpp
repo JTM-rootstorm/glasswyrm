@@ -7,6 +7,7 @@
 #include "glasswyrmd/font.hpp"
 #include "glasswyrmd/cursor_resource.hpp"
 #include "glasswyrmd/colormap.hpp"
+#include "glasswyrmd/shm_segment.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,13 +27,15 @@ enum class ResourceType {
   Font,
   Cursor,
   Colormap,
+  ShmSegment,
 };
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
   std::variant<WindowResource, PixmapResource, GraphicsContextResource,
-               FontResource, CursorResource, ColormapResource> payload;
+               FontResource, CursorResource, ColormapResource,
+               ShmSegmentResource> payload;
 };
 
 enum class CreateWindowStatus {
@@ -82,6 +85,14 @@ enum class CreateColormapStatus {
   BadAlloc,
 };
 enum class FreeColormapStatus { Success, BadColormap, BadAccess };
+enum class AttachShmStatus {
+  Success,
+  BadIdChoice,
+  BadValue,
+  BadAccess,
+  BadAlloc,
+};
+enum class DetachShmStatus { Success, BadSegment };
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -132,6 +143,8 @@ struct ResourceLimits {
   std::size_t maximum_cursors_per_client{256};
   std::size_t maximum_total_cursor_bytes{4U * 1024U * 1024U};
   std::size_t maximum_colormaps_per_client{4096};
+  std::size_t maximum_shm_segments_per_client{256};
+  std::size_t maximum_shm_bytes_per_client{512U * 1024U * 1024U};
 };
 
 class ResourceTable {
@@ -155,6 +168,10 @@ class ResourceTable {
   [[nodiscard]] const ColormapResource* find_colormap(
       std::uint32_t xid) const noexcept;
   [[nodiscard]] bool valid_colormap(std::uint32_t xid) const noexcept;
+  [[nodiscard]] const ShmSegmentResource* find_shm_segment(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] ShmSegmentResource* find_shm_segment(
+      std::uint32_t xid) noexcept;
   [[nodiscard]] std::shared_ptr<const input::CursorImage> effective_cursor(
       std::uint32_t pointer_target) const noexcept;
   [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
@@ -198,6 +215,11 @@ class ResourceTable {
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       std::uint32_t xid, std::uint32_t window, std::uint32_t visual);
   [[nodiscard]] FreeColormapStatus free_colormap(std::uint32_t xid);
+  [[nodiscard]] AttachShmStatus attach_shm_segment(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t shmid, bool read_only,
+      std::uint32_t peer_uid);
+  [[nodiscard]] DetachShmStatus detach_shm_segment(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(

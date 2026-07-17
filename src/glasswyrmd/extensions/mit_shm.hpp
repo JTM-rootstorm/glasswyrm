@@ -2,10 +2,10 @@
 
 #include "glasswyrmd/request_dispatcher.hpp"
 
-namespace glasswyrm::server {
+namespace glasswyrm::server::extensions {
 
-[[nodiscard]] DispatchResult dispatch_extension_request(
+[[nodiscard]] DispatchResult dispatch_mit_shm(
     ServerState& state, const DispatchContext& context,
     const gw::protocol::x11::FramedRequest& request);
 
-}  // namespace glasswyrm::server
+}  // namespace glasswyrm::server::extensions

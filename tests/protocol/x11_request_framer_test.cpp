@@ -107,6 +107,26 @@ void test_pipeline(const ByteOrder order) {
           "caller can immediately frame the following request");
 }
 
+void test_two_unit_pipeline(const ByteOrder order) {
+  const auto first = make_request(order, 8, 0, 2);
+  const auto second = make_request(order, 43, 0, 1);
+  std::vector<std::uint8_t> pipeline = first;
+  pipeline.insert(pipeline.end(), second.begin(), second.end());
+
+  RequestFramer framer(order);
+  const auto first_result = framer.consume(pipeline);
+  require(first_result.status == RequestFrameStatus::Complete &&
+              first_result.consumed == first.size() &&
+              framer.request().header_size == 4,
+          "ordinary two-unit request is not parsed as a BIG-REQUESTS header");
+  framer.reset();
+  const auto second_result =
+      framer.consume(std::span(pipeline).subspan(first_result.consumed));
+  require(second_result.status == RequestFrameStatus::Complete &&
+              second_result.consumed == second.size(),
+          "request after an ordinary two-unit request remains framed");
+}
+
 void test_invalid_lengths() {
   for (const auto order : {ByteOrder::LittleEndian, ByteOrder::BigEndian}) {
     std::array<std::uint8_t, 4> zero{18, 0, 0, 0};
@@ -206,6 +226,8 @@ int main() {
   test_fragmentation(ByteOrder::BigEndian);
   test_pipeline(ByteOrder::LittleEndian);
   test_pipeline(ByteOrder::BigEndian);
+  test_two_unit_pipeline(ByteOrder::LittleEndian);
+  test_two_unit_pipeline(ByteOrder::BigEndian);
   test_invalid_lengths();
   test_big_requests(ByteOrder::LittleEndian);
   test_big_requests(ByteOrder::BigEndian);

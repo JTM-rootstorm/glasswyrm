@@ -1085,6 +1085,7 @@ if get_option('glasswyrmd')
     ['request-work-budget', 'request_work_budget_test.cpp'],
     ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
     ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
+    ['mit-shm', 'mit_shm_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],

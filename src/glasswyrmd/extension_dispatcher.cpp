@@ -2,13 +2,15 @@
 
 #include "glasswyrmd/extension_registry.hpp"
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/extensions/mit_shm.hpp"
 #include "protocol/x11/reply.hpp"
 
 namespace glasswyrm::server {
 namespace x11 = gw::protocol::x11;
 
 DispatchResult dispatch_extension_request(
-    const DispatchContext& context, const x11::FramedRequest& request) {
+    ServerState& state, const DispatchContext& context,
+    const x11::FramedRequest& request) {
   if (!context.extensions) return request_handlers::error(
       context, request, x11::CoreErrorCode::BadRequest);
   const auto* extension = context.extensions->query(request.opcode);
@@ -30,6 +32,7 @@ DispatchResult dispatch_extension_request(
       return result;
     }
     case ExtensionKind::MitShm:
+      return extensions::dispatch_mit_shm(state, context, request);
     case ExtensionKind::XFixes:
     case ExtensionKind::Damage:
     case ExtensionKind::Render:
