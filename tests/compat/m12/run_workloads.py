@@ -123,12 +123,12 @@ def run_resident_workloads(
                    "--position", "64,64", "--blend", "none", "--iterations",
                    "120", "100", "icon.bmp"]
     with sdl_log.open("wb") as sdl_output, sprite_log.open("wb") as sprite_output:
-        sdl = subprocess.Popen(sdl_argv, cwd=programs, env=environment,
-                               stdout=sdl_output, stderr=subprocess.STDOUT,
-                               start_new_session=True)
         sprite = subprocess.Popen(sprite_argv, cwd=programs, env=environment,
                                   stdout=sprite_output, stderr=subprocess.STDOUT,
                                   start_new_session=True)
+        sdl = subprocess.Popen(sdl_argv, cwd=programs, env=environment,
+                               stdout=sdl_output, stderr=subprocess.STDOUT,
+                               start_new_session=True)
         ready = False
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:

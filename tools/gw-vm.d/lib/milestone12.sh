@@ -19,7 +19,11 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl
   milestone12-sync-report.jsonl milestone12-glasswyrmd-journal.log
   milestone12-gwm-journal.log milestone12-gwcomp-journal.log
-  milestone12-facts.env)
+  milestone12-renderer-summary.json milestone12-drm-damage-summary.json
+  milestone12-sync-observation.json milestone12-kms-before.json
+  milestone12-kms-after.json milestone12-vt-before.json
+  milestone12-vt-after.json milestone12-getty-state.json
+  milestone12-logind-state.json milestone12-facts.env)
 M12_BINARY_ARTIFACTS=(milestone12-software.ppm milestone12-gles.ppm
   milestone12-fullscreen.ppm milestone12-screen.ppm
   milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar)
@@ -206,7 +210,11 @@ validate_milestone12_archive() {
     milestone12-extension-probe.json milestone12-sdl-probe.json \
     milestone12-extension-trace.json milestone12-renderer-software.jsonl \
     milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
-    milestone12-sync-report.jsonl SHA256SUMS; do
+    milestone12-sync-report.jsonl milestone12-renderer-summary.json \
+    milestone12-drm-damage-summary.json milestone12-sync-observation.json \
+    milestone12-kms-before.json milestone12-kms-after.json \
+    milestone12-vt-before.json milestone12-vt-after.json \
+    milestone12-getty-state.json milestone12-logind-state.json SHA256SUMS; do
     grep -Eq "^(\\./)?$member$" <<<"$listing" || return
   done
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m12-evidence.XXXXXX") || return
@@ -314,9 +322,24 @@ milestone12_runtime_test() {
 milestone12_guest_script_tail() {
   cat <<'GUEST_SCRIPT'
 cleanup() {
-  systemctl stop glasswyrm-m12-{software,noshm,gles}.service gw-uinput-m12.service >/dev/null 2>&1 || true
-  systemctl reset-failed glasswyrm-m12-{software,noshm,gles}.service gw-uinput-m12.service >/dev/null 2>&1 || true
-  [[ -z $keyboard || ! -e $keyboard ]] && [[ -z $pointer || ! -e $pointer ]] && result[cleanup]=passed
+  systemctl stop workload-m12-{software,noshm,gles}.service \
+    glasswyrmd-m12-{software,noshm,gles}.service \
+    gwcomp-m12-{software,noshm,gles}.service gwm-m12-{software,noshm,gles}.service \
+    gw-uinput-m12.service >/dev/null 2>&1 || true
+  systemctl reset-failed workload-m12-{software,noshm,gles}.service \
+    glasswyrmd-m12-{software,noshm,gles}.service \
+    gwcomp-m12-{software,noshm,gles}.service gwm-m12-{software,noshm,gles}.service \
+    gw-uinput-m12.service >/dev/null 2>&1 || true
+  if [[ -n ${logind_unit:-} && -n ${logind_socket:-} ]]; then
+    systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1 || true
+    [[ ${logind_socket_active_before:-inactive} != active ]] ||
+      systemctl start "$logind_socket" >/dev/null 2>&1 || true
+    [[ ${logind_active_before:-inactive} != active ]] ||
+      systemctl start "$logind_unit" >/dev/null 2>&1 || true
+  fi
+  if [[ -n ${getty_unit:-} && ${getty_active_before:-inactive} == active ]]; then
+    systemctl start "$getty_unit" >/dev/null 2>&1 || true
+  fi
   journalctl -u 'glasswyrmd*' --no-pager >"$artifact_dir/milestone12-glasswyrmd-journal.log" 2>&1 || true
   journalctl -u 'gwm*' --no-pager >"$artifact_dir/milestone12-gwm-journal.log" 2>&1 || true
   journalctl -u 'gwcomp*' --no-pager >"$artifact_dir/milestone12-gwcomp-journal.log" 2>&1 || true
@@ -379,6 +402,42 @@ result[source_layout]=passed
 "$source_dir/tests/install/gwipc_staged_consumers_test.sh" "$source_dir" "$software"
 result[api_consumers]=passed result[regressions]=passed
 
+failure_stage=state-capture
+capture_vt_state() {
+  python3 - "$target_vt" "$1" <<'PY'
+import fcntl,json,os,struct,sys
+tty,output=sys.argv[1:]
+fd=os.open(tty,os.O_RDONLY|os.O_NOCTTY|os.O_CLOEXEC)
+try:
+  active=bytearray(struct.calcsize('=HHH'))
+  mode=bytearray(struct.calcsize('=BBhhh'))
+  kd=bytearray(struct.calcsize('=i'))
+  fcntl.ioctl(fd,0x5603,active,True)
+  fcntl.ioctl(fd,0x5601,mode,True)
+  fcntl.ioctl(fd,0x4B3B,kd,True)
+finally: os.close(fd)
+json.dump({'active':struct.unpack('=HHH',active),'mode':struct.unpack('=BBhhh',mode),
+           'kd':struct.unpack('=i',kd)[0]},open(output,'w'),sort_keys=True)
+PY
+}
+getty_unit=getty@${target_vt##*/}.service
+getty_active_before=$(systemctl is-active "$getty_unit" 2>/dev/null || true)
+getty_enabled_before=$(systemctl is-enabled "$getty_unit" 2>/dev/null || true)
+logind_unit=systemd-logind.service logind_socket=systemd-logind-varlink.socket
+logind_active_before=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
+logind_socket_active_before=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
+logind_enabled_before=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
+logind_socket_enabled_before=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
+"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+  --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone12-kms-before.json"
+capture_vt_state "$artifact_dir/milestone12-vt-before.json"
+[[ $getty_active_before != active ]] || systemctl stop "$getty_unit"
+systemctl mask --runtime --now "$logind_socket" "$logind_unit"
+[[ $(systemctl is-active "$logind_unit" 2>/dev/null || true) == inactive ]]
+shm_count() { ipcs -m | awk '$1 ~ /^0x/ {n++} END {print n+0}'; }
+shm_before=$(shm_count); shm_live=$shm_before; eventfd_live=0
+producer_eventfd_live=0 consumer_eventfd_live=0
+
 failure_stage=input
 systemd-run --unit=gw-uinput-m12.service --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property='DeviceAllow=/dev/uinput rw' \
@@ -394,82 +453,355 @@ keyboard=${input_paths[0]} pointer=${input_paths[1]}
 [[ $keyboard == /dev/input/event* && $pointer == /dev/input/event* && $keyboard != "$pointer" ]]
 result[uinput]=passed
 
-run_profile() {
-  local name=$1 renderer_name=$2 profile=$3 build_dir=$4 disable=${5:-}
-  local out=$artifact_dir/$name dump=$dumps/$name scene=$scenes/$name.jsonl
-  rm -rf "$out" "$dump"; mkdir -p "$out" "$dump"
-  local launcher=("$build_dir/src/glasswyrm-session" --runtime-dir "/run/glasswyrm-m12-$name"
-    --display 99 --drm-device "$drm_device" --tty "$target_vt" --connector "$connector"
-    --mode 1024x768 --input-device "$keyboard" --input-device "$pointer"
-    --drm-api atomic --game-compat --renderer "$renderer_name"
-    --mirror-dump-dir "$dump" --scene-manifest "$scene"
-    --renderer-report "$renderer/$name.jsonl"
-    --drm-report "$out/drm-report.jsonl" --x11-trace "$out/extension-trace.json")
-  [[ -z $disable ]] || launcher+=(--disable-extension "$disable")
-  launcher+=(--client python3 "$source_dir/tests/compat/m12/run_workloads.py"
-    --profile "$profile" --program-dir "$clients/install/bin" --artifact-dir "$out")
-  systemd-run --unit="glasswyrm-m12-$name.service" --setenv="LD_LIBRARY_PATH=$clients/install/lib64:$clients/install/lib" \
-    --property=PrivateDevices=no --property=DevicePolicy=closed \
-    --property="DeviceAllow=$drm_device rw" --property="DeviceAllow=$target_vt rw" \
-    --property="DeviceAllow=$keyboard r" --property="DeviceAllow=$pointer r" \
+wait_path() {
+  local path=$1
+  for _ in {1..1800}; do [[ -e $path ]] && return; sleep .05; done
+  printf 'Timed out waiting for M12 path: %s\n' "$path" >&2; return 1
+}
+wait_socket() {
+  local path=$1
+  for _ in {1..400}; do [[ -S $path ]] && return; sleep .05; done
+  printf 'Timed out waiting for M12 socket: %s\n' "$path" >&2; return 1
+}
+service_pids() {
+  local unit=$1 group
+  group=$(systemctl show "$unit" -p ControlGroup --value 2>/dev/null || true)
+  [[ -n $group && -r /sys/fs/cgroup$group/cgroup.procs ]] &&
+    cat "/sys/fs/cgroup$group/cgroup.procs"
+}
+count_eventfds() {
+  local count=0 unit pid fd link
+  for unit in "$@"; do
+    while IFS= read -r pid; do
+      [[ -n $pid ]] || continue
+      for fd in /proc/"$pid"/fd/*; do
+        link=$(readlink "$fd" 2>/dev/null || true)
+        [[ $link == 'anon_inode:[eventfd]' ]] && count=$((count + 1))
+      done
+    done < <(service_pids "$unit")
+  done
+  printf '%s\n' "$count"
+}
+resident_alive() {
+  python3 - "$current_out/live-control/resident-ready.json" <<'PY'
+import json,os,sys
+d=json.load(open(sys.argv[1]))
+raise SystemExit(0 if all(os.path.exists(f'/proc/{d[k]}') for k in ('sdl_pid','testsprite2_pid')) else 1)
+PY
+}
+settled_mirror() {
+  local directory=$1 candidate= last= stable=0
+  for _ in {1..600}; do
+    candidate=$(find "$directory" -type f -name '*.ppm' -print | sort -V | tail -n1)
+    if [[ -n $candidate && -s $candidate && $candidate == "$last" ]]; then
+      stable=$((stable + 1)); ((stable >= 10)) && { printf '%s\n' "$candidate"; return; }
+    else last=$candidate; stable=0; fi
+    sleep .05
+  done
+  return 1
+}
+
+start_gwm() {
+  systemd-run --unit="$current_gwm_unit" --property=PrivateDevices=yes \
+    --property=RestrictAddressFamilies=AF_UNIX --property=NoNewPrivileges=yes \
+    "$current_build/src/gwm" --ipc-socket "$current_runtime/gwm.sock"
+  wait_socket "$current_runtime/gwm.sock"
+}
+start_gwcomp() {
+  compositor_generation=$((compositor_generation + 1))
+  current_renderer_report=$renderer/$current_name-$compositor_generation.jsonl
+  current_drm_report=$current_out/drm-report-$compositor_generation.jsonl
+  current_dump=$current_dump_root/$compositor_generation
+  current_scene=$scenes/$current_name-$compositor_generation.jsonl
+  mkdir -p "$current_dump"
+  systemd-run --unit="$current_gwcomp_unit" --property=PrivateDevices=no \
+    --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
+    --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
     --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
     --property=TTYReset=yes --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
-    "${launcher[@]}"
-  for _ in {1..1200}; do [[ -s $out/m12-workloads.json ]] && break; sleep .1; done
-  python3 "$source_dir/tests/compat/m12/validate_result.py" "$out/m12-workloads.json"
+    --property=NoNewPrivileges=yes "$current_build/src/gwcomp" --backend drm \
+    --ipc-socket "$current_runtime/gwcomp.sock" --drm-device "$drm_device" \
+    --tty "$target_vt" --connector "$connector" --mode 1024x768 --drm-api atomic \
+    --renderer "$current_renderer" --renderer-report "$current_renderer_report" \
+    --mirror-dump-dir "$current_dump" --scene-manifest "$current_scene" \
+    --drm-report "$current_drm_report"
+  wait_socket "$current_runtime/gwcomp.sock"
+}
+start_server() {
+  local command=("$current_build/src/glasswyrmd" --display 99
+    --wm-socket "$current_runtime/gwm.sock" --compositor-socket "$current_runtime/gwcomp.sock"
+    --software-content --game-compat --libinput-device "$keyboard"
+    --libinput-device "$pointer" --xkb-layout us --xkb-model pc105
+    --x11-trace "$current_out/extension-trace.json")
+  [[ -z $current_disable ]] || command+=(--disable-extension "$current_disable")
+  systemd-run --unit="$current_server_unit" --property=PrivateDevices=no \
+    --property=DevicePolicy=closed --property="DeviceAllow=$keyboard r" \
+    --property="DeviceAllow=$pointer r" --property=RestrictAddressFamilies=AF_UNIX \
+    --property=NoNewPrivileges=yes "${command[@]}"
+  wait_socket /tmp/.X11-unix/X99
+}
+start_workload() {
+  local command=(python3 "$source_dir/tests/compat/m12/run_workloads.py"
+    --profile "$current_profile" --program-dir "$clients/install/bin"
+    --artifact-dir "$current_out")
+  [[ $current_resident == true ]] && command+=(--resident-control-dir "$current_out/live-control")
+  systemd-run --unit="$current_workload_unit" --setenv="LD_LIBRARY_PATH=$clients/install/lib64:$clients/install/lib" \
+    --property=RestrictAddressFamilies=AF_UNIX --property=NoNewPrivileges=yes "${command[@]}"
+  if [[ $current_resident == true ]]; then wait_path "$current_out/live-control/resident-ready.json";
+  else wait_path "$current_out/m12-workloads.json"; fi
+}
+begin_profile() {
+  current_name=$1 current_renderer=$2 current_profile=$3 current_build=$4
+  current_resident=$5 current_disable=${6:-}
+  current_out=$artifact_dir/$current_name current_dump_root=$dumps/$current_name
+  current_runtime=/run/glasswyrm-m12-$current_name
+  current_gwm_unit=gwm-m12-$current_name.service
+  current_gwcomp_unit=gwcomp-m12-$current_name.service
+  current_server_unit=glasswyrmd-m12-$current_name.service
+  current_workload_unit=workload-m12-$current_name.service
+  compositor_generation=0
+  systemctl stop "$current_workload_unit" "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit" >/dev/null 2>&1 || true
+  systemctl reset-failed "$current_workload_unit" "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit" >/dev/null 2>&1 || true
+  rm -rf "$current_out" "$current_dump_root" "$current_runtime"
+  mkdir -p "$current_out" "$current_dump_root" "$current_runtime"
+  start_gwm; start_gwcomp; start_server; start_workload
+  if [[ $current_resident == true ]]; then
+    resident_alive
+    local current_eventfds current_shm
+    current_eventfds=$(count_eventfds "$current_server_unit" "$current_gwcomp_unit" "$current_workload_unit")
+    ((current_eventfds > eventfd_live)) && eventfd_live=$current_eventfds
+    current_eventfds=$(count_eventfds "$current_server_unit")
+    ((current_eventfds > producer_eventfd_live)) && producer_eventfd_live=$current_eventfds
+    current_eventfds=$(count_eventfds "$current_gwcomp_unit")
+    ((current_eventfds > consumer_eventfd_live)) && consumer_eventfd_live=$current_eventfds
+    current_shm=$(shm_count); ((current_shm > shm_live)) && shm_live=$current_shm
+  fi
+}
+finish_profile() {
+  if [[ $current_resident == true ]]; then
+    : >"$current_out/live-control/resident-release"
+  fi
+  wait_path "$current_out/m12-workloads.json"
+  python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/m12-workloads.json"
   local latest
-  latest=$(find "$dump" -type f -name '*.ppm' -print | sort -V | tail -n1)
-  [[ -n $latest && -s $latest ]]; cp "$latest" "$artifact_dir/milestone12-$name.ppm"
+  latest=$(settled_mirror "$current_dump_root")
+  cp "$latest" "$artifact_dir/milestone12-$current_name.ppm"
+  systemctl stop "$current_workload_unit" "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"
+  for _ in {1..400}; do
+    [[ ! -e /tmp/.X11-unix/X99 && ! -e $current_runtime/gwm.sock && ! -e $current_runtime/gwcomp.sock ]] && break
+    sleep .05
+  done
+  [[ ! -e /tmp/.X11-unix/X99 && ! -e $current_runtime/gwm.sock && ! -e $current_runtime/gwcomp.sock ]]
 }
 
 failure_stage=software-runtime
-run_profile software software shm "$software"
+begin_profile software software shm "$software" true
+"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+  --scenario basic-typing --result-json "$control/software-input.json"
+grep -Fq '"status":"completed"' "$control/software-input.json"
+software_fullscreen=$(settled_mirror "$current_dump_root")
+cp "$software_fullscreen" "$artifact_dir/milestone12-fullscreen.ppm"
+printf 'ready\nmode=1024x768\n' >"$control/software-screen-ready"
+wait_path "$control/software-screen-captured"
+cmp "$artifact_dir/milestone12-fullscreen.ppm" "$artifact_dir/milestone12-screen.ppm"
+: >"$current_out/live-control/exit-fullscreen"
+wait_path "$current_out/live-control/borderless-ready"
+resident_alive
+
+failure_stage=gwm-replay
+systemctl stop "$current_gwm_unit"
+for _ in {1..200}; do [[ ! -e $current_runtime/gwm.sock ]] && break; sleep .05; done
+[[ ! -e $current_runtime/gwm.sock ]]
+systemctl reset-failed "$current_gwm_unit" >/dev/null 2>&1 || true
+start_gwm; resident_alive; sleep .5
+result[gwm_replay]=passed
+
+failure_stage=compositor-replay
+frames_before=$(find "$current_dump_root" -type f -name '*.ppm' | wc -l)
+systemctl stop "$current_gwcomp_unit"
+for _ in {1..200}; do [[ ! -e $current_runtime/gwcomp.sock ]] && break; sleep .05; done
+[[ ! -e $current_runtime/gwcomp.sock ]]
+systemctl reset-failed "$current_gwcomp_unit" >/dev/null 2>&1 || true
+start_gwcomp; resident_alive
+for _ in {1..400}; do
+  frames_after=$(find "$current_dump_root" -type f -name '*.ppm' | wc -l)
+  ((frames_after > frames_before)) && break
+  sleep .05
+done
+((frames_after > frames_before)); result[compositor_replay]=passed
+
+failure_stage=vt-replay
+chvt 1; sleep 1; resident_alive
+systemctl is-active --quiet "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit" "$current_workload_unit"
+chvt "${target_vt##*/tty}"; sleep 1; resident_alive
+grep -q '"record":"vt","transition":"release"' "$current_drm_report"
+grep -q '"record":"vt","transition":"acquire"' "$current_drm_report"
+result[vt_replay]=passed
+"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+  --scenario close --result-json "$control/software-close.json"
+grep -Fq '"status":"completed"' "$control/software-close.json"
+wait_path "$current_out/resident-sdl.json"
+python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/resident-sdl.json"
+finish_profile
+cat "$renderer"/software-*.jsonl >"$artifact_dir/milestone12-renderer-software.jsonl"
+cat "$artifact_dir"/software/drm-report-*.jsonl >"$artifact_dir/milestone12-drm-damage-report.jsonl"
 cp "$artifact_dir/software/sdl.json" "$artifact_dir/milestone12-sdl-probe.json"
 cp "$artifact_dir/software/xcb.json" "$artifact_dir/milestone12-extension-probe.json"
 cp "$artifact_dir/software/testdraw2.log" "$artifact_dir/milestone12-testdraw2.log"
 cp "$artifact_dir/software/testsprite2.log" "$artifact_dir/milestone12-testsprite2.log"
 cp "$artifact_dir/software/extension-trace.json" "$artifact_dir/milestone12-extension-trace.json"
-cp "$renderer/software.jsonl" "$artifact_dir/milestone12-renderer-software.jsonl"
-cp "$artifact_dir/software/drm-report.jsonl" "$artifact_dir/milestone12-drm-damage-report.jsonl"
-cp "$artifact_dir/milestone12-software.ppm" "$artifact_dir/milestone12-fullscreen.ppm"
 for key in raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
   extension_registry big_requests mit_shm xfixes damage render composite randr \
-  colormap fullscreen borderless geometry_restore software_frame; do result[$key]=passed; done
-"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" --scenario basic-typing --result-json "$control/input.json"
-"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" --scenario close --result-json "$control/close.json"
-result[fullscreen_input_close]=passed
-printf 'ready\nmode=1024x768\n' >"$control/software-screen-ready"
-while [[ ! -e $control/software-screen-captured ]]; do sleep .1; done
-cmp "$artifact_dir/milestone12-software.ppm" "$artifact_dir/milestone12-screen.ppm"
-systemctl stop glasswyrm-m12-software.service
+  colormap fullscreen borderless geometry_restore software_frame fullscreen_input_close; do result[$key]=passed; done
 
 failure_stage=fallback-runtime
-run_profile noshm software no-shm "$software" MIT-SHM
-result[no_shm_fallback]=passed
-systemctl stop glasswyrm-m12-noshm.service
+begin_profile noshm software no-shm "$software" false MIT-SHM
+finish_profile; result[no_shm_fallback]=passed
 
 failure_stage=gles-runtime
-run_profile gles gles shm "$gles"
-cp "$renderer/gles.jsonl" "$artifact_dir/milestone12-renderer-gles.jsonl"
+begin_profile gles gles shm "$gles" true
+gles_fullscreen=$(settled_mirror "$current_dump_root")
 printf 'ready\nmode=1024x768\n' >"$control/gles-screen-ready"
-while [[ ! -e $control/gles-screen-captured ]]; do sleep .1; done
-cmp "$artifact_dir/milestone12-gles.ppm" "$artifact_dir/milestone12-gles-screen.ppm"
+wait_path "$control/gles-screen-captured"
+cmp "$gles_fullscreen" "$artifact_dir/milestone12-gles-screen.ppm"
+: >"$current_out/live-control/exit-fullscreen"
+wait_path "$current_out/live-control/borderless-ready"
+"$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+  --scenario close --result-json "$control/gles-close.json"
+wait_path "$current_out/resident-sdl.json"
+finish_profile
+cat "$renderer"/gles-*.jsonl >"$artifact_dir/milestone12-renderer-gles.jsonl"
+cat "$artifact_dir"/gles/drm-report-*.jsonl >>"$artifact_dir/milestone12-drm-damage-report.jsonl"
 cmp "$artifact_dir/milestone12-software.ppm" "$artifact_dir/milestone12-gles.ppm"
 result[gles_frame]=passed result[renderer_equality]=passed result[screenshot_equality]=passed
-systemctl stop glasswyrm-m12-gles.service
+
+failure_stage=restoration
+systemctl stop gw-uinput-m12.service
+for _ in {1..400}; do [[ ! -e $keyboard && ! -e $pointer ]] && break; sleep .05; done
+[[ ! -e $keyboard && ! -e $pointer ]]
+[[ $getty_active_before != active ]] || systemctl start "$getty_unit"
+getty_active_after=$(systemctl is-active "$getty_unit" 2>/dev/null || true)
+getty_enabled_after=$(systemctl is-enabled "$getty_unit" 2>/dev/null || true)
+[[ $getty_active_after == "$getty_active_before" ]]
+[[ $getty_enabled_after == "$getty_enabled_before" ]]
+python3 - "$artifact_dir/milestone12-getty-state.json" "$getty_unit" \
+  "$getty_active_before" "$getty_active_after" "$getty_enabled_before" \
+  "$getty_enabled_after" <<'PY'
+import json,sys
+out,unit,active_before,active_after,enabled_before,enabled_after=sys.argv[1:]
+json.dump({'schema':1,'unit':unit,'active_before':active_before,
+ 'active_after':active_after,'enabled_before':enabled_before,
+ 'enabled_after':enabled_after,'restored':active_before==active_after and
+ enabled_before==enabled_after},open(out,'w'),sort_keys=True)
+PY
+systemctl unmask --runtime "$logind_unit" "$logind_socket"
+[[ $logind_socket_active_before != active ]] || systemctl start "$logind_socket"
+[[ $logind_active_before != active ]] || systemctl start "$logind_unit"
+[[ $logind_socket_active_before == active ]] || systemctl stop "$logind_socket"
+[[ $logind_active_before == active ]] || systemctl stop "$logind_unit"
+logind_active_after=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
+logind_socket_active_after=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
+logind_enabled_after=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
+logind_socket_enabled_after=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
+[[ $logind_active_after == "$logind_active_before" &&
+   $logind_socket_active_after == "$logind_socket_active_before" &&
+   $logind_enabled_after == "$logind_enabled_before" &&
+   $logind_socket_enabled_after == "$logind_socket_enabled_before" ]]
+python3 - "$artifact_dir/milestone12-logind-state.json" "$logind_active_before" \
+  "$logind_active_after" "$logind_socket_active_before" "$logind_socket_active_after" \
+  "$logind_enabled_before" "$logind_enabled_after" "$logind_socket_enabled_before" \
+  "$logind_socket_enabled_after" <<'PY'
+import json,sys
+(out,active_before,active_after,socket_before,socket_after,enabled_before,
+ enabled_after,socket_enabled_before,socket_enabled_after)=sys.argv[1:]
+json.dump({'schema':1,'active_before':active_before,'active_after':active_after,
+ 'socket_active_before':socket_before,'socket_active_after':socket_after,
+ 'enabled_before':enabled_before,'enabled_after':enabled_after,
+ 'socket_enabled_before':socket_enabled_before,'socket_enabled_after':socket_enabled_after,
+ 'restored':active_before==active_after and socket_before==socket_after and
+ enabled_before==enabled_after and socket_enabled_before==socket_enabled_after},
+ open(out,'w'),sort_keys=True)
+PY
+"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+  --require-mode 1024x768 --expect-restored "$artifact_dir/milestone12-kms-before.json" \
+  --output "$artifact_dir/milestone12-kms-after.json"
+capture_vt_state "$artifact_dir/milestone12-vt-after.json"
+python3 - "$artifact_dir/milestone12-kms-before.json" "$artifact_dir/milestone12-kms-after.json" \
+  "$artifact_dir/milestone12-vt-before.json" "$artifact_dir/milestone12-vt-after.json" <<'PY'
+import json,sys
+kb,ka,vb,va=map(lambda p:json.load(open(p)),sys.argv[1:])
+checks={'active VT':(vb['active'][0],va['active'][0]),
+        'VT signal':(vb['active'][1],va['active'][1]),
+        'VT mode':(vb['mode'],va['mode']),'KD mode':(vb['kd'],va['kd'])}
+for label,(before,after) in checks.items():
+  if before!=after: raise SystemExit(f'{label} was not restored: {before!r} != {after!r}')
+if vb['active'][2]!=va['active'][2]:
+  print(f"VT open-mask changed (observational only): {vb['active'][2]!r} -> {va['active'][2]!r}")
+PY
+result[restoration]=passed
+
+failure_stage=cleanup-observation
+meson test -C "$software" --print-errorlogs gwcomp-buffer-readiness \
+  >"$artifact_dir/milestone12-buffer-readiness.log"
+shm_after=$(shm_count)
+live_processes_after=0
+eventfd_after=0
+for unit in gwm-m12-{software,noshm,gles}.service gwcomp-m12-{software,noshm,gles}.service \
+  glasswyrmd-m12-{software,noshm,gles}.service workload-m12-{software,noshm,gles}.service; do
+  while IFS= read -r pid; do [[ -z $pid ]] || live_processes_after=$((live_processes_after + 1)); done < <(service_pids "$unit")
+done
+eventfd_after=$(count_eventfds gwm-m12-{software,noshm,gles}.service \
+  gwcomp-m12-{software,noshm,gles}.service glasswyrmd-m12-{software,noshm,gles}.service \
+  workload-m12-{software,noshm,gles}.service)
+runtime_sockets_removed=false input_devices_removed=false texture_cache_released=false device_fds_released=false
+if [[ ! -e /tmp/.X11-unix/X99 ]]; then
+  runtime_sockets_removed=true
+  for name in software noshm gles; do
+    [[ ! -e /run/glasswyrm-m12-$name/gwm.sock && \
+       ! -e /run/glasswyrm-m12-$name/gwcomp.sock ]] || runtime_sockets_removed=false
+  done
+fi
+[[ ! -e $keyboard && ! -e $pointer ]] && input_devices_removed=true
+((live_processes_after == 0)) && texture_cache_released=true && device_fds_released=true
+python3 - "$artifact_dir/milestone12-sync-observation.json" "$shm_before" "$shm_live" "$shm_after" \
+  "$eventfd_live" "$eventfd_after" "$live_processes_after" "$runtime_sockets_removed" "$input_devices_removed" \
+  "$texture_cache_released" "$device_fds_released" "$producer_eventfd_live" \
+  "$consumer_eventfd_live" <<'PY'
+import json,sys
+(out,shm_before,shm_live,shm_after,eventfd_live,eventfd_after,processes,sockets,inputs,textures,devices,producer_eventfds,consumer_eventfds)=sys.argv[1:]
+truth=lambda value:value=='true'
+json.dump({'schema':1,'counts':{'eventfd_before':0,'eventfd_live':int(eventfd_live),
+ 'eventfd_after':int(eventfd_after),'producer_eventfd_live':int(producer_eventfds),
+ 'consumer_eventfd_live':int(consumer_eventfds),'shm_before':int(shm_before),'shm_live':int(shm_live),
+ 'shm_after':int(shm_after),'live_processes_after':int(processes)},'checks':{
+ 'eventfd_capability':int(eventfd_live)>0,'missing_token_wait':True,'read_after_token':True,
+ 'runtime_sockets_removed':truth(sockets),'input_devices_removed':truth(inputs),
+ 'texture_cache_released':truth(textures),'device_fds_released':truth(devices)}},
+ open(out,'w'),sort_keys=True)
+PY
 
 failure_stage=reports
-grep -Eq 'eventfd|sync' "$artifact_dir/milestone12-renderer-"*.jsonl
-cp "$artifact_dir/milestone12-renderer-gles.jsonl" "$artifact_dir/milestone12-sync-report.jsonl"
-grep -Eq 'damage|scissor|upload' "$artifact_dir/milestone12-renderer-gles.jsonl"
-grep -Eq 'damage|copied' "$artifact_dir/milestone12-drm-damage-report.jsonl"
+python3 "$source_dir/tests/compat/m12/validate_runtime_reports.py" \
+  --software-renderer "$artifact_dir/milestone12-renderer-software.jsonl" \
+  --gles-renderer "$artifact_dir/milestone12-renderer-gles.jsonl" \
+  --drm-report "$artifact_dir/milestone12-drm-damage-report.jsonl" \
+  --sync-observation "$artifact_dir/milestone12-sync-observation.json" \
+  --output-dir "$artifact_dir"
+readarray -t renderer_identity < <(python3 - "$artifact_dir/milestone12-renderer-summary.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))['gles']
+for key in ('egl_vendor','egl_version','gles_version','gl_vendor','gl_renderer','gl_version'):
+ print(d[key])
+print('true' if d.get('gbm_device') else 'false')
+print('software' if d['software_renderer'] else 'hardware')
+PY
+)
+egl_vendor=${renderer_identity[0]} egl_version=${renderer_identity[1]}
+gles_version=${renderer_identity[2]} gl_vendor=${renderer_identity[3]}
+gl_renderer=${renderer_identity[4]} gl_version=${renderer_identity[5]}
+gbm_available=${renderer_identity[6]} renderer_classification=${renderer_identity[7]}
 result[eventfd_sync]=passed result[missing_token_wait]=passed
-result[damage_upload]=passed result[damage_scanout]=passed
-
-# The fixed pure/fake suites cover replay state machines; the hardware profiles
-# above prove that the same synchronized buffers and textures reach DRM.
-result[vt_replay]=passed result[gwm_replay]=passed result[compositor_replay]=passed
-result[restoration]=passed
+result[damage_upload]=passed result[damage_scanout]=passed result[cleanup]=passed
 
 failure_stage=evidence-archive
 evidence=$artifact_dir/evidence; mkdir -p "$evidence"
@@ -478,6 +810,10 @@ cp "$artifact_dir"/milestone12-{software,gles,fullscreen,screen,gles-screen}.ppm
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-software,renderer-gles,drm-damage-report,sync-report}.jsonl "$evidence/"
+cp "$artifact_dir"/milestone12-{renderer-summary,drm-damage-summary,sync-observation}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{kms-before,kms-after,vt-before,vt-after}.json "$evidence/"
+cp "$artifact_dir/milestone12-getty-state.json" "$evidence/"
+cp "$artifact_dir/milestone12-logind-state.json" "$evidence/"
 cp "$scenes"/*.jsonl "$evidence/"
 (cd "$evidence" && sha256sum ./* >SHA256SUMS && sha256sum --check --status SHA256SUMS && tar -cf "$artifact_dir/milestone12-efficient-sdl-evidence.tar" ./*)
 result[archive_validation]=passed

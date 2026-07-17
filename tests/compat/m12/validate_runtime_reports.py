@@ -173,6 +173,7 @@ def validate_sync(path: pathlib.Path) -> dict[str, Any]:
         errors.append("sync observation schema must be one")
     counts = value.get("counts", {})
     for field in ("eventfd_before", "eventfd_live", "eventfd_after",
+                  "producer_eventfd_live", "consumer_eventfd_live",
                   "shm_before", "shm_live", "shm_after", "live_processes_after"):
         if not integer(counts.get(field)):
             errors.append(f"sync observation has invalid {field}")
@@ -181,6 +182,10 @@ def validate_sync(path: pathlib.Path) -> dict[str, Any]:
         errors.append("live session did not expose additional eventfds")
     if counts.get("eventfd_after") != counts.get("eventfd_before"):
         errors.append("eventfd count did not return to baseline")
+    if not integer(counts.get("producer_eventfd_live")) or counts.get("producer_eventfd_live") == 0:
+        errors.append("glasswyrmd exposed no live producer eventfd")
+    if not integer(counts.get("consumer_eventfd_live")) or counts.get("consumer_eventfd_live") == 0:
+        errors.append("gwcomp exposed no live consumer eventfd")
     if counts.get("shm_after") != counts.get("shm_before"):
         errors.append("SysV SHM inventory did not return to baseline")
     if counts.get("live_processes_after") != 0:
@@ -216,10 +221,14 @@ def main() -> int:
     outputs = {
         "milestone12-renderer-summary.json": {"schema": 1, "software": software, "gles": gles, "passed": True},
         "milestone12-drm-damage-summary.json": {"schema": 1, **drm, "passed": True},
-        "milestone12-sync-report.json": {"schema": 1, **sync},
+        "milestone12-sync-report.jsonl": {"schema": 1, **sync},
     }
     for name, value in outputs.items():
-        (arguments.output_dir / name).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        if name.endswith(".jsonl"):
+            encoded = json.dumps(value, sort_keys=True) + "\n"
+        else:
+            encoded = json.dumps(value, indent=2, sort_keys=True) + "\n"
+        (arguments.output_dir / name).write_text(encoded)
     print("M12 runtime reports: passed")
     return 0
 

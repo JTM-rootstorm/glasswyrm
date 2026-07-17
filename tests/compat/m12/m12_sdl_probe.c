@@ -322,6 +322,10 @@ int main(int argc, char **argv) {
   if (!result.borderless) remember_error(&result, "borderless window");
 
   if (control) {
+    SDL_WarpMouseInWindow(window, result.windowed_width - 20,
+                         result.windowed_height - 10);
+    SDL_RaiseWindow(window);
+    pump_events();
     if (write_marker(control, "borderless-ready"))
       result.close_event = wait_for_real_close(window);
   } else {

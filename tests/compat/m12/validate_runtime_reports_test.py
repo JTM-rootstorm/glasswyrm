@@ -68,6 +68,7 @@ def main() -> int:
         (root / "sync.json").write_text(json.dumps({
             "schema": 1,
             "counts": {"eventfd_before": 0, "eventfd_live": 3, "eventfd_after": 0,
+                       "producer_eventfd_live": 1, "consumer_eventfd_live": 1,
                        "shm_before": 1, "shm_live": 2, "shm_after": 1,
                        "live_processes_after": 0},
             "checks": {"eventfd_capability": True, "missing_token_wait": True,
