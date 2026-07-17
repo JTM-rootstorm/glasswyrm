@@ -550,7 +550,7 @@ systemd-run --unit=glasswyrm-session-m11.service \
   --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
   --property=StandardOutput=journal --property=StandardError=journal \
   --property=TTYReset=yes --property=TTYVHangup=yes \
-  --property=TTYVTDisallocate=no \
+  --property=TTYVTDisallocate=no --property=SuccessExitStatus=143 \
   --property=NoNewPrivileges=yes "${launcher[@]}"
 for _ in {1..300}; do [[ -S /tmp/.X11-unix/X99 && -S /run/glasswyrm-m11/gwm.sock && -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .1; done
 [[ -S /tmp/.X11-unix/X99 ]]
@@ -937,7 +937,9 @@ failure_stage=shutdown
 # already be unloaded.  B and the three required stack processes remain live.
 systemctl stop xterm-m11-b.service
 systemctl stop glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service
-for unit in glasswyrm-session-m11.service glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service; do
+[[ $(systemctl show glasswyrm-session-m11.service -p Result --value) == success ]]
+[[ $(systemctl show glasswyrm-session-m11.service -p ExecMainStatus --value) == 143 ]]
+for unit in glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service; do
   [[ $(systemctl show "$unit" -p Result --value) == success ]]
   [[ $(systemctl show "$unit" -p ExecMainStatus --value) == 0 ]]
 done
