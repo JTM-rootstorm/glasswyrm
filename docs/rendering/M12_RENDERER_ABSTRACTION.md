@@ -41,10 +41,12 @@ M4-M11 frame fixtures remain the canonical exact-pixel evidence.
 --renderer-report PATH
 ```
 
-The default is `software`. A build without the later EGL/GLES implementation
+The default is `software`. A build without the optional EGL/GLES implementation
 rejects forced `gles` during startup. In that build, `auto` selects software and
-records the unavailable GLES path as a fallback reason. It does not pretend
-that software composition is hardware acceleration.
+records the unavailable GLES path as a fallback reason. With GLES enabled,
+`auto` may fall back for an unsupported frame only when GLES preflight rejects
+the frame before changing GL state. It does not pretend that software
+composition is hardware acceleration.
 
 Presentation selection remains independent. For example,
 `--backend drm --renderer software` uses the reference renderer followed by the
@@ -63,8 +65,10 @@ The first record identifies the requested and selected renderer, EGL/GLES/GL
 fields, GBM/render-node fields, software-renderer classification, and bounded
 fallback reasons. Unavailable graphics fields are JSON `null`, not invented
 values. Each rendered frame records commit, generation, ordinal, disposition,
-damage rectangle count, texture upload count and bytes, readback bytes, and an
+damage rectangle count, texture upload count and bytes, live texture-cache
+bytes, readback bytes, an optional bounded per-frame fallback reason, and an
 optional error. Software frames report zero texture uploads and readback bytes.
 
-The EGL/GLES phase extends the same interface, selection factory, and report
-schema; it does not alter the presenter API or the canonical `SoftwareFrame`.
+The [EGL/GLES profile](M12_EGL_GLES.md) extends the same interface, selection
+factory, and report schema; it does not alter the presenter API or the canonical
+`SoftwareFrame`.
