@@ -575,6 +575,14 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('published-buffer', published_buffer_test, timeout: 10)
+  m12_extension_stress_probe = executable(
+    'm12_extension_stress_probe',
+    files('integration/m12_extension_stress_probe.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+    install: false,
+  )
+  test('m12-extension-stress', m12_extension_stress_probe, timeout: 20)
   content_presenter_test = executable(
     'content_presenter_test',
     files('unit/content_presenter_test.cpp'),
@@ -1320,6 +1328,13 @@ m12_workload_environment_test = find_program(
 test(
   'm12-workload-environment',
   m12_workload_environment_test,
+  timeout: 10,
+)
+
+m12_trace_validator_test = find_program('compat/m12/validate_trace_test.py')
+test(
+  'm12-trace-validator',
+  m12_trace_validator_test,
   timeout: 10,
 )
 
