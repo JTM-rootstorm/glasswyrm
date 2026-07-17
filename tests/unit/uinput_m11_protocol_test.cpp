@@ -44,10 +44,10 @@ bool is_event(const protocol::Event &event, protocol::Device device,
 }  // namespace
 
 int main() {
-  constexpr std::array<std::string_view, 10> expected{
+  constexpr std::array<std::string_view, 11> expected{
       "basic-typing", "repeat",         "scroll", "primary-selection",
       "clipboard-probe", "move",       "resize", "close",
-      "post-vt",      "post-restart",
+      "pointer-anchor", "post-vt",      "post-restart",
   };
   bool okay = true;
   const auto &names = protocol::scenario_names();
@@ -167,6 +167,18 @@ int main() {
                      is_event(close[7], protocol::Device::keyboard, EV_KEY,
                               KEY_LEFTALT, 0),
                  "close refocuses xterm A before Alt-F4");
+
+  const auto anchor = protocol::scenario_events("pointer-anchor");
+  okay &= expect(anchor.size() == 4 &&
+                     is_event(anchor[0], protocol::Device::pointer, EV_REL,
+                              REL_X, -32767) &&
+                     is_event(anchor[1], protocol::Device::pointer, EV_REL,
+                              REL_Y, -32767) &&
+                     is_event(anchor[2], protocol::Device::pointer, EV_REL,
+                              REL_X, 64) &&
+                     is_event(anchor[3], protocol::Device::pointer, EV_REL,
+                              REL_Y, 64),
+                 "pointer anchor clamps both axes before its fixed delta");
 
   const auto keys = protocol::keyboard_key_codes();
   for (const auto required : {KEY_A, KEY_BACKSPACE, KEY_ENTER, KEY_F4,

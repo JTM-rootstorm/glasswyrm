@@ -236,7 +236,8 @@ void usage(FILE *output) {
       "  gw_uinput_m11 run --control-socket PATH --scenario NAME "
       "--result-json PATH\n"
       "Scenarios: basic-typing, repeat, scroll, primary-selection, "
-      "clipboard-probe, move, resize, close, post-vt, post-restart\n");
+      "clipboard-probe, move, resize, close, pointer-anchor, post-vt, "
+      "post-restart\n");
 }
 
 bool make_address(const std::string &path, sockaddr_un &address,

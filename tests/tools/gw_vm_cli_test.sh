@@ -2167,6 +2167,10 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   "item.get('full_copy_reason')=='vt-resume'" \
   "'post_vt_repaint':int(vt_after)>int(vt_before)" \
   "'close_status_completed':close_status=='completed'" \
+  '--scenario pointer-anchor' \
+  'testsprite_alive' \
+  "'pointer_anchor_completed':anchor_status=='completed'" \
+  "'post_anchor_repaint':int(anchor_after)>int(anchor_before)" \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
   'finish_profile "$artifact_dir/milestone12-gles-testsprite.ppm"' \
   'assert_close_kept_vt' \
@@ -2184,6 +2188,9 @@ done
 assert_before "$m12_lib" \
   'begin_profile gles gles shm "$gles" true' \
   'run_live_replay_gates "$control/gles-close.json"'
+assert_before "$m12_lib" \
+  '--scenario pointer-anchor' \
+  'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
   'https://www.libsdl.org/release/SDL2-2.32.10.tar.gz'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \

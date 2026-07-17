@@ -586,6 +586,13 @@ d=json.load(open(sys.argv[1]))
 raise SystemExit(0 if all(os.path.exists(f'/proc/{d[k]}') for k in ('sdl_pid','testsprite2_pid')) else 1)
 PY
 }
+testsprite_alive() {
+  python3 - "$current_out/live-control/resident-ready.json" <<'PY'
+import json,os,sys
+d=json.load(open(sys.argv[1]))
+raise SystemExit(0 if os.path.exists(f"/proc/{d['testsprite2_pid']}") else 1)
+PY
+}
 assert_close_kept_vt() {
   # The direct session disables kernel console keyboard processing. Give any
   # delayed console action time to surface, then prove Alt+F4 did not steal VT.
@@ -700,6 +707,7 @@ PY
 run_live_replay_gates() {
   local close_json=$1 before_scene replayed_scene frames_before frames_after
   local vt_frames_before vt_frames_after close_status
+  local anchor_frames_before anchor_frames_after anchor_status
   local -a renderer_replay
   before_scene=$(settled_mirror "$current_dump_root")
 
@@ -749,13 +757,25 @@ run_live_replay_gates() {
   wait_path "$current_out/resident-sdl.json"
   python3 "$source_dir/tests/compat/m12/validate_result.py" \
     "$current_out/resident-sdl.json"
+  testsprite_alive
+  failure_stage=$current_name-pointer-anchor
+  anchor_frames_before=$(frame_count)
+  "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
+    --scenario pointer-anchor \
+    --result-json "$control/$current_name-pointer-anchor.json"
+  grep -Fq '"status":"completed"' \
+    "$control/$current_name-pointer-anchor.json"
+  anchor_status=completed
+  anchor_frames_after=$(wait_for_frame_progress "$anchor_frames_before")
+  testsprite_alive
   python3 - "$artifact_dir/milestone12-$current_name-replay.json" \
     "$current_name" "$current_renderer" "$frames_before" "$frames_after" \
     "$vt_frames_before" "$vt_frames_after" "${renderer_replay[1]}" \
-    "${renderer_replay[2]}" "$close_status" <<'PY'
+    "${renderer_replay[2]}" "$close_status" "$anchor_frames_before" \
+    "$anchor_frames_after" "$anchor_status" <<'PY'
 import json,sys
 (out,profile,renderer,before,after,vt_before,vt_after,uploads,cache,
- close_status)=sys.argv[1:]
+ close_status,anchor_before,anchor_after,anchor_status)=sys.argv[1:]
 json.dump({'schema':1,'profile':profile,'renderer':renderer,'passed':True,
  'checks':{'gwm_restart':True,'resident_after_gwm_restart':True,
  'compositor_restart':True,'resident_after_compositor_restart':True,
@@ -763,12 +783,16 @@ json.dump({'schema':1,'profile':profile,'renderer':renderer,'passed':True,
  'texture_replay':renderer!='gles' or (int(uploads)>0 and int(cache)>0),
  'vt_release':True,'vt_acquire':True,'vt_remodeset':True,
  'post_vt_repaint':int(vt_after)>int(vt_before),'resident_after_vt':True,
- 'close_status_completed':close_status=='completed'},
+ 'close_status_completed':close_status=='completed',
+ 'pointer_anchor_completed':anchor_status=='completed',
+ 'post_anchor_repaint':int(anchor_after)>int(anchor_before)},
  'frames':{'before_compositor_restart':int(before),
  'after_compositor_restart':int(after),'before_vt':int(vt_before),
- 'after_post_vt_repaint':int(vt_after)},
+ 'after_post_vt_repaint':int(vt_after),'before_pointer_anchor':int(anchor_before),
+ 'after_pointer_anchor_repaint':int(anchor_after)},
  'renderer_replay':{'texture_uploads':int(uploads),'texture_cache_bytes':int(cache)},
- 'close_status':close_status},open(out,'w'),sort_keys=True)
+ 'close_status':close_status,'pointer_anchor_status':anchor_status},
+ open(out,'w'),sort_keys=True)
 PY
   if [[ $current_name == gles ]]; then
     result[gwm_replay]=passed result[compositor_replay]=passed
