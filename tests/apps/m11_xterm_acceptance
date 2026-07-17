@@ -1,0 +1,322 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+pids=()
+scenario_dir='' transcript='' trace='' selection='' geometry='' wm_evidence=''
+server_journal=''
+frames='' scene='' drm_report='' mirror='' screenshot='' output=''
+while (($#)); do
+  case "$1" in
+    --xterm-pid) pids+=("$2"); shift 2 ;;
+    --scenario-dir) scenario_dir=$2; shift 2 ;;
+    --transcript) transcript=$2; shift 2 ;;
+    --trace) trace=$2; shift 2 ;;
+    --selection) selection=$2; shift 2 ;;
+    --geometry) geometry=$2; shift 2 ;;
+    --wm-evidence) wm_evidence=$2; shift 2 ;;
+    --server-journal) server_journal=$2; shift 2 ;;
+    --frames) frames=$2; shift 2 ;;
+    --scene) scene=$2; shift 2 ;;
+    --drm-report) drm_report=$2; shift 2 ;;
+    --mirror) mirror=$2; shift 2 ;;
+    --screenshot) screenshot=$2; shift 2 ;;
+    --output) output=$2; shift 2 ;;
+    *) printf 'm11_xterm_acceptance: unknown option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+
+[[ ${#pids[@]} -eq 2 && -n $scenario_dir && -n $transcript && -n $trace &&
+   -n $selection && -n $geometry && -n $wm_evidence && -n $server_journal && -n $frames &&
+   -n $scene && -n $drm_report &&
+   -n $mirror && -n $screenshot && -n $output ]] || {
+  printf '%s\n' 'usage: m11_xterm_acceptance --xterm-pid PID --xterm-pid PID --scenario-dir DIR --transcript PATH --trace PATH --selection PATH --geometry PATH --wm-evidence PATH --server-journal PATH --frames PATH --scene PATH --drm-report PATH --mirror PATH --screenshot PATH --output PATH' >&2
+  exit 2
+}
+for path in "$scenario_dir" "$transcript" "$trace" "$selection" "$geometry" "$wm_evidence" \
+  "$server_journal" "$frames" "$scene" "$drm_report" "$mirror" "$screenshot"; do
+  [[ -e $path ]] || { printf 'm11_xterm_acceptance: missing evidence: %s\n' "$path" >&2; exit 1; }
+done
+for pid in "${pids[@]}"; do [[ $pid =~ ^[1-9][0-9]*$ ]] || exit 1; done
+[[ -d /proc/${pids[1]} ]] || {
+  printf 'm11_xterm_acceptance: surviving xterm PID is not alive: %s\n' "${pids[1]}" >&2
+  exit 1
+}
+
+python3 - "$scenario_dir" "$transcript" "$trace" "$selection" "$geometry" "$wm_evidence" \
+  "$server_journal" "$frames" \
+  "$scene" "$drm_report" "$mirror" "$screenshot" "$output" "${pids[@]}" <<'PY'
+import hashlib,json,os,pathlib,re,sys
+scenario_dir,transcript,trace,selection,geometry,wm_evidence,server_journal,frames,scene,drm,mirror,screenshot,out,*pids=sys.argv[1:]
+
+def documents(path):
+    text=pathlib.Path(path).read_text(errors='strict')
+    if not text.strip(): raise SystemExit(f'empty JSON evidence: {path}')
+    try: return [json.loads(text)]
+    except json.JSONDecodeError:
+        result=[]
+        for number,line in enumerate(text.splitlines(),1):
+            if line.strip():
+                try: result.append(json.loads(line))
+                except json.JSONDecodeError as error: raise SystemExit(f'{path}:{number}: {error}')
+        return result
+
+required_scenarios=('basic-typing','repeat','scroll','primary-selection',
+                    'clipboard-probe','move','resize','close','post-vt','post-restart')
+scenario_counts={}
+for name in required_scenarios:
+    path=pathlib.Path(scenario_dir,f'{name}.json')
+    if not path.is_file(): raise SystemExit(f'missing uinput scenario result: {name}')
+    value=json.loads(path.read_text())
+    if (value.get('status')!='completed' or
+            not isinstance(value.get('event_count'),int) or
+            isinstance(value.get('event_count'),bool) or
+            value['event_count']<=0):
+        raise SystemExit(f'uinput scenario did not complete with events: {name}')
+    scenario_counts[name]=value['event_count']
+
+transcript_text=pathlib.Path(transcript).read_text(errors='replace')
+for token in ('M11_VT','M11_RESTART'):
+    if token not in transcript_text: raise SystemExit(f'PTY transcript lacks {token}')
+if transcript_text.count('M11_TYPED')<2:
+    raise SystemExit('PTY transcript does not prove corrected typing and edited re-execution')
+repeat_match=re.search(r'(?m)^M11_REPEAT_(a{3,16})$', transcript_text)
+if not repeat_match:
+    raise SystemExit('PTY transcript does not prove bounded server-generated key repeat')
+if not re.search(r'(?m)^M11_PASTED_M11_SELECTION_TOKEN$', transcript_text):
+    raise SystemExit('PTY transcript does not prove the two-xterm PRIMARY paste output')
+
+selection_value=documents(selection)[0]
+if selection_value.get('status')!='passed' or selection_value.get('selection')!='CLIPBOARD':
+    raise SystemExit('selection probe did not pass CLIPBOARD exchange')
+if selection_value.get('token')!='M11_CLIPBOARD_TOKEN' or set(selection_value.get('targets',()))!={'TARGETS','UTF8_STRING'}:
+    raise SystemExit('selection probe payload or targets mismatch')
+if selection_value.get('primary_replaced') is not True:
+    raise SystemExit('selection probe did not replace PRIMARY for SelectionClear evidence')
+
+geometry_value=documents(geometry)[0]
+if (geometry_value.get('schema')!=1 or geometry_value.get('status')!='passed' or
+        geometry_value.get('title')!='Glasswyrm-M11-B' or
+        not isinstance(geometry_value.get('window_id'),int)):
+    raise SystemExit('destination xterm geometry probe identity is invalid')
+initial=geometry_value.get('initial'); moved_geometry=geometry_value.get('moved')
+resized_geometry=geometry_value.get('resized'); size_hints=geometry_value.get('size_hints')
+configure_geometry=geometry_value.get('configure_notify')
+shell=geometry_value.get('shell')
+for name,value in (('initial',initial),('moved',moved_geometry),
+                   ('resized',resized_geometry)):
+    if (not isinstance(value,dict) or set(value)!= {'x','y','width','height'} or
+            not all(isinstance(item,int) and not isinstance(item,bool)
+                    for item in value.values())):
+        raise SystemExit(f'destination xterm {name} GetGeometry evidence is invalid')
+if (not isinstance(configure_geometry,dict) or
+        set(configure_geometry)!= {'moved','resized'} or
+        configure_geometry['moved']!=moved_geometry or
+        configure_geometry['resized']!=resized_geometry):
+    raise SystemExit('destination xterm ConfigureNotify payloads do not match GetGeometry')
+if (moved_geometry['x']-initial['x'],moved_geometry['y']-initial['y'])!=(96,64):
+    raise SystemExit('destination xterm GetGeometry does not prove the exact move')
+if (moved_geometry['width'],moved_geometry['height'])!=(initial['width'],initial['height']):
+    raise SystemExit('destination xterm move changed its dimensions')
+if (resized_geometry['x'],resized_geometry['y'])!=(moved_geometry['x'],moved_geometry['y']):
+    raise SystemExit('destination xterm resize changed its origin')
+if (not isinstance(size_hints,dict) or
+        not all(isinstance(size_hints.get(name),int) and
+                not isinstance(size_hints[name],bool) and size_hints[name]>=0
+                for name in ('base_width','base_height','width_increment','height_increment')) or
+        size_hints['width_increment']<=0 or size_hints['height_increment']<=0):
+    raise SystemExit('destination xterm resize hints are invalid')
+def cell_geometry(value,columns,rows):
+    return (value['width']==size_hints['base_width']+
+                columns*size_hints['width_increment'] and
+            value['height']==size_hints['base_height']+
+                rows*size_hints['height_increment'])
+if not cell_geometry(initial,80,24) or not cell_geometry(resized_geometry,90,28):
+    raise SystemExit('destination xterm GetGeometry is not the required 80x24 to 90x28 transition')
+if shell!={'columns':90,'rows':28}:
+    raise SystemExit('destination shell PTY dimensions are not 90x28')
+if (not isinstance(geometry_value.get('configure_notify_count'),int) or
+        isinstance(geometry_value['configure_notify_count'],bool) or
+        geometry_value['configure_notify_count']<2):
+    raise SystemExit('destination xterm lacks ConfigureNotify evidence')
+if (not isinstance(geometry_value.get('resize_expose_count'),int) or
+        isinstance(geometry_value['resize_expose_count'],bool) or
+        geometry_value['resize_expose_count']<1):
+    raise SystemExit('destination xterm lacks resize redraw evidence')
+
+wm_text=pathlib.Path(wm_evidence).read_text(errors='replace').lower()
+binding_values={}
+for name,expected,base in (('move_button',1,10),('resize_button',3,10),
+                           ('close_keysym',0xffc1,16),('minimum_width',96,10),
+                           ('minimum_height',64,10)):
+    match=re.search(rf'{name}=(0x[0-9a-f]+|[0-9]+)',wm_text)
+    if not match or int(match.group(1),base)!=expected:
+        raise SystemExit(f'GWM evidence lacks exact {name}={expected:#x}'
+                         if base==16 else
+                         f'GWM evidence lacks exact {name}={expected}')
+    binding_values[name]=expected
+policy_pattern=re.compile(
+    rf'gwm: lifecycle window upsert id={geometry_value["window_id"]} '
+    r'geometry=([0-9]+) requested=([0-9]+)x([0-9]+)\+(-?[0-9]+)\+(-?[0-9]+)')
+policy_records=[(int(serial),int(width),int(height),int(x),int(y))
+                for serial,width,height,x,y in policy_pattern.findall(wm_text)]
+def policy_index(expected,start=0):
+    for index,record in enumerate(policy_records[start:],start):
+        if record[1:]==(expected['width'],expected['height'],
+                       expected['x'],expected['y']): return index
+    return None
+move_policy=policy_index(moved_geometry)
+resize_policy=policy_index(resized_geometry,(move_policy+1) if move_policy is not None else 0)
+if (move_policy is None or resize_policy is None or
+        policy_records[move_policy][0]<=0 or
+        policy_records[resize_policy][0]<=policy_records[move_policy][0]):
+    raise SystemExit('GWM policy evidence lacks ordered exact move/resize snapshots')
+
+cursor_pattern=re.compile(
+    r'glasswyrmd: cursor publication accepted kind=([a-z0-9-]+) '
+    r'x=(-?[0-9]+) y=(-?[0-9]+) visible=([01]) buffer=(attached|reused)')
+cursor_records=[{'kind':kind,'x':int(x),'y':int(y),'visible':visible=='1','buffer':buffer}
+                for kind,x,y,visible,buffer in cursor_pattern.findall(
+                    pathlib.Path(server_journal).read_text(errors='replace'))]
+visible_cursor_records=[item for item in cursor_records if item['visible']]
+required_cursor_kinds=('left-pointer','xterm-text','fleur-move',
+                       'bottom-right-resize')
+visible_kinds={item['kind'] for item in visible_cursor_records}
+missing_cursor_kinds=set(required_cursor_kinds)-visible_kinds
+if missing_cursor_kinds:
+    raise SystemExit(f'server journal lacks accepted visible cursor kinds {sorted(missing_cursor_kinds)}')
+attached_kinds={item['kind'] for item in visible_cursor_records
+                if item['buffer']=='attached'}
+if not set(required_cursor_kinds) <= attached_kinds:
+    raise SystemExit('server journal does not prove attached buffers for every required cursor kind')
+cursor_positions={(item['x'],item['y']) for item in visible_cursor_records}
+if len(cursor_positions)<2:
+    raise SystemExit('server journal does not prove accepted cursor movement across positions')
+if not any(item['buffer']=='reused' for item in visible_cursor_records):
+    raise SystemExit('server journal does not prove accepted cursor buffer reuse')
+
+trace_docs=documents(trace)
+if len(trace_docs)!=1 or not isinstance(trace_docs[0],dict) or trace_docs[0].get('schema')!=1:
+    raise SystemExit('normalized trace must be one schema 1 object')
+trace_value=trace_docs[0]
+request_histogram=trace_value.get('request_histogram')
+event_histogram=trace_value.get('event_histogram')
+event_records=trace_value.get('event_sequence')
+if not isinstance(request_histogram,dict) or not all(
+        isinstance(name,str) and isinstance(count,int) and not isinstance(count,bool)
+        and count>0 for name,count in request_histogram.items()):
+    raise SystemExit('normalized trace has an invalid request_histogram')
+if not isinstance(event_histogram,dict) or not all(
+        isinstance(name,str) and name.isdigit() and isinstance(count,int)
+        and not isinstance(count,bool) and count>0
+        for name,count in event_histogram.items()):
+    raise SystemExit('normalized trace has an invalid event_histogram')
+if not isinstance(event_records,list):
+    raise SystemExit('normalized trace has an invalid event_sequence')
+observed_events={}
+for record in event_records:
+    if not isinstance(record,dict) or set(record)!= {'client','event_type'}:
+        raise SystemExit('normalized trace has an invalid event_sequence record')
+    client=record['client']; event_type=record['event_type']
+    if (isinstance(client,bool) or not isinstance(client,int) or client<0 or
+            isinstance(event_type,bool) or not isinstance(event_type,int) or
+            event_type<0):
+        raise SystemExit('normalized trace has an invalid event_sequence value')
+    key=str(event_type); observed_events[key]=observed_events.get(key,0)+1
+if observed_events!=event_histogram:
+    raise SystemExit('normalized trace event_sequence does not match event_histogram')
+if trace_value.get('error_histogram')!={}:
+    raise SystemExit('normalized trace contains X11 errors')
+if trace_value.get('unknown_opcodes')!=[]:
+    raise SystemExit('normalized trace contains unknown opcodes')
+trace_gated=trace_value.get('trace_gated_requests')
+if not isinstance(trace_gated,dict) or not all(
+        name in {'GrabButton','UngrabButton','GrabKey','UngrabKey'} and
+        isinstance(count,int) and not isinstance(count,bool) and count>0 and
+        request_histogram.get(name)==count
+        for name,count in trace_gated.items()):
+    raise SystemExit('normalized trace has invalid trace_gated_requests')
+event_types={int(name) for name in event_histogram}
+required_types={2,3,4,5,6,22,28,29,30,31,33}
+if not required_types <= event_types:
+    raise SystemExit(f'normalized trace lacks event types {sorted(required_types-event_types)}')
+for request in ('ChangeWindowAttributes','CreateGlyphCursor','FreeCursor',
+                'RecolorCursor','GetSelectionOwner','SetSelectionOwner',
+                'ConvertSelection','SendEvent'):
+    if request not in request_histogram:
+        raise SystemExit(f'normalized trace lacks {request} request evidence')
+button_presses=event_histogram.get('4',0)
+button_releases=event_histogram.get('5',0)
+if button_presses<4 or button_releases<4:
+    raise SystemExit('trace lacks the button delivery volume required by selection and wheel scenarios')
+if event_histogram.get('2',0)<3:
+    raise SystemExit('trace lacks repeated keyboard delivery')
+
+frame_docs=documents(frames)
+if not frame_docs: raise SystemExit('frame manifest has no records')
+scene_docs=documents(scene); scene_text=json.dumps(scene_docs,separators=(',',':')).lower()
+if 'cursor' not in scene_text: raise SystemExit('scene manifest lacks cursor surface evidence')
+
+geometries={}
+def visit(value):
+    if isinstance(value,dict):
+        keys=set(value)
+        if {'x','y','width','height'} <= keys:
+            identity=next((value.get(k) for k in ('window_id','window','xid','surface_id','surface') if value.get(k) is not None),None)
+            if identity is not None:
+                geometries.setdefault(str(identity),set()).add(tuple(value[k] for k in ('x','y','width','height')))
+        for child in value.values(): visit(child)
+    elif isinstance(value,list):
+        for child in value: visit(child)
+for doc in scene_docs: visit(doc)
+if len(geometries)<2: raise SystemExit('scene manifest does not prove two xterm windows')
+moved=any(len({(x,y) for x,y,_,_ in values})>1 for values in geometries.values())
+resized=any(len({(w,h) for _,_,w,h in values})>1 for values in geometries.values())
+if not moved: raise SystemExit('scene manifest does not prove a window move')
+if not resized: raise SystemExit('scene manifest does not prove a window resize')
+
+drm_docs=documents(drm)
+present=[item for item in drm_docs if isinstance(item,dict) and item.get('canonical_hash') and item.get('scanout_hash')]
+if not present or any(item['canonical_hash']!=item['scanout_hash'] for item in present):
+    raise SystemExit('DRM report does not prove canonical/scanout hash parity')
+
+def sha(path): return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+mirror_hash=sha(mirror); screenshot_hash=sha(screenshot)
+if mirror_hash!=screenshot_hash: raise SystemExit('canonical mirror and DRM screenshot differ')
+
+payload={'status':'passed','xterm_pids':[int(x) for x in pids],
+         'pty_transcript':True,'typed':True,'edited':True,'repeated':True,
+         'repeat_characters':len(repeat_match.group(1)),
+         'scrolled':True,'wheel':True,'primary':True,'pasted':True,
+         'moved':True,'resized':True,'relative_motion':True,
+         'get_geometry':True,'configure_notify':True,'xterm_redraw':True,
+         'shell_dimensions':True,'gwm_policy_snapshot':True,
+         'wm_bindings':True,'grabs':True,'client_message':True,
+         'cursor_resources':True,
+         'cursor_scanout':True,'scenario_events':scenario_counts,
+         'binding_profile':{'schema':1,'source':'gwm-journal',
+             'replay_verified':True,**binding_values},
+         'geometry_acceptance':{'schema':1,'source':'xcb-and-gwm',
+             'window_id':geometry_value['window_id'],'title':geometry_value['title'],
+             'initial':initial,'moved':moved_geometry,'resized':resized_geometry,
+             'configure_notify':configure_geometry,
+             'shell':shell,'configure_notify_count':geometry_value['configure_notify_count'],
+             'resize_expose_count':geometry_value['resize_expose_count'],
+             'move_geometry_serial':policy_records[move_policy][0],
+             'resize_geometry_serial':policy_records[resize_policy][0]},
+         'selection_client_message':{'schema':1,'source':'normalized-x11-trace',
+             'requests':['GetSelectionOwner','SetSelectionOwner',
+                         'ConvertSelection','SendEvent'],
+             'event_types':{'PropertyNotify':28,'SelectionClear':29,
+                            'SelectionRequest':30,'SelectionNotify':31,
+                            'ClientMessage':33}},
+         'cursor_diagnostics':{'accepted':len(cursor_records),
+             'visible':len(visible_cursor_records),
+             'kinds':list(required_cursor_kinds),
+             'positions':len(cursor_positions),
+             'attached_kinds':sorted(attached_kinds),
+             'buffer_reused':True},
+         'windows':len(geometries),'canonical_hash':present[-1]['canonical_hash'],
+         'scanout_hash':present[-1]['scanout_hash'],
+         'mirror_sha256':mirror_hash,'screenshot_sha256':screenshot_hash}
+pathlib.Path(out).write_text(json.dumps(payload,sort_keys=True,indent=2)+'\n')
+PY

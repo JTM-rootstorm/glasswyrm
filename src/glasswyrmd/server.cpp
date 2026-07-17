@@ -1,6 +1,7 @@
 #include "glasswyrmd/server.hpp"
 
 #include "glasswyrmd/event_router.hpp"
+#include "glasswyrmd/protocol_event_router.hpp"
 
 #include <algorithm>
 #include <array>
@@ -51,6 +52,15 @@ Server::Server(Options options) : options_(std::move(options)) {
       (void)router.route_expose(intent.window, rectangles, recipients);
     }
   };
+  protocol_event_handler_ =
+      [this](const std::vector<ProtocolEventIntent>& intents) {
+        std::vector<ClientConnection*> recipients;
+        recipients.reserve(clients_.size());
+        for (const auto& client : clients_) recipients.push_back(client.get());
+        ProtocolEventRouter router(state_.resources());
+        for (const auto& intent : intents)
+          (void)router.route(intent, recipients);
+      };
 }
 
 Server::~Server() {

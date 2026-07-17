@@ -147,7 +147,7 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u16(static_cast<std::uint16_t>(kVendor.size()));
   body.write_u16(kScreenModel.maximum_request_length);
   body.write_u8(1);                         // screens
-  body.write_u8(1);                         // pixmap formats
+  body.write_u8(2);                         // pixmap formats
   body.write_u8(0);                         // image byte order: LSBFirst
   body.write_u8(0);                         // bitmap bit order: LSBFirst
   body.write_u8(32);                        // bitmap scanline unit
@@ -158,6 +158,11 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
 
   body.write_bytes(kVendor);
   body.write_padding(padding_for(kVendor.size()));
+
+  body.write_u8(1);  // pixmap depth
+  body.write_u8(1);  // bits per pixel
+  body.write_u8(32); // scanline pad
+  body.write_padding(5);
 
   body.write_u8(24); // pixmap depth
   body.write_u8(32); // bits per pixel
@@ -179,7 +184,7 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u8(0);  // backing store: Never
   body.write_u8(0);  // save unders
   body.write_u8(kScreenModel.root_depth);
-  body.write_u8(1);  // allowed depths
+  body.write_u8(2);  // allowed depths
 
   body.write_u8(kScreenModel.root_depth);
   body.write_padding(1);
@@ -193,6 +198,11 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u32(kScreenModel.red_mask);
   body.write_u32(kScreenModel.green_mask);
   body.write_u32(kScreenModel.blue_mask);
+  body.write_padding(4);
+
+  body.write_u8(1);  // depth-one pixmaps
+  body.write_padding(1);
+  body.write_u16(0); // no visuals
   body.write_padding(4);
 
   const std::size_t body_size = body.size();

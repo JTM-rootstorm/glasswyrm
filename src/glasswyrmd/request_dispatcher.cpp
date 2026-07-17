@@ -48,10 +48,34 @@ DispatchResult dispatch_request(ServerState& state,
         return get_property(state, context, request);
       case x11::CoreOpcode::ListProperties:
         return list_properties(state, context, request);
+      case x11::CoreOpcode::SetSelectionOwner:
+        return set_selection_owner(state, context, request);
+      case x11::CoreOpcode::GetSelectionOwner:
+        return get_selection_owner(state, context, request);
+      case x11::CoreOpcode::ConvertSelection:
+        return convert_selection(state, context, request);
+      case x11::CoreOpcode::SendEvent:
+        return send_event(state, context, request);
+      case x11::CoreOpcode::GrabPointer:
+        return grab_pointer(state, context, request);
+      case x11::CoreOpcode::UngrabPointer:
+        return ungrab_pointer(state, context, request);
+      case x11::CoreOpcode::GrabButton:
+        return grab_button(state, context, request);
+      case x11::CoreOpcode::ChangeActivePointerGrab:
+        return change_active_pointer_grab(state, context, request);
+      case x11::CoreOpcode::GrabKeyboard:
+        return grab_keyboard(state, context, request);
+      case x11::CoreOpcode::UngrabKeyboard:
+        return ungrab_keyboard(state, context, request);
+      case x11::CoreOpcode::AllowEvents:
+        return allow_events(state, context, request);
       case x11::CoreOpcode::QueryPointer:
         return query_pointer(state, context, request);
       case x11::CoreOpcode::TranslateCoordinates:
         return translate_coordinates(state, context, request);
+      case x11::CoreOpcode::QueryKeymap:
+        return query_keymap(context, request);
       case x11::CoreOpcode::GetInputFocus:
         return get_input_focus(state, context, request);
       case x11::CoreOpcode::OpenFont:
@@ -74,12 +98,28 @@ DispatchResult dispatch_request(ServerState& state,
         return query_colors(state, context, request);
       case x11::CoreOpcode::LookupColor:
         return named_color(state, context, request, false);
+      case x11::CoreOpcode::CreateCursor:
+        return create_cursor(state, context, request);
+      case x11::CoreOpcode::CreateGlyphCursor:
+        return create_glyph_cursor(state, context, request);
+      case x11::CoreOpcode::FreeCursor:
+        return free_cursor(state, context, request);
+      case x11::CoreOpcode::RecolorCursor:
+        return recolor_cursor(state, context, request);
+      case x11::CoreOpcode::QueryBestSize:
+        return query_best_size(state, context, request);
       case x11::CoreOpcode::QueryExtension:
         return query_extension(context, request);
       case x11::CoreOpcode::ListExtensions:
         return list_extensions(context, request);
       case x11::CoreOpcode::GetKeyboardMapping:
         return get_keyboard_mapping(context, request);
+      case x11::CoreOpcode::ChangeKeyboardControl:
+        return change_keyboard_control(state, context, request);
+      case x11::CoreOpcode::GetKeyboardControl:
+        return get_keyboard_control(state, context, request);
+      case x11::CoreOpcode::Bell:
+        return bell(context, request);
       case x11::CoreOpcode::GetPointerMapping:
         return get_pointer_mapping(context, request);
       case x11::CoreOpcode::GetModifierMapping:

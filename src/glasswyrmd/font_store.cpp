@@ -7,7 +7,8 @@ namespace glasswyrm::server {
 
 OpenFontStatus ResourceTable::open_font(
     const ClientId owner, const std::uint32_t resource_base,
-    const std::uint32_t resource_mask, const std::uint32_t xid) {
+    const std::uint32_t resource_mask, const std::uint32_t xid,
+    const FontIdentity identity) {
   if (!valid_new_resource_id(xid, resource_base, resource_mask))
     return OpenFontStatus::BadIdChoice;
   std::size_t client_fonts = 0;
@@ -23,7 +24,8 @@ OpenFontStatus ResourceTable::open_font(
     return OpenFontStatus::BadAlloc;
   try {
     resources_.emplace(xid, ResourceRecord{ResourceType::Font, owner,
-                                           FontResource{}});
+                                           FontResource{kDefaultFontXid,
+                                                        identity}});
     try { resources_by_owner_[owner].push_back(xid); }
     catch (...) { resources_.erase(xid); throw; }
   } catch (const std::bad_alloc&) { return OpenFontStatus::BadAlloc; }

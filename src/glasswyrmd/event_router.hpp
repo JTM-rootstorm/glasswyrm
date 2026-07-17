@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/client_connection.hpp"
 #include "glasswyrmd/resource_table.hpp"
+#include "glasswyrmd/grab_state.hpp"
 #include "core/geometry/rectangle.hpp"
 #include "input/input_state.hpp"
 #include "protocol/x11/input_event.hpp"
@@ -16,8 +17,10 @@ namespace glasswyrm::server {
 
 struct DirectInputEventState {
   std::uint32_t window{};
-  std::int16_t x{};
-  std::int16_t y{};
+  std::int64_t root_origin_x{};
+  std::int64_t root_origin_y{};
+  bool root_origin_valid{};
+  std::vector<std::uint32_t> ancestry;
   std::vector<ClientId> focus_recipients;
   std::vector<ClientId> leave_recipients;
 };
@@ -67,6 +70,15 @@ public:
       gw::protocol::x11::CoreEventType type, std::uint8_t detail,
       std::uint32_t time, std::uint32_t source, std::uint16_t state,
       std::uint32_t delivery_mask, std::int32_t root_x, std::int32_t root_y,
+      std::uint32_t pointer_target,
+      std::span<ClientConnection *const> clients) const;
+  [[nodiscard]] std::optional<std::pair<ClientId, std::uint32_t>>
+  input_recipient(std::uint32_t source, std::uint32_t delivery_mask) const;
+  [[nodiscard]] std::size_t route_input_grabbed(
+      const GrabState& grabs, gw::protocol::x11::CoreEventType type,
+      std::uint8_t detail, std::uint32_t time, std::uint32_t source,
+      std::uint16_t state, std::uint32_t delivery_mask,
+      std::int32_t root_x, std::int32_t root_y,
       std::uint32_t pointer_target,
       std::span<ClientConnection *const> clients) const;
   [[nodiscard]] std::size_t route_crossing(

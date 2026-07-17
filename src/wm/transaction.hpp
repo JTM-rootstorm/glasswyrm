@@ -21,6 +21,9 @@ class Transaction {
   [[nodiscard]] Evaluation commit(std::uint64_t generation,
                                   const OutputPreflight& preflight = {});
   void disconnect() noexcept;
+  void set_committed_policy_hash(std::uint64_t hash) noexcept {
+    committed_policy_.hash = hash;
+  }
 
   [[nodiscard]] bool snapshot_active() const noexcept { return snapshot_active_; }
   [[nodiscard]] const RawState& pending() const noexcept { return pending_; }

@@ -86,6 +86,8 @@ actions:
 ./tools/gw-vm milestone2-runtime-test --yes
 ./tools/gw-vm milestone3-runtime-test --yes
 ./tools/gw-vm milestone4-runtime-test --yes
+./tools/gw-vm milestone11-runtime-test --yes
+./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
 `push-overlay` synchronizes `packaging/gentoo/overlay/` to the configured guest
@@ -180,6 +182,42 @@ buffer release, invalid metadata and buffers, malformed-peer isolation, and a
 reconnecting snapshot. Exact hashes are checked against repository fixtures.
 No arbitrary scenario names are accepted.
 
+Milestone 11 has a fixed interactive desktop command:
+
+```sh
+./tools/gw-vm milestone11-runtime-test --yes
+```
+
+Run it after the required external reset to the single configured `base`
+snapshot. It builds the libinput/DRM profile, creates fixed uinput keyboard and
+pointer devices, runs the pinned
+xterm 410 core-font ASCII profile through `glasswyrm-session`, and validates
+trace, selection, interaction, VT/restart, frame, graphical-console,
+restoration, and archive evidence. A successful summary is the accepted M11
+VM result; the existence of the command alone is not.
+
+When a failure occurs after the M11 dependency and build matrix has completed,
+the narrower diagnostic command can reuse that already-provisioned guest:
+
+```sh
+./tools/gw-vm milestone11-interactive-rerun --yes
+```
+
+The rerun still synchronizes committed source and checks the required VM
+devices. Its marker must prove that a previous complete M11 build reached the
+runtime build, the existing runtime Meson directory must remain reusable, and
+the pinned xterm source hash must match. The command then reconfigures and
+incrementally compiles only that runtime tree against the current commit before
+repeating uinput startup, the live interactions, VT and peer-restart cycles,
+restoration, and evidence archive. It deliberately does not reinstall
+dependencies or rerun the strict compiler, sanitizer, component, source-layout,
+or staged-consumer matrices. Its summary is named
+`interactive-rerun/milestone11-interactive-rerun-summary.json` beneath the
+configured host artifact directory and always records
+`accepted_milestone11_result` as false. It is a development shortcut, not an
+acceptance result: the final clean `milestone11-runtime-test` remains mandatory
+and never skips the earlier gates.
+
 ## Safety
 
 Snapshot reset, emerge, unmerge, and the complete packaging test change guest
@@ -234,3 +272,15 @@ Milestone 4 acceptance writes `milestone4-runtime-test.log`,
 `milestone4-frames.tar`. A passing summary requires exact source identity,
 build and runtime evidence, at least one golden hash, socket cleanup, a valid
 frame archive, and the current systemd invocation journal.
+
+Milestone 11 acceptance writes the runtime, Meson, xterm interaction,
+selection, VT/restart, journal, normalized-trace, DRM frame, graphical-console,
+restoration, facts, and summary evidence plus its checksum-protected archive.
+The summary passes only when the exact pinned xterm patch 410 core-font ASCII
+profile completes every gate and the collected archive validates.
+An interactive diagnostic rerun uses the separate guest directory
+`/var/tmp/glasswyrm-m11-rerun-artifacts` and host `interactive-rerun/`
+subdirectory, so authoritative full-run evidence is not replaced. Its archive
+contains diagnostic provenance recording both the current runtime rebuild
+commit and the earlier full build commit. Rerun the complete command afterward
+to produce authoritative acceptance evidence.

@@ -1,0 +1,29 @@
+# Deterministic interactive shell profile for the Milestone 11 xterm target.
+export LC_ALL=C
+export LANG=C
+export TERM=xterm
+
+unset PROMPT_COMMAND
+unset PROMPT_DIRTRIM
+export PS1='gw$ '
+export PS2='> '
+export PS4='+ '
+
+export HISTFILE=/dev/null
+export HISTSIZE=0
+export HISTFILESIZE=0
+set +o history
+
+# Readline bracketed-paste negotiation would add terminal output unrelated to
+# the fixed typing and selection scenarios.
+bind 'set enable-bracketed-paste off' 2>/dev/null || :
+
+umask 077
+
+# The VM acceptance harness may request a byte-for-byte PTY transcript while
+# retaining this exact rcfile and xterm argv profile. Normal launches leave it
+# unset and take no logging path.
+if [[ -n ${GW_M11_TRANSCRIPT:-} ]]; then
+  exec > >(tee -a -- "$GW_M11_TRANSCRIPT" >/dev/tty) 2>&1
+fi
+printf 'M11_READY\n'

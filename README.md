@@ -7,6 +7,11 @@ and per-output scaling.
 Milestone 10 DRM/KMS software scanout is complete and validated on the
 configured Gentoo QXL VM through its real DRM primary node, graphical console,
 and VT lifecycle.
+Milestone 11 implementation adds an opt-in libinput/libxkbcommon input path,
+core cursor/grab/selection behavior, interactive GWM bindings, coordinated
+input/VT state, and a session launcher. The pinned xterm patch 410 core-font
+ASCII profile is validated by the live interaction, restart, VT, normalized
+trace, canonical-frame, graphical-console, restoration, and archive gates.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -34,9 +39,10 @@ queries, and opt-in safe protocol tracing. Pinned `xeyes` 1.3.1 and `xclock`
 Milestone 10 preserves that canonical software frame and adds an opt-in Linux
 DRM/KMS presenter using XRGB8888 dumb buffers, atomic modesetting when fully
 usable, a legacy fallback, delayed presentation completion, and direct or
-inherited session ownership. Headless remains the default. There is still no
-real-device input, grabs, XKB, cursors, broad X11 application support,
-acceleration, or multi-output policy.
+inherited session ownership. Headless remains the default. Milestone 11 builds
+the first real-device and interactive baseline on those boundaries. Broad X11
+application support, the XKB extension, acceleration, and multi-output policy
+remain absent.
 Runtime tools remain placeholders.
 
 ## Build
@@ -96,6 +102,19 @@ applies only to `libgwipc`; the remaining reserved renderer, policy, assembly,
 and experimental switches do not enable runtime behavior until their
 milestones land.
 
+The real-input backend is likewise Linux-only and opt-in:
+
+```sh
+meson setup build-m11 \
+  -Dlibinput_backend=true -Ddrm_backend=true -Dwerror=true
+meson compile -C build-m11
+meson test -C build-m11 --print-errorlogs
+```
+
+With `libinput_backend=false` (the default), Meson does not discover or link
+libinput or libxkbcommon. Enabling it requires `glasswyrmd` and `libgwipc` plus
+libinput, libxkbcommon, xkeyboard-config data, and timerfd support.
+
 `compile_commands.json` is generated in each Meson build directory.
 
 ## Running the setup server
@@ -116,6 +135,11 @@ glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
             [--software-content] [--synthetic-input-socket PATH]
             [--x11-trace PATH]
+            [--libinput-device PATH]...
+            [--xkb-rules NAME] [--xkb-model NAME]
+            [--xkb-layout NAME] [--xkb-variant NAME]
+            [--xkb-options LIST]
+            [--repeat-delay-ms N] [--repeat-rate-hz N]
             [--help] [--version]
 ```
 
@@ -253,6 +277,48 @@ input-driven repaint, ordered restoration, and the checksum-protected evidence
 archive. Mocked host coverage remains an additional regression layer rather
 than a substitute for this graphical-console proof.
 
+## Milestone 11 interactive desktop profile
+
+`glasswyrm-session` starts `gwm`, DRM `gwcomp`, real-input `glasswyrmd`, and an
+optional initial client without invoking a shell or acquiring privileges. The
+caller must already be able to open the selected DRM node, VT, and explicit
+input device paths. See [the launcher contract](docs/session/M11_SESSION_LAUNCHER.md)
+and [input documentation](docs/input/).
+
+The validated compatibility claim is only xterm patch 410 under the exact
+core-font ASCII build, environment, and command pinned in
+`tests/compat/m11/clients.toml`: one US pc105 keymap, one workspace, software
+cursor, minimum PRIMARY/CLIPBOARD exchange, Alt+Button1 move, Alt+Button3
+resize, Alt+F4 close, and one DRM/KMS output. Passive grabs are limited to the
+observed `GrabButton` path; `UngrabButton` and passive key grabs are
+unsupported. Xft/Unicode, the XKB extension, XIM/compose, arbitrary layouts,
+themed/hardware cursors, full grabs, clipboard persistence, decorations, and
+multiple workspaces/outputs are unsupported.
+
+The fixed VM command is:
+
+```sh
+./tools/gw-vm milestone11-runtime-test --yes
+```
+
+That command establishes acceptance only when its live trace, interaction,
+VT/restart, canonical-frame, console screenshot, restoration, and archive
+checks all pass.
+
+After that command has completed its build phase at the current commit, a late
+interactive failure can be investigated without repeating the compiler matrix:
+
+```sh
+./tools/gw-vm milestone11-interactive-rerun --yes
+```
+
+This development-only rerun requires a guest where the complete M11 build
+matrix previously reached the runtime build and the pinned xterm cache is still
+valid. It reconfigures and incrementally compiles only that runtime tree against
+the current committed source, then repeats the live input, VT/restart,
+restoration, and archive path. Its summary explicitly is not an acceptance
+result; the complete clean `milestone11-runtime-test` remains the final gate.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:
@@ -297,25 +363,29 @@ core error. It never maps or displays the window.
 
 ## Current binaries
 
-- `glasswyrmd`: owns X11 protocol, resource, and input-routing truth; implements
-  standalone M2, the integrated lifecycle, and opt-in M7/M8 content and input.
+- `glasswyrmd`: owns X11 protocol, resource, input, cursor, grab, and selection
+  truth; implements standalone M2, the integrated lifecycle, M8 synthetic
+  input, and the opt-in M11 real-input profile.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`.
 - `gwcomp`: owns software composition and final display authority; it retains
   the default headless path and can present the identical canonical frame
   through the opt-in M10 DRM/KMS backend. It accepts M6 metadata-only scenes
   without fake buffers and buffered ProtocolServer surfaces in M7
-  software-content mode.
+  software-content mode and capability-gated software cursor/session state.
+- `glasswyrm-session`: unprivileged three-process and optional-client
+  orchestrator for the M11 development session.
 - `gwctl`: future runtime control utility.
 - `gwinfo`: future diagnostics utility.
 - `gwtrace`: future protocol/event tracing utility.
 - `gwout`: future output configuration utility.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.5 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.6 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and compositor,
-window-policy, and lifecycle vocabularies. Wire 1.0 and
+window-policy, lifecycle, synthetic-input, session-state, and interactive
+policy vocabularies. Wire 1.0 and
 SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
 control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
@@ -339,7 +409,8 @@ and tested compatibility boundary.
 - `src/compositor/`: bounded staged scene, geometry, and damage primitives.
 - `src/backends/`: component-neutral software frames, tested headless output,
   DRM/KMS software scanout, and direct/external session boundaries.
-- `src/input/`: reserved for `glasswyrmd` input routing.
+- `src/input/`: synthetic/real input routing, libinput conversion, xkb state,
+  repeat, and cursor-model primitives.
 - `src/render/`: reference software renderer plus reserved accelerated paths.
 - `tools/`: developer and runtime command-line tools.
 - `tests/`: unit and headless integration tests.
@@ -460,3 +531,7 @@ opt-in drawable and raster subset. The
 [Milestone 8 profile](docs/protocols/x11-milestone-8.md) records the exact
 synthetic event-routing subset. None is a compatibility claim for normal X11
 applications.
+The [Milestone 11 profile](docs/protocols/x11-milestone-11.md) records the
+accepted interactive subset, while the
+[xterm profile](docs/compatibility/M11_XTERM.md) limits the external-client
+claim to the pinned patch 410 core-font ASCII invocation.

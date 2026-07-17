@@ -19,6 +19,27 @@
 namespace glasswyrm::server::request_handlers {
 namespace x11 = gw::protocol::x11;
 
+void fill_opaque_stippled(PixelStorage& destination,
+                          const geometry::Rectangle rectangle,
+                          const GraphicsContextResource& gc) noexcept {
+  const auto clipped = geometry::intersect(
+      rectangle, {0, 0, destination.width(), destination.height()});
+  if (!clipped) return;
+  const auto mask = gc.plane_mask & 0x00ffffffU;
+  for (std::uint32_t y = 0; y < clipped->height; ++y)
+    for (std::uint32_t x = 0; x < clipped->width; ++x) {
+      const auto destination_x = static_cast<std::uint32_t>(clipped->x) + x;
+      const auto destination_y = static_cast<std::uint32_t>(clipped->y) + y;
+      const bool foreground = !gc.stipple ||
+          gc.stipple->at(destination_x % gc.stipple->width(),
+                         destination_y % gc.stipple->height()) != 0;
+      const auto source = foreground ? gc.foreground : gc.background;
+      auto& pixel = destination.at(destination_x, destination_y);
+      pixel = 0xff000000U | (source & mask) |
+              (pixel & ~mask & 0x00ffffffU);
+    }
+}
+
 std::optional<geometry::Rectangle> clipped_bounds(
     const PixelStorage& storage, const std::span<const RasterPoint> points) {
   if (points.empty()) return std::nullopt;
@@ -45,6 +66,8 @@ DispatchResult poly_line(ServerState& state, const DispatchContext& context,
   std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
   const auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (gc->fill_style != 0)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
     return error(context, request, known_drawable(state.resources(), drawable)
         ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
@@ -84,6 +107,8 @@ DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
   std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
   const auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (gc->fill_style != 0)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
     return error(context, request, known_drawable(state.resources(), drawable)
         ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
@@ -120,6 +145,8 @@ DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
   if (shape != 2 || mode != 0) return error(context, request, x11::CoreErrorCode::BadImplementation);
   const auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (gc->fill_style != 0)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
     return error(context, request, known_drawable(state.resources(), drawable)
         ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
@@ -147,6 +174,8 @@ DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
   std::uint32_t drawable{}, gc_id{}; (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id);
   const auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
+  if (gc->fill_style != 0)
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
   if (!state.resources().find_pixmap(drawable) && !supported_window_drawable(state.resources(), drawable))
     return error(context, request, known_drawable(state.resources(), drawable)
         ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
@@ -185,16 +214,21 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
   (void)reader.read_u32(drawable); (void)reader.read_u32(gc_id); (void)reader.read_u16(width);
   (void)reader.read_u16(height); (void)reader.read_u16(raw_x); (void)reader.read_u16(raw_y);
   (void)reader.read_u8(left_pad); (void)reader.read_u8(depth); (void)reader.skip(2);
-  const auto payload_size = request.data <= 1
+  const bool bitmap_payload = request.data <= 1 || depth == 1;
+  const auto payload_size = bitmap_payload
       ? ((static_cast<std::uint64_t>(width) + 31U) / 32U * 4U) * height
       : static_cast<std::uint64_t>(width) * height * 4U;
   if (payload_size > std::numeric_limits<std::size_t>::max() ||
       request.bytes.size() != 24U + payload_size)
     return error(context, request, x11::CoreErrorCode::BadLength);
-  const auto expected_depth = request.data <= 1 ? 1U : 24U;
-  if (depth != expected_depth || left_pad != 0)
+  const auto expected_depth = request.data <= 1 ? 1U : depth;
+  if ((request.data <= 1 && depth != 1) ||
+      (request.data == 2 && depth != 1 && depth != 24) || left_pad != 0)
     return error(context, request, x11::CoreErrorCode::BadValue,
-                 depth != expected_depth ? depth : left_pad);
+                 ((request.data <= 1 && depth != 1) ||
+                  (request.data == 2 && depth != 1 && depth != 24))
+                     ? depth
+                     : left_pad);
   auto* gc = state.resources().find_gc(gc_id);
   if (!gc) return error(context, request, x11::CoreErrorCode::BadGContext, gc_id);
   auto* pixmap = state.resources().find_pixmap(drawable);
@@ -212,6 +246,15 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
                              static_cast<std::int16_t>(raw_y), width, height,
                              payload, gc->foreground, gc->background,
                              gc->plane_mask)
+        ? DispatchResult{}
+        : error(context, request, x11::CoreErrorCode::BadLength);
+  }
+  if (depth == 1) {
+    auto* bitmap = pixmap ? pixmap->bitmap() : nullptr;
+    if (!bitmap) return error(context, request, x11::CoreErrorCode::BadMatch, drawable);
+    return put_zpixmap_lsb32(*bitmap, static_cast<std::int16_t>(raw_x),
+                            static_cast<std::int16_t>(raw_y), width, height,
+                            payload, gc->plane_mask)
         ? DispatchResult{}
         : error(context, request, x11::CoreErrorCode::BadLength);
   }
@@ -250,7 +293,10 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   if (supported_window_drawable(state.resources(), drawable))
     result.drawable_damage.reserve(damage.rectangles().size());
   for (const auto& rectangle : damage.rectangles()) {
-    storage->fill(rectangle, gc->foreground, gc->plane_mask);
+    if (gc->fill_style == 3)
+      fill_opaque_stippled(*storage, rectangle, *gc);
+    else
+      storage->fill(rectangle, gc->foreground, gc->plane_mask);
   }
   child_clip.restore();
   if (supported_window_drawable(state.resources(), drawable))

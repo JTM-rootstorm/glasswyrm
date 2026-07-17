@@ -21,7 +21,9 @@ Documents:
 - [Policy Snapshots](POLICY_SNAPSHOTS.md)
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md)
 - [M6 Lifecycle Policy](M6_LIFECYCLE_POLICY.md)
+- [M11 Interactive Policy](M11_INTERACTIVE_POLICY.md)
 
 M6 adds an explicit `glasswyrmd` lifecycle peer while preserving the M5
 synthetic regression boundary. Input, decoration rendering, multiple
-workspaces, and real display integration remain deferred.
+workspaces remain deferred. Milestone 11 capability-gates one interactive
+binding record without changing legacy policy snapshots.

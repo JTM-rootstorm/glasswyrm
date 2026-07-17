@@ -6,6 +6,44 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
+  session_launcher_test = executable(
+    'session_launcher_test',
+    files('unit/session_launcher_test.cpp'),
+    dependencies: [gw_session_launcher_dep, dependency('threads')],
+    include_directories: include_directories('..'),
+  )
+  test('session-launcher', session_launcher_test, timeout: 10)
+  test('session-launcher-help', glasswyrm_session_program, args: ['--help'],
+       depends: glasswyrm_session_program, timeout: 10)
+endif
+
+if host_machine.system() == 'linux'
+  uinput_m11_protocol_lib = static_library(
+    'uinput_m11_protocol',
+    files('helpers/uinput_m11_protocol.cpp'),
+    include_directories: include_directories('..'),
+  )
+  uinput_m11_protocol_dep = declare_dependency(
+    link_with: uinput_m11_protocol_lib,
+    include_directories: include_directories('..'),
+  )
+  gw_uinput_m11_program = executable(
+    'gw_uinput_m11',
+    files('integration/gw_uinput_m11.cpp'),
+    dependencies: uinput_m11_protocol_dep,
+    install: false,
+  )
+  test('gw-uinput-m11-help', gw_uinput_m11_program, args: ['--help'],
+       timeout: 10)
+  uinput_m11_protocol_test = executable(
+    'uinput_m11_protocol_test',
+    files('unit/uinput_m11_protocol_test.cpp'),
+    dependencies: uinput_m11_protocol_dep,
+  )
+  test('gw-uinput-m11-protocol', uinput_m11_protocol_test, timeout: 10)
+endif
+
 x11_event_test = executable(
   'x11_event_test',
   files('protocol/x11_event_test.cpp'),
@@ -55,6 +93,26 @@ test(
   'm9-trace-summarize',
   m9_trace_summarize_test,
   args: [meson.current_source_dir() / 'compat/m9/m9_trace_summarize'],
+  timeout: 10,
+)
+m11_trace_summarize_test = find_program('compat/m11/m11_trace_summarize_test.py')
+test(
+  'm11-trace-summarize',
+  m11_trace_summarize_test,
+  args: [meson.current_source_dir() / 'compat/m11/m11_trace_summarize'],
+  timeout: 10,
+)
+m11_fixture_validate_test = find_program('tools/m11_fixture_validate_test.py')
+test(
+  'm11-fixture-validator',
+  m11_fixture_validate_test,
+  args: [meson.current_source_dir() / 'tools/m11_fixture_validate.py'],
+  timeout: 10,
+)
+test(
+  'm11-fixture-checksum',
+  find_program('tools/m11_fixture_validate.py'),
+  args: [meson.project_source_root() / 'tests/fixtures/m11'],
   timeout: 10,
 )
 
@@ -130,6 +188,22 @@ if get_option('gwm')
     include_directories: test_source_root_include,
   )
   test('wm-policy', wm_policy_test, timeout: 10)
+  interactive_policy_test = executable(
+    'interactive_policy_test',
+    files('wm/interactive_policy_test.cpp'),
+    dependencies: gw_wm_policy_dep,
+    include_directories: test_source_root_include,
+  )
+  test('interactive-policy', interactive_policy_test, timeout: 10)
+  if get_option('glasswyrmd')
+    interactive_close_test = executable(
+      'interactive_close_test',
+      files('wm/interactive_close_test.cpp'),
+      dependencies: [gw_wm_policy_dep, gw_server_state_dep],
+      include_directories: test_source_root_include,
+    )
+    test('interactive-close', interactive_close_test, timeout: 10)
+  endif
 
   gwm_process_test = executable(
     'gwm_process_test',
@@ -179,6 +253,52 @@ if get_option('gwm')
 endif
 
 if get_option('glasswyrmd')
+  if get_option('libinput_backend')
+    xkb_keymap_test = executable(
+      'xkb_keymap_test',
+      files('unit/xkb_keymap_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('xkb-keymap', xkb_keymap_test, timeout: 10)
+    repeat_timer_test = executable(
+      'repeat_timer_test',
+      files('unit/repeat_timer_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('repeat-timer', repeat_timer_test, timeout: 10)
+    libinput_path_allowlist_test = executable(
+      'libinput_path_allowlist_test',
+      files('unit/libinput_path_allowlist_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('libinput-path-allowlist', libinput_path_allowlist_test, timeout: 10)
+    libinput_backend_test = executable(
+      'libinput_backend_test',
+      files('unit/libinput_backend_test.cpp'),
+      dependencies: gw_xkb_keymap_dep,
+      include_directories: test_source_root_include,
+    )
+    test('libinput-backend', libinput_backend_test, timeout: 10)
+    real_input_controller_test = executable(
+      'real_input_controller_test',
+      files('unit/real_input_controller_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('real-input-controller', real_input_controller_test, timeout: 10)
+    real_absolute_pointer_routing_test = executable(
+      'real_absolute_pointer_routing_test',
+      files('integration/real_absolute_pointer_routing_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('real-absolute-pointer-routing',
+         real_absolute_pointer_routing_test, timeout: 10)
+  endif
+
   input_foundation_test = executable(
     'input_foundation_test',
     files('unit/input_foundation_test.cpp'),
@@ -186,6 +306,56 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('input-foundation', input_foundation_test, timeout: 10)
+  keyboard_mapping_dispatch_test = executable(
+    'keyboard_mapping_dispatch_test',
+    files('unit/keyboard_mapping_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('keyboard-mapping-dispatch', keyboard_mapping_dispatch_test,
+       timeout: 10)
+  cursor_model_test = executable(
+    'cursor_model_test',
+    files('unit/cursor_model_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-model', cursor_model_test, timeout: 10)
+  cursor_dispatch_test = executable(
+    'cursor_dispatch_test',
+    files('unit/cursor_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-dispatch', cursor_dispatch_test, timeout: 10)
+  selection_store_test = executable(
+    'selection_store_test',
+    files('unit/selection_store_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('selection-store', selection_store_test, timeout: 10)
+  selection_dispatch_test = executable(
+    'selection_dispatch_test',
+    files('unit/selection_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('selection-dispatch', selection_dispatch_test, timeout: 10)
+  grab_state_test = executable(
+    'grab_state_test',
+    files('unit/grab_state_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('grab-state', grab_state_test, timeout: 10)
+  grab_dispatch_test = executable(
+    'grab_dispatch_test',
+    files('unit/grab_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('grab-dispatch', grab_dispatch_test, timeout: 10)
   drawable_core_test = executable(
     'drawable_core_test',
     files('unit/drawable_core_test.cpp'),
@@ -374,6 +544,13 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('content-presenter', content_presenter_test, timeout: 10)
+  cursor_presenter_test = executable(
+    'cursor_presenter_test',
+    files('unit/cursor_presenter_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('cursor-presenter', cursor_presenter_test, timeout: 10)
   lifecycle_projection_test = executable(
     'lifecycle_projection_test',
     files('unit/lifecycle_projection_test.cpp'),
@@ -419,6 +596,14 @@ if get_option('gwcomp') and get_option('headless_backend')
     include_directories: test_source_root_include,
   )
   test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10)
+
+  gwcomp_cursor_surface_test = executable(
+    'gwcomp_cursor_surface_test',
+    files('unit/gwcomp_cursor_surface_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-cursor-surface', gwcomp_cursor_surface_test, timeout: 10)
 
   gwcomp_metadata_process_test = executable(
     'gwcomp_metadata_process_test',
@@ -481,6 +666,14 @@ if get_option('gwcomp') and get_option('headless_backend')
 endif
 
 if get_option('gwcomp')
+gwcomp_session_state_test = executable(
+  'gwcomp_session_state_test',
+  files('unit/gwcomp_session_state_test.cpp'),
+  dependencies: gwcomp_options_dep,
+  include_directories: test_source_root_include,
+)
+test('gwcomp-session-state', gwcomp_session_state_test, timeout: 10)
+
 gwcomp_signal_runtime_test = executable(
   'gwcomp_signal_runtime_test',
   files('unit/gwcomp_signal_runtime_test.cpp'),
@@ -655,6 +848,23 @@ if get_option('drm_backend')
 endif
 
 if get_option('libgwipc')
+  gwipc_session_c_consumer = executable(
+    'gwipc_session_c_consumer',
+    files('install/gwipc_session_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.6-session-c-consumer', gwipc_session_c_consumer,
+       timeout: 10)
+  gwipc_session_cpp_consumer = executable(
+    'gwipc_session_cpp_consumer',
+    files('install/gwipc_session_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.6-session-cpp-consumer', gwipc_session_cpp_consumer,
+       timeout: 10)
+
   public_control_api_test = executable(
     'public_control_api_test',
     files('unit/ipc/public_control_api_test.cpp'),
@@ -836,7 +1046,11 @@ if get_option('glasswyrmd')
       dependencies: gw_server_state_dep,
       include_directories: test_source_root_include,
     )
-    test(unit_case[0], unit_program, timeout: 10)
+    unit_timeout = 10
+    if unit_case[0] == 'window-tree'
+      unit_timeout = 30
+    endif
+    test(unit_case[0], unit_program, timeout: unit_timeout)
   endforeach
 
   x11_fake_client_lib = static_library(
@@ -860,6 +1074,8 @@ if get_option('glasswyrmd')
     ['glasswyrmd-malformed-client', 'glasswyrmd_malformed_client_test.cpp'],
     ['glasswyrmd-lifecycle', 'glasswyrmd_lifecycle_test.cpp'],
     ['glasswyrmd-core-requests', 'glasswyrmd_core_requests_test.cpp'],
+    ['glasswyrmd-selection', 'glasswyrmd_selection_test.cpp'],
+    ['glasswyrmd-m11-isolation', 'glasswyrmd_m11_isolation_test.cpp'],
   ]
     integration_program = executable(
       integration_case[0],
@@ -942,6 +1158,18 @@ if get_option('glasswyrmd')
       files('xcb/xcb_milestone7_probe.c'),
       dependencies: xcb_test_dependency,
     )
+    m11_selection_probe = executable(
+      'm11_selection_probe',
+      files('xcb/m11_selection_probe.cpp'),
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
+    m11_xterm_geometry_probe = executable(
+      'm11_xterm_geometry_probe',
+      files('xcb/m11_xterm_geometry_probe.cpp'),
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
     if get_option('libgwipc')
       xcb_milestone8_probe = executable(
         'xcb_milestone8_probe',
@@ -969,6 +1197,15 @@ if get_option('glasswyrmd')
     )
   endif
 endif
+
+m11_xterm_acceptance = find_program('apps/m11_xterm_acceptance')
+m11_xterm_acceptance_test = find_program('apps/m11_xterm_acceptance_test.sh')
+test(
+  'm11-xterm-acceptance',
+  m11_xterm_acceptance_test,
+  args: [m11_xterm_acceptance],
+  timeout: 10,
+)
 
 gw_vm_cli_test = find_program('tools/gw_vm_cli_test.sh')
 test(

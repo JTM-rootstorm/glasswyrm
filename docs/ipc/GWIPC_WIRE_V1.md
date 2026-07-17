@@ -53,6 +53,11 @@ The 64-bit capability bits are:
 | 8 | FrameAcknowledgement |
 | 9 | TraceMetadata |
 | 10 | WindowPolicy |
+| 11 | WindowLifecycle |
+| 12 | SyntheticInput |
+| 13 | SessionState |
+| 14 | InteractivePolicy |
+| 15 | CursorSurface |
 
 Unknown offered bits are ignored. Unknown required bits reject the handshake.
 Negotiated capabilities are the offered intersection and must contain the
@@ -235,6 +240,27 @@ snapshot and zero flags for incremental updates. PolicyWindowRemove uses zero
 flags. PolicyCommit uses exactly `AckRequired`; PolicyWindowState uses exactly
 `SnapshotItem`; PolicyAcknowledged uses exactly `Reply`. Other flag
 combinations are protocol errors.
+
+`PolicyBindingsUpsert` (`0x0213`) is one output-snapshot item carrying the
+move, resize, and close modifier bindings, pointer buttons, close keysym,
+minimum geometry, and raise/consume booleans. It requires InteractivePolicy,
+carries no descriptors, and is required exactly once in each negotiated
+policy snapshot. Legacy peers retain the v1 policy hash.
+
+## Session State Contract Registry
+
+`SessionStateChange` (`0x0400`) is an AckRequired compositor-to-server request
+with nonzero increasing generation, Active or Inactive state, and zero
+flags/reserved fields. It requires SessionState and carries no descriptors.
+
+`SessionStateAcknowledged` (`0x0401`) is its correlated Reply. Generation and
+state must match and result is Accepted, AlreadyApplied, InputUnavailable, or
+Failed. The direction, capability, flags, sequence correlation, and descriptor
+count are validated by the connection layer.
+
+CursorSurface does not add message IDs. It capability-gates a cursor-marked
+SurfaceUpsert plus ARGB8888 memfd BufferAttach, damage, and frame commit using
+the existing compositor registry.
 
 ## Descriptor Ownership
 

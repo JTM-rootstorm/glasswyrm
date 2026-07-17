@@ -109,6 +109,12 @@ The VM run must validate, not merely collect:
 The summary is a pass only when every mandatory field is present and correct.
 A screenshot that merely looks plausible is not sufficient.
 
+The post-VT xeyes input proof requires an accepted synthetic-input
+acknowledgement at root coordinates `(35, 55)`. It does not require a queued
+`MotionNotify`: the accepted xeyes profile polls the current pointer through
+`QueryPointer`. The resulting repaint must still produce a later correlated
+page flip whose changed canonical hash matches both scanout and frame evidence.
+
 ## Forced-termination recovery
 
 If `gwcomp` is killed before it can restore state:

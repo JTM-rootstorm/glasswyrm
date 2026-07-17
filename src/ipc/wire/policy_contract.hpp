@@ -72,6 +72,12 @@ struct PolicyAcknowledged {
   std::uint32_t window_count{};
   PolicyResult result{PolicyResult::Accepted};
 };
+struct PolicyBindingsUpsert {
+  std::uint16_t move_modifiers{}, resize_modifiers{}, close_modifiers{};
+  std::uint8_t move_button{}, resize_button{};
+  std::uint32_t close_keysym{}, minimum_width{}, minimum_height{};
+  bool raise_on_focus{}, consume_wm_bindings{};
+};
 #define GWIPC_POLICY_CODEC(T)                                                  \
   std::vector<std::uint8_t> encode(const T &);                                 \
   CodecStatus decode(std::span<const std::uint8_t>, T &)
@@ -81,5 +87,6 @@ GWIPC_POLICY_CODEC(PolicyWindowRemove);
 GWIPC_POLICY_CODEC(PolicyCommit);
 GWIPC_POLICY_CODEC(PolicyWindowState);
 GWIPC_POLICY_CODEC(PolicyAcknowledged);
+GWIPC_POLICY_CODEC(PolicyBindingsUpsert);
 #undef GWIPC_POLICY_CODEC
 } // namespace gw::ipc::wire

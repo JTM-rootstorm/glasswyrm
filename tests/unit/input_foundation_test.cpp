@@ -31,8 +31,11 @@ int main() {
           state.mask() == sm::Button1 &&
           state.transition_button(1, true) == input::TransitionStatus::InvalidTransition,
           "button transition and precondition");
-  require(state.transition_button(6, true) == input::TransitionStatus::InvalidValue,
-          "button range");
+  require(state.transition_button(8, true) == input::TransitionStatus::Accepted &&
+          (state.mask() & sm::Button5) == 0 && state.any_button_down() &&
+          state.transition_button(8, false) == input::TransitionStatus::Accepted &&
+          state.transition_button(10, true) == input::TransitionStatus::InvalidValue,
+          "extended buttons have no core state bit and remain bounded");
   require(state.transition_key(37, true) == input::TransitionStatus::Accepted &&
           state.transition_key(105, true) == input::TransitionStatus::Accepted &&
           (state.mask() & sm::Control) != 0 &&
@@ -42,6 +45,12 @@ int main() {
           (state.mask() & sm::Control) == 0, "paired modifiers remain active");
   state.reset_provider_state();
   require(state.mask() == 0, "provider reset clears buttons keys and modifiers");
+  state.set_core_modifier_mask(sm::Lock | sm::Mod4);
+  require(state.mask() == (sm::Lock | sm::Mod4) &&
+              state.accept_wrapping_time(0xffffffffU) &&
+              state.accept_wrapping_time(1) && state.time() == 1,
+          "real input accepts externally derived modifiers and timestamp wrap");
+  state.reset_provider_state();
 
   const std::vector<input::RouteWindow> windows{
       {1, 0, 0, {{1, em::KeyPress, true}}},
@@ -60,10 +69,6 @@ int main() {
           "motion hint is inert without pointer selection");
 
   using D = gw::protocol::x11::NotifyDetail;
-  require(input::crossing_details(1, 1, 2) == std::pair{D::Inferior,D::Ancestor} &&
-          input::crossing_details(1, 2, 1) == std::pair{D::Ancestor,D::Inferior} &&
-          input::crossing_details(1, 2, 3) == std::pair{D::Nonlinear,D::Nonlinear},
-          "one-level crossing detail matrix");
   require(input::crossing_focus(1, 1, 2) && input::crossing_focus(1, 2, 2) &&
           !input::crossing_focus(1, 3, 2), "crossing focus bit");
 
@@ -98,11 +103,41 @@ int main() {
   require(input::hit_test_top_level(resources, 10, 10) == base + 1 &&
           input::hit_test_top_level(resources, 9, 10) == root &&
           input::hit_test_top_level(resources, 60, 10) == root,
-          "override redirect included and borders excluded");
-  auto coordinates = input::event_coordinates(resources, base + 1, base + 2, 5, 7);
-  require(coordinates.event_x == -5 && coordinates.event_y == -3 && coordinates.child == 0,
-          "top-level signed event coordinates");
-  coordinates = input::event_coordinates(resources, root, base + 1, 5, 7);
-  require(coordinates.event_x == 5 && coordinates.event_y == 7 && coordinates.child == base + 1,
+          "override redirect is included while top-level borders stay excluded");
+  auto* child = resources.find_window(base + 4);
+  child->map_state = server::MapState::Viewable;
+  child->x = 5;
+  child->y = 6;
+  child->border_width = 2;
+  require(input::hit_test_top_level(resources, 18, 19) == base + 1 &&
+              input::hit_test_deepest_viewable(resources, 18, 19) == base + 4 &&
+              input::hit_test_deepest_viewable(resources, 14, 15) == base + 1 &&
+              input::managed_top_level_ancestor(resources, base + 4) == base + 1 &&
+              input::managed_top_level_ancestor(resources, base + 3) == root,
+          "deep pointer hit-test descends into viewable children while policy resolves the managed ancestor");
+  require(input::window_ancestry(resources, base + 4) ==
+              std::vector<std::uint32_t>{base + 4, base + 1, root} &&
+              input::window_ancestry(resources, base + 99).empty(),
+          "pointer ancestry is ordered deepest-to-root and rejects missing windows");
+  auto coordinates = input::event_coordinates(resources, base + 1, base + 4, 18, 19);
+  require(coordinates.event_x == 8 && coordinates.event_y == 9 &&
+              coordinates.child == base + 4,
+          "ancestor event coordinates name the immediate pointer child");
+  coordinates = input::event_coordinates(resources, base + 4, base + 4, 18, 19);
+  require(coordinates.event_x == 1 && coordinates.event_y == 1 &&
+              coordinates.child == 0,
+          "nested event coordinates include the complete window ancestry");
+  coordinates = input::event_coordinates(resources, root, base + 4, 18, 19);
+  require(coordinates.event_x == 18 && coordinates.event_y == 19 &&
+              coordinates.child == base + 1,
           "root coordinates name immediate pointer child");
+  require(input::crossing_details(resources, root, base + 4) ==
+                  std::pair{D::Inferior, D::Ancestor} &&
+              input::crossing_details(resources, base + 4, base + 1) ==
+                  std::pair{D::Ancestor, D::Inferior} &&
+              input::crossing_details(resources, base + 1, base + 4) ==
+                  std::pair{D::Inferior, D::Ancestor} &&
+              input::crossing_details(resources, base + 1, base + 2) ==
+                  std::pair{D::Nonlinear, D::Nonlinear},
+          "nested crossing details follow ancestor relationships");
 }

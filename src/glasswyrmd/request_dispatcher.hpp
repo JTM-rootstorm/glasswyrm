@@ -1,24 +1,40 @@
 #pragma once
 
 #include "glasswyrmd/server_state.hpp"
+#include "glasswyrmd/keyboard_mapping.hpp"
 #include "protocol/x11/byte_order.hpp"
 #include "protocol/x11/request.hpp"
 #include "protocol/x11/lifecycle_request.hpp"
+#include "protocol/x11/event.hpp"
 #include "core/geometry/rectangle.hpp"
 
 #include <cstdint>
+#include <array>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace glasswyrm::server {
 
 struct InputSnapshot {
+  InputSnapshot() = default;
+  InputSnapshot(std::int32_t x, std::int32_t y, std::uint16_t mask,
+                std::uint32_t target, std::uint32_t time,
+                std::array<std::uint8_t, 32> keys = {}) noexcept
+      : root_x(x), root_y(y), state_mask(mask), pointer_target(target),
+        logical_time(time), keymap(keys) {}
+
   std::int32_t root_x{0};
   std::int32_t root_y{0};
   std::uint16_t state_mask{0};
   std::uint32_t pointer_target{1};
   std::uint32_t logical_time{1};
+  std::array<std::uint8_t, 32> keymap{};
+  std::shared_ptr<const KeyboardMappingSnapshot> keyboard_mapping;
+  std::function<bool(bool)> set_global_auto_repeat;
 };
 
 struct DispatchContext {
@@ -58,6 +74,24 @@ struct ExposeIntent {
   glasswyrm::geometry::Rectangle rectangle{};
 };
 
+using ProtocolEvent = std::variant<
+    gw::protocol::x11::PropertyNotifyEvent,
+    gw::protocol::x11::SelectionClearEvent,
+    gw::protocol::x11::SelectionRequestEvent,
+    gw::protocol::x11::SelectionNotifyEvent,
+    gw::protocol::x11::ClientMessageEvent>;
+
+enum class ProtocolEventDelivery { DirectClient, WindowOwner, WindowMask };
+
+struct ProtocolEventIntent {
+  ProtocolEventDelivery delivery{ProtocolEventDelivery::DirectClient};
+  ClientId client{0};
+  std::uint32_t window{0};
+  std::uint32_t mask{0};
+  bool propagate{false};
+  ProtocolEvent event;
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -71,6 +105,7 @@ struct DispatchResult {
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
+  std::vector<ProtocolEventIntent> protocol_events;
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

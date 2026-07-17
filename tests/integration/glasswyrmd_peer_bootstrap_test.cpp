@@ -1,4 +1,5 @@
 #include "glasswyrmd/compositor_peer.hpp"
+#include "glasswyrmd/cursor_presenter.hpp"
 #include "glasswyrmd/pixel_storage.hpp"
 #include "glasswyrmd/published_buffer.hpp"
 #include "glasswyrmd/policy_peer.hpp"
@@ -209,6 +210,14 @@ int main(int argc, char **argv) {
   drive(policy);
   results.push_back(policy.result());
   stop(wm);
+  const std::string legacy_wm_socket = root + "/gwm-legacy.sock";
+  const auto legacy_wm = launch(argv[1], legacy_wm_socket);
+  glasswyrm::server::PolicyPeer legacy_policy(
+      legacy_wm_socket, gw::protocol::x11::kScreenModel, false);
+  synchronize(legacy_policy);
+  require(!legacy_policy.result().bindings && legacy_policy.policy_hash() != 0,
+          "historical policy profile retains a bindings-free v1 snapshot");
+  stop(legacy_wm);
   const auto compositor =
       launch(argv[2], comp_socket, "--dump-dir", root + "/dump");
   glasswyrm::server::CompositorPeer display(comp_socket,
@@ -223,6 +232,17 @@ int main(int argc, char **argv) {
   for (const auto &entry : std::filesystem::recursive_directory_iterator(root))
     require(entry.path().extension() != ".ppm",
             "metadata sequence creates no PPM");
+
+  const std::string session_socket = root + "/gwcomp-session.sock";
+  const auto session_compositor =
+      launch(argv[2], session_socket, "--dump-dir", root + "/session-dump");
+  glasswyrm::server::CompositorPeer session_peer(
+      session_socket, gw::protocol::x11::kScreenModel, false, true);
+  synchronize(session_peer);
+  require(session_peer.state() ==
+              glasswyrm::server::PeerBootstrapState::Synchronized,
+          "real-input profile negotiates compositor session-state support");
+  stop(session_compositor);
 
   const std::string buffered_socket = root + "/gwcomp-buffered.sock";
   auto pixels = glasswyrm::server::PixelStorage::create(32, 24);
@@ -244,6 +264,34 @@ int main(int argc, char **argv) {
   require(buffered.replay_input().buffers.size() == 1 &&
               buffered.replay_input().buffers.front().attach.buffer_id == 1,
           "accepted attachment omission retains complete replay state");
+  glasswyrm::server::CursorPresenter cursor_presenter;
+  auto cursor_image = glasswyrm::input::make_glyph_cursor(
+      {glasswyrm::input::CursorFontIdentity::Cursor,
+       glasswyrm::input::CursorFontIdentity::Cursor,
+       glasswyrm::input::kCursorGlyphLeftPointer,
+       static_cast<std::uint16_t>(
+           glasswyrm::input::kCursorGlyphLeftPointer + 1U),
+       {0xffff, 0xffff, 0xffff}, {0, 0, 0}},
+      error);
+  require(cursor_image != nullptr, error.c_str());
+  glasswyrm::server::CompositorCursorSubmission cursor;
+  require(cursor_presenter.prepare(cursor_image, 10, 12, true, cursor, error) &&
+              buffered.submit_cursor(cursor, 4, 4, error),
+          error.c_str());
+  drive(buffered);
+  cursor_presenter.accept();
+  glasswyrm::server::CompositorCursorSubmission moved;
+  require(cursor_presenter.prepare(cursor_image, 18, 20, true, moved, error) &&
+              !moved.buffer && buffered.submit_cursor(moved, 5, 5, error),
+          error.c_str());
+  drive(buffered);
+  cursor_presenter.accept();
+  require(buffered.submit(buffered_project(6, nullptr), error), error.c_str());
+  drive(buffered);
+  require(buffered.replay_input().surfaces.size() == 2 &&
+              buffered.replay_input().policies.size() == 1 &&
+              buffered.replay_input().buffers.size() == 2,
+          "lifecycle snapshots retain the accepted policy-free cursor and buffer");
   stop(first_compositor);
   auto second_compositor =
       launch(argv[2], buffered_socket, "--dump-dir", root + "/buffered-2");

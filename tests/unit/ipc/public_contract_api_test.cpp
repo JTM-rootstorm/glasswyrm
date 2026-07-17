@@ -54,7 +54,39 @@ int main() {
                  GWIPC_STATUS_INVALID_ARGUMENT;
 
   const auto api = gwipc_get_api_version();
-  ok = ok && api.major == 0 && api.minor == 5 && api.patch == 0;
+  ok = ok && api.major == 0 && api.minor == 6 && api.patch == 0;
+
+  gwipc_policy_bindings_upsert bindings{};
+  bindings.struct_size = sizeof(bindings);
+  bindings.move_modifiers = 8;
+  bindings.resize_modifiers = 8;
+  bindings.close_modifiers = 8;
+  bindings.move_button = 1;
+  bindings.resize_button = 3;
+  bindings.close_keysym = 0xffc1;
+  bindings.minimum_width = 96;
+  bindings.minimum_height = 64;
+  bindings.raise_on_focus = 1;
+  bindings.consume_wm_bindings = 1;
+  payload = nullptr;
+  ok = ok && gwipc_contract_encode_policy_bindings_upsert(
+                 &bindings, &payload) == GWIPC_STATUS_OK;
+  gwipc_contract_payload_destroy(payload);
+  bindings.reserved16 = 1;
+  ok = ok && gwipc_contract_encode_policy_bindings_upsert(
+                 &bindings, &payload) == GWIPC_STATUS_INVALID_ARGUMENT;
+
+  gwipc_session_state_change session{};
+  session.struct_size = sizeof(session);
+  session.generation = 1;
+  session.state = GWIPC_SESSION_INACTIVE;
+  payload = nullptr;
+  ok = ok && gwipc_contract_encode_session_state_change(&session, &payload) ==
+                 GWIPC_STATUS_OK;
+  gwipc_contract_payload_destroy(payload);
+  session.generation = 0;
+  ok = ok && gwipc_contract_encode_session_state_change(&session, &payload) ==
+                 GWIPC_STATUS_INVALID_ARGUMENT;
 
   remove.reserved[0] = 1;
   payload = reinterpret_cast<gwipc_contract_payload*>(1);

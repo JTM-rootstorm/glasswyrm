@@ -16,13 +16,18 @@ class InputState {
   [[nodiscard]] std::uint16_t mask() const noexcept;
   [[nodiscard]] bool button_down(std::uint8_t button) const noexcept;
   [[nodiscard]] bool key_down(std::uint8_t keycode) const noexcept { return keys_[keycode]; }
+  [[nodiscard]] std::array<std::uint8_t, 32> query_keymap() const noexcept;
   [[nodiscard]] bool any_button_down() const noexcept;
   void set_pointer(std::int32_t x, std::int32_t y, std::uint32_t target) noexcept;
   void set_pointer_target(std::uint32_t target) noexcept { pointer_target_ = target; }
   void advance_time() noexcept;
   [[nodiscard]] bool accept_time(std::uint32_t time) noexcept;
+  [[nodiscard]] bool accept_wrapping_time(std::uint32_t time) noexcept;
   [[nodiscard]] TransitionStatus transition_button(std::uint8_t button, bool pressed) noexcept;
   [[nodiscard]] TransitionStatus transition_key(std::uint8_t keycode, bool pressed) noexcept;
+  void set_core_modifier_mask(std::uint16_t mask) noexcept {
+    core_modifier_mask_ = static_cast<std::uint16_t>(mask & 0x00ffU);
+  }
   void reset_provider_state() noexcept;
 
  private:
@@ -30,8 +35,9 @@ class InputState {
   std::int32_t pointer_y_{0};
   std::uint32_t pointer_target_{1};
   std::uint32_t time_{1};
-  std::array<bool, 5> buttons_{};
+  std::array<bool, 9> buttons_{};
   std::array<bool, 256> keys_{};
+  std::uint16_t core_modifier_mask_{};
 };
 
 }  // namespace glasswyrm::input

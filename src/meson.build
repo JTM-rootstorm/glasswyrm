@@ -175,6 +175,7 @@ if get_option('libgwipc')
     'ipc/wire/policy_contract.cpp',
     'ipc/wire/lifecycle_contract.cpp',
     'ipc/wire/input_contract.cpp',
+    'ipc/wire/session_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
   gwipc_wire_lib = static_library(
@@ -200,6 +201,12 @@ if get_option('libgwipc')
       'ipc/message.cpp',
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
+      'ipc/connection_correlation.cpp',
+      'ipc/connection_handshake.cpp',
+      'ipc/connection_poll.cpp',
+      'ipc/connection_queue.cpp',
+      'ipc/connection_transport.cpp',
+      'ipc/connection_validation.cpp',
     ),
     link_whole: gwipc_wire_lib,
     include_directories: [
@@ -212,7 +219,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.5.0',
+    version: '0.6.0',
     soversion: '0',
     install: true,
   )
@@ -237,6 +244,7 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/policy.h',
     '../include/glasswyrm/ipc/lifecycle.h',
     '../include/glasswyrm/ipc/input.h',
+    '../include/glasswyrm/ipc/session.h',
     subdir: 'glasswyrm/ipc',
   )
 
@@ -246,11 +254,32 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.5.0',
+    version: '0.6.0',
   )
 endif
 
 if get_option('glasswyrmd')
+  if get_option('libinput_backend')
+    gw_xkb_keymap_lib = static_library(
+      'gw-xkb-keymap',
+      files(
+        'input/device_path_allowlist.cpp',
+        'input/fake_libinput_api.cpp',
+        'input/libinput_backend.cpp',
+        'input/real_libinput_api.cpp',
+        'input/repeat_timer.cpp',
+        'input/xkb_keymap.cpp',
+      ),
+      dependencies: [libinput_dep, xkbcommon_dep],
+      include_directories: include_directories('.'),
+    )
+    gw_xkb_keymap_dep = declare_dependency(
+      link_with: gw_xkb_keymap_lib,
+      dependencies: [libinput_dep, xkbcommon_dep],
+      include_directories: include_directories('.'),
+    )
+  endif
+
   gw_server_state_lib = static_library(
     'gw-server-state',
     files(
@@ -259,7 +288,10 @@ if get_option('glasswyrmd')
       'glasswyrmd/window_store.cpp',
       'glasswyrmd/drawable_store.cpp',
       'glasswyrmd/font_store.cpp',
+      'glasswyrmd/cursor_store.cpp',
       'glasswyrmd/property_store.cpp',
+      'glasswyrmd/selection_store.cpp',
+      'glasswyrmd/grab_state.cpp',
       'glasswyrmd/resource_cleanup.cpp',
       'glasswyrmd/resource_invariants.cpp',
       'glasswyrmd/atom_table.cpp',
@@ -278,7 +310,11 @@ if get_option('glasswyrmd')
       'glasswyrmd/request_handlers/query.cpp',
       'glasswyrmd/request_handlers/atom.cpp',
       'glasswyrmd/request_handlers/property.cpp',
+      'glasswyrmd/request_handlers/selection.cpp',
+      'glasswyrmd/request_handlers/grab.cpp',
+      'glasswyrmd/request_handlers/keyboard_control.cpp',
       'glasswyrmd/request_handlers/color.cpp',
+      'glasswyrmd/request_handlers/cursor.cpp',
       'core/geometry/rectangle.cpp',
       'core/geometry/region.cpp',
       'glasswyrmd/pixel_storage.cpp',
@@ -289,6 +325,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/subtree_compositor.cpp',
       'input/input_state.cpp',
       'input/input_router.cpp',
+      'input/cursor_model.cpp',
     ),
     dependencies: gw_x11_setup_dep,
     include_directories: include_directories('.'),
@@ -303,6 +340,7 @@ if get_option('glasswyrmd')
     'glasswyrmd/compatibility_trace.cpp',
     'glasswyrmd/client_connection.cpp',
     'glasswyrmd/event_router.cpp',
+    'glasswyrmd/protocol_event_router.cpp',
     'glasswyrmd/server.cpp',
     'glasswyrmd/server_signals.cpp',
     'glasswyrmd/x11_listener.cpp',
@@ -321,11 +359,21 @@ if get_option('glasswyrmd')
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',
+      'glasswyrmd/cursor_presenter.cpp',
       'glasswyrmd/synthetic_input_peer.cpp',
       'glasswyrmd/lifecycle_runtime.cpp',
       'glasswyrmd/input_runtime.cpp',
     )
     gw_server_core_dependencies += gwipc_dep
+  endif
+  if get_option('libinput_backend')
+    gw_server_core_sources += files(
+      'glasswyrmd/real_input_controller.cpp',
+      'glasswyrmd/real_input_runtime.cpp',
+      'glasswyrmd/interactive_wm.cpp',
+      'wm/interactive_policy.cpp',
+    )
+    gw_server_core_dependencies += gw_xkb_keymap_dep
   endif
   gw_server_core_lib = static_library(
     'gw-server-core',
@@ -350,7 +398,11 @@ endif
 if get_option('gwm')
   gw_wm_policy_lib = static_library(
     'gw-wm-policy',
-    files('wm/policy_engine.cpp', 'wm/transaction.cpp'),
+    files(
+      'wm/interactive_policy.cpp',
+      'wm/policy_engine.cpp',
+      'wm/transaction.cpp',
+    ),
     include_directories: include_directories('.'),
   )
   gw_wm_policy_dep = declare_dependency(
@@ -399,6 +451,7 @@ if get_option('gwcomp')
     'gwcomp/scene_manifest.cpp',
     'gwcomp/runtime.cpp',
     'gwcomp/signal_runtime.cpp',
+    'gwcomp/session_state_coordinator.cpp',
     'gwcomp/contract_dispatch.cpp',
     'gwcomp/presentation_transaction.cpp',
   )
@@ -432,5 +485,26 @@ if get_option('gwcomp')
     include_directories: include_directories('../tests/integration'),
     dependencies: gwipc_dep,
     install: false,
+  )
+endif
+
+if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
+  gw_session_launcher_lib = static_library(
+    'gw-session-launcher',
+    files(
+      'session/launcher.cpp',
+      'session/process_supervisor.cpp',
+    ),
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  gw_session_launcher_dep = declare_dependency(
+    link_with: gw_session_launcher_lib,
+    include_directories: [include_directories('.'), gw_generated_include_dir],
+  )
+  glasswyrm_session_program = executable(
+    'glasswyrm-session',
+    files('session/main.cpp'),
+    dependencies: gw_session_launcher_dep,
+    install: true,
   )
 endif

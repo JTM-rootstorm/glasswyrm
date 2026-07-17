@@ -65,33 +65,37 @@ std::uint32_t read_u32(const std::span<const std::uint8_t> bytes,
 void test_success_golden(const ByteOrder order, const std::string_view golden) {
   const auto reply = gw::protocol::x11::encode_setup_success(order);
   require_bytes_equal(reply, decode_hex(golden), "setup success golden bytes");
-  require(reply.size() == 144, "success reply has complete synthetic screen");
+  require(reply.size() == 160, "success reply has complete synthetic screen");
   require(reply[0] == 1, "success status is encoded");
   require(read_u16(reply, 2, order) == 11 && read_u16(reply, 4, order) == 0,
           "success reply advertises X11 11.0");
   require(std::size_t{8} + read_u16(reply, 6, order) * std::size_t{4} ==
               reply.size(),
           "success length field matches encoded body");
-  require(reply[28] == 1 && reply[29] == 1,
-          "one screen and one pixmap format are encoded");
+  require(reply[28] == 1 && reply[29] == 2,
+          "one screen and two pixmap formats are encoded");
   require(reply[30] == 0 && reply[31] == 0,
           "synthetic image and bitmap formats remain LSBFirst");
-  require(reply[64] == 24 && reply[65] == 32,
+  require(reply[64] == 1 && reply[65] == 1 && reply[66] == 32,
+          "depth-one pixmaps use one bit per pixel and 32-bit row padding");
+  require(reply[72] == 24 && reply[73] == 32 && reply[74] == 32,
           "depth-24 pixmaps use 32 bits per pixel");
-  require(reply[110] == 24 && reply[111] == 1,
-          "screen has root depth 24 and one allowed depth");
-  require(reply[112] == 24 && read_u16(reply, 114, order) == 1,
+  require(reply[118] == 24 && reply[119] == 2,
+          "screen has root depth 24 and two allowed depths");
+  require(reply[120] == 24 && read_u16(reply, 122, order) == 1,
           "allowed depth has one visual");
-  require(reply[124] == 4 && reply[125] == 8 &&
-              read_u16(reply, 126, order) == 256,
+  require(reply[132] == 4 && reply[133] == 8 &&
+              read_u16(reply, 134, order) == 256,
           "visual is TrueColor with the required RGB precision");
-  require(read_u32(reply, 128, order) == 0x00ff0000 &&
-              read_u32(reply, 132, order) == 0x0000ff00 &&
-              read_u32(reply, 136, order) == 0x000000ff,
+  require(read_u32(reply, 136, order) == 0x00ff0000 &&
+              read_u32(reply, 140, order) == 0x0000ff00 &&
+              read_u32(reply, 144, order) == 0x000000ff,
           "visual masks are conventional RGB masks");
-  require((read_u32(reply, 72, order) & 0x00400000U) == 0 &&
-              (read_u32(reply, 76, order) & 0x00400000U) == 0 &&
-              (read_u32(reply, 104, order) & 0x00400000U) == 0,
+  require(reply[152] == 1 && read_u16(reply, 154, order) == 0,
+          "depth-one pixmaps are allowed without a visual");
+  require((read_u32(reply, 80, order) & 0x00400000U) == 0 &&
+              (read_u32(reply, 84, order) & 0x00400000U) == 0 &&
+              (read_u32(reply, 112, order) & 0x00400000U) == 0,
           "server objects are outside the client resource-ID range");
 }
 
@@ -138,18 +142,18 @@ void test_failure_reason_limit() {
 int main() {
   test_success_golden(
       ByteOrder::LittleEndian,
-      "01000b00000022000100000000004000ffff1f00000000001500ffff01010000202008ff"
-      "00000000476c6173737779726d204d696c6573746f6e6520310000001820200000000000"
-      "0100000002000000ffffff000000000000000000000400030e01cb000100010003000000"
-      "00001801180001000000000003000000040800010000ff0000ff0000ff0000000000000"
-      "0");
+      "01000b00000026000100000000004000ffff1f00000000001500ffff01020000202008ff"
+      "00000000476c6173737779726d204d696c6573746f6e6520310000000101200000000000"
+      "18202000000000000100000002000000ffffff000000000000000000000400030e01cb00"
+      "010001000300000000001802180001000000000003000000040800010000ff0000ff0000"
+      "ff000000000000000100000000000000");
   test_success_golden(
       ByteOrder::BigEndian,
-      "0100000b000000220000000100400000001fffff000000000015ffff01010000202008ff"
-      "00000000476c6173737779726d204d696c6573746f6e6520310000001820200000000000"
-      "000000010000000200ffffff000000000000000004000300010e00cb0001000100000003"
-      "000018011800000100000000000000030408010000ff00000000ff00000000ff0000000"
-      "0");
+      "0100000b000000260000000100400000001fffff000000000015ffff01020000202008ff"
+      "00000000476c6173737779726d204d696c6573746f6e6520310000000101200000000000"
+      "1820200000000000000000010000000200ffffff000000000000000004000300010e00cb"
+      "0001000100000003000018021800000100000000000000030408010000ff00000000ff00"
+      "000000ff000000000100000000000000");
   test_failure_golden(ByteOrder::LittleEndian,
                       "001c0b0000000700556e737570706f727465642070726f746f636f6c"
                       "2076657273696f6e");

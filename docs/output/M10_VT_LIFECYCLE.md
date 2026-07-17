@@ -21,6 +21,18 @@ VT, allocation, logging, or compositor work.
 
 ## Release and acquire
 
+When SessionState is negotiated for an M11 real-input session, release first
+quiesces presentation and requests Inactive from `glasswyrmd`. DRM master is
+dropped and the VT release acknowledged only after the correlated reply
+confirms that libinput is suspended. Acquire acknowledges the VT, reacquires
+DRM master, restores the committed frame by complete modeset, then requests
+Active. Producer processing resumes only after real input acknowledges a
+successful resume. Timeout, rejection, or malformed correlation is fatal and
+enters restoration.
+
+When SessionState is not negotiated, the exact M10 sequence below remains in
+effect.
+
 On a release notification, the runtime stops producer consumption, waits for
 the pending presentation boundary to quiesce, drops DRM master, acknowledges
 the release with `VT_RELDISP`, and marks presentation suspended.
@@ -52,6 +64,11 @@ Each restoration dimension is recorded separately. A failure produces a
 nonzero process result; later safe restoration steps are still attempted. If
 KMS restoration itself fails, active scanout resources are retained rather
 than being removed underneath the hardware.
+
+The `VT_GETSTATE` open-VT bitmask is retained in before-and-after evidence for
+diagnostics, but it is not a restoration invariant: unrelated gettys or test
+clients can open or close a VT during the session. Acceptance compares the
+active VT and signal together with the complete VT mode and KD mode instead.
 
 ## Limitations and recovery
 

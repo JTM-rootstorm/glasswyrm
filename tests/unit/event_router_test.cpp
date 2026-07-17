@@ -120,7 +120,9 @@ int main() {
   require(state.resources().set_event_selection(
               spec.xid, 1,
               (1U << 17U) | gw::protocol::x11::event_mask::FocusChange |
-                  gw::protocol::x11::event_mask::LeaveWindow) &&
+                  gw::protocol::x11::event_mask::LeaveWindow |
+                  gw::protocol::x11::event_mask::ButtonPress |
+                  gw::protocol::x11::event_mask::ButtonRelease) &&
               state.resources().set_event_selection(state.screen().root_window,
                   2, (1U << 19U) |
                          gw::protocol::x11::event_mask::FocusChange |
@@ -150,6 +152,9 @@ int main() {
   glasswyrm::server::WindowCreateSpec exposed_child = spec;
   exposed_child.xid = 0x00200003U;
   exposed_child.parent = spec.xid;
+  exposed_child.x = 3;
+  exposed_child.y = 2;
+  exposed_child.border_width = 1;
   exposed_child.width = 20;
   exposed_child.height = 10;
   require(state.resources().create_window(
@@ -161,7 +166,9 @@ int main() {
   state.resources().recompute_map_states(exposed_child.xid);
   require(state.resources().set_event_selection(
               exposed_child.xid, 1,
-              gw::protocol::x11::event_mask::Exposure),
+              gw::protocol::x11::event_mask::Exposure |
+                  gw::protocol::x11::event_mask::EnterWindow |
+                  gw::protocol::x11::event_mask::LeaveWindow),
           "select child exposure");
   require(router.route_viewable_subtree_expose(spec.xid, clients) == 1,
           "mapped ancestor exposes its viewable child subtree");
@@ -169,6 +176,38 @@ int main() {
   require(child_expose[0] == 12 && child_expose[12] == 20 &&
               child_expose[14] == 10,
           "child receives full drawable exposure");
+
+  require(router.route_input(
+              gw::protocol::x11::CoreEventType::ButtonPress, 1, 49,
+              exposed_child.xid, 0,
+              gw::protocol::x11::event_mask::ButtonPress, 5, 5,
+              exposed_child.xid, clients) == 1,
+          "nested button input propagates to its selected ancestor");
+  const auto ancestor_press = receive_event(target_client);
+  require(ancestor_press[0] == 4 && ancestor_press[12] == 1 &&
+              ancestor_press[16] == 3 && ancestor_press[18] == 0x20 &&
+              ancestor_press[24] == 5 && ancestor_press[26] == 5,
+          "ancestor delivery encodes its immediate nested child");
+
+  require(state.resources().set_event_selection(
+              state.screen().root_window, 2,
+              (1U << 19U) | gw::protocol::x11::event_mask::FocusChange |
+                  gw::protocol::x11::event_mask::EnterWindow |
+                  gw::protocol::x11::event_mask::PointerMotion),
+          "select root motion for nested propagation");
+  require(router.route_input(
+              gw::protocol::x11::CoreEventType::MotionNotify, 0, 50,
+              exposed_child.xid, 0,
+              gw::protocol::x11::event_mask::PointerMotion, 5, 5,
+              exposed_child.xid, clients) == 1,
+          "nested motion propagates to root");
+  const auto root_motion = receive_event(parent_client);
+  require(root_motion[0] == 6 && root_motion[12] == 0 &&
+              root_motion[13] == 0 && root_motion[14] == 0 &&
+              root_motion[15] == 1 && root_motion[16] == 0 &&
+              root_motion[17] == 0x20 && root_motion[18] == 0 &&
+              root_motion[19] == 1,
+          "root delivery names the immediate top-level child");
 
   glasswyrm::server::WindowCreateSpec sibling_spec = spec;
   sibling_spec.xid = 0x00200002U;
@@ -217,10 +256,43 @@ int main() {
           parent_event[4] == 0 && parent_event[7] == 1,
       "events use recipient sequence, byte order, and selected event field");
 
+  const auto grab_recipient = router.input_recipient(
+      spec.xid, gw::protocol::x11::event_mask::ButtonPress);
+  require(grab_recipient && grab_recipient->first == 1 &&
+              state.grabs().begin_automatic_button_grab(
+                  grab_recipient->first, grab_recipient->second, 1, 50),
+          "automatic grab captures the ButtonPress recipient");
+  state.grabs().note_button_press(1);
+  require(router.route_input_grabbed(
+              state.grabs(), gw::protocol::x11::CoreEventType::ButtonRelease,
+              1, 51, exposed_child.xid, 0,
+              gw::protocol::x11::event_mask::ButtonRelease, 45, 5,
+              exposed_child.xid, clients) == 1,
+          "automatic grab redirects release away from the natural target");
+  const auto grabbed_release = receive_event(target_client);
+  require(grabbed_release[0] == 5 && grabbed_release[4] == 51 &&
+              grabbed_release[16] == 3 && grabbed_release[18] == 0x20 &&
+              grabbed_release[24] == 5 && grabbed_release[26] == 5 &&
+              state.grabs().note_button_release(1),
+          "redirected release preserves nested coordinates and ends the grab");
+
   glasswyrm::input::InputState input;
-  input.set_pointer(52, 33, spec.xid);
-  const auto input_before = router.capture_input_transition(spec.xid, spec.xid);
-  input.set_pointer(52, 33, state.screen().root_window);
+  input.set_pointer(45, 5, exposed_child.xid);
+  require(router.route_crossing(spec.xid, exposed_child.xid, spec.xid, input,
+                                clients) == 2,
+          "parent-child crossing reaches both selected windows");
+  const auto parent_leave = receive_event(target_client);
+  const auto child_enter = receive_event(target_client);
+  require(parent_leave[0] == 8 && parent_leave[1] == 2 &&
+              parent_leave[16] == 0 && parent_leave[17] == 0 &&
+              parent_leave[18] == 0 && parent_leave[19] == 0 &&
+              child_enter[0] == 7 && child_enter[1] == 0 &&
+              child_enter[16] == 0 && child_enter[17] == 0 &&
+              child_enter[18] == 0 && child_enter[19] == 0,
+          "crossing details and child fields follow initial and final targets");
+  const auto input_before =
+      router.capture_input_transition(spec.xid, exposed_child.xid);
+  input.set_pointer(45, 5, state.screen().root_window);
   require(router.route_lifecycle_input_transition(
               input_before, state.screen().root_window,
               state.screen().root_window, input, clients) == 4,
@@ -229,9 +301,12 @@ int main() {
   const auto leave = receive_event(target_client);
   const auto focus_in = receive_event(parent_client);
   const auto enter = receive_event(parent_client);
-  require(focus_out[0] == 10 && leave[0] == 8 &&
+  require(focus_out[0] == 10 && leave[0] == 8 && leave[12] == 3 &&
+              leave[14] == 0x20 && leave[16] == 0 && leave[17] == 0 &&
+              leave[18] == 0 && leave[19] == 0 && leave[24] == 1 &&
+              leave[26] == 2 &&
               focus_in[0] == 9 && enter[0] == 7,
-          "lifecycle input transition preserves focus-before-crossing order");
+          "lifecycle input transition preserves nested departure coordinates");
 
   require(!target_client.connection.enqueue_server_packet(
               std::vector<std::uint8_t>(1024U * 1024U + 1U)),

@@ -162,9 +162,17 @@ PresentedFrame PresentationTransaction::commit(
   const bool metadata_only_peer =
       profile_ == PeerProfile::M6MetadataProtocolServer;
   const bool protocol_server = profile_ != PeerProfile::M4TestProducer;
+  std::size_t policy_surface_count = 0;
   for (const auto& [surface_id, surface] : staged.surfaces) {
     const bool metadata_only =
         surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+    const bool cursor =
+        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+    if (cursor && profile_ != PeerProfile::M7BufferedProtocolServer) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      error = "cursor surfaces require a buffered ProtocolServer peer";
+      return presented;
+    }
     if (metadata_only_peer != metadata_only) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       error = metadata_only_peer
@@ -173,13 +181,19 @@ PresentedFrame PresentationTransaction::commit(
       return presented;
     }
     const auto policy = staged.surface_policies.find(surface_id);
-    if (protocol_server &&
+    if (cursor && policy != staged.surface_policies.end()) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      error = "cursor surfaces cannot carry policy metadata";
+      return presented;
+    }
+    if (!cursor && protocol_server &&
         (policy == staged.surface_policies.end() ||
          policy->second.x11_window_id != surface.x11_window_id)) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       error = "ProtocolServer surface is missing matching policy metadata";
       return presented;
     }
+    if (!cursor) ++policy_surface_count;
     if (!protocol_server && policy != staged.surface_policies.end()) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       error = "TestProducer surfaces cannot carry policy metadata";
@@ -189,7 +203,10 @@ PresentedFrame PresentationTransaction::commit(
     const bool new_buffered_protocol_surface =
         profile_ == PeerProfile::M7BufferedProtocolServer &&
         !scene_.committed().surfaces.contains(surface_id);
-    if (!metadata_only && (surface.visible || new_buffered_protocol_surface) &&
+    const bool requires_attachment =
+        !metadata_only &&
+        (surface.visible || (new_buffered_protocol_surface && !cursor));
+    if (requires_attachment &&
         attachment == pending_attachments_.end()) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       error = new_buffered_protocol_surface
@@ -211,15 +228,18 @@ PresentedFrame PresentationTransaction::commit(
       error = "surface and buffer dimensions do not match";
       return presented;
     }
+    const auto required_format = cursor ? GWIPC_PIXEL_FORMAT_ARGB8888
+                                        : GWIPC_PIXEL_FORMAT_XRGB8888;
     if (profile_ == PeerProfile::M7BufferedProtocolServer &&
-        mapping->second->pixel_format() != GWIPC_PIXEL_FORMAT_XRGB8888) {
+        mapping->second->pixel_format() != required_format) {
       presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "buffered ProtocolServer surfaces require XRGB8888";
+      error = cursor
+                  ? "cursor surfaces require premultiplied ARGB8888"
+                  : "buffered ProtocolServer surfaces require XRGB8888";
       return presented;
     }
   }
-  if (protocol_server &&
-      staged.surface_policies.size() != staged.surfaces.size()) {
+  if (protocol_server && staged.surface_policies.size() != policy_surface_count) {
     presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
     error = "surface policy references an unknown surface";
     return presented;
