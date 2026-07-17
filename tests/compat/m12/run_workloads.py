@@ -205,8 +205,13 @@ def main() -> int:
 
     workloads: list[dict[str, Any]] = []
     raw_results: list[dict[str, Any]] = []
+    raw_scenarios = [
+        "registry", "big-requests", "xfixes-damage", "randr", "errors"
+    ]
+    if arguments.profile == "shm":
+        raw_scenarios[2:2] = ["shm", "render-composite"]
     for order in ("little", "big"):
-        for scenario in ("registry", "big-requests", "xfixes-damage", "errors"):
+        for scenario in raw_scenarios:
             name = f"raw-{order}-{scenario}"
             result_path = artifacts / f"{name}.json"
             argv = [

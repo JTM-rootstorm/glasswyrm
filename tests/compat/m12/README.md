@@ -13,9 +13,12 @@ Repository tools:
   fingerprint; then verifies the detached signature in an isolated keyring.
 - `build_clients.sh` performs the frozen CMake/Ninja SDL build and builds the
   repository raw, XCB, and public-SDL probes.
-- `m12_raw_probe.py` exercises the registry, BIG-REQUESTS, XFIXES/DAMAGE, and
-  recoverable errors in both client byte orders.
-- `m12_xcb_probe.c` exercises the public XCB extension bindings.
+- `m12_raw_probe.py` exercises the complete registry, BIG-REQUESTS, safe
+  same-UID MIT-SHM transport, XFIXES/DAMAGE, exact RENDER pixels,
+  COMPOSITE named-pixmap lifetime, RANDR reporting/errors, and malformed
+  client isolation in both client byte orders.
+- `m12_xcb_probe.c` and its focused graphics helper exercise every supported
+  extension family through the public XCB extension bindings.
 - `m12_sdl_probe.c` uses only public SDL APIs for display, software surface,
   clipboard, cursor, fullscreen-desktop, borderless, restore, and close paths.
 - `run_workloads.py` runs the fixed SHM or no-SHM matrix and emits deterministic

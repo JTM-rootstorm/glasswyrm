@@ -13,29 +13,15 @@
 #include <xcb/xcb.h>
 #include <xcb/xfixes.h>
 
-typedef struct Probe {
-  bool registry;
-  bool big_requests;
-  bool shm;
-  bool xfixes_version;
-  bool selection_notify;
-  bool region_algebra;
-  bool damage_version;
-  bool damage_notify;
-  bool damage_subtract;
-  bool render;
-  bool composite;
-  bool randr;
-  char error[256];
-} Probe;
+#include "m12_xcb_probe.h"
 
-static void fail(Probe *probe, const char *message) {
+void probe_fail(Probe *probe, const char *message) {
   if (probe->error[0] == '\0')
     (void)snprintf(probe->error, sizeof(probe->error), "%s", message);
 }
 
-static bool checked(xcb_connection_t *connection, xcb_void_cookie_t cookie,
-                    Probe *probe, const char *operation) {
+bool probe_checked(xcb_connection_t *connection, xcb_void_cookie_t cookie,
+                   Probe *probe, const char *operation) {
   xcb_generic_error_t *error = xcb_request_check(connection, cookie);
   if (!error) return true;
   if (probe->error[0] == '\0')
@@ -45,8 +31,8 @@ static bool checked(xcb_connection_t *connection, xcb_void_cookie_t cookie,
   return false;
 }
 
-static xcb_generic_event_t *event_with_type(xcb_connection_t *connection,
-                                            uint8_t type) {
+xcb_generic_event_t *probe_event_with_type(xcb_connection_t *connection,
+                                           uint8_t type) {
   struct pollfd descriptor = {xcb_get_file_descriptor(connection), POLLIN, 0};
   for (unsigned attempt = 0; attempt < 30; ++attempt) {
     xcb_generic_event_t *event;
@@ -59,13 +45,22 @@ static xcb_generic_event_t *event_with_type(xcb_connection_t *connection,
   return NULL;
 }
 
-static bool extension_present(xcb_connection_t *connection,
-                              const char *name) {
+static bool extension_assignment(xcb_connection_t *connection,
+                                 const char *name, size_t index,
+                                 const uint8_t expected[3], Probe *probe) {
   xcb_generic_error_t *error = NULL;
   xcb_query_extension_reply_t *reply = xcb_query_extension_reply(
       connection,
       xcb_query_extension(connection, (uint16_t)strlen(name), name), &error);
-  const bool result = reply && !error && reply->present;
+  const bool result = reply && !error && reply->present &&
+                      reply->major_opcode == expected[0] &&
+                      reply->first_event == expected[1] &&
+                      reply->first_error == expected[2];
+  if (reply) {
+    probe->registry_major[index] = reply->major_opcode;
+    probe->registry_event[index] = reply->first_event;
+    probe->registry_error[index] = reply->first_error;
+  }
   free(error);
   free(reply);
   return result;
@@ -76,8 +71,9 @@ static bool probe_randr_profile(xcb_connection_t *connection,
   xcb_generic_error_t *error = NULL;
   xcb_randr_query_version_reply_t *version = xcb_randr_query_version_reply(
       connection, xcb_randr_query_version(connection, 1, 3), &error);
-  bool passed = version && !error && version->major_version == 1 &&
-                version->minor_version == 3;
+  probe->randr = version && !error && version->major_version == 1 &&
+                 version->minor_version == 3;
+  bool passed = probe->randr;
   free(error); error = NULL; free(version);
 
   xcb_randr_get_screen_info_reply_t *screen_info =
@@ -117,6 +113,9 @@ static bool probe_randr_profile(xcb_connection_t *connection,
       xcb_randr_get_screen_resources_outputs(resources)[0];
   const xcb_randr_mode_info_t mode =
       xcb_randr_get_screen_resources_modes(resources)[0];
+  probe->randr_crtc = crtc;
+  probe->randr_output = output;
+  probe->randr_mode = mode.id;
   const xcb_timestamp_t config_timestamp = resources->config_timestamp;
   free(resources);
 
@@ -194,7 +193,7 @@ static bool probe_randr_profile(xcb_connection_t *connection,
   passed = passed && primary && !error && primary->output == output;
   free(error); error = NULL; free(primary);
 
-  passed = checked(connection,
+  passed = probe_checked(connection,
                    xcb_randr_select_input_checked(
                        connection, screen->root,
                        XCB_RANDR_NOTIFY_MASK_SCREEN_CHANGE |
@@ -226,6 +225,28 @@ static bool probe_randr_profile(xcb_connection_t *connection,
   return passed;
 }
 
+static bool probe_recoverable_errors(xcb_connection_t *connection,
+                                     Probe *probe) {
+  const xcb_query_extension_reply_t *xfixes =
+      xcb_get_extension_data(connection, &xcb_xfixes_id);
+  const xcb_xfixes_region_t missing = xcb_generate_id(connection);
+  xcb_generic_error_t *expected = xcb_request_check(
+      connection, xcb_xfixes_destroy_region_checked(connection, missing));
+  const bool extension_error =
+      xfixes && expected && expected->error_code == xfixes->first_error;
+  free(expected);
+  xcb_generic_error_t *error = NULL;
+  xcb_get_input_focus_reply_t *reply = xcb_get_input_focus_reply(
+      connection, xcb_get_input_focus(connection), &error);
+  const bool continued = reply && !error;
+  free(error);
+  free(reply);
+  probe->recoverable_errors = extension_error && continued;
+  if (!probe->recoverable_errors)
+    probe_fail(probe, "recoverable extension error isolation failed");
+  return probe->recoverable_errors;
+}
+
 static void json_string(FILE *stream, const char *value) {
   fputc('"', stream);
   for (; *value; ++value) {
@@ -245,7 +266,10 @@ static bool write_result(const char *path, const Probe *probe) {
                       probe->xfixes_version && probe->selection_notify &&
                       probe->region_algebra && probe->damage_version &&
                       probe->damage_notify && probe->damage_subtract &&
-                      probe->render && probe->composite && probe->randr;
+                      probe->render && probe->render_formats &&
+                      probe->render_exact_pixels && probe->composite &&
+                      probe->composite_named_lifetime && probe->randr &&
+                      probe->randr_reporting && probe->recoverable_errors;
   fprintf(stream,
           "{\n  \"schema\": 1,\n  \"probe\": \"m12_xcb_probe\",\n"
           "  \"checks\": {\n"
@@ -257,8 +281,22 @@ static bool write_result(const char *path, const Probe *probe) {
           "    \"damage_notify\": %s,\n"
           "    \"damage_subtract\": %s,\n"
           "    \"render_version\": %s,\n"
+          "    \"render_formats\": %s,\n"
+          "    \"render_exact_pixels\": %s,\n"
           "    \"composite_version\": %s,\n"
-          "    \"randr_version\": %s\n  },\n"
+          "    \"composite_named_lifetime\": %s,\n"
+          "    \"randr_version\": %s,\n"
+          "    \"randr_reporting\": %s,\n"
+          "    \"recoverable_errors\": %s\n  },\n"
+          "  \"evidence\": {\n"
+          "    \"registry_major\": [%u, %u, %u, %u, %u, %u, %u],\n"
+          "    \"registry_event\": [%u, %u, %u, %u, %u, %u, %u],\n"
+          "    \"registry_error\": [%u, %u, %u, %u, %u, %u, %u],\n"
+          "    \"render_over_pixel\": \"0x%08x\",\n"
+          "    \"composite_named_pixel\": \"0x%08x\",\n"
+          "    \"randr_output\": \"0x%08x\",\n"
+          "    \"randr_crtc\": \"0x%08x\",\n"
+          "    \"randr_mode\": \"0x%08x\"\n  },\n"
           "  \"passed\": %s,\n  \"error\": ",
           probe->registry ? "true" : "false",
           probe->big_requests ? "true" : "false",
@@ -270,8 +308,26 @@ static bool write_result(const char *path, const Probe *probe) {
           probe->damage_notify ? "true" : "false",
           probe->damage_subtract ? "true" : "false",
           probe->render ? "true" : "false",
+          probe->render_formats ? "true" : "false",
+          probe->render_exact_pixels ? "true" : "false",
           probe->composite ? "true" : "false",
-          probe->randr ? "true" : "false", passed ? "true" : "false");
+          probe->composite_named_lifetime ? "true" : "false",
+          probe->randr ? "true" : "false",
+          probe->randr_reporting ? "true" : "false",
+          probe->recoverable_errors ? "true" : "false",
+          probe->registry_major[0], probe->registry_major[1],
+          probe->registry_major[2], probe->registry_major[3],
+          probe->registry_major[4], probe->registry_major[5],
+          probe->registry_major[6], probe->registry_event[0],
+          probe->registry_event[1], probe->registry_event[2],
+          probe->registry_event[3], probe->registry_event[4],
+          probe->registry_event[5], probe->registry_event[6],
+          probe->registry_error[0], probe->registry_error[1],
+          probe->registry_error[2], probe->registry_error[3],
+          probe->registry_error[4], probe->registry_error[5],
+          probe->registry_error[6], probe->render_pixel, probe->named_pixel,
+          probe->randr_output, probe->randr_crtc, probe->randr_mode,
+          passed ? "true" : "false");
   json_string(stream, probe->error);
   fputs("\n}\n", stream);
   return fclose(stream) == 0;
@@ -286,7 +342,7 @@ int main(int argc, char **argv) {
   int screen_index = 0;
   xcb_connection_t *connection = xcb_connect(NULL, &screen_index);
   if (!connection || xcb_connection_has_error(connection)) {
-    fail(&probe, "xcb_connect failed");
+    probe_fail(&probe, "xcb_connect failed");
     (void)write_result(argv[2], &probe);
     if (connection) xcb_disconnect(connection);
     return 1;
@@ -296,7 +352,7 @@ int main(int argc, char **argv) {
   for (int index = 0; index < screen_index && screens.rem; ++index)
     xcb_screen_next(&screens);
   if (!screens.rem) {
-    fail(&probe, "X11 setup has no selected screen");
+    probe_fail(&probe, "X11 setup has no selected screen");
     goto done;
   }
   xcb_screen_t *screen = screens.data;
@@ -304,49 +360,57 @@ int main(int argc, char **argv) {
   static const char *extensions[] = {"BIG-REQUESTS", "MIT-SHM", "XFIXES",
                                      "DAMAGE", "RENDER", "Composite",
                                      "RANDR"};
+  static const uint8_t assignments[][3] = {
+      {128, 0, 0}, {129, 64, 128}, {130, 65, 129}, {131, 66, 130},
+      {132, 0, 131}, {133, 0, 0}, {134, 67, 136},
+  };
   probe.registry = true;
   for (size_t index = 0; index < sizeof(extensions) / sizeof(extensions[0]);
        ++index)
-    if (!extension_present(connection, extensions[index])) {
+    if (!extension_assignment(connection, extensions[index], index,
+                              assignments[index], &probe)) {
       probe.registry = false;
-      fail(&probe, "required extension is absent");
+      probe_fail(&probe, "required extension is absent");
     }
 
   xcb_generic_error_t *error = NULL;
   xcb_big_requests_enable_reply_t *big = xcb_big_requests_enable_reply(
       connection, xcb_big_requests_enable(connection), &error);
   probe.big_requests = big && !error && big->maximum_request_length >= 4194304U;
-  if (!probe.big_requests) fail(&probe, "BIG-REQUESTS Enable failed");
+  if (!probe.big_requests) probe_fail(&probe, "BIG-REQUESTS Enable failed");
   free(error); error = NULL; free(big);
 
   xcb_shm_query_version_reply_t *shm = xcb_shm_query_version_reply(
       connection, xcb_shm_query_version(connection), &error);
-  probe.shm = shm && !error && shm->major_version == 1 && shm->minor_version >= 1;
-  if (!probe.shm) fail(&probe, "MIT-SHM QueryVersion failed");
+  probe.shm = shm && !error && shm->major_version == 1 &&
+              shm->minor_version == 1 && !shm->shared_pixmaps;
+  if (!probe.shm) probe_fail(&probe, "MIT-SHM QueryVersion failed");
   free(error); error = NULL; free(shm);
+  if (probe.shm)
+    probe.shm = probe_shm_transport(connection, screen, &probe);
 
   xcb_xfixes_query_version_reply_t *xfixes = xcb_xfixes_query_version_reply(
       connection, xcb_xfixes_query_version(connection, 2, 0), &error);
   probe.xfixes_version = xfixes && !error && xfixes->major_version == 2 &&
                          xfixes->minor_version == 0;
-  if (!probe.xfixes_version) fail(&probe, "XFIXES QueryVersion failed");
+  if (!probe.xfixes_version) probe_fail(&probe, "XFIXES QueryVersion failed");
   free(error); error = NULL; free(xfixes);
 
   const xcb_query_extension_reply_t *xfixes_data =
       xcb_get_extension_data(connection, &xcb_xfixes_id);
   if (xfixes_data && xfixes_data->present &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_select_selection_input_checked(
                   connection, screen->root, XCB_ATOM_PRIMARY,
                   XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER),
               &probe, "XFIXES SelectSelectionInput") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_set_selection_owner_checked(connection, screen->root,
                                               XCB_ATOM_PRIMARY,
                                               XCB_CURRENT_TIME),
               &probe, "SetSelectionOwner")) {
     xcb_flush(connection);
-    xcb_generic_event_t *event = event_with_type(
+    xcb_generic_event_t *event = probe_event_with_type(
         connection, (uint8_t)(xfixes_data->first_event + XCB_XFIXES_SELECTION_NOTIFY));
     if (event) {
       const xcb_xfixes_selection_notify_event_t *notify =
@@ -357,7 +421,8 @@ int main(int argc, char **argv) {
       free(event);
     }
   }
-  if (!probe.selection_notify) fail(&probe, "XFIXES SelectionNotify missing");
+  if (!probe.selection_notify)
+    probe_fail(&probe, "XFIXES SelectionNotify missing");
 
   const xcb_xfixes_region_t first = xcb_generate_id(connection);
   const xcb_xfixes_region_t second = xcb_generate_id(connection);
@@ -367,36 +432,36 @@ int main(int argc, char **argv) {
                                                {40, 0, 16, 16}};
   const xcb_rectangle_t second_rectangles[] = {{16, 0, 32, 32}};
   bool regions_ok =
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_create_region_checked(connection, first, 2,
                                                first_rectangles),
               &probe, "XFIXES CreateRegion first") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_create_region_checked(connection, second, 1,
                                                second_rectangles),
               &probe, "XFIXES CreateRegion second") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_create_region_checked(connection, combined, 0, NULL),
               &probe, "XFIXES CreateRegion combined") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_create_region_checked(connection, extents, 0, NULL),
               &probe, "XFIXES CreateRegion extents") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_union_region_checked(connection, first, second,
                                               combined),
               &probe, "XFIXES UnionRegion") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_intersect_region_checked(connection, first, second,
                                                   combined),
               &probe, "XFIXES IntersectRegion") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_subtract_region_checked(connection, first, second,
                                                  combined),
               &probe, "XFIXES SubtractRegion") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_translate_region_checked(connection, combined, 5, 7),
               &probe, "XFIXES TranslateRegion") &&
-      checked(connection,
+      probe_checked(connection,
               xcb_xfixes_region_extents_checked(connection, combined, extents),
               &probe, "XFIXES RegionExtents");
   xcb_xfixes_fetch_region_reply_t *fetched = xcb_xfixes_fetch_region_reply(
@@ -409,7 +474,7 @@ int main(int argc, char **argv) {
                            rectangle->width == 56 && rectangle->height == 32;
   }
   free(error); error = NULL; free(fetched);
-  if (!probe.region_algebra) fail(&probe, "XFIXES region algebra failed");
+  if (!probe.region_algebra) probe_fail(&probe, "XFIXES region algebra failed");
 
   xcb_damage_query_version_reply_t *damage_version =
       xcb_damage_query_version_reply(
@@ -418,20 +483,20 @@ int main(int argc, char **argv) {
                          damage_version->major_version == 1 &&
                          damage_version->minor_version == 1;
   free(error); error = NULL; free(damage_version);
-  if (!probe.damage_version) fail(&probe, "DAMAGE QueryVersion failed");
+  if (!probe.damage_version) probe_fail(&probe, "DAMAGE QueryVersion failed");
 
   const xcb_damage_damage_t damage = xcb_generate_id(connection);
   const xcb_query_extension_reply_t *damage_data =
       xcb_get_extension_data(connection, &xcb_damage_id);
   if (damage_data && damage_data->present &&
-      checked(connection,
+      probe_checked(connection,
               xcb_damage_create_checked(connection, damage, screen->root,
                                         XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY),
               &probe, "DAMAGE Create") &&
-      checked(connection, xcb_damage_add_checked(connection, screen->root, first),
+      probe_checked(connection, xcb_damage_add_checked(connection, screen->root, first),
               &probe, "DAMAGE Add")) {
     xcb_flush(connection);
-    xcb_generic_event_t *event = event_with_type(
+    xcb_generic_event_t *event = probe_event_with_type(
         connection, (uint8_t)(damage_data->first_event + XCB_DAMAGE_NOTIFY));
     if (event) {
       const xcb_damage_notify_event_t *notify =
@@ -442,14 +507,14 @@ int main(int argc, char **argv) {
       free(event);
     }
   }
-  if (!probe.damage_notify) fail(&probe, "DAMAGE Notify missing");
-  probe.damage_subtract = checked(
+  if (!probe.damage_notify) probe_fail(&probe, "DAMAGE Notify missing");
+  probe.damage_subtract = probe_checked(
       connection,
       xcb_damage_subtract_checked(connection, damage, XCB_XFIXES_REGION_NONE,
                                   combined),
       &probe, "DAMAGE Subtract");
-  if (!probe.damage_subtract) fail(&probe, "DAMAGE Subtract failed");
-  (void)checked(connection, xcb_damage_destroy_checked(connection, damage),
+  if (!probe.damage_subtract) probe_fail(&probe, "DAMAGE Subtract failed");
+  (void)probe_checked(connection, xcb_damage_destroy_checked(connection, damage),
                 &probe, "DAMAGE Destroy");
 
   xcb_render_query_version_reply_t *render = xcb_render_query_version_reply(
@@ -457,7 +522,8 @@ int main(int argc, char **argv) {
   probe.render = render && !error && render->major_version == 0 &&
                  render->minor_version == 11;
   free(error); error = NULL; free(render);
-  if (!probe.render) fail(&probe, "RENDER QueryVersion failed");
+  if (!probe.render) probe_fail(&probe, "RENDER QueryVersion failed");
+  if (probe.render) (void)probe_render_pixels(connection, screen, &probe);
 
   xcb_composite_query_version_reply_t *composite =
       xcb_composite_query_version_reply(
@@ -465,19 +531,23 @@ int main(int argc, char **argv) {
   probe.composite = composite && !error && composite->major_version == 0 &&
                     composite->minor_version == 4;
   free(error); error = NULL; free(composite);
-  if (!probe.composite) fail(&probe, "COMPOSITE QueryVersion failed");
+  if (!probe.composite) probe_fail(&probe, "Composite QueryVersion failed");
+  if (probe.composite)
+    (void)probe_composite_lifetime(connection, screen, &probe);
 
-  probe.randr = probe_randr_profile(connection, screen, &probe);
-  if (!probe.randr) fail(&probe, "RANDR bounded profile failed");
+  probe.randr_reporting = probe_randr_profile(connection, screen, &probe);
+  if (!probe.randr_reporting)
+    probe_fail(&probe, "RANDR bounded profile failed");
+  (void)probe_recoverable_errors(connection, &probe);
 
-  (void)checked(connection, xcb_xfixes_destroy_region_checked(connection, first),
+  (void)probe_checked(connection, xcb_xfixes_destroy_region_checked(connection, first),
                 &probe, "XFIXES DestroyRegion first");
-  (void)checked(connection, xcb_xfixes_destroy_region_checked(connection, second),
+  (void)probe_checked(connection, xcb_xfixes_destroy_region_checked(connection, second),
                 &probe, "XFIXES DestroyRegion second");
-  (void)checked(connection,
+  (void)probe_checked(connection,
                 xcb_xfixes_destroy_region_checked(connection, combined), &probe,
                 "XFIXES DestroyRegion combined");
-  (void)checked(connection, xcb_xfixes_destroy_region_checked(connection, extents),
+  (void)probe_checked(connection, xcb_xfixes_destroy_region_checked(connection, extents),
                 &probe, "XFIXES DestroyRegion extents");
 
 done:
@@ -487,7 +557,10 @@ done:
                  probe.xfixes_version && probe.selection_notify &&
                  probe.region_algebra && probe.damage_version &&
                  probe.damage_notify && probe.damage_subtract && probe.render &&
-                 probe.composite && probe.randr
+                 probe.render_formats && probe.render_exact_pixels &&
+                 probe.composite && probe.composite_named_lifetime &&
+                 probe.randr && probe.randr_reporting &&
+                 probe.recoverable_errors
              ? 0
              : 1;
 }

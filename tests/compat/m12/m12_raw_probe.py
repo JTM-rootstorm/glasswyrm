@@ -10,6 +10,13 @@ import pathlib
 import socket
 import struct
 
+from m12_raw_extension_scenarios import (
+    ProbeFailure,
+    randr_scenario,
+    render_composite_scenario,
+    shm_scenario,
+)
+
 
 EXTENSIONS = {
     "BIG-REQUESTS": (128, 0, 0),
@@ -17,8 +24,47 @@ EXTENSIONS = {
     "XFIXES": (130, 65, 129),
     "DAMAGE": (131, 66, 130),
     "RENDER": (132, 0, 131),
-    "COMPOSITE": (133, 0, 0),
+    "Composite": (133, 0, 0),
     "RANDR": (134, 67, 136),
+}
+
+EVIDENCE_FIELDS = {
+    "registry": ("assignments", "list_extensions"),
+    "big-requests": ("maximum_units", "upload_bytes"),
+    "shm": ("version", "event_base", "error_base", "round_trip_xrgb"),
+    "xfixes-damage": (
+        "xfixes_version", "damage_version", "region_extents", "damage_id",
+    ),
+    "render-composite": (
+        "render_formats", "render_over_pixel", "composite_named_pixels_sha_sample",
+    ),
+    "randr": (
+        "version", "event_base", "error_base", "output", "crtc", "mode",
+        "output_name",
+    ),
+    "errors": ("bad_region", "bad_damage", "unsupported_minor", "bad_length"),
+}
+
+CHECK_FIELDS = {
+    "registry": (*EXTENSIONS, "stable_list", "unknown_absent"),
+    "big-requests": ("enable", "extended_put_image"),
+    "shm": ("query_version", "attach_put_get_detach", "completion_event"),
+    "xfixes-damage": (
+        "xfixes_version", "damage_version", "region_algebra",
+        "selection_notify", "damage_notify", "damage_subtract",
+    ),
+    "render-composite": (
+        "render_version", "render_formats", "render_exact_over",
+        "composite_version", "composite_named_lifetime",
+    ),
+    "randr": (
+        "version", "resources", "output_crtc_primary",
+        "idempotent_and_rejected_config", "bad_output_recoverable",
+    ),
+    "errors": (
+        "bad_region", "bad_damage", "unsupported_minor", "malformed_length",
+        "malformed_client_isolated", "connection_continues",
+    ),
 }
 
 
@@ -44,10 +90,12 @@ class Connection:
         setup = prefix + body
         self.resource_base = self.u32(setup, 12)
         self.resource_mask = self.u32(setup, 16)
+        self.display = display
         vendor_length = self.u16(setup, 24)
         format_count = setup[29]
         screen_offset = 40 + ((vendor_length + 3) & ~3) + format_count * 8
         self.root = self.u32(setup, screen_offset)
+        self.root_visual = self.u32(setup, screen_offset + 32)
         self.next_id = 1
 
     def close(self) -> None:
@@ -120,19 +168,51 @@ class Connection:
             raise ProtocolError(f"{label} returned the wrong X11 error")
         return packet
 
+    def sync(self, label: str) -> bytes:
+        self.request(43)
+        while True:
+            packet = self.packet()
+            if packet[0] == 1:
+                return packet
+            if packet[0] == 0:
+                raise ProtocolError(f"{label} returned X11 error {packet[1]}")
 
-def registry(connection: Connection, disable_shm: bool) -> dict[str, bool]:
+    def list_extensions(self) -> list[str]:
+        self.request(99)
+        reply = self.expect_reply("ListExtensions")
+        names: list[str] = []
+        cursor = 32
+        for _ in range(reply[1]):
+            if cursor >= len(reply):
+                raise ProtocolError("ListExtensions payload is truncated")
+            length = reply[cursor]
+            cursor += 1
+            names.append(reply[cursor:cursor + length].decode("ascii"))
+            cursor += length
+        return names
+
+
+def registry(connection: Connection, disable_shm: bool) -> tuple[dict[str, bool], dict[str, object]]:
     checks: dict[str, bool] = {}
+    assignments: dict[str, dict[str, int | bool]] = {}
     for name, expected in EXTENSIONS.items():
         present, major, event, error = connection.query_extension(name)
         if disable_shm and name == "MIT-SHM":
             checks[name] = not present and major == event == error == 0
         else:
             checks[name] = present and (major, event, error) == expected
-    return checks
+        assignments[name] = {
+            "present": present, "major": major, "event": event, "error": error,
+        }
+    expected_names = [name for name in EXTENSIONS if not (disable_shm and name == "MIT-SHM")]
+    listed = connection.list_extensions()
+    checks["stable_list"] = listed == expected_names
+    present, major, event, error = connection.query_extension("NOT-A-GLASSWYRM-EXTENSION")
+    checks["unknown_absent"] = not present and major == event == error == 0
+    return checks, {"assignments": assignments, "list_extensions": listed}
 
 
-def big_requests(connection: Connection) -> dict[str, bool]:
+def big_requests(connection: Connection) -> tuple[dict[str, bool], dict[str, object]]:
     present, major, _, _ = connection.query_extension("BIG-REQUESTS")
     if not present:
         raise ProtocolError("BIG-REQUESTS is absent")
@@ -155,14 +235,14 @@ def big_requests(connection: Connection) -> dict[str, bool]:
     return {
         "enable": maximum_units >= 4 * 1024 * 1024,
         "extended_put_image": True,
-    }
+    }, {"maximum_units": maximum_units, "upload_bytes": len(image)}
 
 
 def rectangle(connection: Connection, x: int, y: int, width: int, height: int) -> bytes:
     return connection.pack("hhHH", x, y, width, height)
 
 
-def xfixes_damage(connection: Connection) -> dict[str, bool]:
+def xfixes_damage(connection: Connection) -> tuple[dict[str, bool], dict[str, object]]:
     checks: dict[str, bool] = {}
     xfixes = connection.query_extension("XFIXES")
     damage = connection.query_extension("DAMAGE")
@@ -222,10 +302,15 @@ def xfixes_damage(connection: Connection) -> dict[str, bool]:
     connection.request(damage[1], 2, connection.pack("I", damage_id))
     for xid in (first, second, output, extents):
         connection.request(xfixes[1], 10, connection.pack("I", xid))
-    return checks
+    return checks, {
+        "xfixes_version": "2.0",
+        "damage_version": "1.1",
+        "region_extents": [5, 7, 56, 32],
+        "damage_id": f"0x{damage_id:08x}",
+    }
 
 
-def errors(connection: Connection) -> dict[str, bool]:
+def errors(connection: Connection) -> tuple[dict[str, bool], dict[str, object]]:
     xfixes = connection.query_extension("XFIXES")
     damage = connection.query_extension("DAMAGE")
     connection.request(xfixes[1], 0, connection.pack("II", 2, 0))
@@ -237,37 +322,70 @@ def errors(connection: Connection) -> dict[str, bool]:
     region = connection.expect_error(xfixes[3], xfixes[1], 10, "BadRegion")
     connection.request(damage[1], 2, connection.pack("I", missing))
     bad_damage = connection.expect_error(damage[3], damage[1], 2, "BadDamage")
-    connection.request(43)
-    continuation = connection.expect_reply("error continuation")
+    connection.request(132, 255)
+    unsupported = connection.expect_error(1, 132, 255, "unsupported RENDER minor")
+    connection.socket.sendall(bytes((132, 0)) + connection.pack("H", 1))
+    bad_length = connection.expect_error(16, 132, 0, "malformed RENDER length")
+    sibling = Connection(connection.order, connection.display)
+    malformed_isolated = False
+    try:
+        sibling.socket.sendall(bytes((43, 0)) + sibling.pack("H", 0))
+        packet = sibling.packet()
+        malformed_isolated = packet[0] == 0 and packet[1] == 16
+    except (OSError, ProtocolError, socket.timeout):
+        malformed_isolated = True
+    finally:
+        sibling.close()
+    continuation = connection.sync("error continuation")
     return {
         "bad_region": connection.u32(region, 4) == missing,
         "bad_damage": connection.u32(bad_damage, 4) == missing,
+        "unsupported_minor": unsupported[1] == 1,
+        "malformed_length": bad_length[1] == 16,
+        "malformed_client_isolated": malformed_isolated,
         "connection_continues": continuation[0] == 1,
-    }
+    }, {"bad_region": region[1], "bad_damage": bad_damage[1],
+        "unsupported_minor": unsupported[1], "bad_length": bad_length[1]}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--byte-order", choices=("little", "big"), required=True)
-    parser.add_argument("--scenario", choices=("registry", "big-requests", "xfixes-damage", "errors"), required=True)
+    parser.add_argument(
+        "--scenario",
+        choices=("registry", "big-requests", "shm", "xfixes-damage",
+                 "render-composite", "randr", "errors"),
+        required=True,
+    )
     parser.add_argument("--display", type=int, default=99)
     parser.add_argument("--expect-mit-shm-disabled", action="store_true")
     parser.add_argument("--output", type=pathlib.Path, required=True)
     arguments = parser.parse_args()
-    checks: dict[str, bool] = {}
+    checks: dict[str, bool] = {
+        field: False for field in CHECK_FIELDS[arguments.scenario]
+    }
+    evidence: dict[str, object] = {
+        field: None for field in EVIDENCE_FIELDS[arguments.scenario]
+    }
     error = ""
     connection: Connection | None = None
     try:
         connection = Connection(arguments.byte_order, arguments.display)
         if arguments.scenario == "registry":
-            checks = registry(connection, arguments.expect_mit_shm_disabled)
+            checks, evidence = registry(connection, arguments.expect_mit_shm_disabled)
         elif arguments.scenario == "big-requests":
-            checks = big_requests(connection)
+            checks, evidence = big_requests(connection)
+        elif arguments.scenario == "shm":
+            checks, evidence = shm_scenario(connection)
         elif arguments.scenario == "xfixes-damage":
-            checks = xfixes_damage(connection)
+            checks, evidence = xfixes_damage(connection)
+        elif arguments.scenario == "render-composite":
+            checks, evidence = render_composite_scenario(connection)
+        elif arguments.scenario == "randr":
+            checks, evidence = randr_scenario(connection)
         else:
-            checks = errors(connection)
-    except (OSError, ProtocolError, struct.error, ValueError) as failure:
+            checks, evidence = errors(connection)
+    except (OSError, ProbeFailure, ProtocolError, struct.error, ValueError) as failure:
         error = str(failure)
     finally:
         if connection is not None:
@@ -278,6 +396,7 @@ def main() -> int:
         "byte_order": arguments.byte_order,
         "scenario": arguments.scenario,
         "checks": checks,
+        "evidence": evidence,
         "passed": bool(checks) and all(checks.values()) and not error,
         "error": error,
     }
