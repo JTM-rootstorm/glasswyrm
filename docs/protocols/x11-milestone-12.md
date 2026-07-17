@@ -138,6 +138,14 @@ notification emitted by SDL/Xlib: a synthetic `UnmapNotify` from a direct
 child to its parent with the combined substructure notify/redirect mask.
 Other client-forged structural events remain rejected.
 
+The core compatibility boundary accepts `SetInputFocus` for a viewable,
+managed direct-root window. The request is byte-order-correct, validates its
+length, revert-to value, target, viewability, and logical timestamp, and uses
+the ordinary lifecycle policy transaction so focus events and real-input
+routing change only after GWM and compositor acceptance. The accepted SDL
+profile uses `CurrentTime`; focus to special values or non-policy windows is
+not a broader core-focus claim.
+
 ## Efficient buffer and renderer boundary
 
 Game-compatible published CPU buffers use additive GWIPC API 0.7 eventfd

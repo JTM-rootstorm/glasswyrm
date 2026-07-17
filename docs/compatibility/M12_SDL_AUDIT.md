@@ -44,6 +44,15 @@ accepts the protocol's Reset and Active modes as side-effect-free requests
 because it does not implement a server-owned screen saver; invalid modes and
 request lengths retain the required core errors.
 
+SDL window activation sends core `SetInputFocus` with `CurrentTime` for its
+viewable managed top-level. Glasswyrm decodes every core revert-to value and
+commits this accepted target through the ordinary GWM lifecycle transaction,
+so focus events and real-input retargeting observe the same committed policy.
+Missing and unviewable windows retain `BadWindow` and `BadMatch`; future
+timestamps are ignored. Focus to `None`, `PointerRoot`, child windows, and
+override-redirect windows remains outside the accepted profile when it would
+change the current managed focus.
+
 `SDL_x11mouse.c` first uses Xcursor when compiled in, then falls back to core
 pixmap cursors and core font cursors. The accepted build disables Xcursor so
 the existing M11 core cursor model remains authoritative. XFIXES pointer
