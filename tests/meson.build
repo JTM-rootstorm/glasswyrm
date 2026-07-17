@@ -1169,6 +1169,12 @@ if get_option('glasswyrmd')
       dependencies: xcb_test_dependency,
       install: false,
     )
+    m11_xterm_geometry_probe = executable(
+      'm11_xterm_geometry_probe',
+      files('xcb/m11_xterm_geometry_probe.cpp'),
+      dependencies: xcb_test_dependency,
+      install: false,
+    )
     if get_option('libgwipc')
       xcb_milestone8_probe = executable(
         'xcb_milestone8_probe',
