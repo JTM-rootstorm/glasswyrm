@@ -174,6 +174,7 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 102: return "ChangeKeyboardControl";
     case 103: return "GetKeyboardControl";
     case 104: return "Bell";
+    case 115: return "ForceScreenSaver";
     case 117: return "GetPointerMapping";
     case 119: return "GetModifierMapping";
     case 127: return "NoOperation";

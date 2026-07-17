@@ -39,6 +39,11 @@ EWMH `_NET_WM_STATE_FULLSCREEN` ClientMessage. Borderless state is expressed
 through `_MOTIF_WM_HINTS`. Window state reads also require deterministic root
 and per-window EWMH properties.
 
+SDL initialization also sends core `ForceScreenSaver(Reset)`. Glasswyrm
+accepts the protocol's Reset and Active modes as side-effect-free requests
+because it does not implement a server-owned screen saver; invalid modes and
+request lengths retain the required core errors.
+
 `SDL_x11mouse.c` first uses Xcursor when compiled in, then falls back to core
 pixmap cursors and core font cursors. The accepted build disables Xcursor so
 the existing M11 core cursor model remains authoritative. XFIXES pointer

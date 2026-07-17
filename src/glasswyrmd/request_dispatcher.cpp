@@ -132,6 +132,8 @@ DispatchResult dispatch_request(ServerState& state,
         return get_keyboard_control(state, context, request);
       case x11::CoreOpcode::Bell:
         return bell(context, request);
+      case x11::CoreOpcode::ForceScreenSaver:
+        return force_screen_saver(context, request);
       case x11::CoreOpcode::GetPointerMapping:
         return get_pointer_mapping(context, request);
       case x11::CoreOpcode::GetModifierMapping:
