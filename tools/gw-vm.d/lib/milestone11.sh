@@ -295,12 +295,25 @@ done
 x_servers_absent=true; mesa_absent=true
 xterm_archive=$(find /var/cache/distfiles -maxdepth 1 -type f -name 'xterm-410.tgz' -print -quit)
 [[ -n $xterm_archive && $(sha256sum "$xterm_archive" | awk '{print $1}') == "$xterm_sha" ]]
-curl --fail --location --output "$client_dir/xterm-410.tgz.asc" \
-  https://invisible-island.net/archives/xterm/xterm-410.tgz.asc
-curl --fail --location --output "$client_dir/dickey.asc" \
-  'https://invisible-island.net/public/dickey%40invisible-island.net-rsa3072.asc'
-[[ $(sha256sum "$client_dir/xterm-410.tgz.asc" | awk '{print $1}') == f1acdd6a4516417b3a5149609ac6bd9b36aff6cc4b965dea95cd780d64ec98ce ]]
-[[ $(sha256sum "$client_dir/dickey.asc" | awk '{print $1}') == eec7eccb51a27ae633784d1b1ef42eb775130c782ea51a6c47fa7a901484d6db ]]
+fetch_xterm_identity() {
+  local name=$1 url=$2 sha=$3 output=$4 cache=/var/cache/distfiles/$name
+  if [[ -f $cache && $(sha256sum "$cache" | awk '{print $1}') == "$sha" ]]; then
+    cp "$cache" "$output"
+  else
+    curl --fail --location --output "$output" "$url"
+    [[ $(sha256sum "$output" | awk '{print $1}') == "$sha" ]]
+    cp "$output" "$cache"
+  fi
+  [[ $(sha256sum "$output" | awk '{print $1}') == "$sha" ]]
+}
+fetch_xterm_identity xterm-410.tgz.asc \
+  https://invisible-island.net/archives/xterm/xterm-410.tgz.asc \
+  f1acdd6a4516417b3a5149609ac6bd9b36aff6cc4b965dea95cd780d64ec98ce \
+  "$client_dir/xterm-410.tgz.asc"
+fetch_xterm_identity dickey-xterm-rsa3072.asc \
+  'https://invisible-island.net/public/dickey%40invisible-island.net-rsa3072.asc' \
+  eec7eccb51a27ae633784d1b1ef42eb775130c782ea51a6c47fa7a901484d6db \
+  "$client_dir/dickey.asc"
 gpg_home=$client_dir/gnupg
 rm -rf "$gpg_home"
 mkdir -m 0700 "$gpg_home"
