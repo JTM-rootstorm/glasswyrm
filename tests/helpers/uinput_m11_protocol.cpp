@@ -188,17 +188,17 @@ std::vector<Event> scenario_events(std::string_view name) {
   } else if (name == "primary-selection") {
     // Select the M11_SELECTION_TOKEN output from xterm A.  The preceding
     // clear leaves the token one fixed bitmap-font row above the prompt.  The
-    // fixed font is 6x13, so drag from the first-cell center through the last
-    // cell without crossing into the following newline.
+    // fixed font is 6x13, so drag from the first-cell center to the boundary
+    // after the last cell without crossing into the following newline.
     relative(events, REL_X, -19);
     relative(events, REL_Y, -13);
     button(events, BTN_LEFT, true);
-    relative(events, REL_X, 108);
+    relative(events, REL_X, 111);
     button(events, BTN_LEFT, false, 250);
   } else if (name == "clipboard-probe") {
     // Move from xterm A into the interior of the newly raised xterm B
     // (80x24+384+160).  Middle-click both focuses B and inserts PRIMARY.
-    relative(events, REL_X, 255);
+    relative(events, REL_X, 252);
     relative(events, REL_Y, 98);
     button(events, BTN_MIDDLE, true);
     button(events, BTN_MIDDLE, false, 250);

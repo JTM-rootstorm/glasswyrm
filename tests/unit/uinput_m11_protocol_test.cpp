@@ -119,14 +119,14 @@ int main() {
                      is_event(primary[2], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 1) &&
                      is_event(primary[3], protocol::Device::pointer, EV_REL,
-                              REL_X, 108) &&
+                              REL_X, 111) &&
                      is_event(primary[4], protocol::Device::pointer, EV_KEY,
                               BTN_LEFT, 0) && primary[4].delay_ms == 250,
                  "PRIMARY drag selects the exact xterm A token");
   const auto paste = protocol::scenario_events("clipboard-probe");
   okay &= expect(paste.size() > 8 &&
                      is_event(paste[0], protocol::Device::pointer, EV_REL,
-                              REL_X, 255) &&
+                              REL_X, 252) &&
                      is_event(paste[1], protocol::Device::pointer, EV_REL,
                               REL_Y, 98) &&
                      is_event(paste[2], protocol::Device::pointer, EV_KEY,
