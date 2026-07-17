@@ -390,14 +390,14 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
       if (request.border_width)
         found->second.requested_border_width = *request.border_width;
       found->second.geometry_serial = *serial;
-      found->second.stack_sibling = request.sibling.value_or(0);
-      found->second.stack_mode =
-          request.stack_mode == gw::protocol::x11::CoreStackMode::Above
-              ? LifecycleStackMode::Above
-          : request.stack_mode == gw::protocol::x11::CoreStackMode::Below
-              ? LifecycleStackMode::Below
-              : LifecycleStackMode::None;
-      if (request.stack_mode) found->second.stack_serial = *serial;
+      if (request.stack_mode) {
+        found->second.stack_sibling = request.sibling.value_or(0);
+        found->second.stack_mode =
+            request.stack_mode == gw::protocol::x11::CoreStackMode::Above
+                ? LifecycleStackMode::Above
+                : LifecycleStackMode::Below;
+        found->second.stack_serial = *serial;
+      }
     } else {
       operation.kind = result.deferred_map ? LifecycleOperationKind::Map
                                            : LifecycleOperationKind::Unmap;
