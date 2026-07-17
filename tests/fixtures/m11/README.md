@@ -12,15 +12,17 @@ Gentoo VM runs at commit
 captured raw JSONL traces normalized to byte-identical JSON with SHA-256:
 
 ```text
-89df372b629e8c10248ff5223ae9389d1fc59737082b7c97bb0db8e11416dd73
+702e014eb33d67f9fa719ff0f133782b950a83a153c882394f53d8606f229834
 ```
 
-The normalizer records `ImageText8` and opcode 76 as presence-only counts of
-one. xterm may coalesce redundant text redraws without changing delivered
-events, PTY output, or the canonical frame; the three reviewed raw captures
-contained 800 or 806 `ImageText8` requests while every other normalized field
-and every screenshot matched. The raw JSONL and checksum-protected evidence
-archives retain the exact per-run volume.
+The normalizer records the drawing primitives `ClearArea`, `CopyArea`,
+`ImageText8`, `PolyLine`, and `PutImage` and their opcodes as presence-only
+counts of one. xterm may coalesce redundant text and cursor redraws without
+changing delivered events, PTY output, or the canonical frame. Independent
+runs exposed 800 or 806 raw `ImageText8` requests and six or seven raw
+`PolyLine` requests while every protocol-state field and screenshot matched.
+The raw JSONL and checksum-protected evidence archives retain each exact
+per-run volume.
 
 The reviewed capture directories were `artifacts/vm/m11-fixture-a` and
 `artifacts/vm/m11-fixture-b`. Those ignored runtime artifacts are provenance,

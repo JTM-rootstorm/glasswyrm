@@ -10,7 +10,9 @@ import sys
 MAXIMUM_LINE_BYTES = 64 * 1024
 MAXIMUM_TRACE_BYTES = 8 * 1024 * 1024
 RECURRING_REQUESTS = frozenset(("QueryPointer", "QueryKeymap"))
-PRESENCE_ONLY_REQUESTS = frozenset(("ImageText8",))
+PRESENCE_ONLY_REQUESTS = frozenset((
+    "ClearArea", "CopyArea", "ImageText8", "PolyLine", "PutImage",
+))
 TRACE_GATED_REQUESTS = (
     "GrabButton", "UngrabButton", "GrabKey", "UngrabKey",
 )
