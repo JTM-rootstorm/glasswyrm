@@ -11,7 +11,8 @@ namespace glasswyrm::server {
 
 Server::Server(Options options)
     : options_(std::move(options)),
-      extensions_(options_.game_compat, options_.disabled_extensions) {
+      extensions_(options_.game_compat, options_.disabled_extensions),
+      state_(kScreenModel, options_.game_compat) {
   socket_path_ = options_.socket_dir + "/X" +
                  std::to_string(static_cast<unsigned int>(options_.display));
   structural_transition_handler_ = [this](

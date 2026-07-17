@@ -72,6 +72,7 @@ class ServerRuntime {
     std::uint64_t creation_serial{};
     std::optional<WindowDestroyPlan> destroy;
     std::optional<ClientCleanupPlan> cleanup;
+    std::optional<DeferredPropertyMutation> property;
   };
 
   void initialize_lifecycle();

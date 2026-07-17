@@ -206,6 +206,7 @@ class ResourceTable {
   [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
   root_default_cursor() const noexcept { return root_default_cursor_; }
   [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
+  [[nodiscard]] bool create_server_proxy_window(std::uint32_t xid);
   [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
                                                           bool mapped);
   [[nodiscard]] LocalLifecycleStatus configure_local(

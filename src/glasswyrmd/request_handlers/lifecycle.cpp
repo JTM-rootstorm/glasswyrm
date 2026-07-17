@@ -1,4 +1,5 @@
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/ewmh.hpp"
 #include "glasswyrmd/extension_event_helpers.hpp"
 
 #include "glasswyrmd/request_handlers/drawable_access.hpp"
@@ -219,6 +220,8 @@ DispatchResult destroy_window(ServerState& state,
   if (context.integrated_lifecycle && state.resources().cleanup_pending(window))
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   if (window == state.screen().root_window) return {};
+  if (state.game_compat() && window == kEwmhSupportingWindow)
+    return error(context, request, x11::CoreErrorCode::BadAccess, window);
   if (context.integrated_lifecycle &&
       state.resources().is_policy_candidate(window)) {
     return DispatchResult::deferred_destroy_window(window);
