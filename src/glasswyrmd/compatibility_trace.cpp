@@ -131,6 +131,7 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 35: return "AllowEvents";
     case 38: return "QueryPointer";
     case 40: return "TranslateCoordinates";
+    case 41: return "WarpPointer";
     case 43: return "GetInputFocus";
     case 44: return "QueryKeymap";
     case 45: return "OpenFont";

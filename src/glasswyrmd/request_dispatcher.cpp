@@ -77,6 +77,8 @@ DispatchResult dispatch_request(ServerState& state,
         return query_pointer(state, context, request);
       case x11::CoreOpcode::TranslateCoordinates:
         return translate_coordinates(state, context, request);
+      case x11::CoreOpcode::WarpPointer:
+        return warp_pointer(state, context, request);
       case x11::CoreOpcode::QueryKeymap:
         return query_keymap(context, request);
       case x11::CoreOpcode::GetInputFocus:

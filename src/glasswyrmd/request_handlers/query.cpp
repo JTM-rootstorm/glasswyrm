@@ -5,6 +5,7 @@
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/reply.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -132,6 +133,98 @@ DispatchResult translate_coordinates(const ServerState& state,
   reply.write_u16(static_cast<std::uint16_t>(destination_x));
   reply.write_u16(static_cast<std::uint16_t>(destination_y));
   return {std::move(reply).finish()};
+}
+
+DispatchResult warp_pointer(ServerState& state,
+                            const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (!exact_size(request, 24))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t source{}, destination{};
+  std::uint16_t source_x_wire{}, source_y_wire{}, source_width{},
+      source_height{}, destination_x_wire{}, destination_y_wire{};
+  if (!reader.read_u32(source) || !reader.read_u32(destination) ||
+      !reader.read_u16(source_x_wire) || !reader.read_u16(source_y_wire) ||
+      !reader.read_u16(source_width) || !reader.read_u16(source_height) ||
+      !reader.read_u16(destination_x_wire) ||
+      !reader.read_u16(destination_y_wire))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  const WindowResource* source_window = nullptr;
+  std::optional<std::pair<std::int64_t, std::int64_t>> source_origin;
+  if (source != 0) {
+    source_window = state.resources().find_window(source);
+    if (!source_window)
+      return error(context, request, x11::CoreErrorCode::BadWindow, source);
+    source_origin = glasswyrm::input::window_root_origin(state.resources(), source);
+    if (!source_origin)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+
+  std::optional<std::pair<std::int64_t, std::int64_t>> destination_origin;
+  if (destination != 0) {
+    if (!state.resources().find_window(destination))
+      return error(context, request, x11::CoreErrorCode::BadWindow,
+                   destination);
+    destination_origin =
+        glasswyrm::input::window_root_origin(state.resources(), destination);
+    if (!destination_origin)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+
+  if (source_window) {
+    const auto window_x = static_cast<std::int64_t>(context.input.root_x) -
+                          source_origin->first;
+    const auto window_y = static_cast<std::int64_t>(context.input.root_y) -
+                          source_origin->second;
+    const auto source_x = static_cast<std::int16_t>(source_x_wire);
+    const auto source_y = static_cast<std::int16_t>(source_y_wire);
+    const auto source_right =
+        source_width == 0
+            ? static_cast<std::int64_t>(source_window->width)
+            : static_cast<std::int64_t>(source_x) + source_width;
+    const auto source_bottom =
+        source_height == 0
+            ? static_cast<std::int64_t>(source_window->height)
+            : static_cast<std::int64_t>(source_y) + source_height;
+    const bool inside_window =
+        window_x >= 0 && window_y >= 0 &&
+        window_x < static_cast<std::int64_t>(source_window->width) &&
+        window_y < static_cast<std::int64_t>(source_window->height);
+    const bool inside_rectangle = window_x >= source_x &&
+                                  window_y >= source_y &&
+                                  window_x < source_right &&
+                                  window_y < source_bottom;
+    if (!inside_window || !inside_rectangle)
+      return {};
+  }
+
+  const auto destination_x = static_cast<std::int16_t>(destination_x_wire);
+  const auto destination_y = static_cast<std::int16_t>(destination_y_wire);
+  const std::int64_t root_x =
+      destination_origin
+          ? static_cast<std::int64_t>(destination_origin->first) + destination_x
+          : static_cast<std::int64_t>(context.input.root_x) + destination_x;
+  const std::int64_t root_y =
+      destination_origin
+          ? static_cast<std::int64_t>(destination_origin->second) + destination_y
+          : static_cast<std::int64_t>(context.input.root_y) + destination_y;
+  const auto bounded_x = std::clamp(
+      root_x, static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()));
+  const auto bounded_y = std::clamp(
+      root_y, static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()));
+  const auto [clamped_x, clamped_y] = glasswyrm::input::clamp_pointer(
+      static_cast<std::int32_t>(bounded_x),
+      static_cast<std::int32_t>(bounded_y), state.screen().width_pixels,
+      state.screen().height_pixels);
+  if (!context.input.warp_pointer ||
+      !context.input.warp_pointer(clamped_x, clamped_y))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  return {};
 }
 
 DispatchResult query_extension(const DispatchContext& context,

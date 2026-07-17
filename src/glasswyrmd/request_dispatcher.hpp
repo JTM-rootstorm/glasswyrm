@@ -37,6 +37,7 @@ struct InputSnapshot {
   std::array<std::uint8_t, 32> keymap{};
   std::shared_ptr<const KeyboardMappingSnapshot> keyboard_mapping;
   std::function<bool(bool)> set_global_auto_repeat;
+  std::function<bool(std::int32_t, std::int32_t)> warp_pointer;
 };
 
 struct DispatchContext {

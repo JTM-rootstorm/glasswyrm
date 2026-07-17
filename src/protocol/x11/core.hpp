@@ -35,6 +35,7 @@ enum class CoreOpcode : std::uint8_t {
   AllowEvents = 35,
   QueryPointer = 38,
   TranslateCoordinates = 40,
+  WarpPointer = 41,
   QueryKeymap = 44,
   CreateColormap = 78,
   FreeColormap = 79,
