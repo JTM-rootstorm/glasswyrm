@@ -1556,6 +1556,16 @@ assert_contains "$command_log" 'unmask --runtime'
 assert_contains "$command_log" '<screenshot> <glasswyrm-test>'
 assert_contains "$command_log" 'magick <'
 assert_contains "$command_log" 'M10 scene manifest is missing or empty:'
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  "r['root_x']==35 and r['root_y']==55"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  "r['result']=='accepted'"
+assert_not_contains "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  "r['delivered_event_count']>0"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  "flip['canonical_hash']!=expected"
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
+  "frame['fnv1a64']==flip['canonical_hash']"
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
   '>"$control/screenshot-after-vt-ready"' 'touch "$control/post-vt-input"'
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone10.sh" \
