@@ -30,6 +30,7 @@ LifecycleSnapshot build_lifecycle_snapshot(const ResourceTable& resources,
     item.map_requested = window->map_requested;
     item.policy_visible = window->policy_visible;
     item.focused = window->focused;
+    item.stacking = window->stacking;
     item.creation_serial = window->creation_serial;
     item.map_serial = window->map_serial;
     item.focus_serial = window->focus_serial;
@@ -105,6 +106,7 @@ bool apply_policy_state(ResourceTable& resources,
     window->height = static_cast<std::uint16_t>(item.height);
     window->policy_visible = item.visible;
     window->focused = item.focused;
+    window->stacking = item.stacking;
     if (window->map_requested && window->geometry_serial == 0) {
       window->requested_x = item.x; window->requested_y = item.y;
       window->requested_width = item.width; window->requested_height = item.height;
