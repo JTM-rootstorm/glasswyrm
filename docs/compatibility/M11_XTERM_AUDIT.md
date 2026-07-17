@@ -1,15 +1,16 @@
 # Milestone 11 xterm source audit
 
 Status: official patch 410 source and profile pinned; two full VM bootstrap
-captures at `eb8a20f76b24cc7c07459a402603bad5e7b6cc39` produced identical
-normalized traces and passed every runtime evidence gate except the deliberately
-unavailable exact-fixture comparison. The post-fixture exact-match VM gate is
+captures at `eb8a20f76b24cc7c07459a402603bad5e7b6cc39` reproduced the finalized
+presence-normalized fixture and passed every runtime evidence gate except the
+deliberately unavailable exact-fixture comparison. A focused exact rerun has
+also passed, but it is diagnostic-only. The final full exact-match VM gate is
 still pending.
 
 This document combines the source audit with the reviewed bootstrap evidence
 that selected the fixture. It does not yet declare final Milestone 11
-acceptance: that declaration requires a clean full VM run after the fixture is
-committed and the exact comparison is enabled unconditionally.
+acceptance: that declaration requires a clean full VM run at the final commit
+to pass the unconditional exact comparison.
 
 ## Verified release identity
 
@@ -120,25 +121,30 @@ eb8a20f76b24cc7c07459a402603bad5e7b6cc39
 
 Both runs completed the full interactive scenario with `scenario_exit=0`.
 Every mandatory summary field passed except `exact_trace`, which correctly
-reported `bootstrap` because no committed fixture existed. Their normalized
-traces are byte-for-byte identical and have candidate fixture SHA-256:
+reported `bootstrap` because no committed fixture existed. Normalizing both
+archived raw traces with the finalized presence-normalization rules reproduces
+the committed fixture byte-for-byte at SHA-256:
 
 ```text
-6cc10dc3bbe33afbbb5cd99c82b84fef87dc8252ef506d019a5acf7877affb12
+702e014eb33d67f9fa719ff0f133782b950a83a153c882394f53d8606f229834
 ```
 
-The raw JSONL traces were retained in both checksum-validated evidence
-archives. Their raw hashes differ, as expected for runtime-specific records;
-normalization removes those identities and produced the identical reviewed
-profile above.
+The raw JSONL traces remain exact and checksum-protected in their evidence
+archives. Runtime redraw scheduling produced 800 or 806 `ImageText8` requests
+and 6 or 7 `PolyLine` requests across the reviewed raw captures. Those raw
+counts are evidence, not a compatibility requirement. The fixture therefore
+presence-normalizes the five drawing primitives `ClearArea`, `CopyArea`,
+`ImageText8`, `PolyLine`, and `PutImage` to one occurrence in both its request
+and opcode histograms. Request presence, first-occurrence order, all protocol
+and selection counts, and the complete event sequence remain exact.
 
-The exact observed request histogram is:
+The exact presence-normalized fixture request histogram is:
 
 ```text
 AllocColor=424                 ChangeProperty=38
-ChangeWindowAttributes=151     ClearArea=46
+ChangeWindowAttributes=151     ClearArea=1
 CloseFont=3                    ConfigureWindow=6
-ConvertSelection=3             CopyArea=30
+ConvertSelection=3             CopyArea=1
 CreateGC=19                    CreateGlyphCursor=17
 CreatePixmap=6                 CreateWindow=6
 DeleteProperty=2               FreeCursor=1
@@ -146,10 +152,10 @@ FreeGC=6                       GetGeometry=5
 GetInputFocus=17               GetKeyboardMapping=6
 GetModifierMapping=6           GetProperty=20
 GetSelectionOwner=4            GrabButton=96
-ImageText8=806                 InternAtom=97
+ImageText8=1                   InternAtom=97
 MapSubwindows=2                MapWindow=2
-OpenFont=9                     PolyLine=6
-PutImage=6                     QueryColors=5
+OpenFont=9                     PolyLine=1
+PutImage=1                     QueryColors=5
 QueryExtension=6               QueryFont=6
 QueryTree=3                    RecolorCursor=5
 SendEvent=3                    SetSelectionOwner=3
@@ -159,6 +165,10 @@ There were no protocol errors, recurring requests, or unknown opcodes. The
 only trace-gated request was exactly 96 `GrabButton` requests; no
 `UngrabButton` or passive key-grab request was observed. The trace recorded
 five application connections and a maximum request length of 9,240 bytes.
+
+The corresponding presence-normalized opcode counts are one each for
+`ClearArea` (61), `CopyArea` (62), `PolyLine` (65), `PutImage` (72), and
+`ImageText8` (76). All other opcode counts remain exact.
 
 The exact event histogram is:
 
@@ -331,11 +341,11 @@ the matching live evidence.
 
 ## Final acceptance gate pending
 
-The A/B bootstrap evidence is sufficient to select and document the candidate
-fixture. It is not the final exact-fixture acceptance result. After the
-reviewed normalized trace and its checksum are committed, the complete clean
-VM route must run again at the final source commit and report
-`exact_trace=passed`, not `bootstrap`. The final result must also repeat the
+The A/B bootstrap evidence selected the committed fixture, and a focused
+diagnostic rerun has reproduced it exactly. Neither is the final full
+exact-fixture acceptance result. The complete clean VM route must run again at
+the final source commit and report `exact_trace=passed`, not `bootstrap`. The
+final result must also repeat the
 historical clean-snapshot Milestone 10 predecessor, host compiler/sanitizer and
 component gates, screenshot equality, restoration, cleanup, and archive
 validation before Milestone 11 is declared complete.

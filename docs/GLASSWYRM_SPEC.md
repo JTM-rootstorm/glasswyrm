@@ -1036,8 +1036,8 @@ behavior; capability-gated session-state and GWM interactive bindings through
 GWIPC API 0.6; a software cursor composed by `gwcomp`; and the unprivileged
 `glasswyrm-session` orchestrator. The intended external target is only xterm
 patch 410 under the pinned core-font ASCII profile. Two full bootstrap runs at
-`eb8a20f76b24cc7c07459a402603bad5e7b6cc39` reproduced the normalized live
-trace and validated typing, scrolling, selection exchange, interactive
+`eb8a20f76b24cc7c07459a402603bad5e7b6cc39` reproduced the presence-normalized
+live trace and validated typing, scrolling, selection exchange, interactive
 move/resize/close, VT and compositor-restart recovery, canonical DRM frames,
 graphical-console screenshots, ordered restoration, and evidence-archive
 integrity. The final post-fixture full VM exact-match gate remains pending.
