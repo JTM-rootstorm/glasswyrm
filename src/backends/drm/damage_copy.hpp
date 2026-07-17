@@ -16,6 +16,7 @@ enum class FullCopyReason {
   FirstUse,
   HistoryMiss,
   DamageUnavailable,
+  CanonicalMismatch,
   VirtualTerminalResume,
 };
 

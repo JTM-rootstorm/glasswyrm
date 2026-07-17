@@ -265,6 +265,39 @@ void accumulated_damage_copy_and_vt_fallback() {
       "VT resume forces and reports one complete scanout copy");
 }
 
+void incomplete_damage_recovers_with_full_copy() {
+  Rig rig(DrmPresentationApi::Atomic, true, true, false, true, true);
+  const std::array wrong_damage{gw::compositor::Rectangle{1, 1, 1, 1}};
+  const std::array black{0xff000000U, 0xff000000U, 0xff000000U,
+                         0xff000000U};
+  gw::test::require(
+      rig.presenter->present(frame(black, 1, 60'000, wrong_damage))
+              .disposition == output::PresentDisposition::Complete,
+      "incomplete-damage fixture initializes the first buffer");
+  auto pending = rig.presenter->present(frame(black, 2, 60'000, wrong_damage));
+  rig.drm.queue_page_flip(pending.token, 40, 2);
+  gw::test::require(
+      pending.disposition == output::PresentDisposition::Pending &&
+          rig.presenter->service(POLLIN).kind ==
+              output::BackendEventKind::Complete &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      "incomplete-damage fixture initializes the second buffer");
+
+  const std::array changed{0xffff0000U, 0xff000000U, 0xff000000U,
+                           0xff000000U};
+  pending = rig.presenter->present(frame(changed, 3, 60'000, wrong_damage));
+  rig.drm.queue_page_flip(pending.token, 40, 3);
+  gw::test::require(
+      pending.disposition == output::PresentDisposition::Pending &&
+          rig.presenter->service(POLLIN).kind ==
+              output::BackendEventKind::Complete &&
+          rig.presenter->finalize_pending(pending.token, rig.error) &&
+          contents(rig.report.path()).find(
+              "\"full_copy_reason\":\"canonical-mismatch\"") !=
+              std::string::npos,
+      "canonical mismatch retries a complete copy before KMS submission");
+}
+
 void zero_sequence_page_flip_completion() {
   Rig rig(DrmPresentationApi::Atomic);
   const std::array pixels{0xff111111U, 0xff222222U, 0xff333333U, 0xff444444U};
@@ -436,6 +469,7 @@ int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
   accumulated_damage_copy_and_vt_fallback();
+  incomplete_damage_recovers_with_full_copy();
   zero_sequence_page_flip_completion();
   policy_and_legacy_requests();
   mismatch_resume_and_shutdown_order();
