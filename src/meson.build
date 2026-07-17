@@ -289,6 +289,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/drawable_store.cpp',
       'glasswyrmd/font_store.cpp',
       'glasswyrmd/cursor_store.cpp',
+      'glasswyrmd/colormap_store.cpp',
       'glasswyrmd/property_store.cpp',
       'glasswyrmd/selection_store.cpp',
       'glasswyrmd/grab_state.cpp',
