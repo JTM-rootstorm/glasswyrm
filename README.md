@@ -17,8 +17,8 @@ bounded BIG-REQUESTS, MIT-SHM, XFIXES, DAMAGE, RENDER, COMPOSITE, and RANDR
 subsets, SDL-oriented EWMH policy, eventfd CPU-buffer readiness, a renderer
 abstraction with optional EGL/GLES composition, and damage-aware DRM copies.
 The exact SDL 2.32.10 software-X11 profile and official workloads are pinned,
-but their external-client claim remains pending until the clean M11-to-M12
-Gentoo VM sequence passes with complete evidence.
+and their narrow external-client claim is accepted by the clean M11-to-M12
+Gentoo VM sequence with complete evidence.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -389,7 +389,7 @@ buffer publication. The scalar renderer remains canonical; forced GLES uses
 only the constrained compositor renderer and still hands the same
 `SoftwareFrame` to headless or DRM presentation.
 
-This is not yet an accepted compatibility claim. The required release order is:
+The accepted compatibility claim is bounded by this required release order:
 
 ```sh
 ./tools/gw-vm reset --yes
@@ -398,12 +398,12 @@ This is not yet an accepted compatibility claim. The required release order is:
 ./tools/gw-vm milestone12-runtime-test --yes
 ```
 
-The final command must prove both byte orders, MIT-SHM and its fallback,
+The final command proves both byte orders, MIT-SHM and its fallback,
 software/GLES opaque-frame equality, real input/clipboard/cursor/close,
 fullscreen geometry restore, damage-aware upload and scanout metrics,
 GWM/compositor/VT replay, KMS/KD/VT/getty restoration, cleanup, and evidence
-archive integrity. Until it returns a passing summary with no evidence errors,
-the [SDL profile](docs/compatibility/M12_SDL.md) remains explicitly pending.
+archive integrity. The [SDL profile](docs/compatibility/M12_SDL.md) records the
+exact accepted boundary; it is not a general SDL or game compatibility claim.
 
 ## Setup probes
 
@@ -610,7 +610,7 @@ QXL guest meets that boundary and the command validates atomic scanout,
 graphical-console screenshots, VT switching, input-driven repaint, restoration,
 and the required binary evidence archive.
 
-The Milestone 11 and pending Milestone 12 acceptance commands are:
+The Milestone 11 and Milestone 12 acceptance commands are:
 
 ```sh
 ./tools/gw-vm milestone11-runtime-test --yes
@@ -638,5 +638,5 @@ accepted interactive subset, while the
 claim to the pinned patch 410 core-font ASCII invocation.
 The [Milestone 12 profile](docs/protocols/x11-milestone-12.md) records the
 implemented opt-in extension and efficient-buffer boundary. Its
-[SDL 2.32.10 profile](docs/compatibility/M12_SDL.md) is pinned but remains
-pending until the clean Gentoo VM evidence gate passes.
+[SDL 2.32.10 profile](docs/compatibility/M12_SDL.md) records the narrow claim
+accepted by the clean Gentoo VM evidence gate.

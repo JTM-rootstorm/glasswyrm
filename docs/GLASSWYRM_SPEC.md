@@ -967,7 +967,7 @@ M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline                complete
-M12 Efficient buffers and game-oriented clients
+M12 Efficient buffers and game-oriented clients        complete
 M13 Output model and per-output scaling
 M14 Variable refresh rate
 M15 Color management and HDR
@@ -1069,10 +1069,10 @@ DRM copies. Software rendering remains the default and canonical reference;
 wire 1.0 and SOVERSION 0 remain unchanged. The only external target is the
 exact SDL 2.32.10 X11 software-renderer profile with the pinned repository
 probe and official `testdraw2`/`testsprite2` workloads. Host implementation
-tests and evidence validators do not accept that target by themselves: the
-clean M11-to-M12 Gentoo VM sequence, software/GLES and DRM image evidence,
-real interaction, restart/VT recovery, restoration, cleanup, and archive gates
-must pass before M12 is marked complete.
+tests and evidence validators do not accept that target by themselves. The
+accepted profile is proved by the clean M11-to-M12 Gentoo VM sequence,
+software/GLES and DRM image evidence, real interaction, restart/VT recovery,
+restoration, cleanup, and archive gates.
 
 ## 26. Definition of done
 

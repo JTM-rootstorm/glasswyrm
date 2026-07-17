@@ -1,12 +1,12 @@
 # X11 Milestone 12 game-client profile
 
-Status: implemented with host coverage; live Gentoo VM acceptance is pending.
+Status: accepted for the pinned SDL profile through the clean Gentoo VM gate.
 
 Milestone 12 adds an opt-in X11 profile for the exact SDL 2.32.10 X11
 software-renderer build. It is not enabled by default and is not a claim of
 general SDL, game, toolkit, or extension compatibility. The external-client
-claim remains pending until the clean M11-to-M12 VM sequence passes with a
-complete evidence archive.
+claim is limited to the clean M11-to-M12 VM sequence and its complete evidence
+archive.
 
 ## Activation and setup
 
@@ -170,11 +170,11 @@ boundaries. The exact SDL release, official `testdraw2` and `testsprite2`
 sources, build switches, commands, and hashes are frozen in
 `tests/compat/m12/clients.toml`.
 
-Live acceptance is still pending. It requires the fixed Gentoo VM scenario to
-prove the raw and XCB extension probes, MIT-SHM and non-SHM fallback, official
-SDL workloads, real input/clipboard/cursor/close, fullscreen restore, software
-and GLES equality, DRM screenshot parity, VT and process restart replay,
-restoration, cleanup, and archive integrity. See the
+Live acceptance uses the fixed Gentoo VM scenario to prove the raw and XCB
+extension probes, MIT-SHM and non-SHM fallback, official SDL workloads, real
+input/clipboard/cursor/close, fullscreen restore, software and GLES equality,
+DRM screenshot parity, VT and process restart replay, restoration, cleanup,
+and archive integrity. See the
 [SDL profile](../compatibility/M12_SDL.md).
 
 ## Explicitly unsupported

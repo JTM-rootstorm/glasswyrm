@@ -1,6 +1,6 @@
 # Milestone 12 SDL 2.32.10 Source Audit
 
-Status: implementation input; runtime acceptance is not yet claimed
+Status: accepted implementation input for the pinned runtime profile
 
 ## Pinned release
 
@@ -89,7 +89,8 @@ the software SDL renderer, and the official `icon.bmp` asset.
 ## Compatibility boundary
 
 This audit identifies implementation requirements; it does not by itself
-establish runtime compatibility. Acceptance requires the raw and XCB extension
-probes, repository SDL probe, official workloads, exact software/GLES frame
-equivalence, DRM screenshot parity, live input/fullscreen/clipboard/close
-checks, restart and VT recovery, and the clean M12 Gentoo VM evidence gate.
+establish runtime compatibility. The accepted profile additionally passes the
+raw and XCB extension probes, repository SDL probe, official workloads, exact
+software/GLES frame equivalence, DRM screenshot parity, live
+input/fullscreen/clipboard/close checks, restart and VT recovery, and the clean
+M12 Gentoo VM evidence gate.

@@ -1,13 +1,13 @@
 # SDL 2.32.10 compatibility profile
 
-Status: pinned with host harness coverage; live Gentoo VM acceptance is pending.
+Status: accepted for the pinned profile through the clean Gentoo VM evidence gate.
 
 Milestone 12 targets only the unmodified SDL 2.32.10 X11 software-renderer
 build, environment, and commands frozen in
 `tests/compat/m12/clients.toml`. The source audit and host-side probes do not
-by themselves establish compatibility. This profile becomes accepted only
-after the clean `milestone12-runtime-test` summary passes with an empty
-`evidence_errors` list and its checksum-protected archive validates.
+by themselves establish compatibility. The clean `milestone12-runtime-test`
+accepted this profile with a passing summary, an empty `evidence_errors` list,
+and a validated checksum-protected archive.
 
 ## Verified release identity
 
@@ -214,9 +214,35 @@ The fixed release gate is:
 ./tools/gw-vm milestone12-runtime-test --yes
 ```
 
-No successful M12 VM summary has been accepted yet. Until that gate reports
-`passed: true`, this page records a pending compatibility target, not a claim
-that SDL applications or games generally work on Glasswyrm.
+The accepted run reports `passed: true` with no evidence errors. This page
+records only that exact compatibility target, not a claim that SDL
+applications or games generally work on Glasswyrm.
+
+## Exact support boundary
+
+Supported:
+
+- SDL 2.32.10 exact X11 software-renderer build
+- official testdraw2 accepted profile
+- official testsprite2 accepted bounded profile
+- one output and one workspace
+- MIT-SHM and documented fallback
+- fullscreen desktop and borderless windowed state
+- software renderer
+- constrained EGL/GLES compositor renderer
+- real libinput profile from M11
+
+Unsupported:
+
+- arbitrary SDL versions
+- SDL OpenGL/Vulkan renderers
+- XInput2
+- Shape
+- full RENDER/COMPOSITE/RANDR
+- DRI3/PRESENT/GLX
+- direct scanout
+- arbitrary games
+- multiple outputs
 
 ## Explicitly unsupported
 

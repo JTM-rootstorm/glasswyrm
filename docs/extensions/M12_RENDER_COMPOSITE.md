@@ -1,9 +1,9 @@
 # Milestone 12 RENDER and COMPOSITE Profile
 
 This note records the implemented, host-tested RENDER 0.11 and COMPOSITE 0.4
-subsets specified for Milestone 12. Live SDL and Gentoo VM acceptance remains
-pending. Broad extension compatibility must not be inferred from the versions
-advertised by this profile.
+subsets specified for Milestone 12. The pinned SDL profile is accepted by the
+clean Gentoo VM gate. Broad extension compatibility must not be inferred from
+the versions advertised by this profile.
 
 ## RENDER 0.11
 
@@ -144,7 +144,7 @@ ownership, named-pixmap storage accounting and resize/destroy lifetime, exact
 `Src`/`Over`/fill pixels, destination damage, and both client byte orders. The
 source-layout gate also covers each new module without an exception.
 
-That host proof is not the external compatibility gate. The raw and official
-XCB probes, pinned SDL workloads, software/GLES comparison, restart/VT replay,
-and DRM evidence must still pass the clean Gentoo VM sequence before the M12
-compatibility claim is accepted.
+That host proof is not the external compatibility gate. The accepted M12
+compatibility claim additionally passes the raw and official XCB probes,
+pinned SDL workloads, software/GLES comparison, restart/VT replay, and DRM
+evidence in the clean Gentoo VM sequence.
