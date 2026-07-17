@@ -27,12 +27,20 @@ class Segment {
   }
   ~Segment() {
     if (address != reinterpret_cast<void*>(-1)) (void)::shmdt(address);
-    if (id >= 0) (void)::shmctl(id, IPC_RMID, nullptr);
+    if (id >= 0 && !removed_) (void)::shmctl(id, IPC_RMID, nullptr);
   }
   Segment(const Segment&) = delete;
   Segment& operator=(const Segment&) = delete;
+  void mark_for_removal() {
+    require(id >= 0 && ::shmctl(id, IPC_RMID, nullptr) == 0,
+            "mark SysV fixture segment for removal");
+    removed_ = true;
+  }
   int id{-1};
   void* address{reinterpret_cast<void*>(-1)};
+
+ private:
+  bool removed_{false};
 };
 
 x11::ByteWriter header(const x11::ByteOrder order, const std::uint8_t minor,
@@ -170,6 +178,75 @@ void test_query_and_security(const x11::ByteOrder order) {
   require(result.output[1] == 128 && u16(result.output, order, 8) == 2 &&
               result.output[10] == 129,
           "unknown segment reports MIT-SHM BadSeg with request metadata");
+
+  Segment removed(4096);
+  removed.mark_for_removal();
+  result = dispatch_request(
+      state, context, attach_request(order, 0x400011, removed.id, true));
+  require(result.output.size() == 32 &&
+              result.output[1] ==
+                  static_cast<std::uint8_t>(x11::CoreErrorCode::BadAccess) &&
+              state.resources().find_shm_segment(0x400011) == nullptr,
+          "Attach rejects a segment marked for removal without publishing an "
+          "XID");
+}
+
+void test_injectable_limits() {
+  constexpr ClientId owner = 19;
+  constexpr std::uint32_t resource_base = 0x400000;
+  constexpr std::uint32_t resource_mask = 0x1fffff;
+  const auto peer_uid = static_cast<std::uint32_t>(::getuid());
+
+  Segment first(512);
+  Segment second(768);
+  const auto first_baseline = attachment_count(first.id);
+  const auto second_baseline = attachment_count(second.id);
+
+  ResourceLimits count_limits;
+  count_limits.maximum_shm_segments_per_client = 1;
+  count_limits.maximum_shm_bytes_per_client = 4096;
+  ResourceTable count_bounded(kScreenModel, count_limits);
+  require(count_bounded.attach_shm_segment(
+              owner, resource_base, resource_mask, 0x400040, first.id, true,
+              peer_uid) == AttachShmStatus::Success,
+          "injected segment-count limit accepts the first mapping");
+  require(count_bounded.attach_shm_segment(
+              owner, resource_base, resource_mask, 0x400041, second.id, true,
+              peer_uid) == AttachShmStatus::BadAlloc &&
+              count_bounded.find_shm_segment(0x400041) == nullptr &&
+              attachment_count(second.id) == second_baseline,
+          "injected segment-count limit rejects without mapping or XID");
+  require(count_bounded.detach_shm_segment(0x400040) ==
+                  DetachShmStatus::Success &&
+              attachment_count(first.id) == first_baseline,
+          "segment-count quota is released by detach");
+
+  ResourceLimits byte_limits;
+  byte_limits.maximum_shm_segments_per_client = 4;
+  byte_limits.maximum_shm_bytes_per_client = 1024;
+  ResourceTable byte_bounded(kScreenModel, byte_limits);
+  require(byte_bounded.attach_shm_segment(
+              owner, resource_base, resource_mask, 0x400050, first.id, true,
+              peer_uid) == AttachShmStatus::Success,
+          "injected byte limit accepts a fitting mapping");
+  require(byte_bounded.attach_shm_segment(
+              owner, resource_base, resource_mask, 0x400051, second.id, true,
+              peer_uid) == AttachShmStatus::BadAlloc &&
+              byte_bounded.find_shm_segment(0x400051) == nullptr &&
+              attachment_count(second.id) == second_baseline,
+          "injected cumulative-byte limit rejects without mapping or XID");
+  require(byte_bounded.detach_shm_segment(0x400050) ==
+                  DetachShmStatus::Success &&
+              byte_bounded.attach_shm_segment(
+                  owner, resource_base, resource_mask, 0x400051, second.id,
+                  true, peer_uid) == AttachShmStatus::Success,
+          "detaching releases the injected SHM byte quota");
+  require(byte_bounded.detach_shm_segment(0x400051) ==
+                  DetachShmStatus::Success &&
+              attachment_count(first.id) == first_baseline &&
+              attachment_count(second.id) == second_baseline &&
+              byte_bounded.invariants_hold(),
+          "bounded SHM mappings detach exactly once and preserve invariants");
 }
 
 void test_images_and_cleanup(const x11::ByteOrder order) {
@@ -263,6 +340,7 @@ void test_images_and_cleanup(const x11::ByteOrder order) {
 }  // namespace
 
 int main() {
+  test_injectable_limits();
   for (const auto order : {x11::ByteOrder::LittleEndian,
                            x11::ByteOrder::BigEndian}) {
     test_query_and_security(order);
