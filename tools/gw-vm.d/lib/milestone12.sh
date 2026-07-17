@@ -26,7 +26,8 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-vt-after.json milestone12-getty-state.json
   milestone12-logind-state.json milestone12-frame-equivalence.json
   milestone12-software-testsprite-stability.json
-  milestone12-gles-testsprite-stability.json milestone12-facts.env)
+  milestone12-gles-testsprite-stability.json
+  milestone12-extension-stress.json milestone12-facts.env)
 M12_BINARY_ARTIFACTS=(milestone12-software.ppm milestone12-gles.ppm
   milestone12-fullscreen.ppm milestone12-screen.ppm
   milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm
@@ -97,10 +98,7 @@ asan=/var/tmp/glasswyrm-build-m12-asan
 software=/var/tmp/glasswyrm-build-m12-software
 gles=/var/tmp/glasswyrm-build-m12-gles
 default=/var/tmp/glasswyrm-build-m12-default
-server=/var/tmp/glasswyrm-build-m12-server
-gwm_build=/var/tmp/glasswyrm-build-m12-gwm
-gwcomp_build=/var/tmp/glasswyrm-build-m12-gwcomp
-ipc_only=/var/tmp/glasswyrm-build-m12-ipc-only
+components=/var/tmp/glasswyrm-build-m12-components
 clients=/var/tmp/glasswyrm-m12-clients
 dumps=/var/tmp/glasswyrm-m12-dumps
 scenes=/var/tmp/glasswyrm-m12-scenes
@@ -110,7 +108,7 @@ facts=$artifact_dir/milestone12-facts.env
 failure_stage=prerequisite scenario_exit=1 keyboard= pointer=
 declare -A result
 required_results=(historical_default strict_software strict_gles sanitizer clang
-  component_builds source_layout api_consumers regressions uinput
+  component_builds source_layout api_consumers regressions extension_stress uinput
   raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2
   extension_registry big_requests mit_shm no_shm_fallback xfixes damage render
   composite randr colormap fullscreen borderless geometry_restore
@@ -225,7 +223,8 @@ validate_milestone12_archive() {
     milestone12-getty-state.json milestone12-logind-state.json \
     milestone12-frame-equivalence.json \
     milestone12-software-testsprite-stability.json \
-    milestone12-gles-testsprite-stability.json SHA256SUMS; do
+    milestone12-gles-testsprite-stability.json \
+    milestone12-extension-stress.json SHA256SUMS; do
     grep -Eq "^(\\./)?$member$" <<<"$listing" || return
   done
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m12-evidence.XXXXXX") || return
@@ -248,7 +247,7 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     key,sep,value=line.partition('=')
     if sep: facts[key]=value
-required='historical_default strict_software strict_gles sanitizer component_builds source_layout api_consumers regressions uinput raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 extension_registry big_requests mit_shm no_shm_fallback xfixes damage render composite randr colormap fullscreen borderless geometry_restore eventfd_sync missing_token_wait damage_upload damage_scanout software_frame gles_frame renderer_equality screenshot_equality fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup restoration archive_validation journal_evidence'.split()
+required='historical_default strict_software strict_gles sanitizer component_builds source_layout api_consumers regressions extension_stress uinput raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 extension_registry big_requests mit_shm no_shm_fallback xfixes damage render composite randr colormap fullscreen borderless geometry_restore eventfd_sync missing_token_wait damage_upload damage_scanout software_frame gles_frame renderer_equality screenshot_equality fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup restoration archive_validation journal_evidence'.split()
 identity={'required_base_commit':base,'tested_commit':tested,'sdl_version':'2.32.10','sdl_source_sha256':'5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165','api_version':'0.7.0','soversion':'0','wire_version':'1.0','drm_mode':'1024x768','x_servers_absent':'true'}
 errors=[f'{key} must be passed' for key in required if facts.get(key)!='passed']
 if facts.get('clang') not in {'passed','unavailable'}: errors.append('clang must be passed or unavailable')
@@ -376,7 +375,8 @@ emerge --oneshot --noreplace dev-build/meson dev-build/ninja dev-build/cmake \
   x11-libs/libX11 x11-libs/libXext x11-libs/libXfixes x11-libs/libXdamage \
   x11-libs/libXrender x11-libs/libXcomposite x11-libs/libXrandr \
   x11-libs/libxcb x11-libs/xcb-util x11-base/xorg-proto
-for forbidden in x11-base/xorg-server x11-base/xwayland x11-misc/xvfb; do
+for forbidden in x11-base/xorg-server x11-base/xwayland x11-misc/xvfb \
+  x11-misc/lightdm x11-misc/sddm gnome-base/gdm gui-apps/greetd; do
   ! qlist -IC "$forbidden" 2>/dev/null | grep -q . || { printf 'Forbidden package installed: %s\n' "$forbidden" >&2; exit 1; }
 done
 x_servers_absent=true
@@ -408,26 +408,60 @@ result[strict_software]=passed
 setup_build "$gles" -Dexperimental=true -Drender_gl=true -Ddrm_backend=true -Dlibinput_backend=true
 meson test -C "$gles" --print-errorlogs
 result[strict_gles]=passed
-meson setup "$asan" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=true -Dexperimental=true -Drender_gl=true
-meson compile -C "$asan"; meson test -C "$asan" --print-errorlogs
+meson setup "$asan" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=true \
+  -Dexperimental=true -Drender_gl=true -Ddrm_backend=true \
+  -Dheadless_backend=true -Dlibinput_backend=true
+meson compile -C "$asan" -j1; meson test -C "$asan" --print-errorlogs
 result[sanitizer]=passed
 if command -v clang >/dev/null && command -v clang++ >/dev/null; then
-  CC=clang CXX=clang++ setup_build "$build-clang" -Dexperimental=true -Drender_gl=true
+  CC=clang CXX=clang++ setup_build "$build-clang" -Dexperimental=true \
+    -Drender_gl=true -Ddrm_backend=true -Dheadless_backend=true \
+    -Dlibinput_backend=true
   meson test -C "$build-clang" --print-errorlogs; result[clang]=passed
 else result[clang]=unavailable; fi
-setup_build "$server" -Dexperimental=true -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false
-setup_build "$gwm_build" -Dexperimental=true -Dglasswyrmd=false -Dgwm=true -Dgwcomp=false -Dtools=false
-setup_build "$gwcomp_build" -Dexperimental=true -Drender_gl=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false
-setup_build "$ipc_only" -Dexperimental=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false -Dlibgwipc=true
+setup_build "$components/server-historical" -Dexperimental=false -Dlibgwipc=false \
+  -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false
+setup_build "$components/server-game" -Dexperimental=true -Dlibgwipc=true \
+  -Dglasswyrmd=true -Dgwm=false -Dgwcomp=false -Dtools=false
+setup_build "$components/gwm" -Dexperimental=true -Dlibgwipc=true \
+  -Dglasswyrmd=false -Dgwm=true -Dgwcomp=false -Dtools=false
+setup_build "$components/gwcomp-software-headless" -Dexperimental=true \
+  -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false \
+  -Drender_gl=false -Ddrm_backend=false -Dheadless_backend=true
+setup_build "$components/gwcomp-software-drm" -Dexperimental=true \
+  -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false \
+  -Drender_gl=false -Ddrm_backend=true -Dheadless_backend=false
+setup_build "$components/gwcomp-gles-headless" -Dexperimental=true \
+  -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false \
+  -Drender_gl=true -Ddrm_backend=false -Dheadless_backend=true
+setup_build "$components/gwcomp-gles-drm" -Dexperimental=true \
+  -Dlibgwipc=true -Dglasswyrmd=false -Dgwm=false -Dgwcomp=true -Dtools=false \
+  -Drender_gl=true -Ddrm_backend=true -Dheadless_backend=false
+setup_build "$components/ipc" -Dexperimental=true -Dlibgwipc=true \
+  -Dglasswyrmd=false -Dgwm=false -Dgwcomp=false -Dtools=false
+setup_build "$components/session" -Dexperimental=true -Dlibgwipc=true \
+  -Dglasswyrmd=true -Dgwm=true -Dgwcomp=true -Dtools=false
 result[component_builds]=passed
 "$source_dir/tests/tools/source_layout_test.sh" | tee "$artifact_dir/milestone12-source-layout.log"
 result[source_layout]=passed
 "$source_dir/tests/install/gwipc_staged_consumers_test.sh" "$source_dir" "$software"
 result[api_consumers]=passed result[regressions]=passed
+"$software/tests/m12_extension_stress_probe" \
+  --output "$artifact_dir/milestone12-extension-stress.json"
+python3 - "$artifact_dir/milestone12-extension-stress.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+deltas=d.get('deltas',{})
+if (d.get('schema')!=1 or d.get('probe')!='m12_extension_stress_probe' or
+    d.get('passed') is not True or not d.get('checks') or
+    not all(d['checks'].values()) or deltas.get('descriptors')!=0 or
+    deltas.get('shm_mappings')!=0):
+  raise SystemExit('M12 extension stress evidence failed validation')
+PY
+result[extension_stress]=passed
 
 failure_stage=runtime-storage
-rm -rf -- "$default" "$asan" "${build}-clang" "$server" "$gwm_build" \
-  "$gwcomp_build" "$ipc_only"
+rm -rf -- "$default" "$asan" "${build}-clang" "$components"
 available_kib=$(df -Pk /var/tmp | awk 'NR == 2 { print $4 }')
 [[ $available_kib =~ ^[0-9]+$ ]] && ((available_kib >= 2 * 1024 * 1024)) || {
   printf 'M12 runtime requires at least 2 GiB free in /var/tmp; found %s KiB.\n' \
@@ -886,6 +920,7 @@ cp "$source_dir/tests/compat/m12/clients.toml" "$evidence/"
 cp "$artifact_dir"/milestone12-{software,gles,fullscreen,screen,gles-screen}.ppm "$evidence/"
 cp "$artifact_dir"/milestone12-{software,gles}-{sdl-probe,fullscreen,cursor,testsprite}.ppm "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
+cp "$artifact_dir/milestone12-extension-stress.json" "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{frame-equivalence,software-testsprite-stability,gles-testsprite-stability}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{software-trace,noshm-trace}.jsonl "$evidence/"
