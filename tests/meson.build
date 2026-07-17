@@ -1339,6 +1339,15 @@ test(
   timeout: 10,
 )
 
+m12_resident_workload_test = find_program(
+  'compat/m12/run_workloads_resident_test.py',
+)
+test(
+  'm12-resident-workload',
+  m12_resident_workload_test,
+  timeout: 15,
+)
+
 m12_trace_validator_test = find_program('compat/m12/validate_trace_test.py')
 test(
   'm12-trace-validator',

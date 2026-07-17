@@ -300,6 +300,9 @@ The M12 command requires committed source descending from
 `base` snapshot. It acquires pinned SDL 2.32.10, builds the fixed X11 software
 profile, runs the default/software/GLES/sanitizer and component matrices, and
 exercises SHM and non-SHM SDL workloads against DRM. Canonical and host DRM
-screenshots must compare byte-for-byte. The accepted result is
+screenshots must compare byte-for-byte. Initial scene capture waits for both
+resident client surfaces and a controlled SDL raise/focus acknowledgement, so
+client startup scheduling cannot choose which overlapping window is visible.
+The accepted result is
 `milestone12-summary.json`; its checksum-protected evidence archive and logs
 are collected beneath the configured `artifacts/vm/` path.

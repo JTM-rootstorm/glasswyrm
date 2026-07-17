@@ -626,6 +626,45 @@ capture_scene() {
   latest=$(settled_mirror "$current_dump_root")
   cp "$latest" "$artifact_dir/milestone12-$current_name-$scene.ppm"
 }
+wait_for_resident_scene() {
+  for _ in {1..400}; do
+    if python3 - "$current_scene" <<'PY'
+import json,pathlib,sys
+path=pathlib.Path(sys.argv[1])
+try:
+  lines=path.read_text(errors='strict').splitlines()
+  records=[json.loads(line) for line in lines if line.strip()]
+except (OSError,UnicodeError,json.JSONDecodeError):
+  raise SystemExit(1)
+if not records:
+  raise SystemExit(1)
+surfaces=[surface for surface in records[-1].get('surfaces',())
+          if surface.get('visible') is True and
+             surface.get('metadata_only') is False and
+             isinstance(surface.get('x11_window_id'),int) and
+             surface['x11_window_id'] != 0]
+raise SystemExit(0 if len(surfaces) >= 2 else 1)
+PY
+    then
+      return
+    fi
+    sleep .05
+  done
+  printf 'M12 %s profile did not publish both resident client surfaces.\n' \
+    "$current_name" >&2
+  return 1
+}
+capture_raised_sdl_probe() {
+  local expected=$1 frames_before frames_after
+  [[ $current_name == "$expected" ]]
+  wait_for_resident_scene
+  frames_before=$(frame_count)
+  : >"$current_out/live-control/raise-window"
+  wait_path "$current_out/live-control/raised-ready"
+  frames_after=$(wait_for_frame_progress "$frames_before")
+  ((frames_after > frames_before))
+  capture_scene sdl-probe
+}
 capture_matching_mirror() {
   local screen=$1 destination=$2 candidate
   declare -A checked=()
@@ -923,7 +962,7 @@ finish_profile() {
 
 failure_stage=software-runtime
 begin_profile software software shm "$software" true
-capture_scene sdl-probe
+capture_raised_sdl_probe software
 "$software/tests/gw_uinput_m11" run --control-socket "$control/input.sock" \
   --scenario basic-typing --result-json "$control/software-input.json"
 grep -Fq '"status":"completed"' "$control/software-input.json"
@@ -985,7 +1024,7 @@ result[no_shm_fallback]=passed result[big_requests_fallback]=passed
 
 failure_stage=gles-runtime
 begin_profile gles gles shm "$gles" true
-capture_scene sdl-probe
+capture_raised_sdl_probe gles
 : >"$current_out/live-control/enter-fullscreen"
 wait_path "$current_out/live-control/fullscreen-ready"
 anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"

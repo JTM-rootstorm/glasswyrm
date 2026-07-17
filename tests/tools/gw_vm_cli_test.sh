@@ -2171,6 +2171,11 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'testsprite_alive' \
   'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"' \
   'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"' \
+  'wait_for_resident_scene' \
+  'capture_raised_sdl_probe software' \
+  'capture_raised_sdl_probe gles' \
+  'live-control/raise-window' 'live-control/raised-ready' \
+  'frames_after=$(wait_for_frame_progress "$frames_before")' \
   "'pointer_anchor_completed':anchor_status=='completed'" \
   "'post_anchor_repaint':int(anchor_after)>int(anchor_before)" \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
@@ -2190,6 +2195,38 @@ done
 assert_before "$m12_lib" \
   'begin_profile gles gles shm "$gles" true' \
   'run_live_replay_gates "$control/gles-close.json"'
+assert_before "$m12_lib" \
+  'begin_profile software software shm "$software" true' \
+  'capture_raised_sdl_probe software'
+assert_before "$m12_lib" \
+  'capture_raised_sdl_probe software' \
+  '--scenario basic-typing'
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'capture_raised_sdl_probe gles'
+assert_before "$m12_lib" \
+  'capture_raised_sdl_probe gles' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"'
+m12_sdl_probe=$repo_root/tests/compat/m12/m12_sdl_probe.c
+for expected in 'wait_for_marker(window, control, "raise-window")' \
+  'SDL_RaiseWindow(window)' 'wait_for_input_focus(window)' \
+  'write_marker(control, "raised-ready")' \
+  'wait_for_marker(window, control, "enter-fullscreen")' \
+  'SDL_WINDOW_INPUT_FOCUS'; do
+  assert_contains "$m12_sdl_probe" "$expected"
+done
+assert_before "$m12_sdl_probe" \
+  'wait_for_marker(window, control, "raise-window")' \
+  'SDL_RaiseWindow(window)'
+assert_before "$m12_sdl_probe" \
+  'SDL_RaiseWindow(window)' \
+  'wait_for_input_focus(window)'
+assert_before "$m12_sdl_probe" \
+  'wait_for_input_focus(window)' \
+  'write_marker(control, "raised-ready")'
+assert_before "$m12_sdl_probe" \
+  'write_marker(control, "raised-ready")' \
+  'wait_for_marker(window, control, "enter-fullscreen")'
 assert_before "$m12_lib" \
   '--scenario pointer-anchor' \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"'
