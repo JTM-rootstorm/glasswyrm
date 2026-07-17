@@ -10,8 +10,27 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <span>
 
 namespace glasswyrm::server {
+namespace {
+
+void route_property_notification(
+    const DeferredPropertyMutation& property, const ResourceTable& resources,
+    const std::span<ClientConnection* const> recipients) {
+  ProtocolEventIntent intent;
+  intent.delivery = ProtocolEventDelivery::WindowMask;
+  intent.window = property.window;
+  intent.mask = gw::protocol::x11::event_mask::PropertyChange;
+  intent.event = gw::protocol::x11::PropertyNotifyEvent{
+      property.window, property.atom, property.notify_time,
+      property.value ? gw::protocol::x11::PropertyNotifyState::NewValue
+                     : gw::protocol::x11::PropertyNotifyState::Deleted};
+  ProtocolEventRouter router(resources);
+  (void)router.route(intent, recipients);
+}
+
+}  // namespace
 
 void ServerRuntime::initialize_lifecycle() {
   LifecycleCallbacks callbacks;
@@ -159,19 +178,9 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     for (const auto& client : server_.clients_)
       recipients.push_back(client.get());
     EventRouter router(server_.state_.resources());
-    if (mutation != pending_mutations_.end() && mutation->second.property) {
-      const auto& property = *mutation->second.property;
-      ProtocolEventIntent intent;
-      intent.delivery = ProtocolEventDelivery::WindowMask;
-      intent.window = property.window;
-      intent.mask = gw::protocol::x11::event_mask::PropertyChange;
-      intent.event = gw::protocol::x11::PropertyNotifyEvent{
-          property.window, property.atom, property.notify_time,
-          property.value ? gw::protocol::x11::PropertyNotifyState::NewValue
-                         : gw::protocol::x11::PropertyNotifyState::Deleted};
-      ProtocolEventRouter property_router(server_.state_.resources());
-      (void)property_router.route(intent, recipients);
-    }
+    if (mutation != pending_mutations_.end() && mutation->second.property)
+      route_property_notification(*mutation->second.property,
+                                  server_.state_.resources(), recipients);
     if (operation->kind == LifecycleOperationKind::Destroy &&
         mutation != pending_mutations_.end() && mutation->second.destroy) {
       for (const auto& item : mutation->second.destroy->postorder) {
