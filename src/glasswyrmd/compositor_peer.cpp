@@ -1,12 +1,10 @@
 #include "glasswyrmd/compositor_peer.hpp"
 
+#include "glasswyrmd/compositor_buffer_replay.hpp"
+
 #include <algorithm>
-#include <atomic>
-#include <cerrno>
-#include <map>
 #include <memory>
 #include <set>
-#include <unistd.h>
 
 namespace glasswyrm::server {
 namespace {
@@ -109,33 +107,6 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   });
 }
 
-bool normalize_readiness(const int descriptor, std::string& error) noexcept {
-  std::uint64_t existing = 0;
-  ssize_t count = -1;
-  do {
-    count = ::read(descriptor, &existing, sizeof(existing));
-  } while (count < 0 && errno == EINTR);
-  if (count >= 0 &&
-      (count != static_cast<ssize_t>(sizeof(existing)) || existing != 1)) {
-    error = "compositor buffer has an invalid readiness token";
-    return false;
-  }
-  if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-    error = "compositor buffer readiness could not be inspected";
-    return false;
-  }
-
-  std::atomic_thread_fence(std::memory_order_release);
-  const std::uint64_t token = 1;
-  do {
-    count = ::write(descriptor, &token, sizeof(token));
-  } while (count < 0 && errno == EINTR);
-  if (count != static_cast<ssize_t>(sizeof(token))) {
-    error = "compositor buffer readiness could not be rearmed";
-    return false;
-  }
-  return true;
-}
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
@@ -163,106 +134,13 @@ bool CompositorPeer::connect(std::string &error) {
 }
 
 bool CompositorPeer::send_bootstrap(std::string &error) {
-  if (replay_input_.commit_id != 0 && !prepare_replay_buffers(error))
+  if (replay_input_.commit_id != 0 &&
+      !compositor_buffer_replay::prepare(replay_input_, error))
     return false;
   return submit(replay_input_.commit_id != 0
                     ? replay_input_
                     : CompositorSnapshotSubmission{1, 1, {}, {}, {}, {}},
                 error);
-}
-
-bool CompositorPeer::prepare_replay_buffers(std::string& error) {
-  for (const auto& buffer : replay_input_.buffers) {
-    if (buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_NONE)
-      continue;
-    const int descriptor = buffer.synchronization_fd;
-    if (buffer.attach.synchronization != GWIPC_SYNCHRONIZATION_EVENTFD ||
-        descriptor < 0) {
-      error = "retained compositor buffer has invalid synchronization metadata";
-      return false;
-    }
-    const auto damaged = std::ranges::find_if(
-        replay_input_.damages, [&](const auto& damage) {
-          return damage.surface_id == buffer.attach.surface_id;
-        });
-    if (damaged == replay_input_.damages.end()) {
-      CompositorSnapshotSubmission::Damage damage;
-      damage.surface_id = buffer.attach.surface_id;
-      damage.rectangles.push_back(
-          {0, 0, buffer.attach.width, buffer.attach.height});
-      replay_input_.damages.push_back(std::move(damage));
-    }
-  }
-  error.clear();
-  return true;
-}
-
-bool CompositorPeer::rearm_snapshot_buffers(
-    const CompositorSnapshotSubmission& submission, std::string& error) {
-  std::set<int> rearmed;
-  for (const auto& damage : submission.damages) {
-    auto found = std::ranges::find_if(
-        submission.buffers, [&](const auto& buffer) {
-          return buffer.attach.surface_id == damage.surface_id;
-        });
-    const CompositorSnapshotSubmission::Buffer* buffer =
-        found != submission.buffers.end() ? &*found : nullptr;
-    if (!buffer) {
-      const auto retained = std::ranges::find_if(
-          replay_input_.buffers, [&](const auto& candidate) {
-            return candidate.attach.surface_id == damage.surface_id;
-          });
-      if (retained != replay_input_.buffers.end())
-        buffer = &*retained;
-    }
-    if (!buffer) {
-      error = "compositor damage has no submitted or retained buffer attachment";
-      return false;
-    }
-    if (buffer->attach.synchronization == GWIPC_SYNCHRONIZATION_NONE)
-      continue;
-    const int descriptor = buffer->synchronization_fd;
-    if (buffer->attach.synchronization != GWIPC_SYNCHRONIZATION_EVENTFD ||
-        descriptor < 0) {
-      error = "compositor buffer has invalid synchronization metadata";
-      return false;
-    }
-    if (rearmed.insert(descriptor).second &&
-        !normalize_readiness(descriptor, error))
-      return false;
-  }
-  error.clear();
-  return true;
-}
-
-bool CompositorPeer::rearm_content_buffers(
-    const std::vector<CompositorSnapshotSubmission::Damage>& damages,
-    std::string& error) {
-  std::set<int> rearmed;
-  for (const auto& damage : damages) {
-    const auto found = std::ranges::find_if(
-        replay_input_.buffers, [&](const auto& buffer) {
-          return buffer.attach.surface_id == damage.surface_id;
-        });
-    if (found == replay_input_.buffers.end()) {
-      error = "incremental compositor damage has no retained buffer attachment";
-      return false;
-    }
-    const auto& buffer = *found;
-    if (buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_NONE)
-      continue;
-    const int descriptor = buffer.synchronization_fd;
-    if (buffer.attach.synchronization != GWIPC_SYNCHRONIZATION_EVENTFD ||
-        descriptor < 0) {
-      error = "retained compositor buffer has invalid synchronization metadata";
-      return false;
-    }
-    if (rearmed.insert(descriptor).second &&
-        !normalize_readiness(descriptor, error))
-      return false;
-  }
-  error.clear();
-  return true;
 }
 
 bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
@@ -350,7 +228,8 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
       error = "invalid buffered compositor damage";
       return false;
     }
-  if (!rearm_snapshot_buffers(complete, error))
+  if (!compositor_buffer_replay::rearm_snapshot(complete, replay_input_,
+                                                error))
     return false;
   for (const auto &surface : complete.surfaces) {
     if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
@@ -489,7 +368,8 @@ bool CompositorPeer::submit_content(
     error = "compositor peer is not ready for incremental content";
     return false;
   }
-  if (!rearm_content_buffers(submission.damages, error))
+  if (!compositor_buffer_replay::rearm_content(submission.damages,
+                                               replay_input_, error))
     return false;
   auto* connection = transport_.connection();
   for (const auto& damage : submission.damages) {
@@ -559,33 +439,6 @@ bool CompositorPeer::acknowledge_session_state(
   }
   error.clear();
   return true;
-}
-
-void CompositorPeer::promote_replay_snapshot() {
-  CompositorSnapshotSubmission replay = pending_;
-  replay.buffers.clear();
-  // Damage is a one-shot publication instruction, not retained scene state.
-  // A future reconnect synthesizes fresh damage for synchronized attachments
-  // after rearming them; retaining consumed damage would make an unrelated
-  // cursor-only snapshot wait on content buffers that were not republished.
-  replay.damages.clear();
-  std::map<std::uint64_t, CompositorSnapshotSubmission::Buffer> attachments;
-  const std::set<std::uint64_t> retained_surfaces = [&] {
-    std::set<std::uint64_t> ids;
-    for (const auto& surface : pending_.surfaces) ids.insert(surface.surface_id);
-    return ids;
-  }();
-  for (const auto& buffer : replay_input_.buffers)
-    if (retained_surfaces.contains(buffer.attach.surface_id))
-      attachments[buffer.attach.surface_id] = buffer;
-  for (const auto& buffer : pending_.buffers)
-    attachments[buffer.attach.surface_id] = buffer;
-  replay.buffers.reserve(attachments.size());
-  for (const auto& surface : pending_.surfaces) {
-    const auto found = attachments.find(surface.surface_id);
-    if (found != attachments.end()) replay.buffers.push_back(found->second);
-  }
-  replay_input_ = std::move(replay);
 }
 
 PeerProcessOutcome CompositorPeer::drain(std::string &error) {
@@ -665,7 +518,8 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       error = "invalid compositor bootstrap acknowledgement";
       return PeerProcessOutcome::Fatal;
     }
-    if (!content_submission_) promote_replay_snapshot();
+    if (!content_submission_)
+      compositor_buffer_replay::promote(pending_, replay_input_);
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }
