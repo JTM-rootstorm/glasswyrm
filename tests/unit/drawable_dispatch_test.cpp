@@ -21,6 +21,21 @@ int main() {
     pixmap.write_u32(base+1); pixmap.write_u32(state.screen().root_window); pixmap.write_u16(2); pixmap.write_u16(2);
     auto result=dispatch_request(state,context,finish(std::move(pixmap),x11::CoreOpcode::CreatePixmap,24));
     gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1),"CreatePixmap");
+    ServerState game_state(kScreenModel, true);
+    for (const std::uint8_t depth : {8, 32}) {
+      const auto xid = base + 100 + depth;
+      x11::ByteWriter historical_depth(order); historical_depth.write_u8(53); historical_depth.write_u8(depth); historical_depth.write_u16(4);
+      historical_depth.write_u32(xid); historical_depth.write_u32(state.screen().root_window); historical_depth.write_u16(1); historical_depth.write_u16(1);
+      result=dispatch_request(state,context,finish(std::move(historical_depth),x11::CoreOpcode::CreatePixmap,depth));
+      gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadValue)&&
+                        !state.resources().find_pixmap(xid),
+                        "historical profile rejects game-only pixmap depths");
+      x11::ByteWriter game_depth(order); game_depth.write_u8(53); game_depth.write_u8(depth); game_depth.write_u16(4);
+      game_depth.write_u32(xid); game_depth.write_u32(game_state.screen().root_window); game_depth.write_u16(1); game_depth.write_u16(1);
+      result=dispatch_request(game_state,context,finish(std::move(game_depth),x11::CoreOpcode::CreatePixmap,depth));
+      gw::test::require(result.output.empty()&&game_state.resources().find_pixmap(xid),
+                        "game profile accepts RENDER pixmap depths");
+    }
     x11::ByteWriter gc(order); gc.write_u8(55); gc.write_u8(0); gc.write_u16(7); gc.write_u32(base+2); gc.write_u32(base+1); gc.write_u32((1U<<1U)|(1U<<2U)|(1U<<16U)); gc.write_u32(0x00ffffffU); gc.write_u32(0x00112233U); gc.write_u32(1);
     result=dispatch_request(state,context,finish(std::move(gc),x11::CoreOpcode::CreateGC,0));
     gw::test::require(result.output.empty()&&state.resources().find_gc(base+2)&&
