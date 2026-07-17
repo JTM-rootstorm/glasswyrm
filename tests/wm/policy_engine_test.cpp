@@ -82,7 +82,7 @@ void cascade_and_determinism() {
               evaluated.policy.windows.at(20).stacking == 1 &&
               evaluated.policy.windows.at(20).focused,
           "map order determines contiguous stack and focus fallback");
-  require(evaluated.policy.hash == UINT64_C(0x79ddf2e26c5784d8),
+  require(evaluated.policy.hash == UINT64_C(0xd52cb7f4f5d3b4d0),
           "canonical policy payload hash matches known vector");
   const auto payload = encode_policy_window_state(evaluated.policy.windows.at(10));
   require(payload.size() == 64 && payload[0] == 10 && payload[12] == 0 &&
@@ -90,7 +90,7 @@ void cascade_and_determinism() {
               payload[32] == 200 && payload[36] == 100 && payload[44] == 1 &&
               payload[46] == 1 && payload[48] == 1 && payload[49] == 0 &&
               payload[50] == 1 && payload[51] == 1 && payload[54] == 1 &&
-              payload[55] == 0 && payload[63] == 0,
+              payload[55] == 1 && payload[63] == 0,
           "canonical state bytes match the exact policy wire payload layout");
 
   RawState reversed;
@@ -162,14 +162,20 @@ void transients_override_and_states() {
           "minimized takes precedence over fullscreen and maximize");
 
   raw.windows.at(20).minimized_requested = false;
+  raw.windows.at(10).wants_map = true;
+  raw.windows.at(10).map_serial = 99;
   const auto fullscreen = evaluate(raw, 3);
   require(fullscreen && fullscreen.policy.windows.at(20).applied_state ==
                             AppliedState::Fullscreen &&
               fullscreen.policy.windows.at(20).final_x == 100 &&
               fullscreen.policy.windows.at(20).final_width == 640 &&
               !fullscreen.policy.windows.at(20).decoration_eligible &&
-              fullscreen.policy.windows.at(20).fullscreen_eligible == TriState::True,
-          "fullscreen beats maximize and fills the work area");
+              fullscreen.policy.windows.at(20).fullscreen_eligible == TriState::True &&
+              fullscreen.policy.windows.at(20).direct_scanout_eligible ==
+                  TriState::False &&
+              fullscreen.policy.windows.at(20).stacking >
+                  fullscreen.policy.windows.at(10).stacking,
+          "fullscreen beats maximize, fills the work area, and tops managed windows");
 }
 
 void decoration_and_focus() {
@@ -223,8 +229,11 @@ void lifecycle_geometry() {
   raw.windows.at(10).requested_width = 200;
   evaluated = evaluate(raw, 3);
   require(evaluated && evaluated.policy.windows.at(10).final_x == 100 &&
-              evaluated.policy.windows.at(10).final_width == 640,
-          "fullscreen overrides persisted geometry");
+              evaluated.policy.windows.at(10).final_width == 640 &&
+              evaluated.policy.windows.at(10).focused &&
+              evaluated.policy.windows.at(10).direct_scanout_eligible ==
+                  TriState::Unknown,
+          "fullscreen overrides geometry and retains honest scanout uncertainty");
 
   raw = state();
   auto transient = window(30, 3);

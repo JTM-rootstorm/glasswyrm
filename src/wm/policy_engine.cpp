@@ -365,6 +365,10 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   };
   apply_restack(managed_roots);
   apply_restack(overrides);
+  std::stable_partition(managed_roots.begin(), managed_roots.end(),
+                        [&](const auto id) {
+    return policy.windows.at(id).applied_state != AppliedState::Fullscreen;
+  });
   std::erase_if(managed_roots, [&](const auto id) {
     return !policy.windows.at(id).visible;
   });
@@ -394,15 +398,40 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
     const bool has_explicit = std::any_of(focus.begin(), focus.end(), [&](const auto id) {
       return raw.windows.at(id).focus_serial != 0;
     });
+    const auto focus_rank = [&](const std::uint32_t id) {
+      const auto& window = raw.windows.at(id);
+      if (window.transient_for != 0) return 2;
+      return policy.windows.at(id).applied_state == AppliedState::Fullscreen
+                 ? 1
+                 : 0;
+    };
     const auto selected = *std::max_element(focus.begin(), focus.end(), [&](const auto left,
                                                                             const auto right) {
       const auto& l = raw.windows.at(left); const auto& r = raw.windows.at(right);
       return has_explicit
-          ? std::tie(l.focus_serial, l.map_serial, l.creation_serial, l.window_id) <
-                std::tie(r.focus_serial, r.map_serial, r.creation_serial, r.window_id)
-          : stack_key(l) < stack_key(r);
+          ? std::tuple(focus_rank(left), l.focus_serial, l.map_serial,
+                       l.creation_serial, l.window_id) <
+                std::tuple(focus_rank(right), r.focus_serial, r.map_serial,
+                           r.creation_serial, r.window_id)
+          : std::tuple(focus_rank(left), l.map_serial, l.creation_serial,
+                       l.window_id) <
+                std::tuple(focus_rank(right), r.map_serial, r.creation_serial,
+                           r.window_id);
     });
     policy.windows.at(selected).focused = true;
+  }
+
+  for (auto& [id, state] : policy.windows) {
+    (void)id;
+    if (state.override_redirect) {
+      state.direct_scanout_eligible = TriState::Unknown;
+    } else if (state.fullscreen_eligible == TriState::True && state.focused) {
+      // GWM cannot see the compositor's opacity, format, or occlusion state.
+      // Preserve that uncertainty instead of claiming direct scanout support.
+      state.direct_scanout_eligible = TriState::Unknown;
+    } else {
+      state.direct_scanout_eligible = TriState::False;
+    }
   }
 
   policy.output_order = stacking;
