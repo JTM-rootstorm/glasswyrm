@@ -168,7 +168,6 @@ def render_composite_scenario(
         raise ProbeFailure("RENDER or COMPOSITE is absent")
     segment = SysVSegment(64)
     shmseg = _attach(connection, segment)
-    resources: list[tuple[int, int]] = []
     try:
         connection.request(render[1], 0, connection.pack("II", 0, 11))
         version = connection.expect_reply("RENDER QueryVersion")
@@ -219,7 +218,6 @@ def render_composite_scenario(
         pixmap = _create_pixmap(connection, 32, 2, 2)
         destination = connection.xid()
         solid = connection.xid()
-        resources.extend(((7, destination), (7, solid), (54, pixmap)))
         connection.request(
             render[1], 4,
             connection.pack("IIII", destination, pixmap, expected_formats[3], 0),
@@ -260,10 +258,12 @@ def render_composite_scenario(
         connection.request(composite[1], 4, connection.pack("IB3x", connection.root, 1))
         connection.sync("COMPOSITE unredirect")
         named_pixels = _get_image(connection, named, shmseg, segment, 2, 2)
-        resources.extend(((54, named), (60, window_gc), (4, window)))
-
-        for opcode, xid in resources:
-            connection.request(opcode, 0, connection.pack("I", xid))
+        for picture in (destination, solid):
+            connection.request(render[1], 7, connection.pack("I", picture))
+        for drawable in (pixmap, named):
+            connection.request(54, 0, connection.pack("I", drawable))
+        connection.request(60, 0, connection.pack("I", window_gc))
+        connection.request(4, 0, connection.pack("I", window))
         connection.request(129, 2, connection.pack("I", shmseg))
         shmseg = 0
         connection.sync("RENDER/COMPOSITE cleanup")
