@@ -769,6 +769,7 @@ if get_option('drm_backend')
   foreach drm_model_test : [
     ['drm-connector-name', 'connector_name_test.cpp'],
     ['drm-connector-selector', 'connector_selector_test.cpp'],
+    ['drm-damage-copy', 'damage_copy_test.cpp'],
     ['drm-mode-selector', 'mode_selector_test.cpp'],
     ['drm-pipeline-selector', 'pipeline_selector_test.cpp'],
     ['drm-property-cache', 'property_cache_test.cpp'],

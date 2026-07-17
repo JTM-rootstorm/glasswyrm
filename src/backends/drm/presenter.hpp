@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backends/drm/device.hpp"
+#include "backends/drm/damage_copy.hpp"
 #include "backends/drm/drm_report.hpp"
 #include "backends/drm/dumb_buffer.hpp"
 #include "backends/drm/kms_api.hpp"
@@ -27,6 +28,7 @@ struct DrmPresenterConfig {
   DrmPresentationApi api{DrmPresentationApi::Auto};
   std::string tty_path;
   session::VirtualTerminalSignals vt_signals;
+  bool damage_aware_copy{};
 };
 
 class DrmPresenter final : public output::PresentationBackend,
@@ -105,6 +107,15 @@ class DrmPresenter final : public output::PresentationBackend,
   void record_fatal(std::string stage, std::string reason) noexcept;
   [[nodiscard]] bool append_report(const DrmReportRecord& record,
                                    std::string& error);
+  [[nodiscard]] bool copy_frame_to(
+      DumbBuffer& target, const output::SoftwareFrameView& frame,
+      FullCopyReason forced_reason, DamageCopyPlan& plan,
+      std::string& error);
+  [[nodiscard]] DamageCopyReport damage_copy_report(
+      const DumbBuffer& target, const DamageCopyPlan& plan,
+      std::uint64_t generation, std::uint32_t buffer_index) const;
+  void complete_damage_copy(DumbBuffer& target, const DamageCopyPlan& plan,
+                            std::uint64_t generation);
   void clear_pending() noexcept;
 
   Device device_;
@@ -122,9 +133,13 @@ class DrmPresenter final : public output::PresentationBackend,
   ReportApiPath selected_api_{ReportApiPath::Legacy};
   std::unique_ptr<session::DirectVirtualTerminalSession> direct_session_;
   std::unique_ptr<PendingPresentation> pending_;
+  std::unique_ptr<DamageCopyHistory> damage_history_;
   std::vector<std::uint32_t> committed_pixels_;
   std::uint64_t committed_hash_{};
+  std::uint64_t committed_generation_{};
   std::uint64_t next_token_{1};
+  std::uint64_t cumulative_full_frame_bytes_{};
+  std::uint64_t cumulative_copied_bytes_{};
   std::string fallback_reason_;
   std::string shutdown_error_;
   std::size_t front_index_{};

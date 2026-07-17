@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backends/drm/damage_copy.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <span>
@@ -67,6 +69,19 @@ struct VtReport {
   std::uint64_t committed_hash{};
 };
 
+struct DamageCopyReport {
+  std::uint64_t generation{};
+  std::uint32_t buffer_index{};
+  std::uint32_t framebuffer_id{};
+  std::uint64_t full_frame_bytes{};
+  std::uint64_t copied_bytes{};
+  std::uint64_t history_span{};
+  std::uint64_t cumulative_full_frame_bytes{};
+  std::uint64_t cumulative_copied_bytes{};
+  std::vector<gw::compositor::Rectangle> rectangles;
+  FullCopyReason full_copy_reason{FullCopyReason::None};
+};
+
 struct RestoreReport {
   bool kms_restore{};
   bool vt_restore{};
@@ -86,7 +101,7 @@ struct FatalReport {
 
 using DrmReportRecord =
     std::variant<DiscoveryReport, SelectionReport, ModesetReport, FlipReport,
-                 VtReport, RestoreReport, FatalReport>;
+                 VtReport, DamageCopyReport, RestoreReport, FatalReport>;
 
 [[nodiscard]] std::string serialize_report_record(
     const DrmReportRecord& record);

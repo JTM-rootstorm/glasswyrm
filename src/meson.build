@@ -103,16 +103,19 @@ if get_option('drm_backend')
     files(
       'backends/drm/connector_name.cpp',
       'backends/drm/connector_selector.cpp',
+      'backends/drm/damage_copy.cpp',
       'backends/drm/dumb_buffer.cpp',
       'backends/drm/drm_report.cpp',
       'backends/drm/mode_selector.cpp',
       'backends/drm/pipeline_selector.cpp',
       'backends/drm/property_cache.cpp',
     ),
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
   gw_drm_model_dep = declare_dependency(
     link_with: gw_drm_model_lib,
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
 
@@ -154,6 +157,7 @@ if get_option('drm_backend')
     'gw-drm-presenter',
     files(
       'backends/drm/presenter.cpp',
+      'backends/drm/presenter_damage.cpp',
       'backends/drm/presenter_pipeline.cpp',
     ),
     dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],

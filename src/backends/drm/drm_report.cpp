@@ -53,6 +53,13 @@ const char* api_name(const ReportApiPath api) {
   return api == ReportApiPath::Atomic ? "atomic" : "legacy";
 }
 
+std::uint64_t copy_ratio_ppm(const std::uint64_t copied,
+                             const std::uint64_t full) noexcept {
+  if (full == 0) return 0;
+  const auto scaled = static_cast<unsigned __int128>(copied) * 1000000U;
+  return static_cast<std::uint64_t>(scaled / full);
+}
+
 template <typename Value>
 void array(std::ostringstream& stream, const std::vector<Value>& values) {
   stream << '[';
@@ -136,6 +143,34 @@ std::string serialize(const VtReport& value) {
   return stream.str();
 }
 
+std::string serialize(const DamageCopyReport& value) {
+  const auto ratio_ppm = copy_ratio_ppm(value.cumulative_copied_bytes,
+                                        value.cumulative_full_frame_bytes);
+  std::ostringstream stream;
+  stream << "{\"record\":\"damage-copy\",\"generation\":"
+         << value.generation << ",\"buffer\":" << value.buffer_index
+         << ",\"framebuffer_id\":" << value.framebuffer_id
+         << ",\"full_frame_bytes\":" << value.full_frame_bytes
+         << ",\"copied_bytes\":" << value.copied_bytes
+         << ",\"copy_rectangles\":[";
+  for (std::size_t index = 0; index < value.rectangles.size(); ++index) {
+    if (index != 0) stream << ',';
+    const auto& rectangle = value.rectangles[index];
+    stream << "{\"x\":" << rectangle.x << ",\"y\":" << rectangle.y
+           << ",\"width\":" << rectangle.width << ",\"height\":"
+           << rectangle.height << '}';
+  }
+  stream << "],\"history_span\":" << value.history_span
+         << ",\"full_copy_reason\":"
+         << json_quote(full_copy_reason_name(value.full_copy_reason))
+         << ",\"cumulative_full_frame_bytes\":"
+         << value.cumulative_full_frame_bytes
+         << ",\"cumulative_copied_bytes\":"
+         << value.cumulative_copied_bytes
+         << ",\"cumulative_copy_ratio_ppm\":" << ratio_ppm << '}';
+  return stream.str();
+}
+
 std::string serialize(const RestoreReport& value) {
   std::ostringstream stream;
   stream << "{\"record\":\"restore\",\"kms\":"
@@ -200,6 +235,18 @@ bool valid(const VtReport& value) {
   return value.transition == VtTransition::Release
              ? !value.master_owned && !value.full_modeset
              : value.master_owned && value.full_modeset;
+}
+
+bool valid(const DamageCopyReport& value) {
+  return value.generation != 0 && value.framebuffer_id != 0 &&
+         value.full_frame_bytes != 0 &&
+         value.copied_bytes <= value.full_frame_bytes &&
+         value.cumulative_copied_bytes <=
+             value.cumulative_full_frame_bytes &&
+         !value.rectangles.empty() &&
+         (value.full_copy_reason == FullCopyReason::None
+              ? value.history_span != 0
+              : value.copied_bytes == value.full_frame_bytes);
 }
 
 bool valid(const RestoreReport&) { return true; }
