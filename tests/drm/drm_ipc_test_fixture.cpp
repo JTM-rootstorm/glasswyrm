@@ -191,6 +191,10 @@ bool FakeVirtualTerminal::get_kd_mode(int, int& value) {
   value = 0;
   return true;
 }
+bool FakeVirtualTerminal::get_keyboard_mode(int, int& value) {
+  value = 3;
+  return true;
+}
 bool FakeVirtualTerminal::activate(int, unsigned value) {
   calls.push_back("activate:" + std::to_string(value));
   return true;
@@ -211,6 +215,10 @@ bool FakeVirtualTerminal::set_graphics_mode(int) {
 }
 bool FakeVirtualTerminal::set_kd_mode(int, int) {
   calls.push_back("restore-kd");
+  return true;
+}
+bool FakeVirtualTerminal::set_keyboard_mode(int, int value) {
+  calls.push_back("keyboard:" + std::to_string(value));
   return true;
 }
 bool FakeVirtualTerminal::acknowledge_release(int) {
