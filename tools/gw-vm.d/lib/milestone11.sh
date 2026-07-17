@@ -14,6 +14,7 @@ M11_TEXT_ARTIFACTS=(milestone11-runtime-test.log milestone11-meson-test.log
   milestone11-source-layout.log milestone11-libinput-devices.json
   milestone11-keymap.json milestone11-xterm.log milestone11-xterm-trace.raw.jsonl
   milestone11-xterm-trace.json milestone11-pty-transcript.log
+  milestone11-xterm-geometry.json
   milestone11-selection.log milestone11-interactive-wm.log
   milestone11-gwm-bindings.json milestone11-selection-client-message.json
   milestone11-session-state.log milestone11-drm-report.jsonl
@@ -131,6 +132,7 @@ artifact_dir=${artifact_dir:-/var/tmp/glasswyrm-m11-artifacts}
 facts=$artifact_dir/milestone11-facts.env
 runtime_log=$artifact_dir/milestone11-runtime-test.log
 failure_stage=prerequisite scenario_exit=1 keyboard= pointer= session_pid= xterm_bin=
+geometry_probe_pid=
 x_servers_absent=false mesa_absent=false getty_unit=getty@${target_vt##*/}.service
 getty_state_captured=false getty_active_before=unknown getty_enabled_before=unknown
 getty_active_after=unknown getty_enabled_after=unknown
@@ -227,6 +229,7 @@ record_facts() {
   set +e
   scenario_exit=$status
   [[ -n ${session_pid:-} ]] && kill "$session_pid" >/dev/null 2>&1
+  [[ -n ${geometry_probe_pid:-} ]] && kill "$geometry_probe_pid" >/dev/null 2>&1
   systemctl stop xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service \
     gwcomp-m11.service gwm-m11.service glasswyrm-session-m11.service \
     gw-uinput-m11.service >/dev/null 2>&1
@@ -578,9 +581,27 @@ for _ in {1..200}; do
 done
 ((ready_count_after > ready_count_before))
 sleep .25
+[[ -x $runtime/tests/m11_xterm_geometry_probe ]] || {
+  printf '%s\n' 'M11 destination geometry probe is required.' >&2; exit 1;
+}
+DISPLAY=:99 "$runtime/tests/m11_xterm_geometry_probe" \
+  --title Glasswyrm-M11-B --xterm-pid "$second_xterm_pid" \
+  --move-dx 96 --move-dy 64 --columns 90 --rows 28 \
+  --output "$artifact_dir/milestone11-xterm-geometry.json" &
+geometry_probe_pid=$!
+sleep .1
+kill -0 "$geometry_probe_pid"
 run_input clipboard-probe milestone11-selection.log
 run_input move milestone11-interactive-wm.log
 run_input resize milestone11-interactive-wm.log
+for _ in {1..200}; do
+  kill -0 "$geometry_probe_pid" 2>/dev/null || break
+  sleep .05
+done
+wait "$geometry_probe_pid"
+geometry_probe_pid=
+grep -F '"status": "passed"' "$artifact_dir/milestone11-xterm-geometry.json"
+grep -F '"columns":90,"rows":28' "$artifact_dir/milestone11-xterm-geometry.json"
 [[ -x $runtime/tests/m11_selection_probe && -x $source_dir/tests/apps/m11_xterm_acceptance ]] || {
   printf '%s\n' 'M11 acceptance probes are required; helper completion alone is not evidence.' >&2; exit 1; }
 DISPLAY=:99 "$runtime/tests/m11_selection_probe" --output "$artifact_dir/milestone11-selection-probe.json"
@@ -753,6 +774,7 @@ failure_stage=interactive-acceptance
   --scenario-dir "$input" --transcript "$transcript" \
   --trace "$artifact_dir/milestone11-xterm-trace.json" \
   --selection "$artifact_dir/milestone11-selection-probe.json" \
+  --geometry "$artifact_dir/milestone11-xterm-geometry.json" \
   --wm-evidence "$artifact_dir/milestone11-interactive-wm.log" \
   --server-journal "$artifact_dir/milestone11-glasswyrmd-journal.log" \
   --frames "$frames" --scene "$scenes/scene.jsonl" \
@@ -809,6 +831,7 @@ cp "$artifact_dir"/milestone11-desktop*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-canonical*.ppm "$evidence/"
 cp "$artifact_dir"/milestone11-{libinput-devices.json,keymap.json,xterm-trace.raw.jsonl,xterm-trace.json,selection.log,interactive-wm.log,session-state.log,drm-report.jsonl,drm-report-before-restart.jsonl} "$evidence/"
 cp "$artifact_dir/milestone11-pty-transcript.log" "$evidence/"
+cp "$artifact_dir/milestone11-xterm-geometry.json" "$evidence/"
 cp "$artifact_dir"/milestone11-{gwm-bindings.json,selection-client-message.json} "$evidence/"
 cp "$artifact_dir/milestone11-glasswyrmd-journal.log" "$evidence/"
 cp "$artifact_dir"/milestone11-{selection-probe.json,xterm-result.json,kms-before.json,kms-after.json,vt-before.json,vt-after.json} "$evidence/"
@@ -907,6 +930,7 @@ validate_milestone11_archive() {
     milestone11-libinput-devices.json \
     milestone11-keymap.json milestone11-xterm-trace.raw.jsonl \
     milestone11-xterm-trace.json milestone11-pty-transcript.log \
+    milestone11-xterm-geometry.json \
     milestone11-selection.log \
     milestone11-interactive-wm.log milestone11-session-state.log \
     milestone11-gwm-bindings.json milestone11-selection-client-message.json \

@@ -355,9 +355,14 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
           gwipc_decoded_policy_lifecycle_window_upsert(contract.get());
       if (!value || !peer.transaction.upsert(window_from(*value))) return false;
       std::fprintf(stderr,
-                   "gwm: lifecycle window upsert id=%u geometry=%llu stack=%llu\n",
+                   "gwm: lifecycle window upsert id=%u geometry=%llu "
+                   "requested=%ux%u+%d+%d stack=%llu\n",
                    value->window.window_id,
                    static_cast<unsigned long long>(value->geometry_serial),
+                   value->window.requested_width,
+                   value->window.requested_height,
+                   value->window.requested_x,
+                   value->window.requested_y,
                    static_cast<unsigned long long>(value->stack_serial));
       return true;
     }
