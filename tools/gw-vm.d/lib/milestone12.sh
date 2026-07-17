@@ -133,8 +133,8 @@ write_facts() {
     printf 'meson_version=%s\nninja_version=%s\nsystemd_version=%s\n' \
       "$(meson --version 2>/dev/null || echo unavailable)" \
       "$(ninja --version 2>/dev/null || echo unavailable)" \
-      "$(systemd --version 2>/dev/null | head -n1 || echo unavailable)"
-    printf 'mesa_version=%s\n' "$(pkg-config --modversion egl 2>/dev/null || echo unavailable)"
+      "$(systemctl --version 2>/dev/null | head -n1 || echo unavailable)"
+    printf 'mesa_version=%s\n' "$(pkg-config --modversion gbm 2>/dev/null || echo unavailable)"
     printf 'egl_vendor=%s\negl_version=%s\ngles_version=%s\n' \
       "${egl_vendor:-unknown}" "${egl_version:-unknown}" "${gles_version:-unknown}"
     printf 'gl_vendor=%s\ngl_renderer=%s\ngl_version=%s\n' \
