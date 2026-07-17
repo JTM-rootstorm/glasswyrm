@@ -887,6 +887,7 @@ if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
     milestone12-frame-equivalence.json \
     milestone12-software-testsprite-stability.json \
     milestone12-gles-testsprite-stability.json \
+    milestone12-software-replay.json milestone12-gles-replay.json \
     milestone12-extension-stress.json milestone12-software-trace.jsonl \
     milestone12-noshm-trace.jsonl; do
     printf '{}\n' >"$scratch/$name"
@@ -2003,6 +2004,7 @@ for artifact in milestone12-runtime-test.log milestone12-meson-test.log \
   milestone12-frame-equivalence.json \
   milestone12-software-testsprite-stability.json \
   milestone12-gles-testsprite-stability.json \
+  milestone12-software-replay.json milestone12-gles-replay.json \
   milestone12-extension-stress.json milestone12-software-trace.jsonl \
   milestone12-noshm-trace.jsonl \
   milestone12-glasswyrmd-journal.log milestone12-gwm-journal.log \
@@ -2060,6 +2062,11 @@ m12_finish_function=$(awk '
   capture { print }
   capture && /^}$/ { exit }
 ' <<<"$m12_guest_tail")
+m12_begin_function=$(awk '
+  /^begin_profile\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
 m12_match_dir=$work_dir/m12-mirror-match
 mkdir -p "$m12_match_dir/dumps"
 printf 'captured-frame\n' >"$m12_match_dir/dumps/frame-000001.ppm"
@@ -2111,6 +2118,30 @@ current_name=software
 finish_profile' _
 assert_contains "$m12_finish_dir/missing-frame.out" \
   'requires an accepted visible frame before release'
+m12_begin_dir=$work_dir/m12-begin-profile
+run_success "$m12_begin_dir.out" bash -c \
+  "$m12_begin_function"$'\n''
+set -euo pipefail
+artifact_dir=$1
+dumps=$1/dumps
+eventfd_live=4
+producer_eventfd_live=4
+consumer_eventfd_live=4
+shm_live=7
+systemctl() { return 0; }
+rm() { return 0; }
+mkdir() { return 0; }
+start_gwm() { return 0; }
+start_gwcomp() { return 0; }
+start_server() { return 0; }
+start_workload() { return 0; }
+resident_alive() { return 0; }
+count_eventfds() { printf "4\n"; }
+shm_count() { printf "7\n"; }
+begin_profile gles gles shm "$1/build" true
+[[ $eventfd_live == 4 && $producer_eventfd_live == 4 &&
+   $consumer_eventfd_live == 4 && $shm_live == 7 ]]' \
+  _ "$m12_begin_dir"
 for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   /var/tmp/glasswyrm-build-m12 /var/tmp/glasswyrm-build-m12-asan \
   /var/tmp/glasswyrm-build-m12-software /var/tmp/glasswyrm-build-m12-gles \
@@ -2130,6 +2161,12 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'done < <(find "$current_dump_root" -type f -name '\''*.ppm'\'' -print | sort -Vr)' \
   'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
   'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
+  'run_live_replay_gates "$control/software-close.json"' \
+  'run_live_replay_gates "$control/gles-close.json"' \
+  'forced GLES replay did not rebuild its texture cache' \
+  "item.get('full_copy_reason')=='vt-resume'" \
+  "'post_vt_repaint':int(vt_after)>int(vt_before)" \
+  "'close_status_completed':close_status=='completed'" \
   'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
   'finish_profile "$artifact_dir/milestone12-gles-testsprite.ppm"' \
   'assert_close_kept_vt' \
@@ -2139,10 +2176,14 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   server-historical server-game gwcomp-software-headless gwcomp-software-drm \
   gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
   milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
-  milestone12-gles-screen.ppm milestone12-efficient-sdl-evidence.tar \
+  milestone12-gles-screen.ppm milestone12-software-replay.json \
+  milestone12-gles-replay.json milestone12-efficient-sdl-evidence.tar \
   'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
   assert_contains "$m12_lib" "$expected"
 done
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'run_live_replay_gates "$control/gles-close.json"'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
   'https://www.libsdl.org/release/SDL2-2.32.10.tar.gz'
 assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
@@ -2167,6 +2208,15 @@ assert_contains "$m12_lib" \
 assert_before "$m12_lib" \
   'systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true' \
   'systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''glasswyrmd*'\'' --no-pager --quiet'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''gwm*'\'' --no-pager --quiet'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''gwcomp*'\'' --no-pager --quiet'
+assert_before "$m12_lib" \
+  'run_started=$(date +%s)' \
+  'systemd-run --unit=gw-uinput-m12.service'
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 
