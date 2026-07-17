@@ -82,7 +82,7 @@ void cascade_and_determinism() {
               evaluated.policy.windows.at(20).stacking == 1 &&
               evaluated.policy.windows.at(20).focused,
           "map order determines contiguous stack and focus fallback");
-  require(evaluated.policy.hash == UINT64_C(0xd52cb7f4f5d3b4d0),
+  require(evaluated.policy.hash == UINT64_C(0x79ddf2e26c5784d8),
           "canonical policy payload hash matches known vector");
   const auto payload = encode_policy_window_state(evaluated.policy.windows.at(10));
   require(payload.size() == 64 && payload[0] == 10 && payload[12] == 0 &&
@@ -90,7 +90,7 @@ void cascade_and_determinism() {
               payload[32] == 200 && payload[36] == 100 && payload[44] == 1 &&
               payload[46] == 1 && payload[48] == 1 && payload[49] == 0 &&
               payload[50] == 1 && payload[51] == 1 && payload[54] == 1 &&
-              payload[55] == 1 && payload[63] == 0,
+              payload[55] == 0 && payload[63] == 0,
           "canonical state bytes match the exact policy wire payload layout");
 
   RawState reversed;

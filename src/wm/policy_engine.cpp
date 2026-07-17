@@ -409,9 +409,14 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
     const bool has_explicit = std::any_of(focus.begin(), focus.end(), [&](const auto id) {
       return raw.windows.at(id).focus_serial != 0;
     });
+    const bool has_fullscreen =
+        std::any_of(focus.begin(), focus.end(), [&](const auto id) {
+          return policy.windows.at(id).applied_state ==
+                 AppliedState::Fullscreen;
+        });
     const auto focus_rank = [&](const std::uint32_t id) {
       const auto& window = raw.windows.at(id);
-      if (window.transient_for != 0) return 2;
+      if (has_fullscreen && window.transient_for != 0) return 2;
       return policy.windows.at(id).applied_state == AppliedState::Fullscreen
                  ? 1
                  : 0;
@@ -434,14 +439,13 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
 
   for (auto& [id, state] : policy.windows) {
     (void)id;
-    if (state.override_redirect) {
-      state.direct_scanout_eligible = TriState::Unknown;
-    } else if (state.fullscreen_eligible == TriState::True && state.focused) {
+    if (!state.override_redirect &&
+        state.fullscreen_eligible == TriState::True && !state.focused) {
+      state.direct_scanout_eligible = TriState::False;
+    } else {
       // GWM cannot see the compositor's opacity, format, or occlusion state.
       // Preserve that uncertainty instead of claiming direct scanout support.
       state.direct_scanout_eligible = TriState::Unknown;
-    } else {
-      state.direct_scanout_eligible = TriState::False;
     }
   }
 
