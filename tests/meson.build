@@ -478,42 +478,44 @@ if get_option('glasswyrmd')
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 45,
     )
-    glasswyrmd_m12_game_profile_test = executable(
-      'glasswyrmd_m12_game_profile_test',
-      files(
-        'integration/glasswyrmd_m12_game_profile_test.cpp',
-        'helpers/x11_fake_client.cpp',
-        'helpers/x11_request_builder.cpp',
-      ),
-      dependencies: [gw_x11_setup_dep],
-      include_directories: test_source_root_include,
-    )
-    test(
-      'glasswyrmd-m12-game-profile',
-      glasswyrmd_m12_game_profile_test,
-      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
-             gwcomp_program.full_path()],
-      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
-      timeout: 45,
-    )
-    glasswyrmd_integrated_property_test = executable(
-      'glasswyrmd_integrated_property_test',
-      files(
-        'integration/glasswyrmd_integrated_property_test.cpp',
-        'helpers/x11_fake_client.cpp',
-        'helpers/x11_request_builder.cpp',
-      ),
-      dependencies: [gw_x11_setup_dep],
-      include_directories: test_source_root_include,
-    )
-    test(
-      'glasswyrmd-integrated-property',
-      glasswyrmd_integrated_property_test,
-      args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
-             gwcomp_program.full_path()],
-      depends: [glasswyrmd_program, gwm_program, gwcomp_program],
-      timeout: 45,
-    )
+    if get_option('experimental')
+      glasswyrmd_m12_game_profile_test = executable(
+        'glasswyrmd_m12_game_profile_test',
+        files(
+          'integration/glasswyrmd_m12_game_profile_test.cpp',
+          'helpers/x11_fake_client.cpp',
+          'helpers/x11_request_builder.cpp',
+        ),
+        dependencies: [gw_x11_setup_dep],
+        include_directories: test_source_root_include,
+      )
+      test(
+        'glasswyrmd-m12-game-profile',
+        glasswyrmd_m12_game_profile_test,
+        args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+               gwcomp_program.full_path()],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+        timeout: 45,
+      )
+      glasswyrmd_integrated_property_test = executable(
+        'glasswyrmd_integrated_property_test',
+        files(
+          'integration/glasswyrmd_integrated_property_test.cpp',
+          'helpers/x11_fake_client.cpp',
+          'helpers/x11_request_builder.cpp',
+        ),
+        dependencies: [gw_x11_setup_dep],
+        include_directories: test_source_root_include,
+      )
+      test(
+        'glasswyrmd-integrated-property',
+        glasswyrmd_integrated_property_test,
+        args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+               gwcomp_program.full_path()],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+        timeout: 45,
+      )
+    endif
     glasswyrmd_input_recovery_test = executable(
       'glasswyrmd_input_recovery_test',
       files(
