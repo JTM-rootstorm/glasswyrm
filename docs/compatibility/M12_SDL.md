@@ -147,12 +147,22 @@ repaints while the hardware recovery scenarios run.
 ## SHM and fallback profiles
 
 The primary profile starts `glasswyrmd` in game-compat mode with MIT-SHM
-enabled. The raw probes cover both X11 byte orders. The XCB and SDL evidence
-must show the frozen extension registry, BIG-REQUESTS, MIT-SHM 1.1, XFIXES
+enabled. The raw probes cover both X11 byte orders. The XCB probes and SDL
+workload evidence together must show the frozen extension
+registry, BIG-REQUESTS, MIT-SHM 1.1, XFIXES
 2.0, DAMAGE 1.1, RENDER 0.11, COMPOSITE 0.4, and RANDR 1.3 subsets. SDL's
 software framebuffer must attach a same-process SysV segment and use
 `ShmPutImage`; the producer signals its eventfd before `gwcomp` reads damaged
 pixels.
+
+The exact official `testdraw2` and `testsprite2` workloads query
+`BIG-REQUESTS`, the normalized `OTHER` class, RANDR, and MIT-SHM, in that
+order. In SDL 2.32.10, the shared X11 symbol group containing XFIXES also
+requires `XIBarrierReleasePointer`; disabling XInput2 makes that group
+unavailable. The SDL API probe and official workloads consequently do not
+query XFIXES. The normalized official-client selector freezes that exact query
+set. XFIXES remains mandatory and is proven independently by the raw/XCB
+query, version, selection, and region probes.
 
 The fallback profile restarts the server with exactly:
 

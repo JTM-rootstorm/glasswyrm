@@ -24,7 +24,7 @@ def client(client_id: int, image_length: int, error: bool = False) -> list[dict]
         {"direction": "connection", "client": client_id, "outcome": "accepted"},
     ]
     sequence = 0
-    for extension in ("BIG-REQUESTS", "MIT-SHM", "XFIXES", "RANDR"):
+    for extension in ("BIG-REQUESTS", "OTHER", "RANDR", "MIT-SHM"):
         sequence += 1
         records.append({"direction": "request", "client": client_id,
                         "sequence": sequence, "opcode": 98,
@@ -46,6 +46,24 @@ def client(client_id: int, image_length: int, error: bool = False) -> list[dict]
     return records
 
 
+def client_with_xfixes(client_id: int, image_length: int) -> list[dict]:
+    records = client(client_id, image_length)
+    records.insert(5, {
+        "direction": "request", "client": client_id, "sequence": 5,
+        "opcode": 98, "name": "QueryExtension", "extension": "XFIXES",
+        "length": 16, "outcome": "success", "error": None,
+    })
+    return records
+
+
+def client_with_wrong_query_order(client_id: int, image_length: int) -> list[dict]:
+    records = client(client_id, image_length)
+    records[1]["extension"], records[2]["extension"] = (
+        records[2]["extension"], records[1]["extension"]
+    )
+    return records
+
+
 def main() -> int:
     normalizer = load()
     records = client(1, 40) + client(2, 44) + client(3, 48)
@@ -58,6 +76,29 @@ def main() -> int:
         if normalized["testsprite2"]["recurring_image_classes"][0]["request_length"] != 48:
             return 1
         if normalized["testsprite2"]["ewmh_request_classes"] != ["ChangeProperty", "SendEvent"]:
+            return 1
+        if "XFIXES" in normalized["testsprite2"]["extension_discovery_order"]:
+            return 1
+        trace.write_text("".join(
+            json.dumps(record) + "\n"
+            for record in client_with_xfixes(1, 40) + client(2, 44)
+        ))
+        try:
+            normalizer.normalized_official_traces(trace)
+        except ValueError:
+            pass
+        else:
+            return 1
+        trace.write_text("".join(
+            json.dumps(record) + "\n"
+            for record in client_with_wrong_query_order(1, 40)
+            + client_with_wrong_query_order(2, 44)
+        ))
+        try:
+            normalizer.normalized_official_traces(trace)
+        except ValueError:
+            pass
+        else:
             return 1
         trace.write_text("".join(
             json.dumps(record) + "\n"

@@ -11,6 +11,9 @@ from typing import Any
 
 MAXIMUM_TRACE_BYTES = 64 * 1024 * 1024
 MAXIMUM_RECORDS = 250_000
+OFFICIAL_SDL_EXTENSION_QUERY_ORDER = [
+    "BIG-REQUESTS", "OTHER", "RANDR", "MIT-SHM",
+]
 
 
 def read_records(path: pathlib.Path) -> list[dict[str, Any]]:
@@ -59,11 +62,11 @@ def requests_by_client(records: list[dict[str, Any]]) -> list[list[dict[str, Any
 
 def is_official_sdl_client(requests: list[dict[str, Any]]) -> bool:
     names = {record.get("name") for record in requests}
-    extension_queries = {
+    extension_queries = ordered_unique([
         record.get("extension")
         for record in requests
         if record.get("opcode") == 98
-    }
+    ])
     image_transport = any(
         (record.get("extension") == "MIT-SHM" and record.get("minor") == 3)
         or record.get("opcode") == 72
@@ -71,7 +74,7 @@ def is_official_sdl_client(requests: list[dict[str, Any]]) -> bool:
     )
     return (
         {"CreateWindow", "ChangeProperty", "MapWindow"} <= names
-        and {"BIG-REQUESTS", "MIT-SHM", "XFIXES", "RANDR"} <= extension_queries
+        and extension_queries == OFFICIAL_SDL_EXTENSION_QUERY_ORDER
         and image_transport
     )
 
