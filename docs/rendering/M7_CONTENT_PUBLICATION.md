@@ -34,6 +34,14 @@ canonical storage, preserves the opaque X byte, and synchronizes the complete
 mapping before frame submission. It never writes the mirror while a compositor
 frame is in flight.
 
+The M12 game-compat profile advances this same path to eventfd synchronization.
+Each published buffer owns one nonblocking, close-on-exec eventfd. After
+copying normalized dirty rows, the producer issues a release fence and signals
+exactly one token for that buffer and frame. The eventfd is sent only with the
+first BufferAttach. Replacement and replay allocate fresh buffer IDs and
+eventfds; retired buffers retain both descriptors until release or disconnect.
+Historical profiles continue to publish with synchronization None.
+
 ## Damage and frame arbitration
 
 Each published window tracks `pending_dirty` separately from
@@ -91,3 +99,9 @@ the same deterministic frame hash.
 The compositor remains authoritative for software scene composition, PPM
 encoding, frame manifests, and output hashes. `glasswyrmd` does not contain a
 second desktop compositor.
+
+For synchronized damage, `gwcomp` consumes one token and issues an acquire
+fence before a renderer can read the mapped pixels. An unavailable token keeps
+the frame staged on the eventfd poll source without rendering, promotion,
+acknowledgement, or release. Extra tokens, descriptor errors, and the bounded
+frame timeout are fatal to that producer.

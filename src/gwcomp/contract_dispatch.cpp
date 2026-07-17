@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <unistd.h>
 
 namespace glasswyrm::compositor {
 namespace {
@@ -173,12 +174,26 @@ ContractDispatchResult dispatch_contract_message(
       break;
     case GWIPC_MESSAGE_BUFFER_ATTACH: {
       int fd = -1;
+      int synchronization_fd = -1;
       std::string error;
-      applied = peer_profile !=
-                    gw::compositor::PeerProfile::M6MetadataProtocolServer &&
-                gwipc_message_take_fd(message, 0, &fd) == GWIPC_STATUS_OK &&
-                compositor.attach(
-                    *gwipc_decoded_buffer_attach(contract.get()), fd, error);
+      const auto& attachment =
+          *gwipc_decoded_buffer_attach(contract.get());
+      const bool descriptors_taken =
+          gwipc_message_take_fd(message, 0, &fd) == GWIPC_STATUS_OK &&
+          (attachment.synchronization != GWIPC_SYNCHRONIZATION_EVENTFD ||
+           gwipc_message_take_fd(message, 1, &synchronization_fd) ==
+               GWIPC_STATUS_OK);
+      if (descriptors_taken &&
+          peer_profile !=
+              gw::compositor::PeerProfile::M6MetadataProtocolServer) {
+        applied = compositor.attach(attachment, fd, synchronization_fd, error);
+        fd = -1;
+        synchronization_fd = -1;
+      } else {
+        applied = false;
+      }
+      if (fd >= 0) (void)::close(fd);
+      if (synchronization_fd >= 0) (void)::close(synchronization_fd);
       if (!applied)
         std::fprintf(stderr, "gwcomp: buffer rejected: %s\n", error.c_str());
       break;

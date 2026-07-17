@@ -37,9 +37,12 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   bridge_ = std::make_unique<RuntimeBridge>(
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
-      server_.options_.software_content, server_.options_.real_input_enabled());
+      server_.options_.software_content, server_.options_.real_input_enabled(),
+      server_.options_.game_compat);
   if (server_.options_.software_content) {
-    content_presenter_ = std::make_unique<ContentPresenter>();
+    content_presenter_ = std::make_unique<ContentPresenter>(
+        server_.options_.game_compat ? GWIPC_SYNCHRONIZATION_EVENTFD
+                                    : GWIPC_SYNCHRONIZATION_NONE);
 #if GW_HAS_LIBINPUT_BACKEND
     if (server_.options_.real_input_enabled()) {
       cursor_presenter_ = std::make_unique<CursorPresenter>();
@@ -206,7 +209,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
       if (!content_presenter_->prepare_replay(
               lifecycle_->committed(), server_.state_.resources(), replay) ||
           !bridge_->submit_replay(replay, error)) {
-        content_presenter_->reject_lifecycle();
+        content_presenter_->cancel_lifecycle_submission();
         std::fprintf(stderr,
                      "glasswyrmd: compositor content replay failed: %s\n",
                      error.c_str());
@@ -320,7 +323,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
             lifecycle_->committed(), server_.state_.resources(),
             next_compositor_commit_++, next_compositor_generation_++, content)) {
       if (!bridge_->submit_content(content, error)) {
-        content_presenter_->reject_content();
+        content_presenter_->cancel_content_submission();
         std::fprintf(stderr, "glasswyrmd: content submission failed: %s\n",
                      error.c_str());
       }

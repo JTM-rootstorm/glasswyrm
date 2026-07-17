@@ -1,4 +1,5 @@
 #include "gwcomp/contract_dispatch.hpp"
+#include "gwcomp/renderer_runtime.hpp"
 #include "gwcomp/runtime.hpp"
 #include "gwcomp/session_state_coordinator.hpp"
 #include "gwcomp/signal_runtime.hpp"
@@ -38,7 +39,7 @@ constexpr std::uint64_t kCommonCapabilities =
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
 constexpr std::uint64_t kOfferedCapabilities =
     kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE |
-    GWIPC_CAP_CURSOR_SURFACE;
+    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 
@@ -106,6 +107,13 @@ int run(const Options& options) {
     return 1;
   }
 
+  std::string renderer_error;
+  auto renderer = create_runtime_renderer(options, renderer_error);
+  if (!renderer) {
+    std::fprintf(stderr, "gwcomp: renderer initialization failed: %s\n",
+                 renderer_error.c_str());
+    return 1;
+  }
   SignalRuntime signals;
   std::string signal_error;
   if (!signals.install(options.backend == Backend::Drm &&
@@ -171,7 +179,8 @@ int run(const Options& options) {
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
 
   std::unique_ptr<gwipc_connection, ConnectionDeleter> producer;
-  gw::compositor::Compositor compositor(std::move(presenter), manifest_path);
+  gw::compositor::Compositor compositor(std::move(presenter), manifest_path,
+                                        {}, std::move(renderer));
   bool peer_validated = false;
   gwipc_role peer_role = GWIPC_ROLE_UNKNOWN;
   std::optional<gw::compositor::PeerProfile> peer_profile;
@@ -345,6 +354,8 @@ int run(const Options& options) {
         peer_role = GWIPC_ROLE_UNKNOWN;
       } else {
         compositor.set_peer_profile(*peer_profile);
+        compositor.set_cpu_buffer_synchronization(
+            (info.capabilities & GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION) != 0);
         peer_validated = true;
         session_state.configure(
             peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&

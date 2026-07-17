@@ -60,7 +60,8 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
                                 snapshot, server_.state_.resources(), submission))
     return false;
   if (bridge_->submit_compositor(submission, error)) return true;
-  if (content_presenter_) content_presenter_->reject_lifecycle();
+  if (content_presenter_)
+    content_presenter_->cancel_lifecycle_submission();
   return false;
 }
 

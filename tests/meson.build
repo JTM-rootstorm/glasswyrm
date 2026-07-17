@@ -682,6 +682,14 @@ gwcomp_signal_runtime_test = executable(
 )
 test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
 
+gwcomp_buffer_readiness_test = executable(
+  'gwcomp_buffer_readiness_test',
+  files('unit/gwcomp_buffer_readiness_test.cpp'),
+  dependencies: gwcomp_options_dep,
+  include_directories: test_source_root_include,
+)
+test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10)
+
 compositor_geometry_test = executable(
   'compositor_geometry_test',
   files('unit/compositor_geometry_test.cpp'),
@@ -713,6 +721,14 @@ software_renderer_test = executable(
   include_directories: test_source_root_include,
 )
 test('software-renderer', software_renderer_test, timeout: 10)
+
+software_scene_renderer_test = executable(
+  'software_scene_renderer_test',
+  files('pixel/software_scene_renderer_test.cpp'),
+  dependencies: [gw_render_software_dep, gw_output_dep],
+  include_directories: test_source_root_include,
+)
+test('software-scene-renderer', software_scene_renderer_test, timeout: 10)
 
 software_frame_test = executable(
   'software_frame_test',
@@ -848,6 +864,21 @@ if get_option('drm_backend')
 endif
 
 if get_option('libgwipc')
+  gwipc_sync_c_consumer = executable(
+    'gwipc_sync_c_consumer',
+    files('install/gwipc_sync_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.7-sync-c-consumer', gwipc_sync_c_consumer, timeout: 10)
+  gwipc_sync_cpp_consumer = executable(
+    'gwipc_sync_cpp_consumer',
+    files('install/gwipc_sync_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.7-sync-cpp-consumer', gwipc_sync_cpp_consumer, timeout: 10)
+
   gwipc_session_c_consumer = executable(
     'gwipc_session_c_consumer',
     files('install/gwipc_session_c_consumer.c'),
@@ -889,6 +920,19 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_buffer_sync_validation_test = executable(
+    'gwipc_buffer_sync_validation_test',
+    files(
+      'unit/ipc/buffer_sync_validation_test.cpp',
+      '../src/ipc/connection_validation.cpp',
+      '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-buffer-sync-validation', gwipc_buffer_sync_validation_test,
+       timeout: 10)
 
   gwipc_policy_contract_test = executable(
     'gwipc_policy_contract_test',

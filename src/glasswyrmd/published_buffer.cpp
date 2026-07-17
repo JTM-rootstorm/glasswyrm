@@ -1,11 +1,13 @@
 #include "glasswyrmd/published_buffer.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <limits>
 #include <sys/mman.h>
+#include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -28,7 +30,8 @@ PublishedWindowBuffer::PublishedWindowBuffer(
     const std::uint64_t buffer_id, const std::uint32_t window_xid,
     const std::uint32_t width, const std::uint32_t height,
     const std::uint32_t stride, const std::size_t size, const int fd,
-    void* const mapping) noexcept
+    void* const mapping, const gwipc_synchronization_mode synchronization,
+    const int synchronization_fd) noexcept
     : buffer_id_(buffer_id),
       window_xid_(window_xid),
       width_(width),
@@ -36,17 +39,23 @@ PublishedWindowBuffer::PublishedWindowBuffer(
       stride_(stride),
       size_(size),
       fd_(fd),
-      mapping_(mapping) {}
+      mapping_(mapping),
+      synchronization_(synchronization),
+      synchronization_fd_(synchronization_fd) {}
 
 PublishedWindowBuffer::~PublishedWindowBuffer() {
   if (mapping_ != nullptr) (void)::munmap(mapping_, size_);
   if (fd_ >= 0) (void)::close(fd_);
+  if (synchronization_fd_ >= 0) (void)::close(synchronization_fd_);
 }
 
 std::unique_ptr<PublishedWindowBuffer> PublishedWindowBuffer::create(
     const std::uint64_t buffer_id, const std::uint32_t window_xid,
-    const PixelStorage& canonical) {
+    const PixelStorage& canonical,
+    const gwipc_synchronization_mode synchronization) {
   if (buffer_id == 0 || window_xid == 0 || canonical.byte_size() == 0 ||
+      (synchronization != GWIPC_SYNCHRONIZATION_NONE &&
+       synchronization != GWIPC_SYNCHRONIZATION_EVENTFD) ||
       canonical.byte_size() > static_cast<std::size_t>(
                                   std::numeric_limits<off_t>::max()))
     return nullptr;
@@ -68,10 +77,21 @@ std::unique_ptr<PublishedWindowBuffer> PublishedWindowBuffer::create(
     (void)::close(fd);
     return nullptr;
   }
+  const int synchronization_fd =
+      synchronization == GWIPC_SYNCHRONIZATION_EVENTFD
+          ? ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)
+          : -1;
+  if (synchronization == GWIPC_SYNCHRONIZATION_EVENTFD &&
+      synchronization_fd < 0) {
+    (void)::munmap(mapping, size);
+    (void)::close(fd);
+    return nullptr;
+  }
   auto result = std::unique_ptr<PublishedWindowBuffer>(
       new PublishedWindowBuffer(buffer_id, window_xid, canonical.width(),
                                 canonical.height(), canonical.stride(), size,
-                                fd, mapping));
+                                fd, mapping, synchronization,
+                                synchronization_fd));
   if (!result->copy_all_from(canonical)) return nullptr;
   return result;
 }
@@ -105,6 +125,27 @@ bool PublishedWindowBuffer::copy_all_from(
     const PixelStorage& canonical) noexcept {
   const geometry::Rectangle bounds{0, 0, width_, height_};
   return copy_from(canonical, std::span<const geometry::Rectangle>(&bounds, 1));
+}
+
+bool PublishedWindowBuffer::signal_ready() noexcept {
+  if (synchronization_ == GWIPC_SYNCHRONIZATION_NONE) return true;
+  std::atomic_thread_fence(std::memory_order_release);
+  const std::uint64_t value = 1;
+  ssize_t count = -1;
+  do {
+    count = ::write(synchronization_fd_, &value, sizeof(value));
+  } while (count < 0 && errno == EINTR);
+  return count == static_cast<ssize_t>(sizeof(value));
+}
+
+bool PublishedWindowBuffer::retract_ready() noexcept {
+  if (synchronization_ == GWIPC_SYNCHRONIZATION_NONE) return true;
+  std::uint64_t value = 0;
+  ssize_t count = -1;
+  do {
+    count = ::read(synchronization_fd_, &value, sizeof(value));
+  } while (count < 0 && errno == EINTR);
+  return count == static_cast<ssize_t>(sizeof(value)) && value == 1;
 }
 
 std::uint64_t PublishedBufferStore::next_buffer_id() noexcept {

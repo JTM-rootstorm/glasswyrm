@@ -41,7 +41,36 @@ int main() {
   if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
              "/tmp/frames", "--scene-manifest", "/tmp/scenes.jsonl"},
             options, output, error) != ParseOptionsResult::Run ||
-      options.scene_manifest != "/tmp/scenes.jsonl")
+      options.scene_manifest != "/tmp/scenes.jsonl" ||
+      options.renderer != gw::render::RendererRequest::Software ||
+      options.renderer_report)
+    return 1;
+
+  for (const auto& renderer : {std::string("software"), std::string("gles"),
+                               std::string("auto")}) {
+    options = {};
+    if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+               "/tmp/frames", "--renderer", renderer, "--renderer-report",
+               "/tmp/renderer.jsonl"},
+              options, output, error) != ParseOptionsResult::Run ||
+        std::string(gw::render::renderer_request_name(options.renderer)) !=
+            renderer ||
+        options.renderer_report != "/tmp/renderer.jsonl")
+      return 1;
+  }
+
+  for (const auto* invalid : {"", "gl", "Software"}) {
+    options = {};
+    if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+               "/tmp/frames", "--renderer", invalid},
+              options, output, error) != ParseOptionsResult::ExitFailure)
+      return 1;
+  }
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--renderer-report", ""},
+            options, output, error) != ParseOptionsResult::ExitFailure)
     return 1;
 
   options = {};
@@ -53,7 +82,9 @@ int main() {
   options = {};
   if (parse({"gwcomp", "--help"}, options, output, error) !=
           ParseOptionsResult::ExitSuccess ||
-      output.find("Usage: gwcomp") == std::string::npos)
+      output.find("Usage: gwcomp") == std::string::npos ||
+      output.find("--renderer software|gles|auto") == std::string::npos ||
+      output.find("--renderer-report PATH") == std::string::npos)
     return 1;
 
   options = {};
