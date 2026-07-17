@@ -22,8 +22,11 @@ Documents:
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md)
 - [M6 Lifecycle Policy](M6_LIFECYCLE_POLICY.md)
 - [M11 Interactive Policy](M11_INTERACTIVE_POLICY.md)
+- [M12 Fullscreen Policy](M12_FULLSCREEN_POLICY.md)
 
 M6 adds an explicit `glasswyrmd` lifecycle peer while preserving the M5
 synthetic regression boundary. Input, decoration rendering, multiple
 workspaces remain deferred. Milestone 11 capability-gates one interactive
 binding record without changing legacy policy snapshots.
+Milestone 12 makes fullscreen geometry, managed-stack priority, focus, and
+borderless metadata explicit while continuing to defer direct scanout.
