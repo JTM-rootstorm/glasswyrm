@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -201,6 +202,103 @@ int main() {
           gles_frame.metrics.texture_uploads == 1 &&
           gles_frame.metrics.readback_bytes == 4,
       "opaque XRGB software and GLES frames are byte-identical");
+
+  auto equivalence_scene = scene();
+  gw::render::BufferMappingMap equivalence_mappings;
+  equivalence_mappings.emplace(
+      21, mapping(21, GWIPC_PIXEL_FORMAT_XRGB8888,
+                  {0xff102030U, 0xff405060U, 0xff708090U, 0xffa0b0c0U}));
+  const gw::render::SurfaceAttachmentMap equivalence_attachments{{10, 21}};
+  const std::array<gw::compositor::Rectangle, 1> full_damage{{0, 0, 2, 2}};
+  const gw::render::RenderFrameRequest equivalence_request{
+      equivalence_scene, stacking, equivalence_mappings,
+      equivalence_attachments, full_damage, &previous, 10, 11, 12};
+  gw::test::require(
+      gw::render::create_scene_renderer(gw::render::RendererRequest::Gles,
+                                        std::nullopt, unavailable, error),
+      error);
+  const auto opaque_software = software_reference->render(equivalence_request);
+  const auto opaque_gles = unavailable->render(equivalence_request);
+  gw::test::require(
+      opaque_software.complete() && opaque_gles.complete() &&
+          std::equal(opaque_software.frame.pixels().begin(),
+                     opaque_software.frame.pixels().end(),
+                     opaque_gles.frame.pixels().begin()) &&
+          opaque_gles.metrics.texture_cache_bytes == 16 &&
+          opaque_gles.metrics.texture_upload_bytes == 16 &&
+          opaque_gles.metrics.readback_bytes == 16,
+      "full opaque GLES output is exact and reports bounded work");
+
+  const std::array<gw::compositor::Rectangle, 1> partial_damage{{1, 1, 1, 1}};
+  const gw::render::RenderFrameRequest partial_request{
+      equivalence_scene, stacking, equivalence_mappings,
+      equivalence_attachments, partial_damage, &opaque_gles.frame,
+      13,                14,       15};
+  const auto partial_gles = unavailable->render(partial_request);
+  gw::test::require(
+      partial_gles.complete() && partial_gles.metrics.texture_uploads == 1 &&
+          partial_gles.metrics.texture_upload_bytes == 4 &&
+          partial_gles.metrics.readback_bytes == 4 &&
+          partial_gles.frame.pixels()[0] == opaque_gles.frame.pixels()[0],
+      "cached GLES textures upload and read back only damaged pixels");
+
+  equivalence_scene.surfaces.at(10).clipping = 1;
+  equivalence_scene.surfaces.at(10).clip_x = 0;
+  equivalence_scene.surfaces.at(10).clip_width = 1;
+  equivalence_scene.surfaces.at(10).clip_height = 2;
+  equivalence_scene.surfaces.at(10).opacity = GWIPC_OPACITY_ONE / 2U;
+  equivalence_scene.surfaces.at(10).presentation_flags =
+      GWIPC_SURFACE_PRESENTATION_CURSOR;
+  equivalence_mappings.clear();
+  equivalence_mappings.emplace(
+      22, mapping(22, GWIPC_PIXEL_FORMAT_ARGB8888,
+                  {0x80800000U, 0x80008000U, 0x80000080U, 0x80808080U}));
+  const gw::render::SurfaceAttachmentMap alpha_attachments{{10, 22}};
+  const gw::render::RenderFrameRequest alpha_request{
+      equivalence_scene, stacking, equivalence_mappings, alpha_attachments,
+      full_damage,       &previous, 16, 17, 18};
+  gw::test::require(
+      gw::render::create_scene_renderer(gw::render::RendererRequest::Gles,
+                                        std::nullopt, unavailable, error),
+      error);
+  const auto alpha_software = software_reference->render(alpha_request);
+  const auto alpha_gles = unavailable->render(alpha_request);
+  bool within_one = alpha_software.complete() && alpha_gles.complete();
+  for (std::size_t index = 0;
+       within_one && index < alpha_software.frame.pixels().size(); ++index) {
+    const auto left = alpha_software.frame.pixels()[index];
+    const auto right = alpha_gles.frame.pixels()[index];
+    for (const unsigned shift : {0U, 8U, 16U}) {
+      const int a = static_cast<int>((left >> shift) & 0xffU);
+      const int b = static_cast<int>((right >> shift) & 0xffU);
+      within_one = within_one && std::abs(a - b) <= 1;
+    }
+  }
+  gw::test::require(
+      within_one,
+      "ARGB cursor clipping and opacity match software within one channel unit");
+
+  const gw::render::RendererCreateOptions constrained_gles{
+      gw::render::RendererRequest::Gles, std::nullopt, std::nullopt, 15};
+  gw::test::require(
+      gw::render::create_scene_renderer(constrained_gles, unavailable, error),
+      error);
+  const auto rejected_cache = unavailable->render(alpha_request);
+  gw::test::require(
+      rejected_cache.disposition == gw::render::RenderDisposition::InvalidFrame &&
+          rejected_cache.error == "GLES texture cache limit exceeded",
+      "forced GLES rejects a frame before exceeding its injected cache limit");
+  const gw::render::RendererCreateOptions constrained_auto{
+      gw::render::RendererRequest::Auto, std::nullopt, std::nullopt, 15};
+  gw::test::require(
+      gw::render::create_scene_renderer(constrained_auto, unavailable, error),
+      error);
+  const auto fallback_frame = unavailable->render(alpha_request);
+  gw::test::require(
+      fallback_frame.complete() &&
+          fallback_frame.selected_renderer == "software" &&
+          fallback_frame.fallback_reason == "GLES texture cache limit exceeded",
+      "auto falls back only after GLES preflight rejects unsupported work");
 #else
       !gw::render::create_scene_renderer(gw::render::RendererRequest::Gles,
                                          std::nullopt, unavailable, error) &&

@@ -12,6 +12,9 @@
 
 namespace gw::render {
 
+inline constexpr std::uint64_t kMaximumGlTextureCacheBytes =
+    512ULL * 1024ULL * 1024ULL;
+
 using BufferMappingMap =
     std::map<std::uint64_t, std::shared_ptr<compositor::BufferMapping>>;
 using SurfaceAttachmentMap = std::map<std::uint64_t, std::uint64_t>;
@@ -23,6 +26,7 @@ struct RendererMetrics {
   std::uint64_t damage_rectangles{};
   std::uint64_t texture_uploads{};
   std::uint64_t texture_upload_bytes{};
+  std::uint64_t texture_cache_bytes{};
   std::uint64_t readback_bytes{};
 };
 
@@ -42,6 +46,8 @@ struct RenderFrameResult {
   RenderDisposition disposition{RenderDisposition::InvalidFrame};
   glasswyrm::output::SoftwareFrame frame;
   RendererMetrics metrics;
+  std::string selected_renderer;
+  std::string fallback_reason;
   std::string error;
 
   [[nodiscard]] bool complete() const noexcept {

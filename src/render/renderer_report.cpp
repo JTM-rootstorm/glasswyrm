@@ -145,7 +145,11 @@ bool RendererReport::append_frame(const RenderFrameRequest& request,
        << ",\"texture_upload_bytes\":"
        << result.metrics.texture_upload_bytes << ",\"damage_rectangles\":"
        << result.metrics.damage_rectangles << ",\"readback_bytes\":"
-       << result.metrics.readback_bytes << ",\"error\":"
+       << result.metrics.readback_bytes << ",\"texture_cache_bytes\":"
+       << result.metrics.texture_cache_bytes << ",\"fallback_reason\":"
+       << (result.fallback_reason.empty() ? "null"
+                                          : json_quote(result.fallback_reason))
+       << ",\"error\":"
        << (result.error.empty() ? "null" : json_quote(result.error)) << "}\n";
   return append(line.str(), error);
 }

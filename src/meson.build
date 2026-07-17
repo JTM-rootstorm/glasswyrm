@@ -53,15 +53,27 @@ gw_render_sources = files(
   'render/software/renderer.cpp',
   'render/software/scene_renderer.cpp',
 )
+gw_render_dependencies = [gw_compositor_geometry_dep]
+if get_option('render_gl')
+  gw_render_sources += files(
+    'render/gles/context.cpp',
+    'render/gles/scene_renderer.cpp',
+    'render/gles/scene_renderer_frame.cpp',
+  )
+  gw_render_dependencies += [egl_dep, glesv2_dep]
+  if gbm_dep.found()
+    gw_render_dependencies += gbm_dep
+  endif
+endif
 gw_render_software_lib = static_library(
   'gwcomp-render-software',
   gw_render_sources,
-  dependencies: gw_compositor_geometry_dep,
+  dependencies: gw_render_dependencies,
   include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 gw_render_software_dep = declare_dependency(
   link_with: gw_render_software_lib,
-  dependencies: gw_compositor_geometry_dep,
+  dependencies: gw_render_dependencies,
   include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 
