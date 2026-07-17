@@ -15,7 +15,8 @@ M12_TEXT_ARTIFACTS=(milestone12-meson-test.log
   milestone12-source-layout.log milestone12-client-build.log
   milestone12-extension-probe.json milestone12-sdl-probe.json
   milestone12-testdraw2.log milestone12-testsprite2.log
-  milestone12-extension-trace.json milestone12-renderer-software.jsonl
+  milestone12-extension-trace.json milestone12-software-trace.jsonl
+  milestone12-noshm-trace.jsonl milestone12-renderer-software.jsonl
   milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl
   milestone12-sync-report.jsonl milestone12-glasswyrmd-journal.log
   milestone12-gwm-journal.log milestone12-gwcomp-journal.log
@@ -204,7 +205,8 @@ validate_milestone12_archive() {
   for member in clients.toml milestone12-software.ppm milestone12-gles.ppm \
     milestone12-fullscreen.ppm milestone12-screen.ppm milestone12-gles-screen.ppm \
     milestone12-extension-probe.json milestone12-sdl-probe.json \
-    milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+    milestone12-extension-trace.json milestone12-software-trace.jsonl \
+    milestone12-noshm-trace.jsonl milestone12-renderer-software.jsonl \
     milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
     milestone12-sync-report.jsonl milestone12-renderer-summary.json \
     milestone12-drm-damage-summary.json milestone12-sync-observation.json \
@@ -668,14 +670,20 @@ cp "$artifact_dir/software/sdl.json" "$artifact_dir/milestone12-sdl-probe.json"
 cp "$artifact_dir/software/xcb.json" "$artifact_dir/milestone12-extension-probe.json"
 cp "$artifact_dir/software/testdraw2.log" "$artifact_dir/milestone12-testdraw2.log"
 cp "$artifact_dir/software/testsprite2.log" "$artifact_dir/milestone12-testsprite2.log"
-cp "$artifact_dir/software/extension-trace.json" "$artifact_dir/milestone12-extension-trace.json"
+cp "$artifact_dir/software/extension-trace.json" "$artifact_dir/milestone12-software-trace.jsonl"
 for key in raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
-  extension_registry big_requests mit_shm xfixes damage render composite randr \
+  extension_registry big_requests xfixes damage render composite randr \
   colormap fullscreen borderless geometry_restore software_frame fullscreen_input_close; do result[$key]=passed; done
 
 failure_stage=fallback-runtime
 begin_profile noshm software no-shm "$software" false MIT-SHM
-finish_profile; result[no_shm_fallback]=passed
+finish_profile
+cp "$artifact_dir/noshm/extension-trace.json" "$artifact_dir/milestone12-noshm-trace.jsonl"
+python3 "$source_dir/tests/compat/m12/validate_trace.py" \
+  --shm "$artifact_dir/milestone12-software-trace.jsonl" \
+  --no-shm "$artifact_dir/milestone12-noshm-trace.jsonl" \
+  --output "$artifact_dir/milestone12-extension-trace.json"
+result[mit_shm]=passed result[no_shm_fallback]=passed
 
 failure_stage=gles-runtime
 begin_profile gles gles shm "$gles" true
@@ -828,6 +836,7 @@ cp "$source_dir/tests/compat/m12/clients.toml" "$evidence/"
 cp "$artifact_dir"/milestone12-{software,gles,fullscreen,screen,gles-screen}.ppm "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-probe,sdl-probe}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{extension-trace}.json "$evidence/"
+cp "$artifact_dir"/milestone12-{software-trace,noshm-trace}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-software,renderer-gles,drm-damage-report,sync-report}.jsonl "$evidence/"
 cp "$artifact_dir"/milestone12-{renderer-summary,drm-damage-summary,sync-observation}.json "$evidence/"
 cp "$artifact_dir"/milestone12-{kms-before,kms-after,vt-before,vt-after}.json "$evidence/"
