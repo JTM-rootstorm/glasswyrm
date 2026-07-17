@@ -66,6 +66,36 @@ RAW_EVIDENCE_KEYS = {
     "errors": {"bad_region", "bad_damage", "unsupported_minor", "bad_length"},
 }
 
+WORKLOAD_ENVIRONMENT = {
+    "LC_ALL": "C",
+    "LANG": "C",
+    "XMODIFIERS": "@im=none",
+    "SESSION_MANAGER": "",
+    "XAUTHORITY": "/dev/null",
+    "DISPLAY": ":99",
+    "SDL_VIDEODRIVER": "x11",
+    "SDL_RENDER_DRIVER": "software",
+    "SDL_AUDIODRIVER": "dummy",
+}
+
+
+def validate_workload_environment(result: dict, errors: list[str]) -> None:
+    environment = result.get("environment")
+    if not isinstance(environment, dict):
+        errors.append("workload environment must be an object")
+        return
+    if set(environment) != {*WORKLOAD_ENVIRONMENT, "LD_PRELOAD"}:
+        errors.append("workload environment fields differ from the frozen profile")
+        return
+    for key, expected in WORKLOAD_ENVIRONMENT.items():
+        if environment.get(key) != expected:
+            errors.append(f"workload environment has invalid {key}")
+    preload = environment.get("LD_PRELOAD")
+    if not isinstance(preload, str) or not preload.endswith(
+        "/tests/libgw_m9_fixed_time.so"
+    ):
+        errors.append("workload LD_PRELOAD is not the repository fixed-time shim")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -118,6 +148,7 @@ def main() -> int:
             errors.append("workload result has no workloads")
         if not isinstance(result.get("evidence_errors"), list):
             errors.append("workload evidence_errors must be a list")
+        validate_workload_environment(result, errors)
     else:
         errors.append("unknown M12 result kind")
     if any(not isinstance(value, bool) for value in checks.values()):
