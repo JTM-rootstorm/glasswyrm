@@ -35,11 +35,13 @@ decorations in Milestone 12; the field is policy and compatibility metadata.
 Visible managed fullscreen state is reported as `fullscreen_eligible=True`.
 Override-redirect windows retain `Unknown` because GWM does not manage them.
 
-Direct-scanout eligibility is computed separately. Non-fullscreen, hidden, or
-unfocused managed windows report `False`. A focused fullscreen window reports
+Direct-scanout eligibility is computed separately. An unfocused managed
+fullscreen window reports `False`. A focused fullscreen window reports
 `Unknown`, because GWM cannot inspect compositor opacity, occlusion, buffer
-format, or scanout constraints. This is deliberate: Milestone 12 performs no
-direct scanout and does not claim eligibility that only `gwcomp` could prove.
+format, or scanout constraints. Non-fullscreen and override-redirect windows
+retain the historical `Unknown` value. This is deliberate: Milestone 12
+performs no direct scanout and does not claim eligibility that only `gwcomp`
+could prove.
 
 ## Determinism and tests
 
