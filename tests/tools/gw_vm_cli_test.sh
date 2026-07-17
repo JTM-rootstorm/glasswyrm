@@ -2055,6 +2055,11 @@ m12_match_function=$(awk '
   capture { print }
   capture && /^}$/ { exit }
 ' <<<"$m12_guest_tail")
+m12_finish_function=$(awk '
+  /^finish_profile\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
 m12_match_dir=$work_dir/m12-mirror-match
 mkdir -p "$m12_match_dir/dumps"
 printf 'captured-frame\n' >"$m12_match_dir/dumps/frame-000001.ppm"
@@ -2065,6 +2070,47 @@ run_success "$m12_match_dir/test.out" timeout 2 bash -c \
   _ "$m12_match_dir/dumps" "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm"
 cmp "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm" ||
   fail 'M12 retained-frame matcher did not preserve the captured frame'
+m12_finish_dir=$work_dir/m12-finish-profile
+mkdir -p "$m12_finish_dir/artifacts/software/live-control" \
+  "$m12_finish_dir/runtime" "$m12_finish_dir/dumps"
+printf 'visible-testsprite-frame\n' >"$m12_finish_dir/accepted.ppm"
+run_success "$m12_finish_dir/test.out" bash -c \
+  "$m12_finish_function"$'\n''
+current_resident=true
+current_name=software
+artifact_dir=$1/artifacts
+current_out=$artifact_dir/software
+current_runtime=$1/runtime
+current_dump_root=$1/dumps
+source_dir=$1/source
+current_workload_unit=workload.service
+current_server_unit=server.service
+current_gwcomp_unit=compositor.service
+current_gwm_unit=wm.service
+accepted_frame=$1/accepted.ppm
+wait_path() {
+  [[ -e $current_out/live-control/resident-release ]] || return 1
+  printf "post-release-blank-frame\\n" >"$accepted_frame"
+  : >"$current_out/m12-workloads.json"
+}
+python3() { return 0; }
+systemctl() { return 0; }
+sleep() { :; }
+finish_profile "$accepted_frame"' \
+  _ "$m12_finish_dir"
+printf 'visible-testsprite-frame\n' >"$m12_finish_dir/expected.ppm"
+cmp "$m12_finish_dir/expected.ppm" \
+  "$m12_finish_dir/artifacts/milestone12-software.ppm" ||
+  fail 'M12 finish profile replaced the accepted scene after resident release'
+[[ -e $m12_finish_dir/artifacts/software/live-control/resident-release ]] ||
+  fail 'M12 finish profile did not release resident workloads'
+run_failure "$m12_finish_dir/missing-frame.out" bash -c \
+  "$m12_finish_function"$'\n''
+current_resident=true
+current_name=software
+finish_profile' _
+assert_contains "$m12_finish_dir/missing-frame.out" \
+  'requires an accepted visible frame before release'
 for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   /var/tmp/glasswyrm-build-m12 /var/tmp/glasswyrm-build-m12-asan \
   /var/tmp/glasswyrm-build-m12-software /var/tmp/glasswyrm-build-m12-gles \
@@ -2084,6 +2130,8 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   'done < <(find "$current_dump_root" -type f -name '\''*.ppm'\'' -print | sort -Vr)' \
   'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
   'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
+  'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
+  'finish_profile "$artifact_dir/milestone12-gles-testsprite.ppm"' \
   'assert_close_kept_vt' \
   '[[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]' \
   'fcntl.ioctl(fd,0x4B44,keyboard,True)' \

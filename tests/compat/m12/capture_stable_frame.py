@@ -7,12 +7,26 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import time
 
 
+def natural_key(value: str) -> tuple[tuple[int, int | str], ...]:
+    return tuple(
+        (1, int(token)) if token.isdigit() else (0, token)
+        for token in re.split(r"(\d+)", value)
+        if token
+    )
+
+
 def latest(directory: pathlib.Path) -> pathlib.Path:
-    candidates = sorted(directory.glob("**/*.ppm"), key=lambda path: path.name)
+    candidates = sorted(
+        directory.glob("**/*.ppm"),
+        key=lambda path: tuple(
+            natural_key(part) for part in path.relative_to(directory).parts
+        ),
+    )
     if not candidates:
         raise ValueError("frame dump has no PPM")
     return candidates[-1]

@@ -707,14 +707,25 @@ begin_profile() {
   fi
 }
 finish_profile() {
+  local accepted_frame=${1:-} latest
   if [[ $current_resident == true ]]; then
+    [[ -n $accepted_frame && -s $accepted_frame ]] || {
+      printf 'Resident M12 profile %s requires an accepted visible frame before release.\n' \
+        "$current_name" >&2
+      return 1
+    }
+    # The stable testsprite frame is the accepted canonical scene. Preserve it
+    # while both clients are still resident: releasing them intentionally
+    # commits later window-withdrawal frames that only prove teardown.
+    cp "$accepted_frame" "$artifact_dir/milestone12-$current_name.ppm"
     : >"$current_out/live-control/resident-release"
   fi
   wait_path "$current_out/m12-workloads.json"
   python3 "$source_dir/tests/compat/m12/validate_result.py" "$current_out/m12-workloads.json"
-  local latest
-  latest=$(settled_mirror "$current_dump_root")
-  cp "$latest" "$artifact_dir/milestone12-$current_name.ppm"
+  if [[ $current_resident != true ]]; then
+    latest=$(settled_mirror "$current_dump_root")
+    cp "$latest" "$artifact_dir/milestone12-$current_name.ppm"
+  fi
   # A successful bounded workload may exit before cleanup and systemd then
   # garbage-collects its transient unit. Treat that state as already stopped,
   # while retaining strict stop checks for the three long-lived services.
@@ -789,7 +800,7 @@ python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
   --dump-dir "$current_dump_root" \
   --output-frame "$artifact_dir/milestone12-software-testsprite.ppm" \
   --output-json "$artifact_dir/milestone12-software-testsprite-stability.json"
-finish_profile
+finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"
 cmp "$artifact_dir/milestone12-software-testsprite.ppm" \
   "$artifact_dir/milestone12-software.ppm"
 cat "$renderer"/software-*.jsonl >"$artifact_dir/milestone12-renderer-software.jsonl"
@@ -848,7 +859,7 @@ python3 "$source_dir/tests/compat/m12/capture_stable_frame.py" \
   --dump-dir "$current_dump_root" \
   --output-frame "$artifact_dir/milestone12-gles-testsprite.ppm" \
   --output-json "$artifact_dir/milestone12-gles-testsprite-stability.json"
-finish_profile
+finish_profile "$artifact_dir/milestone12-gles-testsprite.ppm"
 cmp "$artifact_dir/milestone12-gles-testsprite.ppm" \
   "$artifact_dir/milestone12-gles.ppm"
 cat "$renderer"/gles-*.jsonl >"$artifact_dir/milestone12-renderer-gles.jsonl"
