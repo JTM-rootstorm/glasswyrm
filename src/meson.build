@@ -403,6 +403,7 @@ if get_option('glasswyrmd')
     gw_server_core_sources += files(
       'glasswyrmd/peer_transport.cpp',
       'glasswyrmd/policy_peer.cpp',
+      'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
