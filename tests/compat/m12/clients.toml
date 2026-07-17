@@ -22,6 +22,13 @@ environment = [
   "SDL_RENDER_DRIVER=software",
   "SDL_AUDIODRIVER=dummy",
 ]
+official_program_compile_flags = [
+  "-std=c11",
+  "-Wall",
+  "-Wextra",
+  "-Werror",
+  "-Wno-unused-parameter",
+]
 
 [[source]]
 application = "SDL"
@@ -41,9 +48,10 @@ build_arguments = [
   "-DCMAKE_BUILD_TYPE=Release",
   "-DSDL_SHARED=ON",
   "-DSDL_STATIC=OFF",
-  "-DSDL_TESTS=ON",
+  "-DSDL_TEST=ON",
+  "-DSDL_TESTS=OFF",
   "-DSDL_X11=ON",
-  "-DSDL_X11_SHARED=OFF",
+  "-DSDL_X11_SHARED=ON",
   "-DSDL_X11_XFIXES=ON",
   "-DSDL_X11_XRANDR=ON",
   "-DSDL_X11_XCURSOR=OFF",
