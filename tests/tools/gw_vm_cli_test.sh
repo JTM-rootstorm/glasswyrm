@@ -2059,6 +2059,7 @@ for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
   -Dexperimental=false -Drender_gl=false -Drender_gl=true \
   '--game-compat' '--disable-extension' MIT-SHM run_workloads.py \
   m12_extension_stress_probe milestone12-extension-stress.json \
+  'latest=$(latest_mirror "$current_dump_root")' \
   server-historical server-game gwcomp-software-headless gwcomp-software-drm \
   gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
   milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
