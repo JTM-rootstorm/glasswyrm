@@ -956,7 +956,7 @@ M7  Drawable and software-rendering bridge        complete
 M8  Synthetic input and event routing             complete
 M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
-M11 Interactive desktop baseline                exact fixture gate pending
+M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients
 M13 Output model and per-output scaling
 M14 Variable refresh rate
@@ -1040,7 +1040,11 @@ patch 410 under the pinned core-font ASCII profile. Two full bootstrap runs at
 live trace and validated typing, scrolling, selection exchange, interactive
 move/resize/close, VT and compositor-restart recovery, canonical DRM frames,
 graphical-console screenshots, ordered restoration, and evidence-archive
-integrity. The final post-fixture full VM exact-match gate remains pending.
+integrity. The clean full exact run at
+`53ec4879b858b96a9b7e8734fb173d037cbc683b` reproduced the committed fixture
+with every summary field passing and no evidence errors, accepting this narrow
+profile. The repository release sequence still repeats the host matrix and
+clean M10/M11 VM order at the final documentation HEAD.
 Passive grabs cover only the observed `GrabButton` path; `UngrabButton` and
 passive key grabs remain unsupported. This is not a broader xterm, Xt/Xaw,
 toolkit, Unicode, or X11 compatibility claim.

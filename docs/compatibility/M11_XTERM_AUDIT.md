@@ -1,16 +1,14 @@
 # Milestone 11 xterm source audit
 
-Status: official patch 410 source and profile pinned; two full VM bootstrap
-captures at `eb8a20f76b24cc7c07459a402603bad5e7b6cc39` reproduced the finalized
-presence-normalized fixture and passed every runtime evidence gate except the
-deliberately unavailable exact-fixture comparison. A focused exact rerun has
-also passed, but it is diagnostic-only. The final full exact-match VM gate is
-still pending.
+Status: accepted for the pinned patch 410 profile. The clean full VM run at
+`53ec4879b858b96a9b7e8734fb173d037cbc683b` reproduced the finalized
+presence-normalized fixture exactly and passed every runtime evidence gate.
 
-This document combines the source audit with the reviewed bootstrap evidence
-that selected the fixture. It does not yet declare final Milestone 11
-acceptance: that declaration requires a clean full VM run at the final commit
-to pass the unconditional exact comparison.
+This document combines the source audit, reviewed fixture-selection captures,
+and accepted exact-match evidence. The compatibility claim remains limited to
+the exact profile below. Release completion still repeats the host matrix and
+clean M10/M11 sequence at the final documentation commit; that release step is
+outside the already accepted client-profile evidence.
 
 ## Verified release identity
 
@@ -110,7 +108,7 @@ The target remains limited to patch 410 under this profile. It is not a claim
 for a distribution's default xterm, Xft, Unicode, themed cursors, the toolbar,
 or another terminal emulator.
 
-## Reviewed deterministic bootstrap evidence
+## Reviewed deterministic fixture and acceptance evidence
 
 Two complete VM runs, fixture captures A and B, used the same tested, full
 build, and runtime commit:
@@ -169,6 +167,21 @@ five application connections and a maximum request length of 9,240 bytes.
 The corresponding presence-normalized opcode counts are one each for
 `ClearArea` (61), `CopyArea` (62), `PolyLine` (65), `PutImage` (72), and
 `ImageText8` (76). All other opcode counts remain exact.
+
+The subsequent clean full exact run used the same pinned source and profile at
+tested, full-build, and runtime commit:
+
+```text
+53ec4879b858b96a9b7e8734fb173d037cbc683b
+```
+
+It reproduced the committed fixture byte-for-byte at SHA-256
+`702e014eb33d67f9fa719ff0f133782b950a83a153c882394f53d8606f229834`.
+Its summary reports `passed=true`, `scenario_exit=0`,
+`exact_trace=passed`, and an empty `evidence_errors` list. The run repeated all
+interactive, VT/restart, screenshot, restoration, cleanup, and archive gates
+described below; this is the accepted compatibility result. The earlier
+focused exact rerun remains diagnostic-only and is not the basis of acceptance.
 
 The exact event histogram is:
 
@@ -239,8 +252,8 @@ Paths are relative to the extracted patch 410 source root.
 
 The resulting `SetSelectionOwner`, `ConvertSelection`, property, selection
 event, and `SendEvent` requests are mediated by Xt. Source inspection anchors
-the behavior; the reviewed normalized bootstrap trace above freezes their exact
-order and temporary atoms or properties for this profile.
+the behavior; the accepted normalized trace above freezes their exact order
+and temporary atoms or properties for this profile.
 
 ## Pointer and cursor paths
 
@@ -335,17 +348,20 @@ realizes the shell and installs it with `XSetWMProtocols`; the translation at
 
 The Milestone 11 close binding must therefore send one format-32
 `WM_PROTOCOLS` `ClientMessage` containing `WM_DELETE_WINDOW` to the managed
-top-level shell. The source path alone does not prove delivery; the reviewed
-bootstrap trace's single `ClientMessage` and clean first-xterm shutdown provide
-the matching live evidence.
+top-level shell. The source path alone does not prove delivery; the accepted
+trace's single `ClientMessage` and clean first-xterm shutdown provide the
+matching live evidence.
 
-## Final acceptance gate pending
+## Accepted compatibility boundary
 
-The A/B bootstrap evidence selected the committed fixture, and a focused
-diagnostic rerun has reproduced it exactly. Neither is the final full
-exact-fixture acceptance result. The complete clean VM route must run again at
-the final source commit and report `exact_trace=passed`, not `bootstrap`. The
-final result must also repeat the
-historical clean-snapshot Milestone 10 predecessor, host compiler/sanitizer and
-component gates, screenshot equality, restoration, cleanup, and archive
-validation before Milestone 11 is declared complete.
+The A/B bootstrap evidence selected the committed fixture, and the clean full
+run at `53ec4879b858b96a9b7e8734fb173d037cbc683b` accepted it with
+`exact_trace=passed`. This establishes only the xterm patch 410 core-font ASCII
+profile documented here. It does not broaden the claim to another xterm build,
+toolkit, extension, keyboard model, output topology, or input profile.
+
+Before the branch is released, the repository-level final sequence still
+repeats the host compiler/sanitizer and component gates plus the historical
+clean-snapshot M10/M11 VM order at the final documentation HEAD. That
+release-engineering repetition does not make this compatibility claim
+provisional.

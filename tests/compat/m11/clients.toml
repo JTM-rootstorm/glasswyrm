@@ -1,5 +1,5 @@
 schema = 1
-status = "source/profile pinned, presence-normalized fixture finalized, and focused exact diagnostic passed; final full exact-match VM gate pending"
+status = "accepted for the pinned profile by a clean full exact-match VM run"
 source_hash_status = "computed from the official archive and verified by its detached upstream signature"
 bootstrap_tested_commit = "eb8a20f76b24cc7c07459a402603bad5e7b6cc39"
 bootstrap_capture_count = 2
@@ -9,7 +9,9 @@ fixture_reproduced_from_bootstrap_captures = true
 presence_normalized_requests = ["ClearArea", "CopyArea", "ImageText8", "PolyLine", "PutImage"]
 raw_drawing_count_status = "checksum-protected archives retain exact counts; observed ImageText8 800 or 806 and PolyLine 6 or 7"
 focused_exact_diagnostic_status = "passed; diagnostic-only and not final Milestone 11 acceptance"
-exact_fixture_gate_status = "pending full clean VM rerun at the final commit"
+accepted_tested_commit = "53ec4879b858b96a9b7e8734fb173d037cbc683b"
+accepted_summary_status = "passed=true, scenario_exit=0, exact_trace=passed, evidence_errors empty"
+exact_fixture_gate_status = "passed in clean full VM acceptance"
 bootstrap_screenshot_sha256 = "bd6a1e885c0a633d42f5b61af0e8f355df2ace8fb6a39bb6f4b744c1bd317cdc"
 bootstrap_screenshot_matches_canonical = true
 
@@ -84,8 +86,8 @@ argv = [
 ]
 bashrc = "tests/compat/m11/m11-bashrc"
 compatibility_claim = "xterm patch 410, core-font ASCII profile, exact command and build options only"
-expected_trace_status = "A/B raw bootstrap traces reproduce the committed presence-normalized fixture at the recorded SHA-256; focused exact diagnostic passed; final full exact-match VM gate pending"
-expected_screenshot_status = "A/B bootstrap canonical mirrors equal the DRM screenshots at the recorded SHA-256; final post-fixture VM acceptance pending"
+expected_trace_status = "accepted clean full VM run reproduces the committed presence-normalized fixture at the recorded SHA-256 with exact_trace=passed"
+expected_screenshot_status = "accepted clean full VM canonical mirror equals the DRM screenshot at the recorded SHA-256"
 disabled_optional_features = [
   "Xft and FreeType",
   "wide-character and Unicode mode",
