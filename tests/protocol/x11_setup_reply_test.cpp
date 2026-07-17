@@ -1,6 +1,7 @@
 #include "protocol/x11/setup.hpp"
 #include "tests/helpers/test_support.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -124,6 +125,31 @@ void test_configurable_resource_range() {
       "per-client resource range is encoded");
 }
 
+void test_game_compat_profile(const ByteOrder order) {
+  gw::protocol::x11::SetupReplyConfig config;
+  config.game_compat = true;
+  const auto reply = gw::protocol::x11::encode_setup_success(order, config);
+  require(reply.size() == 192, "M12 setup has complete extended screen");
+  require(reply[28] == 1 && reply[29] == 4,
+          "M12 setup advertises four pixmap formats");
+  const std::array<std::array<std::uint8_t, 3>, 4> formats{{
+      {1, 1, 32}, {8, 8, 32}, {24, 32, 32}, {32, 32, 32}}};
+  for (std::size_t index = 0; index < formats.size(); ++index) {
+    const auto offset = 64 + index * 8;
+    require(reply[offset] == formats[index][0] &&
+                reply[offset + 1] == formats[index][1] &&
+                reply[offset + 2] == formats[index][2],
+            "M12 pixmap format matches the checked profile");
+  }
+  require(reply[134] == 24 && reply[135] == 4,
+          "M12 screen retains root depth and adds allowed depths");
+  require(reply[136] == 24 && read_u16(reply, 138, order) == 1 &&
+              reply[168] == 1 && read_u16(reply, 170, order) == 0 &&
+              reply[176] == 8 && read_u16(reply, 178, order) == 0 &&
+              reply[184] == 32 && read_u16(reply, 186, order) == 0,
+          "M12 allowed depths retain one root visual and no extra visuals");
+}
+
 void test_failure_reason_limit() {
   const std::vector<char> oversized(256, 'x');
   bool threw = false;
@@ -161,6 +187,8 @@ int main() {
                       "001c000b00000007556e737570706f727465642070726f746f636f6c"
                       "2076657273696f6e");
   test_configurable_resource_range();
+  test_game_compat_profile(ByteOrder::LittleEndian);
+  test_game_compat_profile(ByteOrder::BigEndian);
   test_failure_reason_limit();
   return 0;
 }

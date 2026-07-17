@@ -29,6 +29,10 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   resources_.emplace(
       screen.root_window,
       ResourceRecord{ResourceType::Window, std::nullopt, std::move(root)});
+  resources_.emplace(
+      screen.default_colormap,
+      ResourceRecord{ResourceType::Colormap, std::nullopt,
+                     ColormapResource{screen.root_visual}});
   resources_.emplace(kDefaultFontXid,
                      ResourceRecord{ResourceType::Font, std::nullopt,
                                     FontResource{}});
@@ -94,6 +98,16 @@ const CursorResource* ResourceTable::find_cursor(
     const std::uint32_t xid) const noexcept {
   const auto* resource = find(xid);
   return resource ? std::get_if<CursorResource>(&resource->payload) : nullptr;
+}
+
+const ColormapResource* ResourceTable::find_colormap(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<ColormapResource>(&resource->payload) : nullptr;
+}
+
+bool ResourceTable::valid_colormap(const std::uint32_t xid) const noexcept {
+  return xid == screen_.default_colormap || find_colormap(xid) != nullptr;
 }
 
 std::shared_ptr<const input::CursorImage> ResourceTable::effective_cursor(

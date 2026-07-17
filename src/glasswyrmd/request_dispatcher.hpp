@@ -19,6 +19,8 @@
 
 namespace glasswyrm::server {
 
+class ExtensionRegistry;
+
 struct InputSnapshot {
   InputSnapshot() = default;
   InputSnapshot(std::int32_t x, std::int32_t y, std::uint16_t mask,
@@ -46,6 +48,7 @@ struct DispatchContext {
       gw::protocol::x11::ByteOrder::LittleEndian};
   bool integrated_lifecycle{false};
   InputSnapshot input{};
+  const ExtensionRegistry* extensions{nullptr};
 };
 
 enum class StructuralTransitionKind { Map, Unmap, Configure, Destroy };
@@ -106,6 +109,7 @@ struct DispatchResult {
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
   std::vector<ProtocolEventIntent> protocol_events;
+  bool enable_big_requests{false};
   DispatchResult() = default;
   DispatchResult(std::vector<std::uint8_t> packet) : output(std::move(packet)) {}
   static DispatchResult deferred(

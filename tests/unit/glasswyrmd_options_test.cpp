@@ -110,6 +110,10 @@ int main() {
   if (output.find("--synthetic-input-socket PATH") == std::string::npos) {
     return 5;
   }
+  if (output.find("--game-compat") == std::string::npos ||
+      output.find("--disable-extension NAME") == std::string::npos) {
+    return 13;
+  }
   if (output.find("--libinput-device PATH") == std::string::npos ||
       output.find("--xkb-rules NAME") == std::string::npos ||
       output.find("--repeat-delay-ms N") == std::string::npos) {
@@ -125,6 +129,33 @@ int main() {
   if (parse({"glasswyrmd", "--x11-trace", "/tmp/a", "--x11-trace", "/tmp/b"},
             options, output, error) != ParseOptionsResult::ExitFailure) {
     return 7;
+  }
+
+#if GW_HAS_EXPERIMENTAL
+  options = {};
+  if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm", "--compositor-socket",
+             "/tmp/comp", "--software-content", "--game-compat",
+             "--disable-extension", "MIT-SHM"},
+            options, output, error) != ParseOptionsResult::Run ||
+      !options.game_compat || options.disabled_extensions.size() != 1 ||
+      options.disabled_extensions.front() != "MIT-SHM") {
+    return 14;
+  }
+#endif
+  for (const auto &values : {
+           std::vector<std::string>{"glasswyrmd", "--game-compat"},
+           std::vector<std::string>{"glasswyrmd", "--disable-extension",
+                                    "MIT-SHM"},
+           std::vector<std::string>{"glasswyrmd", "--disable-extension",
+                                    "not-an-extension"},
+           std::vector<std::string>{"glasswyrmd", "--game-compat",
+                                    "--game-compat"},
+       }) {
+    options = {};
+    if (parse(values, options, output, error) !=
+        ParseOptionsResult::ExitFailure) {
+      return 15;
+    }
   }
 
 #if GW_HAS_LIBINPUT_BACKEND

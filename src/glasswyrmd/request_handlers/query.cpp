@@ -1,5 +1,6 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 
+#include "glasswyrmd/extension_registry.hpp"
 #include "input/input_router.hpp"
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/reply.hpp"
@@ -144,14 +145,33 @@ DispatchResult query_extension(const DispatchContext& context,
   std::span<const std::uint8_t> name;
   if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
-  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(0);
+  const auto extension_name = std::string_view(
+      reinterpret_cast<const char*>(name.data()), name.size());
+  const auto* extension = context.extensions
+                              ? context.extensions->query(extension_name)
+                              : nullptr;
+  reply.write_u8(extension ? 1 : 0);
+  reply.write_u8(extension ? extension->major_opcode : 0);
+  reply.write_u8(extension ? extension->first_event : 0);
+  reply.write_u8(extension ? extension->first_error : 0);
   return {std::move(reply).finish()};
 }
 
 DispatchResult list_extensions(const DispatchContext& context,
                                const x11::FramedRequest& request) {
   if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
-  return {std::move(x11::ReplyBuilder(context.byte_order, context.sequence, 0)).finish()};
+  const auto names = context.extensions ? context.extensions->enabled_names()
+                                        : std::vector<std::string_view>{};
+  x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                          static_cast<std::uint8_t>(names.size()));
+  std::vector<std::uint8_t> payload;
+  for (const auto name : names) {
+    payload.push_back(static_cast<std::uint8_t>(name.size()));
+    payload.insert(payload.end(), name.begin(), name.end());
+  }
+  while ((payload.size() & 3U) != 0) payload.push_back(0);
+  reply.write_payload(payload);
+  return {std::move(reply).finish()};
 }
 
 std::uint32_t keysym_for(const std::uint8_t keycode, const bool shifted) {

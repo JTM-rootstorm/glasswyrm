@@ -6,6 +6,7 @@
 #include "glasswyrmd/graphics_context.hpp"
 #include "glasswyrmd/font.hpp"
 #include "glasswyrmd/cursor_resource.hpp"
+#include "glasswyrmd/colormap.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,13 +19,20 @@ namespace glasswyrm::server {
 
 using ClientId = std::uint64_t;
 
-enum class ResourceType { Window, Pixmap, GraphicsContext, Font, Cursor };
+enum class ResourceType {
+  Window,
+  Pixmap,
+  GraphicsContext,
+  Font,
+  Cursor,
+  Colormap,
+};
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
   std::variant<WindowResource, PixmapResource, GraphicsContextResource,
-               FontResource, CursorResource> payload;
+               FontResource, CursorResource, ColormapResource> payload;
 };
 
 enum class CreateWindowStatus {
@@ -66,6 +74,14 @@ enum class CloseFontStatus { Success, BadFont };
 enum class CreateCursorStatus { Success, BadIdChoice, BadAlloc };
 enum class FreeCursorStatus { Success, BadCursor };
 enum class RecolorCursorStatus { Success, BadCursor, BadAlloc };
+enum class CreateColormapStatus {
+  Success,
+  BadIdChoice,
+  BadWindow,
+  BadMatch,
+  BadAlloc,
+};
+enum class FreeColormapStatus { Success, BadColormap, BadAccess };
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -115,6 +131,7 @@ struct ResourceLimits {
   std::size_t maximum_total_fonts{1024};
   std::size_t maximum_cursors_per_client{256};
   std::size_t maximum_total_cursor_bytes{4U * 1024U * 1024U};
+  std::size_t maximum_colormaps_per_client{4096};
 };
 
 class ResourceTable {
@@ -135,6 +152,9 @@ class ResourceTable {
   [[nodiscard]] const FontResource* find_font(std::uint32_t xid) const noexcept;
   [[nodiscard]] const CursorResource* find_cursor(
       std::uint32_t xid) const noexcept;
+  [[nodiscard]] const ColormapResource* find_colormap(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] bool valid_colormap(std::uint32_t xid) const noexcept;
   [[nodiscard]] std::shared_ptr<const input::CursorImage> effective_cursor(
       std::uint32_t pointer_target) const noexcept;
   [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
@@ -174,6 +194,10 @@ class ResourceTable {
   [[nodiscard]] RecolorCursorStatus recolor_cursor(
       std::uint32_t xid, input::CursorColor foreground,
       input::CursorColor background);
+  [[nodiscard]] CreateColormapStatus create_colormap(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t window, std::uint32_t visual);
+  [[nodiscard]] FreeColormapStatus free_colormap(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(

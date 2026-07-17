@@ -28,11 +28,17 @@ bool ResourceTable::invariants_hold() const noexcept {
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
-      if ((!resource.owner && resource.type != ResourceType::Font) ||
+      if ((!resource.owner && resource.type != ResourceType::Font &&
+           resource.type != ResourceType::Colormap) ||
           resource.type == ResourceType::Window) return false;
       if (!resource.owner) {
-        if (xid != kDefaultFontXid ||
-            !std::holds_alternative<FontResource>(resource.payload)) return false;
+        const bool default_font =
+            xid == kDefaultFontXid &&
+            std::holds_alternative<FontResource>(resource.payload);
+        const bool default_colormap =
+            xid == screen_.default_colormap &&
+            std::holds_alternative<ColormapResource>(resource.payload);
+        if (!default_font && !default_colormap) return false;
         continue;
       }
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
