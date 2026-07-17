@@ -196,7 +196,8 @@ marked accepted:
   recorded baseline;
 - KMS, KD, VT, getty, and logind states match their before-run evidence;
 - canonical and DRM screenshots are byte-identical;
-- forced software and forced GLES render the required opaque final frame
+- forced software and forced GLES render the windowed SDL probe,
+  fullscreen-desktop, cursor-on-opaque-window, and stable final sprite scenes
   byte-for-byte identically;
 - the renderer report records the selected EGL platform, EGL/GLES/GL identity,
   GBM or surfaceless path, software-renderer classification, damage, upload,

@@ -1338,6 +1338,13 @@ test(
   timeout: 10,
 )
 
+m12_frame_evidence_test = find_program('compat/m12/frame_evidence_test.py')
+test(
+  'm12-frame-evidence',
+  m12_frame_evidence_test,
+  timeout: 10,
+)
+
 gw_vm_cli_test = find_program('tools/gw_vm_cli_test.sh')
 test(
   'gw-vm-cli',

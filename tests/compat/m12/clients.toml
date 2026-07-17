@@ -9,8 +9,16 @@ expected_frame_artifacts = [
   "milestone12-fullscreen.ppm",
   "milestone12-screen.ppm",
   "milestone12-gles-screen.ppm",
+  "milestone12-software-sdl-probe.ppm",
+  "milestone12-gles-sdl-probe.ppm",
+  "milestone12-software-fullscreen.ppm",
+  "milestone12-gles-fullscreen.ppm",
+  "milestone12-software-cursor.ppm",
+  "milestone12-gles-cursor.ppm",
+  "milestone12-software-testsprite.ppm",
+  "milestone12-gles-testsprite.ppm",
 ]
-frame_acceptance = "runtime-generated canonical and DRM captures must be byte-identical and checksum-protected in the accepted evidence archive"
+frame_acceptance = "runtime-generated SDL-probe, fullscreen, cursor, and stable testsprite scenes must be byte-identical between software and GLES; fullscreen canonical and DRM captures must be byte-identical; every artifact is checksum-protected in the accepted evidence archive"
 environment = [
   "LC_ALL=C",
   "LANG=C",
