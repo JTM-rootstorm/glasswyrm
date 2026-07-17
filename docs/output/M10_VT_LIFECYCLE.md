@@ -65,6 +65,11 @@ nonzero process result; later safe restoration steps are still attempted. If
 KMS restoration itself fails, active scanout resources are retained rather
 than being removed underneath the hardware.
 
+The `VT_GETSTATE` open-VT bitmask is retained in before-and-after evidence for
+diagnostics, but it is not a restoration invariant: unrelated gettys or test
+clients can open or close a VT during the session. Acceptance compares the
+active VT and signal together with the complete VT mode and KD mode instead.
+
 ## Limitations and recovery
 
 `SIGINT` and `SIGTERM` use the normal runtime shutdown path. `SIGKILL` cannot be
