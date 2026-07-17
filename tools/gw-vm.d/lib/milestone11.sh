@@ -833,7 +833,10 @@ mkdir -p "$dumps" "$scenes"
 start_gwcomp
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwcomp.sock ]] && break; sleep .05; done
 for _ in {1..200}; do
-  scene_records_after=$(wc -l <"$scenes/scene.jsonl" 2>/dev/null || true)
+  scene_records_after=0
+  if [[ -f $scenes/scene.jsonl ]]; then
+    scene_records_after=$(wc -l <"$scenes/scene.jsonl")
+  fi
   ((scene_records_after > 0)) && break
   sleep .05
 done
@@ -930,8 +933,10 @@ result[client_message]=passed
 result[cursor_resources]=passed result[cursor_scanout]=passed
 
 failure_stage=shutdown
-systemctl stop xterm-m11-b.service xterm-m11-a.service glasswyrmd-m11.service \
-  gwcomp-m11.service gwm-m11.service
+# xterm A exited through WM_DELETE_WINDOW and its collected transient unit may
+# already be unloaded.  B and the three required stack processes remain live.
+systemctl stop xterm-m11-b.service
+systemctl stop glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service
 for unit in glasswyrm-session-m11.service glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service; do
   [[ $(systemctl show "$unit" -p Result --value) == success ]]
   [[ $(systemctl show "$unit" -p ExecMainStatus --value) == 0 ]]
