@@ -120,7 +120,7 @@ bool initialize_ewmh(ServerState& state) {
 void synchronize_ewmh_root_properties(ServerState& state) {
   if (!state.game_compat()) return;
   std::vector<std::uint32_t> clients;
-  std::vector<std::uint32_t> stacking;
+  std::vector<std::pair<std::int32_t, std::uint32_t>> stacked_clients;
   const auto* root = state.resources().find_window(state.screen().root_window);
   if (!root) return;
   for (const auto xid : root->children) {
@@ -128,7 +128,15 @@ void synchronize_ewmh_root_properties(ServerState& state) {
     if (!window || !state.resources().is_policy_candidate(xid)) continue;
     clients.push_back(xid);
     synchronize_window_state(state, xid, *window);
-    if (window->policy_visible) stacking.push_back(xid);
+    if (window->policy_visible)
+      stacked_clients.emplace_back(window->stacking, xid);
+  }
+  std::sort(stacked_clients.begin(), stacked_clients.end());
+  std::vector<std::uint32_t> stacking;
+  stacking.reserve(stacked_clients.size());
+  for (const auto [level, xid] : stacked_clients) {
+    (void)level;
+    stacking.push_back(xid);
   }
   const auto window_type = std::uint32_t{33};
   replace(state, state.screen().root_window, "_NET_CLIENT_LIST", window_type,

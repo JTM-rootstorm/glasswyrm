@@ -74,16 +74,41 @@ void test_atom_and_root_profile(const x11::ByteOrder order) {
           "supporting-WM proxy publishes a deterministic name");
 
   constexpr std::uint32_t window = 0x400010;
+  constexpr std::uint32_t middle = 0x400011;
+  constexpr std::uint32_t bottom = 0x400012;
   create_window(state, window);
+  create_window(state, middle);
+  create_window(state, bottom);
   synchronize_ewmh_root_properties(state);
   const auto clients_atom = state.atoms().find("_NET_CLIENT_LIST").value();
   require(std::get<std::vector<std::uint32_t>>(
               state.resources()
                   .find_window(state.screen().root_window)
                   ->properties.at(clients_atom)
-                  .data) == std::vector<std::uint32_t>{window} &&
+                  .data) ==
+              std::vector<std::uint32_t>{window, middle, bottom} &&
               state.invariants_hold(),
           "root client list excludes the server proxy and preserves invariants");
+
+  const std::array policy{
+      AppliedPolicyWindow{window, 0, 0, 100, 80, 2, true, false},
+      AppliedPolicyWindow{middle, 0, 0, 100, 80, 1, true, true},
+      AppliedPolicyWindow{bottom, 0, 0, 100, 80, 0, true, false}};
+  for (const auto xid : {window, middle, bottom})
+    state.resources().find_window(xid)->map_requested = true;
+  require(state.apply_policy(policy), "commit explicit lifecycle stacking");
+  require(state.resources().reorder_root_children({middle, bottom, window}),
+          "supply root order differing from committed lifecycle stacking");
+  synchronize_ewmh_root_properties(state);
+  const auto stacking_atom =
+      state.atoms().find("_NET_CLIENT_LIST_STACKING").value();
+  require(std::get<std::vector<std::uint32_t>>(
+              state.resources()
+                  .find_window(state.screen().root_window)
+                  ->properties.at(stacking_atom)
+                  .data) ==
+              std::vector<std::uint32_t>{bottom, middle, window},
+          "stacking property follows committed bottom-to-top lifecycle levels");
 
   const auto active = state.atoms().find("_NET_ACTIVE_WINDOW").value();
   auto writer = header(order, 18, 0, 7);
