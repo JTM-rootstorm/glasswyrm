@@ -712,12 +712,14 @@ gl_version=OpenGL ES 3.2 Mesa
 gbm_available=true
 renderer_classification=software
 x_servers_absent=true
+display_manager_absent=true
 clang=passed
 FACTS
       for result in historical_default strict_software strict_gles sanitizer \
         component_builds source_layout api_consumers regressions extension_stress uinput \
         raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
-        extension_registry big_requests mit_shm no_shm_fallback xfixes damage \
+        testsprite_stable_frame extension_registry big_requests \
+        big_requests_fallback mit_shm mit_shm_trace no_shm_fallback xfixes damage \
         render composite randr colormap fullscreen borderless geometry_restore \
         eventfd_sync missing_token_wait damage_upload damage_scanout \
         software_frame gles_frame renderer_equality screenshot_equality \
