@@ -157,7 +157,11 @@ void test_property_projection(const x11::ByteOrder order) {
   require(lifecycle.policy_window_type == PolicyWindowType::Utility &&
               lifecycle.decoration_preference == PolicyDecoration::False &&
               lifecycle.transient_for == parent && lifecycle.bypass_compositor &&
-              lifecycle.attention_requested,
+              lifecycle.minimum_width == 200 &&
+              lifecycle.minimum_height == 100 &&
+              lifecycle.maximum_width == UINT16_MAX &&
+              lifecycle.maximum_height == 60000 &&
+              !lifecycle.input_requested && lifecycle.attention_requested,
           "lifecycle snapshot carries GWM policy inputs");
 }
 

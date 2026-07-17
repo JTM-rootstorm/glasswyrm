@@ -1098,6 +1098,8 @@ if get_option('glasswyrmd')
     ['ewmh-root', 'ewmh_root_test.cpp'],
     ['ewmh-policy', 'ewmh_policy_test.cpp'],
     ['ewmh-client-message', 'ewmh_client_message_test.cpp'],
+    ['ewmh-state-action', 'ewmh_state_action_test.cpp'],
+    ['ewmh-lifecycle', 'ewmh_lifecycle_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],
