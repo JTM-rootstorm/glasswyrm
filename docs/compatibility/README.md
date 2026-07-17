@@ -13,18 +13,18 @@ that an external application works.
 - [M11 xterm source audit](M11_XTERM_AUDIT.md) records the verified patch 410
   source/build paths, deterministic presence-normalized A/B bootstrap trace,
   and evidence boundary.
-- [M11 xterm profile](M11_XTERM.md) states the narrow candidate claim and its
-  remaining exact-fixture gate.
+- [M11 xterm profile](M11_XTERM.md) states the narrow accepted claim and its
+  presence-normalization boundary.
 
 Milestone 9 is complete for only the pinned commands. The Gentoo VM builds the
 verified sources and validates reviewed normalized traces, exact frames,
 combined-client isolation, restart behavior, and archive integrity.
 
-Milestone 11 bootstrap evidence is complete only for xterm patch 410 under the
-pinned core-font ASCII build and invocation. Two full Gentoo VM captures at the
-same commit reproduced the presence-normalized trace and validated interaction,
-selection, VT and compositor-restart recovery, canonical frames,
-graphical-console parity, restoration, and archive integrity. Final acceptance
-remains pending until the post-fixture full VM run passes exact comparison.
-The passive-grab scope is `GrabButton` only; `UngrabButton` and passive key
-grabs are unsupported.
+Milestone 11 is accepted only for xterm patch 410 under the pinned core-font
+ASCII build and invocation. Two full Gentoo VM bootstrap captures selected the
+presence-normalized fixture, and the clean full exact run at
+`53ec4879b858b96a9b7e8734fb173d037cbc683b` reproduced it with every evidence
+gate passing. The accepted run validates interaction, selection, VT and
+compositor-restart recovery, canonical frames, graphical-console parity,
+restoration, and archive integrity. The passive-grab scope is `GrabButton`
+only; `UngrabButton` and passive key grabs are unsupported.
