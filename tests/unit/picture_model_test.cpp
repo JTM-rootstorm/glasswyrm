@@ -23,12 +23,12 @@ using gw::test::require;
 void test_canonical_formats() {
   require(kCanonicalPictureFormats.size() == 4,
           "exactly four canonical picture formats are exposed");
-  require(static_cast<std::uint32_t>(PictureFormatId::A1) == 0xFFFFF101U &&
-              static_cast<std::uint32_t>(PictureFormatId::A8) == 0xFFFFF102U &&
+  require(static_cast<std::uint32_t>(PictureFormatId::A1) == 0x1FFFF101U &&
+              static_cast<std::uint32_t>(PictureFormatId::A8) == 0x1FFFF102U &&
               static_cast<std::uint32_t>(PictureFormatId::Xrgb32) ==
-                  0xFFFFF103U &&
+                  0x1FFFF103U &&
               static_cast<std::uint32_t>(PictureFormatId::Argb32) ==
-                  0xFFFFF104U,
+                  0x1FFFF104U,
           "canonical picture format IDs remain stable");
 
   const auto* a1 = find_picture_format(PictureFormatId::A1);

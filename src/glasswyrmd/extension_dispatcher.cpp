@@ -6,6 +6,8 @@
 #include "glasswyrmd/extensions/xfixes.hpp"
 #include "glasswyrmd/extensions/damage.hpp"
 #include "glasswyrmd/extensions/randr.hpp"
+#include "glasswyrmd/extensions/render.hpp"
+#include "glasswyrmd/extensions/composite.hpp"
 #include "protocol/x11/reply.hpp"
 
 namespace glasswyrm::server {
@@ -41,7 +43,9 @@ DispatchResult dispatch_extension_request(
     case ExtensionKind::Damage:
       return extensions::dispatch_damage(state, context, request);
     case ExtensionKind::Render:
+      return extensions::dispatch_render(state, context, request);
     case ExtensionKind::Composite:
+      return extensions::dispatch_composite(state, context, request);
     case ExtensionKind::RandR:
       return extensions::dispatch_randr(state, context, request);
   }

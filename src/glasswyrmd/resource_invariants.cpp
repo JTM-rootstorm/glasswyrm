@@ -45,8 +45,25 @@ bool ResourceTable::invariants_hold() const noexcept {
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(), xid) != 1)
         return false;
-      if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload))
-        calculated_drawable_bytes += pixmap->byte_size();
+      if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload)) {
+        bool counted = false;
+        for (const auto& [other_xid, other_resource] : resources_) {
+          if (other_xid >= xid) continue;
+          const auto* other =
+              std::get_if<PixmapResource>(&other_resource.payload);
+          if (other && other->storage_identity() == pixmap->storage_identity()) {
+            counted = true;
+            break;
+          }
+        }
+        if (!counted) calculated_drawable_bytes += pixmap->byte_size();
+        const bool valid_storage =
+            (pixmap->depth == 1 && pixmap->bitmap()) ||
+            (pixmap->depth == 8 && pixmap->alpha()) ||
+            ((pixmap->depth == 24 || pixmap->depth == 32) && pixmap->pixels());
+        if (resource.type != ResourceType::Pixmap || !valid_storage)
+          return false;
+      }
       if (const auto* cursor = std::get_if<CursorResource>(&resource.payload)) {
         if (!cursor->image) return false;
         calculated_cursor_bytes += cursor->image->byte_size();
@@ -67,6 +84,16 @@ bool ResourceTable::invariants_hold() const noexcept {
             (!find_window(damage->drawable) && !find_pixmap(damage->drawable)) ||
             damage->accumulated.size() > kMaximumXFixesRegionRectangles)
           return false;
+      }
+      if (const auto* picture = std::get_if<Picture>(&resource.payload)) {
+        if (resource.type != ResourceType::Picture) return false;
+        if (const auto* source =
+                std::get_if<DrawablePictureSource>(&picture->source())) {
+          const auto* drawable = find(source->drawable);
+          if (!drawable || (!find_window(source->drawable) &&
+                            !find_pixmap(source->drawable)))
+            return false;
+        }
       }
       continue;
     }

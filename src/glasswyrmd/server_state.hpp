@@ -4,6 +4,7 @@
 #include "glasswyrmd/ewmh.hpp"
 #include "glasswyrmd/grab_state.hpp"
 #include "glasswyrmd/randr_state.hpp"
+#include "glasswyrmd/composite_state.hpp"
 #include "glasswyrmd/resource_table.hpp"
 #include "glasswyrmd/lifecycle_snapshot.hpp"
 #include "glasswyrmd/selection_store.hpp"
@@ -65,6 +66,10 @@ class ServerState {
   [[nodiscard]] const GrabState& grabs() const noexcept { return grabs_; }
   [[nodiscard]] RandRState& randr() noexcept { return randr_; }
   [[nodiscard]] const RandRState& randr() const noexcept { return randr_; }
+  [[nodiscard]] CompositeState& composite() noexcept { return composite_; }
+  [[nodiscard]] const CompositeState& composite() const noexcept {
+    return composite_;
+  }
   [[nodiscard]] KeyboardControlState& keyboard_control() noexcept {
     return keyboard_control_;
   }
@@ -188,6 +193,8 @@ class ServerState {
       (void)staged.selections_.clear_window(entry.xid);
     for (const auto& entry : plan->postorder)
       (void)staged.randr_.clear_window(entry.xid);
+    for (const auto& entry : plan->postorder)
+      (void)staged.composite_.remove_window(entry.xid);
     if (staged.resources_.commit_destroy_plan(*plan) != DestroyWindowStatus::Success)
       return false;
     if (!staged.commit_lifecycle(evaluated)) return false;
@@ -199,6 +206,7 @@ class ServerState {
     (void)selections_.clear_client(owner);
     (void)grabs_.cleanup_client(owner);
     (void)randr_.clear_client(owner);
+    (void)composite_.remove_client(owner);
     auto result = resources_.cleanup_client(owner);
     (void)randr_.prune_windows(resources_);
     synchronize_ewmh_root_properties(*this);
@@ -216,6 +224,7 @@ class ServerState {
   SelectionStore selections_;
   GrabState grabs_;
   RandRState randr_;
+  CompositeState composite_;
   KeyboardControlState keyboard_control_;
   LifecycleSerialSource lifecycle_serials_;
   std::uint32_t focused_window_{screen_.root_window};

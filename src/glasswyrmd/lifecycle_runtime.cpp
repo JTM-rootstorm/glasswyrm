@@ -95,6 +95,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     for (const auto& item : mutation->second.destroy->postorder) {
       (void)staged.selections().clear_window(item.xid);
       (void)staged.grabs().cleanup_window(item.xid);
+      (void)staged.composite().remove_window(item.xid);
     }
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
@@ -104,6 +105,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
              mutation->second.cleanup) {
     auto staged = server_.state_;
     (void)staged.selections().clear_client(mutation->second.cleanup->owner);
+    (void)staged.composite().remove_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
     committed = staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
