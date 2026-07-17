@@ -1,5 +1,6 @@
 #include "glasswyrmd/protocol_event_router.hpp"
 
+#include "glasswyrmd/extension_event_helpers.hpp"
 #include "protocol/x11/event.hpp"
 
 #include <type_traits>
@@ -33,9 +34,17 @@ std::vector<std::uint8_t> encode_for(const ClientConnection& client,
         else if constexpr (std::is_same_v<Event, x11::SelectionNotifyEvent>)
           return x11::encode_selection_notify(
               client.byte_order(), client.last_request_sequence(), value);
-        else
+        else if constexpr (std::is_same_v<Event, x11::ClientMessageEvent>)
           return x11::encode_client_message(
               client.byte_order(), client.last_request_sequence(), value);
+        else if constexpr (std::is_same_v<Event,
+                                          XFixesSelectionNotifyEvent>) {
+          return encode_xfixes_selection_notify(
+              client.byte_order(), client.last_request_sequence(), value);
+        } else {
+          return encode_damage_notify(client.byte_order(),
+                                      client.last_request_sequence(), value);
+        }
       },
       event);
 }

@@ -56,6 +56,7 @@ CreatePixmapStatus ResourceTable::create_pixmap(
 FreePixmapStatus ResourceTable::free_pixmap(const std::uint32_t xid) {
   const auto* pixmap = find_pixmap(xid);
   if (!pixmap) return FreePixmapStatus::BadPixmap;
+  (void)remove_damage_for_drawable(xid);
   const auto owner = find(xid)->owner;
   const auto bytes = pixmap->byte_size();
   resources_.erase(xid);

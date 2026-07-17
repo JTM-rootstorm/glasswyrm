@@ -89,12 +89,32 @@ struct ExposeIntent {
   glasswyrm::geometry::Rectangle rectangle{};
 };
 
+struct XFixesSelectionNotifyEvent {
+  std::uint8_t subtype{};
+  std::uint32_t window{};
+  std::uint32_t owner{};
+  std::uint32_t selection{};
+  std::uint32_t timestamp{};
+  std::uint32_t selection_timestamp{};
+};
+
+struct DamageNotifyEvent {
+  std::uint8_t level{};
+  std::uint32_t drawable{};
+  std::uint32_t damage{};
+  std::uint32_t timestamp{};
+  glasswyrm::geometry::Rectangle area{};
+  glasswyrm::geometry::Rectangle geometry{};
+};
+
 using ProtocolEvent = std::variant<
     gw::protocol::x11::PropertyNotifyEvent,
     gw::protocol::x11::SelectionClearEvent,
     gw::protocol::x11::SelectionRequestEvent,
     gw::protocol::x11::SelectionNotifyEvent,
-    gw::protocol::x11::ClientMessageEvent>;
+    gw::protocol::x11::ClientMessageEvent,
+    XFixesSelectionNotifyEvent,
+    DamageNotifyEvent>;
 
 enum class ProtocolEventDelivery { DirectClient, WindowOwner, WindowMask };
 

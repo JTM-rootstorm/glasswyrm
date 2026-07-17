@@ -56,6 +56,18 @@ bool ResourceTable::invariants_hold() const noexcept {
         if (!segment->mapping || segment->size == 0 || segment->shmid < 0)
           return false;
       }
+      if (const auto* region =
+              std::get_if<XFixesRegionResource>(&resource.payload)) {
+        if (resource.type != ResourceType::XFixesRegion ||
+            region->rectangles.size() > kMaximumXFixesRegionRectangles)
+          return false;
+      }
+      if (const auto* damage = std::get_if<DamageResource>(&resource.payload)) {
+        if (resource.type != ResourceType::Damage ||
+            (!find_window(damage->drawable) && !find_pixmap(damage->drawable)) ||
+            damage->accumulated.size() > kMaximumXFixesRegionRectangles)
+          return false;
+      }
       continue;
     }
     if (window->attributes.cursor_inherit) {

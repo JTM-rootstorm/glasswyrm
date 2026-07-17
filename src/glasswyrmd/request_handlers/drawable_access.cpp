@@ -1,6 +1,7 @@
 #include "glasswyrmd/request_handlers/drawable_access.hpp"
 
 #include "core/geometry/region.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -63,6 +64,16 @@ void add_window_damage(DispatchResult& result, const ResourceTable& resources,
                        const geometry::Rectangle rectangle) {
   if (const auto translated = translate_window_damage(resources, drawable, rectangle))
     result.drawable_damage.push_back(*translated);
+}
+
+void add_drawable_damage(DispatchResult& result, ServerState& state,
+                         const std::uint32_t drawable,
+                         const geometry::Rectangle rectangle,
+                         const std::uint32_t timestamp) {
+  append_damage_notifications(
+      result, state.resources().damage_drawable(drawable, rectangle),
+      timestamp);
+  add_window_damage(result, state.resources(), drawable, rectangle);
 }
 bool known_drawable(const ResourceTable& resources, const std::uint32_t xid) {
   return resources.find_window(xid) || resources.find_pixmap(xid);
