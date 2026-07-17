@@ -110,7 +110,8 @@ declare -A result
 required_results=(historical_default strict_software strict_gles sanitizer clang
   component_builds source_layout api_consumers regressions extension_stress uinput
   raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2
-  extension_registry big_requests mit_shm no_shm_fallback xfixes damage render
+  testsprite_stable_frame extension_registry big_requests big_requests_fallback
+  mit_shm mit_shm_trace no_shm_fallback xfixes damage render
   composite randr colormap fullscreen borderless geometry_restore
   eventfd_sync missing_token_wait damage_upload damage_scanout software_frame
   gles_frame renderer_equality screenshot_equality fullscreen_input_close
@@ -141,6 +142,7 @@ write_facts() {
     printf 'gbm_available=%s\nrenderer_classification=%s\n' \
       "${gbm_available:-unknown}" "${renderer_classification:-unknown}"
     printf 'x_servers_absent=%s\n' "${x_servers_absent:-false}"
+    printf 'display_manager_absent=%s\n' "${display_manager_absent:-false}"
     for key in "${required_results[@]}"; do printf '%s=%s\n' "$key" "${result[$key]}"; done
   } >"$facts"
 }
@@ -247,8 +249,8 @@ if p.is_file():
   for line in p.read_text(errors='replace').splitlines():
     key,sep,value=line.partition('=')
     if sep: facts[key]=value
-required='historical_default strict_software strict_gles sanitizer component_builds source_layout api_consumers regressions extension_stress uinput raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 extension_registry big_requests mit_shm no_shm_fallback xfixes damage render composite randr colormap fullscreen borderless geometry_restore eventfd_sync missing_token_wait damage_upload damage_scanout software_frame gles_frame renderer_equality screenshot_equality fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup restoration archive_validation journal_evidence'.split()
-identity={'required_base_commit':base,'tested_commit':tested,'sdl_version':'2.32.10','sdl_source_sha256':'5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165','api_version':'0.7.0','soversion':'0','wire_version':'1.0','drm_mode':'1024x768','x_servers_absent':'true'}
+required='historical_default strict_software strict_gles sanitizer component_builds source_layout api_consumers regressions extension_stress uinput raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 testsprite_stable_frame extension_registry big_requests big_requests_fallback mit_shm mit_shm_trace no_shm_fallback xfixes damage render composite randr colormap fullscreen borderless geometry_restore eventfd_sync missing_token_wait damage_upload damage_scanout software_frame gles_frame renderer_equality screenshot_equality fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup restoration archive_validation journal_evidence'.split()
+identity={'required_base_commit':base,'tested_commit':tested,'sdl_version':'2.32.10','sdl_source_sha256':'5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165','api_version':'0.7.0','soversion':'0','wire_version':'1.0','drm_mode':'1024x768','x_servers_absent':'true','display_manager_absent':'true'}
 errors=[f'{key} must be passed' for key in required if facts.get(key)!='passed']
 if facts.get('clang') not in {'passed','unavailable'}: errors.append('clang must be passed or unavailable')
 errors += [f'{key} must be {value}' for key,value in identity.items() if facts.get(key)!=value]
@@ -380,6 +382,12 @@ for forbidden in x11-base/xorg-server x11-base/xwayland x11-misc/xvfb \
   ! qlist -IC "$forbidden" 2>/dev/null | grep -q . || { printf 'Forbidden package installed: %s\n' "$forbidden" >&2; exit 1; }
 done
 x_servers_absent=true
+! systemctl is-active --quiet display-manager.service
+[[ ! -e /etc/systemd/system/display-manager.service &&
+   ! -L /etc/systemd/system/display-manager.service &&
+   ! -e /usr/lib/systemd/system/display-manager.service &&
+   ! -L /usr/lib/systemd/system/display-manager.service ]]
+display_manager_absent=true
 
 failure_stage=graphics-dependencies
 pkg-config --exists egl glesv2 gbm
@@ -749,7 +757,8 @@ python3 "$source_dir/tests/compat/m12/validate_trace.py" \
   --shm "$artifact_dir/milestone12-software-trace.jsonl" \
   --no-shm "$artifact_dir/milestone12-noshm-trace.jsonl" \
   --output "$artifact_dir/milestone12-extension-trace.json"
-result[mit_shm]=passed result[no_shm_fallback]=passed
+result[mit_shm]=passed result[mit_shm_trace]=passed
+result[no_shm_fallback]=passed result[big_requests_fallback]=passed
 
 failure_stage=gles-runtime
 begin_profile gles gles shm "$gles" true
@@ -784,7 +793,8 @@ cmp "$artifact_dir/milestone12-software.ppm" "$artifact_dir/milestone12-gles.ppm
 python3 "$source_dir/tests/compat/m12/validate_frame_equivalence.py" \
   --artifact-dir "$artifact_dir" \
   --output "$artifact_dir/milestone12-frame-equivalence.json"
-result[gles_frame]=passed result[renderer_equality]=passed result[screenshot_equality]=passed
+result[gles_frame]=passed result[testsprite_stable_frame]=passed
+result[renderer_equality]=passed result[screenshot_equality]=passed
 
 failure_stage=restoration
 systemctl stop gw-uinput-m12.service
