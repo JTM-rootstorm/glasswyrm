@@ -618,6 +618,7 @@ start_gwcomp() {
     --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
     --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
     --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+    --property=StandardOutput=journal --property=StandardError=journal \
     --property=TTYReset=yes --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
     --property=NoNewPrivileges=yes "$current_build/src/gwcomp" --backend drm \
     --ipc-socket "$current_runtime/gwcomp.sock" --drm-device "$drm_device" \
