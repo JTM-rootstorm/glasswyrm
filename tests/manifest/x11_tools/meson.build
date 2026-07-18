@@ -63,7 +63,11 @@ test('x11-reply-atom', x11_reply_atom_test, timeout: 10)
 if get_option('glasswyrmd')
   m13_scale_client_program = executable(
     'm13_scale_client',
-    files(tests_source_dir / 'apps/m13_scale_client.cpp'),
+    files(
+      tests_source_dir / 'apps/m13_scale_client.cpp',
+      tests_source_dir / 'apps/m13_scale_client_hold.cpp',
+      tests_source_dir / 'apps/m13_scale_client_options.cpp',
+    ),
     dependencies: x11_fake_client_dep,
     include_directories: test_source_root_include,
   )
