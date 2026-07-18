@@ -46,6 +46,38 @@ gwipc_output_upsert disabled_output() {
   return value;
 }
 
+gwipc_surface_upsert metadata_surface() {
+  gwipc_surface_upsert value{};
+  value.struct_size = sizeof(value);
+  value.surface_id = 10;
+  value.x11_window_id = 100;
+  value.output_id = 1;
+  value.logical_width = value.logical_height = 1;
+  value.visible = 1;
+  value.transform = GWIPC_TRANSFORM_NORMAL;
+  value.opacity = GWIPC_OPACITY_ONE;
+  value.scale_numerator = value.scale_denominator = 1;
+  value.color = srgb();
+  value.presentation_flags = GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  value.fullscreen_eligible = GWIPC_TRI_STATE_FALSE;
+  value.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  return value;
+}
+
+gwipc_surface_policy_upsert metadata_policy() {
+  gwipc_surface_policy_upsert value{};
+  value.struct_size = sizeof(value);
+  value.surface_id = 10;
+  value.x11_window_id = 100;
+  value.workspace_id = 1;
+  value.window_type = GWIPC_POLICY_WINDOW_NORMAL;
+  value.applied_state = GWIPC_POLICY_APPLIED_NORMAL;
+  value.managed = 1;
+  value.fullscreen_eligible = GWIPC_TRI_STATE_FALSE;
+  value.direct_scanout_eligible = GWIPC_TRI_STATE_UNKNOWN;
+  return value;
+}
+
 gwipc_frame_commit frame() {
   gwipc_frame_commit value{};
   value.struct_size = sizeof(value);
@@ -150,17 +182,24 @@ void output_model_metadata_only_stays_manifest_only() {
     gw::test::require(
         compositor.configure_scene_profile(SceneProfile::OutputModel, 1, 9) &&
             compositor.begin_snapshot(9) &&
-            compositor.apply(enabled_output()) && compositor.end_snapshot(),
+            compositor.apply(enabled_output()) &&
+            compositor.apply(metadata_surface()) &&
+            compositor.apply(metadata_policy()) && compositor.end_snapshot(),
         "metadata-only output-model snapshot stages");
     const auto presented = compositor.commit(frame(), error);
+    const auto scene = read_file(manifest);
     gw::test::require(
         presented.disposition == Disposition::Complete &&
             presented.result == GWIPC_FRAME_ACCEPTED &&
             presented.ordinal == 1 && presented.hash != 0 &&
             compositor.accepted_frames() == 1 &&
             !std::filesystem::exists(root / "frame-sets.jsonl") &&
-            read_file(manifest).find("\"schema\":\"glasswyrm-scene-v2\"") !=
-                std::string::npos,
+            scene.find("\"schema\":\"glasswyrm-scene-v2\"") !=
+                std::string::npos &&
+            scene.find("\"surface_id\":10") != std::string::npos &&
+            scene.find("\"metadata_only\":true") != std::string::npos &&
+            scene.find("\"memberships\"") == std::string::npos &&
+            scene.find("\"surface_count\":1") != std::string::npos,
         "metadata-only output model publishes its v2 scene without a frame "
         "set: " +
             error);

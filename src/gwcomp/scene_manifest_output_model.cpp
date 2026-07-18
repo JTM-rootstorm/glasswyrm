@@ -53,6 +53,11 @@ bool cursor_surface(const gwipc_surface_upsert &surface) {
   return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
 }
 
+bool metadata_surface(const gwipc_surface_upsert &surface) {
+  return surface.presentation_flags ==
+         GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+}
+
 const char *boolean(const bool value) { return value ? "true" : "false"; }
 
 bool hash_membership(std::uint64_t &hash, const std::uint64_t surface_id,
@@ -119,12 +124,19 @@ bool SceneManifest::describe_output_model(
   }
   for (const auto &[surface_id, surface] : scene.surfaces) {
     const auto membership = scene.surface_outputs.find(surface_id);
-    if (membership == scene.surface_outputs.end()) {
+    const bool metadata_only = metadata_surface(surface);
+    if (metadata_only && membership != scene.surface_outputs.end()) {
+      error = "M13 metadata-only scene manifest surface has output membership";
+      return false;
+    }
+    if (!metadata_only && membership == scene.surface_outputs.end()) {
       error = "M13 scene manifest surface lacks output membership";
       return false;
     }
     if (!hash_contract(hash, surface, gwipc_contract_encode_surface_upsert,
-                       error) ||
+                       error))
+      return false;
+    if (membership != scene.surface_outputs.end() &&
         !hash_membership(hash, surface_id, membership->second, error))
       return false;
     if (const auto policy = scene.surface_policies.find(surface_id);
@@ -175,8 +187,13 @@ bool SceneManifest::describe_output_model(
            << ",\"x11_window_id\":" << surface.x11_window_id
            << ",\"x\":" << surface.logical_x << ",\"y\":"
            << surface.logical_y << ",\"width\":" << surface.logical_width
-           << ",\"height\":" << surface.logical_height << ',';
-    write_membership(output, scene.surface_outputs.at(surface_id));
+           << ",\"height\":" << surface.logical_height
+           << ",\"metadata_only\":" << boolean(metadata_surface(surface));
+    if (const auto membership = scene.surface_outputs.find(surface_id);
+        membership != scene.surface_outputs.end()) {
+      output << ',';
+      write_membership(output, membership->second);
+    }
     output << '}';
   }
   output << "],\"cursors\":[";
