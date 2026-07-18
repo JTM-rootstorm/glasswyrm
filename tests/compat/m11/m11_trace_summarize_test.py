@@ -13,26 +13,41 @@ records = [
      "name": "QueryExtension", "length": 16, "outcome": "success",
      "error": None, "extension": "XInputExtension"},
     {"direction": "reply", "client": 7, "sequence": 1},
-    {"direction": "request", "client": 7, "sequence": 2, "opcode": 38,
+    {"direction": "request", "client": 7, "sequence": 2, "opcode": 98,
+     "name": "QueryExtension", "length": 20, "outcome": "success",
+     "error": None, "extension": "BIG-REQUESTS"},
+    {"direction": "request", "client": 7, "sequence": 3, "opcode": 98,
+     "name": "QueryExtension", "length": 16, "outcome": "success",
+     "error": None, "extension": "MIT-SHM"},
+    {"direction": "request", "client": 7, "sequence": 4, "opcode": 98,
+     "name": "QueryExtension", "length": 16, "outcome": "success",
+     "error": None, "extension": "Composite"},
+    {"direction": "request", "client": 7, "sequence": 5, "opcode": 98,
+     "name": "QueryExtension", "length": 12, "outcome": "success",
+     "error": None, "extension": "RANDR"},
+    {"direction": "request", "client": 7, "sequence": 6, "opcode": 98,
+     "name": "QueryExtension", "length": 20, "outcome": "success",
+     "error": None, "extension": "OTHER"},
+    {"direction": "request", "client": 7, "sequence": 7, "opcode": 38,
      "name": "QueryPointer", "length": 8, "outcome": "success",
      "error": None},
-    {"direction": "request", "client": 7, "sequence": 3, "opcode": 38,
+    {"direction": "request", "client": 7, "sequence": 8, "opcode": 38,
      "name": "QueryPointer", "length": 8, "outcome": "success",
      "error": None},
-    {"direction": "request", "client": 7, "sequence": 4, "opcode": 76,
+    {"direction": "request", "client": 7, "sequence": 9, "opcode": 76,
      "name": "ImageText8", "length": 12, "outcome": "success",
      "error": None},
-    {"direction": "request", "client": 7, "sequence": 5, "opcode": 76,
+    {"direction": "request", "client": 7, "sequence": 10, "opcode": 76,
      "name": "ImageText8", "length": 40, "outcome": "success",
      "error": None},
     {"direction": "event", "client": 7, "sequence": 3,
      "event_type": 2, "window": 0x200001},
     {"direction": "event", "client": 7, "sequence": 3,
      "event_type": 2, "window": 0x200001},
-    {"direction": "request", "client": 7, "sequence": 4, "opcode": 28,
+    {"direction": "request", "client": 7, "sequence": 11, "opcode": 28,
      "name": "GrabButton", "length": 24, "outcome": "success",
      "error": None},
-    {"direction": "request", "client": 7, "sequence": 5, "opcode": 250,
+    {"direction": "request", "client": 7, "sequence": 12, "opcode": 250,
      "name": "Unknown", "length": 12, "outcome": "error",
      "error": "BadRequest"},
     {"direction": "connection", "client": 7, "outcome": "disconnected"},
@@ -50,14 +65,14 @@ assert summary["presence_normalized_requests"] == [
 assert summary["first_request_occurrence"] == [
     "QueryExtension", "QueryPointer", "ImageText8", "GrabButton", "Unknown"]
 assert summary["request_histogram"] == {
-    "GrabButton": 1, "ImageText8": 1, "QueryExtension": 1,
+    "GrabButton": 1, "ImageText8": 1, "QueryExtension": 6,
     "QueryPointer": 2, "Unknown": 1}
 assert summary["opcode_histogram"] == {
-    "28": 1, "38": 2, "76": 1, "98": 1, "250": 1}
+    "28": 1, "38": 2, "76": 1, "98": 6, "250": 1}
 assert summary["error_histogram"] == {"BadRequest": 1}
 assert summary["reply_requests"] == ["QueryExtension"]
 assert summary["recurring_requests"] == ["QueryPointer"]
-assert summary["extension_queries"] == ["XInputExtension"]
+assert summary["extension_queries"] == ["XInputExtension", "OTHER"]
 assert summary["unknown_opcodes"] == [250]
 assert summary["trace_gated_requests"] == {"GrabButton": 1}
 assert summary["event_histogram"] == {"2": 2}
