@@ -11,6 +11,8 @@ import re
 import sys
 from typing import Any
 
+import validate_frame_sets
+
 
 BOOTSTRAP_FILES = {"README.md", "scale-client-result.schema.json"}
 FIXTURE_FILES = {
@@ -163,18 +165,7 @@ def validate_complete(root: pathlib.Path) -> None:
             or not isinstance(maximum, int) or maximum < 0 or maximum > 1):
         fail("fractional renderer comparison exceeds one channel value")
 
-    lines = (root / "frame-sets.jsonl").read_text(
-        encoding="utf-8").splitlines()
-    if not lines:
-        fail("frame-sets.jsonl is empty")
-    for number, line in enumerate(lines, 1):
-        value = json.loads(line)
-        if (not isinstance(value, dict)
-                or not isinstance(value.get("generation"), int)
-                or not isinstance(value.get("aggregate_hash"), str)
-                or not isinstance(value.get("outputs"), list)
-                or len(value["outputs"]) != 2):
-            fail(f"frame-sets.jsonl record {number} differs")
+    validate_frame_sets.validate_manifest(root / "frame-sets.jsonl", root)
 
     left_frames = {"legacy-left.ppm", "legacy-spanning-left.ppm",
                    "aware-left.ppm"}
