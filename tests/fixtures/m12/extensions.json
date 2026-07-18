@@ -1,0 +1,58 @@
+{
+  "evidence_errors": [],
+  "independent_extension_coverage": {
+    "mit_shm_query_version_in_shm_trace": true,
+    "xfixes_probe_in_no_shm_trace": true,
+    "xfixes_probe_in_shm_trace": true
+  },
+  "passed": true,
+  "profiles": {
+    "no-shm": {
+      "checks": {
+        "core_put_image": true,
+        "extended_put_image_probe": true,
+        "mit_shm_queried": true,
+        "no_client_errors": true,
+        "no_mit_shm_requests": true,
+        "official_extension_query_profile": true,
+        "sdl_window_client": true,
+        "xfixes_not_queried_by_official_client": true
+      },
+      "client": 17,
+      "extension_queries": [
+        "BIG-REQUESTS",
+        "OTHER",
+        "OTHER",
+        "RANDR",
+        "OTHER",
+        "OTHER",
+        "MIT-SHM"
+      ],
+      "passed": true,
+      "request_count": 3078
+    },
+    "shm": {
+      "checks": {
+        "no_bulk_core_put_image": true,
+        "no_client_errors": true,
+        "official_extension_query_profile": true,
+        "sdl_window_client": true,
+        "shm_attach_put_detach": true,
+        "xfixes_not_queried_by_official_client": true
+      },
+      "client": 26,
+      "extension_queries": [
+        "BIG-REQUESTS",
+        "OTHER",
+        "OTHER",
+        "RANDR",
+        "OTHER",
+        "OTHER",
+        "MIT-SHM"
+      ],
+      "passed": true,
+      "request_count": 1160
+    }
+  },
+  "schema": 1
+}
