@@ -109,3 +109,23 @@ The diagnostic hash is FNV-1a 64-bit with offset basis
 `glasswyrm-policy-v1`, committed generation, little-endian context fields, and
 the exact 64-byte encoded policy record for each window in output order. It is
 for reproducibility and diagnostics, not security.
+
+The M13 multi-output profile uses the tag `glasswyrm-policy-v3` and retains
+the same FNV-1a parameters. After the tag it hashes, without padding:
+
+1. the committed `u64` generation and the context fields in their existing
+   little-endian order;
+2. a `u32` output count, followed by outputs in ascending output-ID order;
+3. a `u32` window-hint count, followed by hints in ascending window-ID order;
+4. the same exact 64-byte policy-window records used by v1, in policy output
+   order.
+
+Each output contributes its `u64` ID; logical and work rectangles as signed
+origin plus unsigned extent; scale numerator and denominator; one-byte
+transform, enabled, and primary values; and `u32` flags. Each hint contributes
+its `u32` window, `u64` previous and preferred output IDs, and `u32` flags.
+
+When interactive bindings are negotiated with the multi-output profile, the
+outer hash also uses `glasswyrm-policy-v3`, then hashes the base v3 hash and
+the exact existing v2 binding fields. The v1 and v2 tags and byte streams are
+unchanged. Canonical v3 vectors are frozen by `multi-output-policy` tests.
