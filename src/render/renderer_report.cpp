@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <iomanip>
 #include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -44,6 +45,58 @@ const char* disposition_name(const RenderDisposition disposition) {
     case RenderDisposition::Fatal: return "fatal";
   }
   return "fatal";
+}
+
+const char* transform_name(
+    const glasswyrm::output::OutputTransform transform) noexcept {
+  using glasswyrm::output::OutputTransform;
+  switch (transform) {
+    case OutputTransform::Normal: return "normal";
+    case OutputTransform::Rotate90: return "rotate-90";
+    case OutputTransform::Rotate180: return "rotate-180";
+    case OutputTransform::Rotate270: return "rotate-270";
+    case OutputTransform::Flipped: return "flipped";
+    case OutputTransform::Flipped90: return "flipped-90";
+    case OutputTransform::Flipped180: return "flipped-180";
+    case OutputTransform::Flipped270: return "flipped-270";
+  }
+  return "invalid";
+}
+
+std::string output_id(const std::uint64_t value) {
+  std::ostringstream output;
+  output << std::hex << std::setfill('0') << std::setw(16) << value;
+  return output.str();
+}
+
+void append_filters(std::ostringstream& line,
+                    const OutputRendererMetrics& metrics) {
+  line << '[';
+  bool separator = false;
+  const auto append = [&](const std::string_view name, const bool used) {
+    if (!used) return;
+    if (separator) line << ',';
+    line << json_quote(name);
+    separator = true;
+  };
+  append("direct", metrics.used_direct);
+  append("nearest", metrics.used_nearest);
+  append("bilinear", metrics.used_bilinear);
+  line << ']';
+}
+
+void append_physical_damage(std::ostringstream& line,
+                            const OutputRendererMetrics& metrics) {
+  line << '[';
+  for (std::size_t index = 0;
+       index < metrics.physical_damage_rectangles.size(); ++index) {
+    if (index != 0) line << ',';
+    const auto& rectangle = metrics.physical_damage_rectangles[index];
+    line << "{\"x\":" << rectangle.x << ",\"y\":" << rectangle.y
+         << ",\"width\":" << rectangle.width << ",\"height\":"
+         << rectangle.height << '}';
+  }
+  line << ']';
 }
 
 bool same_identity(const struct stat& status, const std::uint64_t device,
@@ -147,6 +200,61 @@ bool RendererReport::append_frame(const RenderFrameRequest& request,
        << result.metrics.damage_rectangles << ",\"readback_bytes\":"
        << result.metrics.readback_bytes << ",\"texture_cache_bytes\":"
        << result.metrics.texture_cache_bytes << ",\"fallback_reason\":"
+       << (result.fallback_reason.empty() ? "null"
+                                          : json_quote(result.fallback_reason))
+       << ",\"error\":"
+       << (result.error.empty() ? "null" : json_quote(result.error)) << "}\n";
+  return append(line.str(), error);
+}
+
+bool RendererReport::append_output_frame(
+    const software::SoftwareFrameSetRenderRequest& request,
+    const OutputSceneRenderResult& result, std::string& error) {
+  if (result.complete() &&
+      (!result.frames.finalized() ||
+       result.metrics.size() != result.frames.outputs().size())) {
+    error = "output renderer metrics are incomplete";
+    return false;
+  }
+  std::ostringstream line;
+  line << "{\"record\":\"output-frame\",\"schema_version\":13"
+       << ",\"selected\":" << json_quote(result.selected_renderer)
+       << ",\"commit_id\":" << request.commit_id
+       << ",\"generation\":" << request.generation
+       << ",\"ordinal\":" << request.ordinal
+       << ",\"layout_generation\":"
+       << (result.frames.finalized() ? result.frames.layout_generation() : 0)
+       << ",\"primary_output_id\":"
+       << json_quote(output_id(result.frames.finalized()
+                                   ? result.frames.primary_output_id()
+                                   : 0))
+       << ",\"disposition\":"
+       << json_quote(disposition_name(result.disposition))
+       << ",\"outputs\":[";
+  std::size_t index = 0;
+  for (const auto& [id, metrics] : result.metrics) {
+    if (index++ != 0) line << ',';
+    line << "{\"output_id\":" << json_quote(output_id(id))
+         << ",\"texture_uploads\":" << metrics.texture_uploads
+         << ",\"texture_upload_bytes\":" << metrics.texture_upload_bytes
+         << ",\"physical_damage_rectangles\":";
+    append_physical_damage(line, metrics);
+    line << ",\"readback_bytes\":" << metrics.readback_bytes
+         << ",\"texture_cache_bytes\":" << metrics.texture_cache_bytes
+         << ",\"filtering_modes\":";
+    append_filters(line, metrics);
+    line << ",\"scale_numerator\":" << metrics.scale.numerator
+         << ",\"scale_denominator\":" << metrics.scale.denominator
+         << ",\"transform\":" << json_quote(transform_name(metrics.transform))
+         << ",\"fallback_reason\":"
+         << (metrics.fallback_reason.empty()
+                 ? "null"
+                 : json_quote(metrics.fallback_reason))
+         << ",\"maximum_fractional_comparison_error\":"
+         << static_cast<unsigned>(metrics.maximum_fractional_comparison_error)
+         << '}';
+  }
+  line << "],\"fallback_reason\":"
        << (result.fallback_reason.empty() ? "null"
                                           : json_quote(result.fallback_reason))
        << ",\"error\":"

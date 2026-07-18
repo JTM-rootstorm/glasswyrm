@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/output_scene_renderer.hpp"
 #include "render/scene_renderer.hpp"
 
 #include <filesystem>
@@ -40,6 +41,9 @@ public:
                                   const RenderFrameResult& result,
                                   std::string_view selected,
                                   std::string& error);
+  [[nodiscard]] bool append_output_frame(
+      const software::SoftwareFrameSetRenderRequest& request,
+      const OutputSceneRenderResult& result, std::string& error);
 
 private:
   [[nodiscard]] bool append(std::string_view line, std::string& error);
