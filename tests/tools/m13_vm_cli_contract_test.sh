@@ -54,6 +54,7 @@ for expected in \
   m13_raw_output_probe.py m13_scale_client 'systemctl restart' \
   m13_sdl_display_probe.c 'SDL2-2.32.10.tar.gz' \
   '--synthetic-input-socket' 'gwinput_m8' '--scenario crossing' \
+  'scene_line_before=0' 'if [[ -f $scenes/scene.jsonl ]]' \
   '--disable' '--enable' validate_frame_sets.py \
   '--backend drm' '--scale 4/3' '--transform rotate-180' \
   'drm-screen-ready' 'screen-captured' '--scale 1/1' '--transform normal' \

@@ -449,7 +449,10 @@ cp "$artifact_dir/milestone13-gw-scale-little.json" \
   "$artifact_dir/milestone13-gw-scale.log"
 result[multi_output_randr]=passed
 
-scene_line_before=$(wc -l <"$scenes/scene.jsonl")
+scene_line_before=0
+if [[ -f $scenes/scene.jsonl ]]; then
+  scene_line_before=$(wc -l <"$scenes/scene.jsonl")
+fi
 "$synthetic_input" --socket "$runtime/input.sock" --scenario crossing \
   --output "$control_data/pointer-acks.json"
 python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
