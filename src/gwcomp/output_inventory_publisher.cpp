@@ -121,7 +121,9 @@ gwipc_output_mode_upsert mode_record(const output::OutputMode &mode) {
   value.refresh_millihertz = mode.refresh_millihertz;
   value.preferred = mode.preferred;
   value.current = mode.current;
-  value.flags = mode.flags;
+  // Native mode flags contribute to the stable mode identity, but GWIPC 0.8
+  // reserves the published mode-flags field to zero.
+  value.flags = 0;
   return value;
 }
 

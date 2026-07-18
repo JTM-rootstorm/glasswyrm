@@ -19,13 +19,14 @@ using gw::test::require;
 
 OutputMode mode(const OutputId output_id, const OutputModeId mode_id,
                 const std::uint32_t width, const std::uint32_t height,
-                const bool preferred, const bool current) {
+                const bool preferred, const bool current,
+                const std::uint32_t native_flags = 0) {
   return {mode_id,
           output_id,
           width,
           height,
           60'000,
-          0,
+          native_flags,
           std::to_string(width) + "x" + std::to_string(height),
           preferred,
           current};
@@ -96,7 +97,8 @@ OutputLayout layout() {
                          mode(first, first_mode, 800, 600, true, true)}));
   value.descriptors.emplace(
       second,
-      drm_descriptor(second, mode(second, second_mode, 640, 480, true, true)));
+      drm_descriptor(second,
+                     mode(second, second_mode, 640, 480, true, true, 5)));
   value.states.emplace(first, state(first, first_mode, 0, 800, 600, 640, 480,
                                     RationalScale{5, 4}, true));
   value.states.emplace(second, state(second, second_mode, 640, 640, 480, 640,
@@ -184,6 +186,12 @@ void test_complete_inventory() {
               first_mode.current &&
               alternate_mode.mode_id == UINT64_C(0x4000000000000012),
           "modes publish deterministically by stable mode ID");
+  const auto second_mode = decode(
+      messages[5],
+      static_cast<CodecStatus (*)(std::span<const std::uint8_t>,
+                                  OutputModeUpsert &)>(gw::ipc::wire::decode));
+  require(second_mode.flags == 0,
+          "native DRM mode flags remain identity-only wire metadata");
 
   const auto first_state = decode(
       messages[6], static_cast<CodecStatus (*)(std::span<const std::uint8_t>,
