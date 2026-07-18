@@ -213,6 +213,7 @@ bool apply_edit(Snapshot &snapshot, const std::string_view selector,
   }
   auto &output = selected->second;
   const auto &descriptor = snapshot.descriptors.at(selected->first);
+  const bool was_enabled = output.enabled;
   if (edit.enabled)
     output.enabled = *edit.enabled;
   if (!output.enabled && snapshot.primary_output_id == output.id) {
@@ -226,6 +227,26 @@ bool apply_edit(Snapshot &snapshot, const std::string_view selector,
       return false;
     }
     snapshot.primary_output_id = output.id;
+  }
+  if (!was_enabled && output.enabled && !edit.mode) {
+    auto mode = std::find_if(snapshot.modes.begin(), snapshot.modes.end(),
+                             [&](const auto &candidate) {
+                               return candidate.output_id == output.id &&
+                                      candidate.current;
+                             });
+    if (mode == snapshot.modes.end())
+      mode = std::find_if(snapshot.modes.begin(), snapshot.modes.end(),
+                          [&](const auto &candidate) {
+                            return candidate.output_id == output.id &&
+                                   candidate.preferred;
+                          });
+    if (mode == snapshot.modes.end()) {
+      error = "re-enabled output requires an available mode";
+      return false;
+    }
+    output.physical_width = mode->width;
+    output.physical_height = mode->height;
+    output.refresh_millihertz = mode->refresh_millihertz;
   }
   if (edit.mode) {
     if (descriptor.kind == GWIPC_OUTPUT_DRM) {
