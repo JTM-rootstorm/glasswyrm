@@ -89,7 +89,11 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     server_.drawable_damage_handler_ = [this](
         const std::vector<DrawableDamage>& damage) {
       for (const auto& item : damage)
-        content_presenter_->damage(item.window, item.rectangle);
+        if (item.buffer_rectangle)
+          content_presenter_->damage_scaled(item.window, item.rectangle,
+                                            *item.buffer_rectangle);
+        else
+          content_presenter_->damage(item.window, item.rectangle);
     };
   }
   bridge_->start();
@@ -125,11 +129,22 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     const auto *layout = bridge_->output_layout();
     const auto screen = layout ? derive_output_screen_model(*layout)
                                : std::nullopt;
-    if (!screen || !server_.state_.update_screen_geometry(*screen)) {
+    if (!screen || !server_.state_.update_screen_geometry(*screen) ||
+        !server_.state_.randr().configure_output_layout(*layout)) {
       std::fprintf(stderr,
                    "glasswyrmd: compositor output inventory could not "
                    "initialize the server screen\n");
       return 1;
+    }
+    if (server_.options_.control_socket) {
+      output_control_peer_ = std::make_unique<OutputControlPeer>(
+          *server_.options_.control_socket, *layout,
+          [this] { return server_.state_.lifecycle_snapshot(); });
+      std::string error;
+      if (!output_control_peer_->start(error)) {
+        std::fprintf(stderr, "glasswyrmd: %s\n", error.c_str());
+        return 1;
+      }
     }
   }
 
@@ -172,13 +187,12 @@ bool ServerRuntime::service_integrated(const short policy_events,
   if (!service_input_session_work(compositor_reset, compositor_releases))
     return false;
   std::string error;
-  if (!service_peer_replay(error) ||
+  if (!service_peer_replay(error) || !service_output_control_work() ||
       !service_lifecycle_work(compositor_releases))
     return false;
 #if GW_HAS_LIBINPUT_BACKEND
   if (!service_cursor()) return false;
 #endif
-  if (!service_output_control_work()) return false;
   submit_pending_content(error);
   return true;
 }

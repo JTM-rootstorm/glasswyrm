@@ -25,6 +25,7 @@ struct Options {
   std::optional<std::string> wm_socket;
   std::optional<std::string> compositor_socket;
   std::optional<std::string> synthetic_input_socket;
+  std::optional<std::string> control_socket;
   std::optional<std::string> x11_trace;
   std::vector<InputDevicePath> libinput_devices;
   std::string xkb_rules = "evdev";

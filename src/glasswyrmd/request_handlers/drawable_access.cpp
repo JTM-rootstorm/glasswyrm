@@ -52,7 +52,7 @@ std::optional<DrawableDamage> translate_window_damage(
     if (!clipped) return std::nullopt;
     rectangle = *clipped;
     if (window->parent == resources.screen().root_window)
-      return DrawableDamage{xid, rectangle};
+      return DrawableDamage{xid, rectangle, std::nullopt};
     rectangle.x += static_cast<std::int32_t>(window->x) + window->border_width;
     rectangle.y += static_cast<std::int32_t>(window->y) + window->border_width;
     xid = window->parent;

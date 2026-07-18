@@ -5,6 +5,7 @@
 #include <glasswyrm/ipc.h>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace glasswyrm::compositor {
@@ -26,11 +27,19 @@ struct OutputInventoryPublication {
   }
 };
 
+struct OutputInventoryWindow {
+  gwipc_surface_upsert surface{};
+  gwipc_surface_policy_upsert policy{};
+  gwipc_surface_output_state membership{};
+  std::vector<std::uint64_t> output_ids;
+};
+
 // Builds one atomic reply to an already validated compositor OutputStateQuery.
 // The caller owns snapshot identity and enqueues the returned messages in
 // order.
 [[nodiscard]] OutputInventoryPublication build_output_inventory_publication(
     const gwipc_output_state_query &query, std::uint64_t query_sequence,
-    std::uint64_t snapshot_id, const output::OutputLayout &layout);
+    std::uint64_t snapshot_id, const output::OutputLayout &layout,
+    std::span<const OutputInventoryWindow> windows = {});
 
 } // namespace glasswyrm::compositor

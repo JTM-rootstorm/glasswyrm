@@ -143,6 +143,28 @@ bool CompositorPeer::connect(std::string &error) {
   return true;
 }
 
+bool CompositorPeer::can_adopt_output_layout(
+    const output::OutputLayout& layout) const noexcept {
+  if (!output_model_ || !output_layout_ || !output::validate_layout(layout) ||
+      output_layout_->descriptors.size() != layout.descriptors.size())
+    return false;
+  for (const auto &[id, descriptor] : output_layout_->descriptors) {
+    const auto found = layout.descriptors.find(id);
+    if (found == layout.descriptors.end() ||
+        found->second.name != descriptor.name ||
+        found->second.kind != descriptor.kind)
+      return false;
+  }
+  return true;
+}
+
+bool CompositorPeer::adopt_output_layout(output::OutputLayout layout) {
+  if (!can_adopt_output_layout(layout))
+    return false;
+  output_layout_ = std::move(layout);
+  return true;
+}
+
 bool CompositorPeer::begin_output_inventory(std::string &error) {
   if (next_output_query_id_ == 0) {
     error = "compositor output inventory query identity was exhausted";
@@ -173,7 +195,11 @@ bool CompositorPeer::accept_output_inventory(std::string &error) {
     return false;
   }
   if (!reference_output_inventory_) reference_output_inventory_ = *layout;
-  output_layout_ = *layout;
+  // A reconnect inventory proves that the compositor still exposes the same
+  // immutable outputs; it does not supersede an accepted server-side layout.
+  // Preserve the committed configuration so bootstrap replays it into the
+  // fresh compositor instead of silently reverting to backend defaults.
+  if (!output_layout_) output_layout_ = *layout;
   pending_output_inventory_.reset();
   state_ = PeerBootstrapState::Synchronized;
   error.clear();
@@ -309,6 +335,9 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     }
     if (!content_submission_)
       compositor_buffer_replay::promote(pending_, replay_input_);
+    else
+      compositor_buffer_replay::promote_content(pending_content_,
+                                                replay_input_);
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }

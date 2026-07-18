@@ -62,6 +62,9 @@ public:
   begin_complete_snapshot(std::uint64_t primary_output_id,
                           std::uint64_t configuration_generation);
   [[nodiscard]] bool end_complete_snapshot();
+  [[nodiscard]] bool set_snapshot_output_configuration(
+      std::uint64_t primary_output_id,
+      std::uint64_t configuration_generation) noexcept;
   void abort_complete_snapshot();
 
   [[nodiscard]] bool apply(const gwipc_output_upsert &output);

@@ -61,5 +61,17 @@ int main() {
                         resume.full_copy_reason ==
                             FullCopyReason::VirtualTerminalResume,
                     "VT resume explicitly forces a complete copy");
+  const auto configuration = history.plan(
+      true, 4, 5, third_damage,
+      FullCopyReason::OutputConfigurationChanged);
+  gw::test::require(
+      configuration.full_copy() &&
+          configuration.full_copy_reason ==
+              FullCopyReason::OutputConfigurationChanged &&
+          configuration.completed_damage ==
+              std::vector<Rectangle>{{0, 0, 100, 80}} &&
+          full_copy_reason_name(configuration.full_copy_reason) ==
+              "output-configuration-changed",
+      "output configuration changes force complete scanout copy history");
   return 0;
 }

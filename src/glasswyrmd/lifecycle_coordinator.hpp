@@ -7,11 +7,12 @@
 #include <deque>
 #include <functional>
 #include <optional>
+#include <utility>
 
 namespace glasswyrm::server {
 
 enum class LifecycleOperationKind { Create, Map, Unmap, Configure, Destroy,
-                                    OverrideChange, PolicyChange, Focus,
+                                    OverrideChange, PolicyChange, ScaleChange, Focus,
                                     ClientCleanup };
 enum class CoordinatorPhase { Idle, AwaitingPolicy, AwaitingCompositor,
                               RollingBackPolicy, RollingBackCompositor,
@@ -68,6 +69,15 @@ class LifecycleCoordinator {
   }
   [[nodiscard]] const LifecycleSnapshot& committed() const noexcept {
     return committed_;
+  }
+  [[nodiscard]] bool can_replace_committed() const noexcept {
+    return phase_ == CoordinatorPhase::Idle && !active_;
+  }
+  [[nodiscard]] bool replace_committed(LifecycleSnapshot committed) {
+    if (!can_replace_committed())
+      return false;
+    committed_ = std::move(committed);
+    return true;
   }
 
  private:

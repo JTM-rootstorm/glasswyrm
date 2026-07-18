@@ -103,9 +103,14 @@ class DrmPresenter final : public output::PresentationBackend,
                                      std::string& error);
   [[nodiscard]] bool blocking_modeset(DumbBuffer& buffer, std::string& error);
   [[nodiscard]] output::PresentResult present_initial(
-      const output::SoftwareFrameView& frame, std::uint64_t hash);
+      const output::SoftwareFrameView& frame, std::uint64_t hash,
+      FullCopyReason forced_reason, std::uint64_t layout_generation);
   [[nodiscard]] output::PresentResult present_flip(
-      const output::SoftwareFrameView& frame, std::uint64_t hash);
+      const output::SoftwareFrameView& frame, std::uint64_t hash,
+      FullCopyReason forced_reason, std::uint64_t layout_generation);
+  [[nodiscard]] output::PresentResult present_validated(
+      const output::SoftwareFrameView& frame, FullCopyReason forced_reason,
+      std::uint64_t layout_generation);
   [[nodiscard]] output::BackendEvent fatal_event(std::string stage,
                                                  std::string reason);
   void record_fatal(std::string stage, std::string reason) noexcept;
@@ -139,10 +144,12 @@ class DrmPresenter final : public output::PresentationBackend,
   std::unique_ptr<session::DirectVirtualTerminalSession> direct_session_;
   std::unique_ptr<PendingPresentation> pending_;
   std::optional<std::uint64_t> pending_frame_set_hash_;
+  std::optional<std::uint64_t> pending_layout_generation_;
   std::unique_ptr<DamageCopyHistory> damage_history_;
   std::vector<std::uint32_t> committed_pixels_;
   std::uint64_t committed_hash_{};
   std::uint64_t committed_generation_{};
+  std::uint64_t committed_layout_generation_{};
   std::uint64_t next_token_{1};
   std::uint64_t cumulative_full_frame_bytes_{};
   std::uint64_t cumulative_copied_bytes_{};

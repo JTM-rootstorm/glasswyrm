@@ -58,6 +58,10 @@ public:
       gw::ipc::wire::OutputConfigurationAcknowledged>
   reject_policy() noexcept;
   [[nodiscard]] bool accept_compositor() noexcept;
+  [[nodiscard]] bool can_accept_compositor() const noexcept {
+    return stage_ == OutputConfigurationStage::CompositorPending &&
+           transaction_.has_value();
+  }
   [[nodiscard]] bool begin_rollback(
       gw::ipc::wire::OutputConfigurationResult rejection) noexcept;
   [[nodiscard]] std::optional<
@@ -66,6 +70,9 @@ public:
   [[nodiscard]] std::optional<
       gw::ipc::wire::OutputConfigurationAcknowledged>
   commit() noexcept;
+  [[nodiscard]] std::optional<
+      gw::ipc::wire::OutputConfigurationAcknowledged>
+  fail_internal() noexcept;
 
   [[nodiscard]] const OutputConfigurationTransaction *transaction()
       const noexcept {

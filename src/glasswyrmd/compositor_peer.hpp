@@ -39,6 +39,7 @@ struct CompositorSnapshotSubmission {
         buffers(std::move(buffer_records)), damages(std::move(damage_records)) {}
 
   std::uint64_t commit_id{}, generation{};
+  std::uint64_t primary_output_id{}, output_layout_generation{};
   std::vector<gwipc_surface_upsert> surfaces;
   std::vector<gwipc_surface_policy_upsert> policies;
   std::vector<Buffer> buffers;
@@ -49,6 +50,7 @@ struct CompositorSnapshotSubmission {
 
 struct CompositorContentSubmission {
   std::uint64_t commit_id{}, generation{};
+  std::vector<CompositorSnapshotSubmission::Buffer> buffers;
   std::vector<CompositorSnapshotSubmission::Damage> damages;
 };
 
@@ -56,6 +58,8 @@ struct CompositorCursorSubmission {
   gwipc_surface_upsert surface{};
   std::optional<CompositorSnapshotSubmission::Buffer> buffer;
   std::optional<CompositorSnapshotSubmission::Damage> damage;
+  CompositorSnapshotSubmission::SurfaceOutput surface_output;
+  std::int32_t pointer_x{}, pointer_y{};
 };
 
 struct CompositorBufferRelease {
@@ -102,6 +106,9 @@ public:
   [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
     return output_layout_ ? &*output_layout_ : nullptr;
   }
+  [[nodiscard]] bool
+  can_adopt_output_layout(const output::OutputLayout& layout) const noexcept;
+  [[nodiscard]] bool adopt_output_layout(output::OutputLayout layout);
   void forget_cursor_replay() noexcept;
   void disconnect() noexcept;
 

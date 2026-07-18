@@ -1,5 +1,6 @@
 #include "glasswyrmd/output_configuration_coordinator.hpp"
 
+#include "output/model/drm_configuration.hpp"
 #include "output/model/identity.hpp"
 
 #include <algorithm>
@@ -235,7 +236,7 @@ OutputConfigurationCoordinator::reject_policy() noexcept {
 }
 
 bool OutputConfigurationCoordinator::accept_compositor() noexcept {
-  if (stage_ != OutputConfigurationStage::CompositorPending || !transaction_)
+  if (!can_accept_compositor())
     return false;
   stage_ = OutputConfigurationStage::CommitReady;
   return true;
@@ -271,6 +272,16 @@ OutputConfigurationCoordinator::commit() noexcept {
   const auto request_id = transaction_->configuration_id;
   clear_transaction();
   return acknowledgement(request_id, Result::Accepted);
+}
+
+std::optional<gw::ipc::wire::OutputConfigurationAcknowledged>
+OutputConfigurationCoordinator::fail_internal() noexcept {
+  if (!transaction_)
+    return std::nullopt;
+  const auto result = acknowledgement(transaction_->configuration_id,
+                                      Result::InternalError);
+  clear_transaction();
+  return result;
 }
 
 OutputConfigurationCoordinator::Acknowledged
@@ -368,6 +379,15 @@ OutputConfigurationCoordinator::build_candidate(
     }
   }
   update_layout_metadata(candidate);
+  if (output::is_single_fixed_drm_output_profile(committed_layout_)) {
+    const auto drm_validation =
+        output::validate_single_fixed_drm_configuration(committed_layout_,
+                                                        candidate);
+    if (drm_validation == output::DrmConfigurationError::PhysicalModeChanged)
+      return Result::UnsupportedMode;
+    if (drm_validation != output::DrmConfigurationError::None)
+      return Result::InvalidLayout;
+  }
   const auto validation = output::validate_layout(candidate);
   return validation ? Result::Accepted : validation_result(validation.error);
 }

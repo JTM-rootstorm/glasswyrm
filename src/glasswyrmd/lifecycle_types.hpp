@@ -31,6 +31,9 @@ struct LifecycleWindow {
   std::uint8_t window_type{}, applied_state{};
   bool managed{}, decoration_eligible{};
   std::uint8_t fullscreen_eligible{}, direct_scanout_eligible{};
+  std::uint64_t assigned_output_id{};
+  std::vector<std::uint64_t> output_memberships;
+  WindowScaleState scale;
 };
 
 struct LifecycleSnapshot {

@@ -1,5 +1,6 @@
 #include "glasswyrmd/runtime_bridge.hpp"
 #include "glasswyrmd/cursor_presenter.hpp"
+#include "glasswyrmd/output_scene_projection.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <chrono>
@@ -222,7 +223,7 @@ int main(int argc, char** argv) {
       argv[2], output_compositor_socket, root + "/output-model-dump");
   RuntimeBridge output_bridge(
       output_policy_socket, output_compositor_socket,
-      gw::protocol::x11::kScreenModel, std::chrono::seconds(10), false, false,
+      gw::protocol::x11::kScreenModel, std::chrono::seconds(10), true, false,
       false, true);
   output_bridge.start();
   drive_until(output_bridge, [&] { return output_bridge.ready(); },
@@ -233,6 +234,36 @@ int main(int argc, char** argv) {
               output_layout->root_logical_width == 1440 &&
               output_layout->root_logical_height == 600,
           "output-model bridge exposes compositor-authoritative layout");
+  glasswyrm::server::CursorPresenter output_cursor_presenter;
+  glasswyrm::server::CompositorCursorSubmission output_cursor;
+  const auto output_cursor_scale =
+      glasswyrm::server::cursor_buffer_scale(*output_layout, 900, 100);
+  require(output_cursor_presenter.prepare(image, 900, 100, true, output_cursor,
+                                          error, false,
+                                          output_cursor_scale) &&
+              output_bridge.submit_cursor(output_cursor, 2, 2, error),
+          "first output-model cursor publication is accepted for submission");
+  drive_until(output_bridge,
+              [&] { return output_bridge.cursor_result_ready(); },
+              "first output-model cursor frame timed out");
+  output_cursor_presenter.accept();
+  output_bridge.clear_transaction_result();
+  require(output_bridge.transaction_idle(),
+          "accepted output-model cursor frame returns the bridge to idle");
+  glasswyrm::server::CompositorCursorSubmission moved_output_cursor;
+  require(output_cursor_presenter.prepare(image, 901, 101, true,
+                                          moved_output_cursor, error, false,
+                                          output_cursor_scale) &&
+              !moved_output_cursor.buffer &&
+              output_bridge.submit_cursor(moved_output_cursor, 3, 3, error),
+          "second same-layout cursor snapshot advances producer generation");
+  drive_until(output_bridge,
+              [&] { return output_bridge.cursor_result_ready(); },
+              "second same-layout output-model cursor frame timed out");
+  output_cursor_presenter.accept();
+  output_bridge.clear_transaction_result();
+  require(output_bridge.transaction_idle(),
+          "second same-layout output-model frame commits independently");
   stop(output_compositor_process);
   stop(output_policy_process);
   return 0;

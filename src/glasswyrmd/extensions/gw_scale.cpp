@@ -1,13 +1,16 @@
 #include "glasswyrmd/extensions/gw_scale.hpp"
 
 #include "glasswyrmd/extension_registry.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 #include "glasswyrmd/extension_wire.hpp"
+#include "glasswyrmd/gw_scale_state.hpp"
 #include "glasswyrmd/randr_state.hpp"
 #include "glasswyrmd/request_handlers/common.hpp"
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/reply.hpp"
 
 #include <algorithm>
+#include <array>
 #include <new>
 #include <optional>
 
@@ -20,6 +23,20 @@ namespace {
 constexpr std::uint32_t kSupportedEventMask = UINT32_C(0x7);
 constexpr std::uint16_t kLegacyScaleMode = 1;
 constexpr std::uint16_t kScaledPixmapMode = 2;
+
+DispatchResult xfixes_region_error(const DispatchContext& context,
+                                   const x11::FramedRequest& request,
+                                   const std::uint32_t xid) {
+  const auto* extension = find_extension(ExtensionKind::XFixes);
+  const auto packet =
+      extension ? encode_extension_error(context.byte_order, *extension, 0,
+                                         context.sequence, xid, request.opcode,
+                                         request.data)
+                : std::nullopt;
+  return packet ? DispatchResult{*packet}
+                : error(context, request,
+                        x11::CoreErrorCode::BadImplementation);
+}
 
 DispatchResult extension_error(const DispatchContext& context,
                                const x11::FramedRequest& request,
@@ -118,6 +135,38 @@ DispatchResult select_input(ServerState& state,
   }
 }
 
+DispatchResult get_output_scale(ServerState& state,
+                                const DispatchContext& context,
+                                const x11::FramedRequest& request) {
+  if (request.core_size() != 8)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{};
+  (void)reader.read_u32(xid);
+  const auto* output = state.randr().find_output(xid);
+  if (!state.randr().output_model_enabled() || !output)
+    return error(context, request, x11::CoreErrorCode::BadValue, xid);
+  const auto generation = state.randr().output_layout()->generation;
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u32(static_cast<std::uint32_t>(output->internal_id >> 32U));
+  reply.write_u32(static_cast<std::uint32_t>(output->internal_id));
+  reply.write_u32(static_cast<std::uint32_t>(output->logical_x));
+  reply.write_u32(static_cast<std::uint32_t>(output->logical_y));
+  reply.write_u32(output->logical_width);
+  reply.write_u32(output->logical_height);
+  reply.write_payload_u32(output->physical_width);
+  reply.write_payload_u32(output->physical_height);
+  reply.write_payload_u32(output->scale.numerator);
+  reply.write_payload_u32(output->scale.denominator);
+  reply.write_payload_u16(static_cast<std::uint16_t>(output->transform));
+  const std::array flags{static_cast<std::uint8_t>(output->primary),
+                         static_cast<std::uint8_t>(output->enabled)};
+  reply.write_payload(flags);
+  reply.write_payload_u32(static_cast<std::uint32_t>(generation >> 32U));
+  reply.write_payload_u32(static_cast<std::uint32_t>(generation));
+  return {std::move(reply).finish()};
+}
+
 DispatchResult get_window_scale(ServerState& state,
                                 const DispatchContext& context,
                                 const x11::FramedRequest& request) {
@@ -180,18 +229,22 @@ DispatchResult set_window_buffer_scale(
   if (requested_scale == 0 || requested_scale > 4)
     return extension_error(context, request, 0, requested_scale);
 
-  window->scale.accepted_buffer_scale = requested_scale;
-  window->scale.presentation =
+  auto scale = window->scale;
+  const bool invalidated = invalidate_scaled_pixmap(scale);
+  scale.accepted_buffer_scale = requested_scale;
+  scale.presentation =
       WindowScalePresentationState::ScaleAwareAwaitingPixmap;
-  const auto preferred_numerator = window->scale.has_output_state
-                                       ? window->scale.preferred_scale_numerator
+  scale.scaled_pixmap_storage.reset();
+  scale.presentation_serial = 0;
+  const auto preferred_numerator = scale.has_output_state
+                                       ? scale.preferred_scale_numerator
                                        : UINT32_C(1);
   const auto preferred_denominator =
-      window->scale.has_output_state
-          ? window->scale.preferred_scale_denominator
+      scale.has_output_state
+          ? scale.preferred_scale_denominator
           : UINT32_C(1);
-  const auto generation = window->scale.has_output_state
-                              ? window->scale.layout_generation
+  const auto generation = scale.has_output_state
+                              ? scale.layout_generation
                               : std::uint64_t{kRandRConfigurationTimestamp};
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
   reply.write_u32(requested_scale);
@@ -200,7 +253,114 @@ DispatchResult set_window_buffer_scale(
   reply.write_u32(static_cast<std::uint32_t>(generation >> 32U));
   reply.write_u32(static_cast<std::uint32_t>(generation));
   reply.write_padding(4);
-  return {std::move(reply).finish()};
+  auto result = context.integrated_lifecycle
+                    ? DispatchResult::deferred_scale_change({xid, scale})
+                    : DispatchResult{};
+  result.output = std::move(reply).finish();
+  if (!context.integrated_lifecycle) {
+    window->scale = std::move(scale);
+    if (invalidated)
+      append_gw_scale_notifications(result, *window, xid,
+                                    kGwScaleInvalidatedReason);
+  }
+  return result;
+}
+
+bool bounded_damage(const geometry::Rectangle rectangle,
+                    const std::uint32_t width,
+                    const std::uint32_t height) noexcept {
+  if (rectangle.empty() || rectangle.x < 0 || rectangle.y < 0) return false;
+  const auto right = static_cast<std::uint64_t>(rectangle.x) + rectangle.width;
+  const auto bottom =
+      static_cast<std::uint64_t>(rectangle.y) + rectangle.height;
+  return right <= width && bottom <= height;
+}
+
+geometry::Rectangle logical_damage(const geometry::Rectangle pixels,
+                                   const std::uint32_t scale) noexcept {
+  const auto right = static_cast<std::uint32_t>(pixels.x) + pixels.width;
+  const auto bottom = static_cast<std::uint32_t>(pixels.y) + pixels.height;
+  const auto x = static_cast<std::uint32_t>(pixels.x) / scale;
+  const auto y = static_cast<std::uint32_t>(pixels.y) / scale;
+  const auto logical_right = (right + scale - 1U) / scale;
+  const auto logical_bottom = (bottom + scale - 1U) / scale;
+  return {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+          logical_right - x, logical_bottom - y};
+}
+
+DispatchResult present_scaled_pixmap(
+    ServerState& state, const DispatchContext& context,
+    const x11::FramedRequest& request) {
+  if (request.core_size() != 20)
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t xid{}, pixmap_xid{}, damage_xid{}, serial{};
+  (void)reader.read_u32(xid);
+  (void)reader.read_u32(pixmap_xid);
+  (void)reader.read_u32(damage_xid);
+  (void)reader.read_u32(serial);
+  DispatchResult failure;
+  auto* window = eligible_window(state, context, request, xid, true, failure);
+  if (!window) return failure;
+  if (window->scale.presentation == WindowScalePresentationState::Legacy ||
+      window->scale.accepted_buffer_scale == 0)
+    return extension_error(context, request, 1, xid);
+  if (std::ranges::any_of(window->children, [&](const std::uint32_t child_xid) {
+        const auto* child = state.resources().find_window(child_xid);
+        return child && child->window_class == WindowClass::InputOutput &&
+               child->map_requested;
+      }))
+    return extension_error(context, request, 1, xid);
+  const auto* pixmap = state.resources().find_pixmap(pixmap_xid);
+  if (!pixmap)
+    return error(context, request, x11::CoreErrorCode::BadPixmap, pixmap_xid);
+  const auto* pixels = pixmap->pixels();
+  const auto scale = window->scale.accepted_buffer_scale;
+  const auto expected_width =
+      static_cast<std::uint64_t>(window->width) * scale;
+  const auto expected_height =
+      static_cast<std::uint64_t>(window->height) * scale;
+  if (pixmap->depth != 24 || !pixels || pixmap->width != expected_width ||
+      pixmap->height != expected_height)
+    return extension_error(context, request, 0, pixmap_xid);
+
+  std::vector<geometry::Rectangle> buffer_damage;
+  if (damage_xid == 0) {
+    buffer_damage.push_back({0, 0, pixmap->width, pixmap->height});
+  } else {
+    const auto* region = state.resources().find_xfixes_region(damage_xid);
+    if (!region) return xfixes_region_error(context, request, damage_xid);
+    if (!std::ranges::all_of(region->rectangles, [&](const auto rectangle) {
+          return bounded_damage(rectangle, pixmap->width, pixmap->height);
+        }))
+      return extension_error(context, request, 0, damage_xid);
+    buffer_damage = region->rectangles;
+  }
+
+  auto next = window->scale;
+  next.presentation = WindowScalePresentationState::ScaleAwareActive;
+  next.scaled_pixmap_storage =
+      std::get<std::shared_ptr<PixelStorage>>(pixmap->storage);
+  next.presentation_serial = serial;
+  const auto generation = next.has_output_state
+                              ? next.layout_generation
+                              : std::uint64_t{kRandRConfigurationTimestamp};
+  x11::ReplyBuilder reply(context.byte_order, context.sequence);
+  reply.write_u32(serial);
+  reply.write_u32(scale);
+  reply.write_u32(static_cast<std::uint32_t>(generation >> 32U));
+  reply.write_u32(static_cast<std::uint32_t>(generation));
+  reply.write_padding(8);
+  auto result = context.integrated_lifecycle
+                    ? DispatchResult::deferred_scale_change({xid, next})
+                    : DispatchResult{};
+  result.output = std::move(reply).finish();
+  if (!context.integrated_lifecycle) window->scale = std::move(next);
+  result.drawable_damage.reserve(buffer_damage.size());
+  for (const auto rectangle : buffer_damage)
+    result.drawable_damage.push_back(
+        {xid, logical_damage(rectangle, scale), rectangle});
+  return result;
 }
 
 DispatchResult reset_window_buffer_scale(
@@ -214,9 +374,22 @@ DispatchResult reset_window_buffer_scale(
   DispatchResult failure;
   auto* window = eligible_window(state, context, request, xid, true, failure);
   if (!window) return failure;
-  window->scale.accepted_buffer_scale = 1;
-  window->scale.presentation = WindowScalePresentationState::Legacy;
-  return {};
+  auto scale = window->scale;
+  const bool invalidated = invalidate_scaled_pixmap(scale);
+  scale.accepted_buffer_scale = 1;
+  scale.presentation = WindowScalePresentationState::Legacy;
+  scale.scaled_pixmap_storage.reset();
+  scale.presentation_serial = 0;
+  auto result = context.integrated_lifecycle
+                    ? DispatchResult::deferred_scale_change({xid, scale})
+                    : DispatchResult{};
+  if (!context.integrated_lifecycle) {
+    window->scale = std::move(scale);
+    if (invalidated)
+      append_gw_scale_notifications(result, *window, xid,
+                                    kGwScaleInvalidatedReason);
+  }
+  return result;
 }
 
 }  // namespace
@@ -227,8 +400,10 @@ DispatchResult dispatch_gw_scale(ServerState& state,
   switch (request.data) {
     case 0: return query_version(context, request);
     case 1: return select_input(state, context, request);
+    case 2: return get_output_scale(state, context, request);
     case 3: return get_window_scale(state, context, request);
     case 4: return set_window_buffer_scale(state, context, request);
+    case 5: return present_scaled_pixmap(state, context, request);
     case 6: return reset_window_buffer_scale(state, context, request);
     default:
       return error(context, request, x11::CoreErrorCode::BadRequest);

@@ -8,6 +8,7 @@
 #include "glasswyrmd/cursor_presenter.hpp"
 #include "glasswyrmd/event_router.hpp"
 #include "glasswyrmd/lifecycle_coordinator.hpp"
+#include "glasswyrmd/output_control_peer.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
 #include "glasswyrmd/synthetic_input_peer.hpp"
 #include "input/input_state.hpp"
@@ -73,6 +74,7 @@ class ServerRuntime {
     std::optional<WindowDestroyPlan> destroy;
     std::optional<ClientCleanupPlan> cleanup;
     std::optional<DeferredPropertyMutation> property;
+    std::optional<WindowScaleState> scale;
   };
 
   void initialize_lifecycle();
@@ -96,6 +98,21 @@ class ServerRuntime {
   [[nodiscard]] bool service_lifecycle_work(
       const std::vector<CompositorBufferRelease>& compositor_releases);
   [[nodiscard]] bool service_output_control_work();
+  [[nodiscard]] bool submit_output_policy(
+      const LifecycleSnapshot& snapshot, const output::OutputLayout& layout,
+      bool rollback);
+  [[nodiscard]] bool submit_output_compositor(
+      const LifecycleSnapshot& snapshot, const output::OutputLayout& layout,
+      bool rollback);
+  [[nodiscard]] bool begin_output_rollback(
+      gw::ipc::wire::OutputConfigurationResult result,
+      bool compositor_accepted);
+  [[nodiscard]] bool install_output_configuration(
+      const LifecycleSnapshot& snapshot, const output::OutputLayout& layout,
+      bool emit_events);
+  [[nodiscard]] bool promote_output_configuration();
+  [[nodiscard]] bool finish_output_configuration();
+  [[nodiscard]] bool output_configuration_active() const noexcept;
   void submit_pending_content(std::string& error);
   void service_input(short listener_events, short connection_events);
   [[nodiscard]] bool warp_pointer(std::int32_t x, std::int32_t y);
@@ -127,6 +144,20 @@ class ServerRuntime {
   std::unique_ptr<ContentPresenter> content_presenter_;
   std::unique_ptr<CursorPresenter> cursor_presenter_;
   std::unique_ptr<SyntheticInputPeer> input_peer_;
+  std::unique_ptr<OutputControlPeer> output_control_peer_;
+  enum class OutputConfigurationRuntimeStage {
+    Idle,
+    AwaitingPolicy,
+    AwaitingCompositor,
+    RollingBackPolicy,
+    RollingBackCompositor,
+  };
+  OutputConfigurationRuntimeStage output_configuration_stage_{
+      OutputConfigurationRuntimeStage::Idle};
+  std::optional<LifecycleSnapshot> output_configuration_before_;
+  std::optional<LifecycleSnapshot> output_configuration_evaluated_;
+  std::vector<ProtocolEventIntent> output_configuration_events_;
+  bool output_configuration_peer_reset_{};
   glasswyrm::input::InputState input_state_;
   std::uint64_t expected_input_id_{1};
   std::optional<PendingFocusInput> pending_focus_input_;
@@ -164,6 +195,7 @@ class ServerRuntime {
   std::uint64_t policy_commit_{0};
   std::uint64_t policy_generation_{0};
   std::optional<StructuralEventState> transition_before_;
+  std::optional<WindowScaleState> scale_transition_before_;
   std::optional<InputTransitionState> input_transition_before_;
   bool content_replay_attempted_{false};
   std::map<std::uint64_t, PendingMutation> pending_mutations_;

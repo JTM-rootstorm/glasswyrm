@@ -152,6 +152,11 @@ int main() {
               after_warp.records[0].root_x == 21 &&
               after_warp.records[0].root_y == 31,
           "pointer warp resets the relative-motion origin and fraction");
+  require(!backend.update_root_bounds(0, 8) &&
+              backend.update_root_bounds(10, 8) &&
+              backend.pointer_x() == 9 && backend.pointer_y() == 7 &&
+              backend.update_root_bounds(100, 80),
+          "dynamic root bounds reject empty roots and clamp pointer state");
 
   auto key = event(input::LibinputEventKind::Key, 1, 12000);
   key.code = KEY_A;

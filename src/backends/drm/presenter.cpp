@@ -146,43 +146,19 @@ bool DrmPresenter::blocking_modeset(DumbBuffer& buffer, std::string& error) {
 
 output::PresentResult DrmPresenter::present(
     const output::SoftwareFrameView& frame) {
-  if (!initialized_ || shutdown_ || fatal_)
-    return {output::PresentDisposition::Fatal, 0, 0,
-            "DRM presenter is not operational"};
-  if (suspended_)
-    return {output::PresentDisposition::Rejected, 0, 0,
-            "DRM presenter is suspended"};
-  if (pending_)
-    return {output::PresentDisposition::Rejected, 0, 0,
-            "one DRM page flip is already pending"};
-  const auto expected = std::uint64_t{config_.output.width} * config_.output.height;
-  const auto refresh_distance =
-      frame.output.refresh_millihz > config_.output.refresh_millihz
-          ? frame.output.refresh_millihz - config_.output.refresh_millihz
-          : config_.output.refresh_millihz - frame.output.refresh_millihz;
-  if (frame.output.width != config_.output.width ||
-      frame.output.height != config_.output.height ||
-      frame.output.output_id == 0 ||
-      (config_.output.output_id != 0 &&
-       frame.output.output_id != config_.output.output_id) ||
-      refresh_distance > kDefaultRefreshToleranceMillihz ||
-      frame.commit_id == 0 || frame.generation == 0 || frame.ordinal == 0 ||
-      frame.pixels.size() != expected)
-    return {output::PresentDisposition::Rejected, 0, 0,
-            "software frame does not match the selected DRM mode"};
-  const auto hash = output::hash_visible_xrgb8888(frame.pixels);
-  return initial_modeset_ ? present_flip(frame, hash)
-                          : present_initial(frame, hash);
+  return present_validated(frame, FullCopyReason::None, 0);
 }
 
 output::PresentResult DrmPresenter::present_initial(
-    const output::SoftwareFrameView& frame, const std::uint64_t hash) {
+    const output::SoftwareFrameView& frame, const std::uint64_t hash,
+    const FullCopyReason forced_reason,
+    const std::uint64_t layout_generation) {
   std::string error;
   auto& target = buffers_.front();
   headless::StagedFrameDump mirror;
   StagedDrmReport report;
   DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, hash, FullCopyReason::None, damage_copy, error) ||
+  if (!copy_frame_to(target, frame, hash, forced_reason, damage_copy, error) ||
       target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("initial-copy", error); fatal_ = true;
@@ -219,13 +195,17 @@ output::PresentResult DrmPresenter::present_initial(
   committed_pixels_.assign(frame.pixels.begin(), frame.pixels.end());
   committed_hash_ = hash;
   committed_generation_ = frame.generation;
+  if (layout_generation != 0)
+    committed_layout_generation_ = layout_generation;
   complete_damage_copy(target, damage_copy, frame.generation);
   initial_modeset_ = true;
   return {output::PresentDisposition::Complete, 0, hash, {}};
 }
 
 output::PresentResult DrmPresenter::present_flip(
-    const output::SoftwareFrameView& frame, const std::uint64_t hash) {
+    const output::SoftwareFrameView& frame, const std::uint64_t hash,
+    const FullCopyReason forced_reason,
+    const std::uint64_t layout_generation) {
   std::string error;
   auto& target = buffers_.back();
   PendingPresentation value;
@@ -238,7 +218,7 @@ output::PresentResult DrmPresenter::present_flip(
   value.next_front_index = 1U - front_index_;
   value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
-  if (!copy_frame_to(target, frame, hash, FullCopyReason::None,
+  if (!copy_frame_to(target, frame, hash, forced_reason,
                      value.damage_copy, error) ||
       target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
@@ -291,6 +271,8 @@ output::PresentResult DrmPresenter::present_flip(
     return {output::PresentDisposition::Rejected, 0, 0, error};
   }
   pending_ = std::make_unique<PendingPresentation>(std::move(value));
+  if (layout_generation != 0)
+    pending_layout_generation_ = layout_generation;
   return {output::PresentDisposition::Pending, pending_->token, 0, {}};
 }
 
@@ -356,6 +338,8 @@ bool DrmPresenter::finalize_pending(const std::uint64_t token,
   committed_pixels_ = std::move(pending_->pixels);
   committed_hash_ = pending_->hash;
   committed_generation_ = pending_->generation;
+  if (pending_layout_generation_)
+    committed_layout_generation_ = *pending_layout_generation_;
   clear_pending();
   return true;
 }
@@ -378,6 +362,7 @@ void DrmPresenter::clear_pending() noexcept {
   if (report_) report_->abort(pending_->report);
   pending_.reset();
   pending_frame_set_hash_.reset();
+  pending_layout_generation_.reset();
 }
 
 output::BackendEvent DrmPresenter::fatal_event(std::string stage,

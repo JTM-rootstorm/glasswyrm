@@ -3,6 +3,7 @@
 #include "helpers/test_support.hpp"
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
+#include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/output_contract.hpp"
 
 #include <cstdint>
@@ -129,6 +130,45 @@ gwipc_output_state_query query(const std::uint32_t flags) {
   return value;
 }
 
+std::vector<glasswyrm::compositor::OutputInventoryWindow> windows() {
+  glasswyrm::compositor::OutputInventoryWindow item;
+  item.surface.struct_size = sizeof(item.surface);
+  item.surface.surface_id = (UINT64_C(1) << 32U) | 41U;
+  item.surface.x11_window_id = 41;
+  item.surface.output_id = UINT64_C(0x8000000000000001);
+  item.surface.logical_x = 600;
+  item.surface.logical_y = 40;
+  item.surface.logical_width = 100;
+  item.surface.logical_height = 80;
+  item.surface.stacking = 2;
+  item.surface.visible = 1;
+  item.surface.opacity = GWIPC_OPACITY_ONE;
+  item.surface.scale_numerator = 2;
+  item.surface.scale_denominator = 1;
+  item.surface.color = {GWIPC_SDR_COLOR_SPACE_SRGB,
+                        GWIPC_TRANSFER_FUNCTION_SRGB,
+                        GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
+  item.surface.presentation_flags = GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  item.policy.struct_size = sizeof(item.policy);
+  item.policy.surface_id = item.surface.surface_id;
+  item.policy.x11_window_id = 41;
+  item.policy.workspace_id = 1;
+  item.policy.window_type = GWIPC_POLICY_WINDOW_NORMAL;
+  item.policy.applied_state = GWIPC_POLICY_APPLIED_FULLSCREEN;
+  item.policy.focused = item.policy.managed = 1;
+  item.output_ids = {UINT64_C(0x8000000000000001),
+                     UINT64_C(0x8000000000000002)};
+  item.membership.struct_size = sizeof(item.membership);
+  item.membership.surface_id = item.surface.surface_id;
+  item.membership.primary_output_id = item.surface.output_id;
+  item.membership.preferred_scale_numerator = 5;
+  item.membership.preferred_scale_denominator = 4;
+  item.membership.client_buffer_scale = 2;
+  item.membership.scale_mode = GWIPC_SURFACE_SCALE_SCALED_PIXMAP;
+  item.membership.layout_generation = 7;
+  return {std::move(item)};
+}
+
 void test_complete_inventory() {
   const auto value = layout();
   const auto publication = build_output_inventory_publication(
@@ -248,13 +288,30 @@ void test_selective_queries() {
           "selective query advertises only selected items");
 
   publication = build_output_inventory_publication(
-      query(GWIPC_OUTPUT_QUERY_WINDOWS), 19, 31, value);
-  require(publication && publication.messages.size() == 3 &&
+      query(GWIPC_OUTPUT_QUERY_WINDOWS), 19, 31, value, windows());
+  require(publication && publication.messages.size() == 6 &&
               publication.messages[0].type == GWIPC_MESSAGE_SNAPSHOT_BEGIN &&
-              publication.messages[1].type == GWIPC_MESSAGE_SNAPSHOT_END &&
+              publication.messages[1].type == GWIPC_MESSAGE_SURFACE_UPSERT &&
               publication.messages[2].type ==
+                  GWIPC_MESSAGE_SURFACE_POLICY_UPSERT &&
+              publication.messages[3].type ==
+                  GWIPC_MESSAGE_SURFACE_OUTPUT_STATE &&
+              publication.messages[4].type == GWIPC_MESSAGE_SNAPSHOT_END &&
+              publication.messages[5].type ==
                   GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,
-          "window-only compositor query returns an empty inventory snapshot");
+          "window-only query returns complete deterministic window records");
+  const auto membership = decode(
+      publication.messages[3],
+      static_cast<CodecStatus (*)(std::span<const std::uint8_t>,
+                                  SurfaceOutputState &)>(
+          gw::ipc::wire::decode));
+  require(membership.output_ids.size() == 2 &&
+              membership.primary_output_id ==
+                  UINT64_C(0x8000000000000001) &&
+              membership.preferred_scale_numerator == 5 &&
+              membership.preferred_scale_denominator == 4 &&
+              membership.client_buffer_scale == 2,
+          "window publication preserves membership and scale state");
 }
 
 void test_atomic_rejection() {

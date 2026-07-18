@@ -157,7 +157,8 @@ gwipc_output_upsert state_record(const output::OutputState &state) {
 }
 
 std::uint32_t requested_item_count(const gwipc_output_state_query &query,
-                                   const output::OutputLayout &layout) {
+                                   const output::OutputLayout &layout,
+                                   const std::size_t window_count) {
   std::size_t count = 0;
   if ((query.flags & GWIPC_OUTPUT_QUERY_DESCRIPTORS) != 0)
     count += layout.descriptors.size();
@@ -168,6 +169,8 @@ std::uint32_t requested_item_count(const gwipc_output_state_query &query,
     }
   if ((query.flags & GWIPC_OUTPUT_QUERY_LAYOUT) != 0)
     count += layout.states.size();
+  if ((query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0)
+    count += window_count * 3U;
   return static_cast<std::uint32_t>(count);
 }
 
@@ -219,11 +222,45 @@ gwipc_status append_states(std::vector<OutputInventoryMessage> &messages,
   return GWIPC_STATUS_OK;
 }
 
+gwipc_status append_windows(
+    std::vector<OutputInventoryMessage> &messages,
+    const std::span<const OutputInventoryWindow> windows) {
+  std::vector<const OutputInventoryWindow *> ordered;
+  ordered.reserve(windows.size());
+  for (const auto &window : windows)
+    ordered.push_back(&window);
+  std::ranges::sort(ordered, {}, [](const auto *window) {
+    return window->surface.x11_window_id;
+  });
+  for (const auto *window : ordered) {
+    auto membership = window->membership;
+    membership.output_ids = window->output_ids.data();
+    membership.output_count = window->output_ids.size();
+    auto status = append_contract(
+        messages, GWIPC_MESSAGE_SURFACE_UPSERT, GWIPC_FLAG_SNAPSHOT_ITEM, 0,
+        window->surface, gwipc_contract_encode_surface_upsert);
+    if (status == GWIPC_STATUS_OK)
+      status = append_contract(
+          messages, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,
+          GWIPC_FLAG_SNAPSHOT_ITEM, 0, window->policy,
+          gwipc_contract_encode_surface_policy_upsert);
+    if (status == GWIPC_STATUS_OK)
+      status = append_contract(
+          messages, GWIPC_MESSAGE_SURFACE_OUTPUT_STATE,
+          GWIPC_FLAG_SNAPSHOT_ITEM, 0, membership,
+          gwipc_contract_encode_surface_output_state);
+    if (status != GWIPC_STATUS_OK)
+      return status;
+  }
+  return GWIPC_STATUS_OK;
+}
+
 } // namespace
 
 OutputInventoryPublication build_output_inventory_publication(
     const gwipc_output_state_query &query, const std::uint64_t query_sequence,
-    const std::uint64_t snapshot_id, const output::OutputLayout &layout) {
+    const std::uint64_t snapshot_id, const output::OutputLayout &layout,
+    const std::span<const OutputInventoryWindow> windows) {
   OutputInventoryPublication result;
   if (!valid_query(query, query_sequence, snapshot_id)) {
     result.status = GWIPC_STATUS_INVALID_ARGUMENT;
@@ -237,7 +274,13 @@ OutputInventoryPublication build_output_inventory_publication(
 
   try {
     std::vector<OutputInventoryMessage> messages;
-    const auto item_count = requested_item_count(query, layout);
+    if (windows.size() > (UINT32_MAX - GWIPC_MAXIMUM_OUTPUT_MODES -
+                          2U * GWIPC_MAXIMUM_OUTPUTS) /
+                             3U) {
+      result.status = GWIPC_STATUS_LIMIT_EXCEEDED;
+      return result;
+    }
+    const auto item_count = requested_item_count(query, layout, windows.size());
     messages.reserve(static_cast<std::size_t>(item_count) + 3U);
 
     gwipc_snapshot_begin begin{};
@@ -257,6 +300,9 @@ OutputInventoryPublication build_output_inventory_publication(
     if (status == GWIPC_STATUS_OK &&
         (query.flags & GWIPC_OUTPUT_QUERY_LAYOUT) != 0)
       status = append_states(messages, layout);
+    if (status == GWIPC_STATUS_OK &&
+        (query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0)
+      status = append_windows(messages, windows);
 
     gwipc_snapshot_end end{};
     end.struct_size = sizeof(end);

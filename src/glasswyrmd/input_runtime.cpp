@@ -134,7 +134,8 @@ void ServerRuntime::service_input(const short listener_events,
         pending_focus_input_ = PendingFocusInput{
             record, server_.state_.focused_window(), delivered, true};
         const auto focus_status =
-            content_presenter_ && !bridge_->transaction_idle()
+            output_configuration_active() ||
+                    (content_presenter_ && !bridge_->transaction_idle())
                 ? lifecycle_->enqueue_paused(std::move(operation))
                 : lifecycle_->enqueue(std::move(operation));
         if (focus_status != EnqueueStatus::Queued) {
