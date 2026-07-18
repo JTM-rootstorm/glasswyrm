@@ -102,6 +102,21 @@ int main() {
               error.find("primary") != std::string::npos,
           "disabling primary requires another primary selection");
 
+  auto reenabled = snapshot();
+  edit = {};
+  edit.enabled = false;
+  require(apply_edit(reenabled, "RIGHT", edit, error) &&
+              reenabled.outputs.at(12).physical_width == 0,
+          "disabled output uses the zero-extent wire representation");
+  reenabled.modes.at(1).current = false;
+  edit.enabled = true;
+  edit.position = {{640, 0}};
+  require(apply_edit(reenabled, "RIGHT", edit, error) &&
+              reenabled.outputs.at(12).physical_width == 640 &&
+              reenabled.outputs.at(12).physical_height == 480 &&
+              reenabled.outputs.at(12).refresh_millihertz == 60000,
+          "re-enabling restores the preferred inventory mode");
+
   std::pair<std::uint32_t, std::uint32_t> scale;
   std::pair<std::int32_t, std::int32_t> position;
   std::pair<std::uint32_t, std::uint32_t> extent;
