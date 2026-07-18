@@ -21,6 +21,7 @@ M13_TEXT_ARTIFACTS=(
   milestone13-gw-scale-little.json milestone13-gw-scale-big.json
   milestone13-scale-client.json milestone13-frame-sets.jsonl
   milestone13-pointer-crossing.json milestone13-sdl-displays.json
+  milestone13-fullscreen-outputs.json
   milestone13-renderer-software.jsonl milestone13-renderer-gles.jsonl
   milestone13-renderer-drm.jsonl
   milestone13-renderer-fractional-diff.json milestone13-drm-report.jsonl
@@ -112,6 +113,7 @@ required_results=(historical_default strict_software strict_gles sanitizer
   component_builds source_layout api_consumers m1_m12_regressions
   output_inventory stable_id_replay logical_physical_geometry integer_scaling
   output_enable_disable pointer_output_crossing sdl_display_discovery
+  fullscreen_outputs
   fractional_scaling transforms surface_membership primary_transition
   legacy_fallback scaled_pixmap gw_scale_events multi_output_randr gwinfo_text
   gwinfo_json gwout_commit stale_rejection busy_rejection headless_frame_hashes
@@ -533,6 +535,22 @@ wait_frames_after "$before_frames"
 assert_window_memberships "$left_id" "$control_data/legacy-left.json"
 copy_latest_output "$left_id" "$control_data/milestone13-legacy-left.ppm"
 
+before_frames=$(frame_count); legacy_command fullscreen on
+wait_frames_after "$before_frames"
+"$software/tools/gwinfo" --socket "$runtime/control.sock" windows --json \
+  >"$control_data/fullscreen-left.json"
+python3 - "$control_data/fullscreen-left.json" "$left_id" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); assert len(d['windows'])==1
+w=d['windows'][0]
+assert w['fullscreen'] is True and w['primary_output_id']==sys.argv[2]
+assert (w['logical_x'],w['logical_y'],w['logical_width'],w['logical_height'])==(0,0,640,480)
+PY
+before_frames=$(frame_count); legacy_command fullscreen off
+wait_frames_after "$before_frames"
+"$software/tools/gwinfo" --socket "$runtime/control.sock" windows --json \
+  >"$control_data/fullscreen-left-restored.json"
+
 before_frames=$(frame_count); legacy_command configure 480 80 320 240
 wait_frames_after "$before_frames"
 assert_window_memberships "$left_id,$right_id" "$control_data/legacy-spanning.json"
@@ -543,6 +561,39 @@ before_frames=$(frame_count); legacy_command configure 760 80 320 240
 wait_frames_after "$before_frames"
 assert_window_memberships "$right_id" "$control_data/legacy-right.json"
 copy_latest_output "$right_id" "$control_data/milestone13-legacy-right.ppm"
+
+before_frames=$(frame_count); legacy_command fullscreen on
+wait_frames_after "$before_frames"
+"$software/tools/gwinfo" --socket "$runtime/control.sock" windows --json \
+  >"$control_data/fullscreen-right.json"
+python3 - "$control_data/fullscreen-right.json" "$right_id" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); assert len(d['windows'])==1
+w=d['windows'][0]
+assert w['fullscreen'] is True and w['primary_output_id']==sys.argv[2]
+assert (w['logical_x'],w['logical_y'],w['logical_width'],w['logical_height'])==(640,0,640,480)
+PY
+before_frames=$(frame_count); legacy_command fullscreen off
+wait_frames_after "$before_frames"
+"$software/tools/gwinfo" --socket "$runtime/control.sock" windows --json \
+  >"$control_data/fullscreen-right-restored.json"
+python3 - "$control_data/fullscreen-left.json" \
+  "$control_data/fullscreen-left-restored.json" \
+  "$control_data/fullscreen-right.json" \
+  "$control_data/fullscreen-right-restored.json" \
+  "$artifact_dir/milestone13-fullscreen-outputs.json" <<'PY'
+import json,sys
+left,left_restored,right,right_restored=(json.load(open(path))['windows'][0]
+                                         for path in sys.argv[1:5])
+assert left['fullscreen'] is True and right['fullscreen'] is True
+assert left_restored['fullscreen'] is False and right_restored['fullscreen'] is False
+assert (left_restored['logical_width'],left_restored['logical_height'])==(320,240)
+assert (right_restored['logical_width'],right_restored['logical_height'])==(320,240)
+json.dump({'schema':1,'passed':True,'left':left,'right':right,
+           'left_restored':left_restored,'right_restored':right_restored},
+          open(sys.argv[5],'w'),sort_keys=True)
+PY
+result[fullscreen_outputs]=passed
 
 before_sets=$(frame_set_count)
 "$software/tools/gwout" --socket "$runtime/control.sock" set RIGHT --disable \
@@ -1086,6 +1137,7 @@ cp "$artifact_dir"/milestone13-{randr-little,randr-big,gw-scale-little,gw-scale-
 cp "$artifact_dir"/milestone13-{gwinfo-outputs,gwinfo-windows,gwout-result}.json "$evidence/"
 cp "$artifact_dir/milestone13-scale-client.json" "$evidence/"
 cp "$artifact_dir"/milestone13-{pointer-crossing,sdl-displays}.json "$evidence/"
+cp "$artifact_dir/milestone13-fullscreen-outputs.json" "$evidence/"
 cp "$artifact_dir/milestone13-frame-sets.jsonl" "$evidence/"
 find "$headless/evidence" -type f -name '*.ppm' -exec cp -t "$evidence" -- {} +
 "$source_dir/tests/compat/m13/validate_frame_sets.py" \

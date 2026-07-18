@@ -20,6 +20,7 @@ REQUIRED_RESULTS = (
     "source_layout api_consumers m1_m12_regressions output_inventory "
     "stable_id_replay logical_physical_geometry integer_scaling "
     "output_enable_disable pointer_output_crossing sdl_display_discovery "
+    "fullscreen_outputs "
     "fractional_scaling transforms surface_membership primary_transition "
     "legacy_fallback scaled_pixmap gw_scale_events multi_output_randr "
     "gwinfo_text gwinfo_json gwout_commit stale_rejection busy_rejection "
@@ -53,7 +54,8 @@ IMPORTANT_ARTIFACTS = (
     "milestone13-gw-scale-big.json milestone13-gw-scale.log "
     "milestone13-scale-client.json "
     "milestone13-frame-sets.jsonl milestone13-pointer-crossing.json "
-    "milestone13-sdl-displays.json milestone13-renderer-software.jsonl "
+    "milestone13-sdl-displays.json milestone13-fullscreen-outputs.json "
+    "milestone13-renderer-software.jsonl "
     "milestone13-renderer-gles.jsonl milestone13-renderer-drm.jsonl "
     "milestone13-renderer-fractional-diff.json "
     "milestone13-drm-report.jsonl milestone13-drm-representation.json "
@@ -74,7 +76,8 @@ EVIDENCE_MEMBERS = {
     "milestone13-randr-big.json", "milestone13-gw-scale-little.json",
     "milestone13-gw-scale-big.json", "milestone13-scale-client.json",
     "milestone13-frame-sets.jsonl", "milestone13-pointer-crossing.json",
-    "milestone13-sdl-displays.json", "milestone13-renderer-fractional-diff.json",
+    "milestone13-sdl-displays.json", "milestone13-fullscreen-outputs.json",
+    "milestone13-renderer-fractional-diff.json",
     "milestone13-drm-report.jsonl", "milestone13-restoration.json",
     "milestone13-getty-state.json", "milestone13-logind-state.json",
     "milestone13-legacy-left.ppm", "milestone13-legacy-right.ppm",
@@ -210,6 +213,24 @@ def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
         if (sdl.get("passed") is not True or sdl.get("sdl_version") != "2.32.10"
                 or sdl.get("display_count") != 2 or len(sdl.get("displays", [])) != 2):
             raise ValueError("SDL artifact does not prove two displays")
+        fullscreen = load_object(root / "milestone13-fullscreen-outputs.json")
+        left = fullscreen.get("left", {})
+        right = fullscreen.get("right", {})
+        left_restored = fullscreen.get("left_restored", {})
+        right_restored = fullscreen.get("right_restored", {})
+        if (fullscreen.get("schema") != 1 or fullscreen.get("passed") is not True
+                or left.get("fullscreen") is not True
+                or right.get("fullscreen") is not True
+                or left_restored.get("fullscreen") is not False
+                or right_restored.get("fullscreen") is not False
+                or (left.get("logical_x"), left.get("logical_y"),
+                    left.get("logical_width"), left.get("logical_height"))
+                != (0, 0, 640, 480)
+                or (right.get("logical_x"), right.get("logical_y"),
+                    right.get("logical_width"), right.get("logical_height"))
+                != (640, 0, 640, 480)
+                or left.get("primary_output_id") == right.get("primary_output_id")):
+            raise ValueError("fullscreen artifact does not prove both outputs")
         difference = load_object(root / "milestone13-renderer-fractional-diff.json")
         maximum = difference.get("maximum_channel_difference")
         if (difference.get("passed") is not True or not isinstance(maximum, int)

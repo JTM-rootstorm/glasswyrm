@@ -31,6 +31,9 @@ class Client:
         self.root = struct.unpack_from("<I", setup, screen)[0]
         self.window = base | (1 & mask)
         self.graphics_contexts = [base | (index & mask) for index in range(2, 6)]
+        self.net_wm_state = self.intern_atom("_NET_WM_STATE")
+        self.net_wm_state_fullscreen = self.intern_atom(
+            "_NET_WM_STATE_FULLSCREEN")
 
     def read(self, count: int) -> bytes:
         value = bytearray()
@@ -46,6 +49,16 @@ class Client:
         if size % 4:
             raise RuntimeError("request is not aligned")
         self.socket.sendall(bytes((opcode, data)) + struct.pack("<H", size // 4) + body)
+
+    def intern_atom(self, name: str) -> int:
+        encoded = name.encode("ascii")
+        body = struct.pack("<H2x", len(encoded))
+        body += encoded + bytes((-len(encoded)) % 4)
+        self.request(16, 0, body)
+        reply = self.read(32)
+        if reply[0] != 1:
+            raise RuntimeError(f"InternAtom failed for {name}")
+        return struct.unpack_from("<I", reply, 8)[0]
 
     def create(self) -> None:
         body = struct.pack("<IIhhHHHHII", self.window, self.root, 64, 80,
@@ -83,6 +96,13 @@ class Client:
                 self.graphics_contexts, rectangles, strict=True):
             self.request(70, 0, struct.pack(
                 "<IIhhHH", self.window, graphics_context, *rectangle))
+
+    def fullscreen(self, enabled: bool) -> None:
+        event = struct.pack(
+            "<BBHII5I", 33, 32, 0, self.window, self.net_wm_state,
+            1 if enabled else 0, self.net_wm_state_fullscreen, 0, 1, 0)
+        self.request(25, 0, struct.pack("<II", self.root, 0x00180000) + event)
+        self.sync()
 
     def sync(self) -> None:
         self.request(43, 0, b"")
@@ -125,6 +145,10 @@ def main() -> int:
                             or max(values[2:]) > 4096):
                         raise ValueError("configuration is outside fixed bounds")
                     client.configure(*values)
+                    peer.sendall(b"ok\n")
+                elif command in (["fullscreen", "on"],
+                                  ["fullscreen", "off"]):
+                    client.fullscreen(command[1] == "on")
                     peer.sendall(b"ok\n")
                 else:
                     peer.sendall(b"error\n")
