@@ -82,6 +82,13 @@ done
 
 require_text "$library" 'reset; milestone12-runtime-test; reset; milestone13-runtime-test'
 require_text "$library" '[[ $name == milestone13-runtime-test.log ]] && continue'
+require_text "$library" "record.get('schema')=='glasswyrm-scene-v2'"
+require_text "$library" "record.get('cursors',[])"
+require_text "$repo_root/tests/integration/gwinput_m8.cpp" \
+  '--hold-until PATH'
+require_text "$library" '--hold-until "$crossing_release"'
+require_text "$library" 'synthetic_pid=$!'
+require_text "$library" ': >"$crossing_release"'
 legacy_line=$(grep -n -m1 'm13_legacy_client.py' "$library" | cut -d: -f1)
 crossing_line=$(grep -n -m1 'scene_line_before=$(wc -l' "$library" | cut -d: -f1)
 ((legacy_line < crossing_line)) ||
