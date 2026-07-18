@@ -1794,6 +1794,9 @@ assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'rm -rf -- "$default" "$build" "$asan" "$clang_build"' \
+  'rm -rf "$runtime"; meson setup "$runtime" "$source_dir"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'rm -rf -- "$default" "$build" "$asan" "$clang_build"' \
   'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'M11 runtime requires at least 2 GiB free in /var/tmp'
