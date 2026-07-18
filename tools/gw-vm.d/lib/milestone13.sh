@@ -449,33 +449,6 @@ cp "$artifact_dir/milestone13-gw-scale-little.json" \
   "$artifact_dir/milestone13-gw-scale.log"
 result[multi_output_randr]=passed
 
-scene_line_before=0
-if [[ -f $scenes/scene.jsonl ]]; then
-  scene_line_before=$(wc -l <"$scenes/scene.jsonl")
-fi
-"$synthetic_input" --socket "$runtime/input.sock" --scenario crossing \
-  --output "$control_data/pointer-acks.json"
-python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
-  "$scene_line_before" "$left_id" "$right_id" \
-  "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
-import json,sys
-acks=json.load(open(sys.argv[1]))
-records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
-events=acks['acknowledgements']
-assert acks['scenario']=='crossing' and len(events)==4
-assert (events[1]['root_x'],events[1]['root_y'])==(100,100)
-assert events[2]['root_x']==700 and events[2]['root_y']==479
-assert events[1]['result']=='accepted' and events[2]['result'] in ('accepted','clamped')
-cursor_ids=[record['cursor_surface']['output_id'] for record in records
-            if 'cursor_surface' in record]
-left,right=int(sys.argv[4],16),int(sys.argv[5],16)
-assert left in cursor_ids and right in cursor_ids
-assert cursor_ids.index(left)<len(cursor_ids)-1-cursor_ids[::-1].index(right)
-json.dump({'schema':1,'passed':True,'acknowledgements':events,
-           'cursor_output_ids':cursor_ids},open(sys.argv[6],'w'),sort_keys=True)
-PY
-result[pointer_output_crossing]=passed
-
 frame_count() { find "$runtime/frames" -type f -name '*.ppm' | wc -l; }
 frame_set_count() {
   [[ -f $runtime/frames/frame-sets.jsonl ]] && \
@@ -540,6 +513,30 @@ for _ in {1..400}; do [[ -S $control/legacy.sock && -s $control/legacy-ready.jso
 wait_frames_after "$before_frames"
 assert_window_memberships "$left_id" "$control_data/legacy-left.json"
 copy_latest_output "$left_id" "$control_data/milestone13-legacy-left.ppm"
+
+scene_line_before=$(wc -l <"$scenes/scene.jsonl")
+"$synthetic_input" --socket "$runtime/input.sock" --scenario crossing \
+  --output "$control_data/pointer-acks.json"
+python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
+  "$scene_line_before" "$left_id" "$right_id" \
+  "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
+import json,sys
+acks=json.load(open(sys.argv[1]))
+records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
+events=acks['acknowledgements']
+assert acks['scenario']=='crossing' and len(events)==4
+assert (events[1]['root_x'],events[1]['root_y'])==(100,100)
+assert events[2]['root_x']==700 and events[2]['root_y']==479
+assert events[1]['result']=='accepted' and events[2]['result'] in ('accepted','clamped')
+cursor_ids=[record['cursor_surface']['output_id'] for record in records
+            if 'cursor_surface' in record]
+left,right=int(sys.argv[4],16),int(sys.argv[5],16)
+assert left in cursor_ids and right in cursor_ids
+assert cursor_ids.index(left)<len(cursor_ids)-1-cursor_ids[::-1].index(right)
+json.dump({'schema':1,'passed':True,'acknowledgements':events,
+           'cursor_output_ids':cursor_ids},open(sys.argv[6],'w'),sort_keys=True)
+PY
+result[pointer_output_crossing]=passed
 
 before_frames=$(frame_count); legacy_command fullscreen on
 wait_frames_after "$before_frames"

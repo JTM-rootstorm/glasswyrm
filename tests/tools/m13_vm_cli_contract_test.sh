@@ -54,7 +54,7 @@ for expected in \
   m13_raw_output_probe.py m13_scale_client 'systemctl restart' \
   m13_sdl_display_probe.c 'SDL2-2.32.10.tar.gz' \
   '--synthetic-input-socket' 'gwinput_m8' '--scenario crossing' \
-  'scene_line_before=0' 'if [[ -f $scenes/scene.jsonl ]]' \
+  'scene_line_before=$(wc -l <"$scenes/scene.jsonl")' \
   '--disable' '--enable' validate_frame_sets.py \
   '--backend drm' '--scale 4/3' '--transform rotate-180' \
   'drm-screen-ready' 'screen-captured' '--scale 1/1' '--transform normal' \
@@ -82,6 +82,10 @@ done
 
 require_text "$library" 'reset; milestone12-runtime-test; reset; milestone13-runtime-test'
 require_text "$library" '[[ $name == milestone13-runtime-test.log ]] && continue'
+legacy_line=$(grep -n -m1 'm13_legacy_client.py' "$library" | cut -d: -f1)
+crossing_line=$(grep -n -m1 'scene_line_before=$(wc -l' "$library" | cut -d: -f1)
+((legacy_line < crossing_line)) ||
+  fail 'pointer crossing runs before the first legacy surface is ready'
 if grep -Eq '(^|[[:space:]])eval([[:space:]]|$)' "$library"; then
   fail 'M13 harness contains eval'
 fi
