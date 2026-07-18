@@ -281,4 +281,13 @@ void ResourceTable::remove_event_selections(const ClientId client) noexcept {
   }
 }
 
+void ResourceTable::remove_gw_scale_selections(
+    const ClientId client) noexcept {
+  for (auto& [xid, record] : resources_) {
+    static_cast<void>(xid);
+    if (auto* window = std::get_if<WindowResource>(&record.payload))
+      window->scale.event_selections.erase(client);
+  }
+}
+
 }  // namespace glasswyrm::server
