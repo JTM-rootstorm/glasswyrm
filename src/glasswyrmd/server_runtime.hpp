@@ -116,6 +116,10 @@ class ServerRuntime {
   void submit_pending_content(std::string& error);
   void service_input(short listener_events, short connection_events);
   [[nodiscard]] bool warp_pointer(std::int32_t x, std::int32_t y);
+  [[nodiscard]] bool service_cursor();
+  void mark_cursor_dirty() noexcept { cursor_dirty_ = true; }
+  [[nodiscard]] std::shared_ptr<const glasswyrm::input::CursorImage>
+  current_cursor_image() const noexcept;
 #if GW_HAS_LIBINPUT_BACKEND
   [[nodiscard]] bool initialize_real_input();
   [[nodiscard]] bool service_real_input(short input_events,
@@ -123,8 +127,6 @@ class ServerRuntime {
   [[nodiscard]] bool service_session_changes();
   [[nodiscard]] bool suspend_real_input_for_compositor_reset(bool reset);
   [[nodiscard]] bool resume_real_input_after_compositor_reset();
-  [[nodiscard]] bool service_cursor();
-  void mark_cursor_dirty() noexcept { cursor_dirty_ = true; }
   void deliver_real_input();
   void complete_real_focus(bool success);
   [[nodiscard]] bool initialize_interactive_policy();
@@ -135,8 +137,6 @@ class ServerRuntime {
                                       bool success);
   void complete_interactive_cursor_publication();
   void abort_interactive() noexcept;
-  [[nodiscard]] std::shared_ptr<const glasswyrm::input::CursorImage>
-  current_cursor_image() const noexcept;
 #endif
 
   std::unique_ptr<RuntimeBridge> bridge_;
@@ -164,16 +164,17 @@ class ServerRuntime {
   bool cursor_dirty_{};
   bool cursor_force_buffer_{};
   bool cursor_replay_attempted_{};
-#if GW_HAS_LIBINPUT_BACKEND
-  struct PendingRealFocus {
-    std::uint32_t old_focus{};
-  };
   struct PendingCursorDiagnostic {
     glasswyrm::input::CursorKind kind{glasswyrm::input::CursorKind::Pixmap};
     std::int32_t x{};
     std::int32_t y{};
     bool visible{};
     bool buffer_attached{};
+  };
+  std::optional<PendingCursorDiagnostic> cursor_submission_diagnostic_;
+#if GW_HAS_LIBINPUT_BACKEND
+  struct PendingRealFocus {
+    std::uint32_t old_focus{};
   };
   std::unique_ptr<RealInputController> real_input_;
   std::optional<PendingRealFocus> pending_real_focus_;
@@ -182,7 +183,6 @@ class ServerRuntime {
   std::optional<std::uint64_t> interactive_geometry_token_;
   bool cursor_submission_interactive_{};
   bool real_input_suspended_for_compositor_reset_{};
-  std::optional<PendingCursorDiagnostic> cursor_submission_diagnostic_;
   std::shared_ptr<const glasswyrm::input::CursorImage> move_cursor_;
   std::shared_ptr<const glasswyrm::input::CursorImage> resize_cursor_;
 #endif

@@ -45,18 +45,19 @@ bool ServerRuntime::service_input_session_work(
         cursor_presenter_->peer_disconnected();
 #if GW_HAS_LIBINPUT_BACKEND
         cursor_submission_interactive_ = false;
-        cursor_submission_diagnostic_.reset();
 #endif
+        cursor_submission_diagnostic_.reset();
         cursor_dirty_ = true;
       }
       if (content_presenter_) content_presenter_->peer_disconnected();
     }
     compositor_releases = bridge_->take_buffer_releases();
   }
-#if GW_HAS_LIBINPUT_BACKEND
   if (cursor_presenter_ && bridge_->cursor_rejected_ready()) {
     cursor_presenter_->reject();
+#if GW_HAS_LIBINPUT_BACKEND
     cursor_submission_interactive_ = false;
+#endif
     cursor_submission_diagnostic_.reset();
     bridge_->clear_transaction_result();
     if (cursor_replay_attempted_) {
@@ -67,8 +68,10 @@ bool ServerRuntime::service_input_session_work(
     cursor_force_buffer_ = true;
     cursor_dirty_ = true;
   } else if (cursor_presenter_ && bridge_->cursor_result_ready()) {
+#if GW_HAS_LIBINPUT_BACKEND
     const bool interactive_cursor = cursor_submission_interactive_;
     cursor_submission_interactive_ = false;
+#endif
     cursor_presenter_->accept();
     cursor_replay_attempted_ = false;
     bridge_->clear_transaction_result();
@@ -83,7 +86,9 @@ bool ServerRuntime::service_input_session_work(
                    publication.buffer_attached ? "attached" : "reused");
       cursor_submission_diagnostic_.reset();
     }
+#if GW_HAS_LIBINPUT_BACKEND
     if (interactive_cursor) complete_interactive_cursor_publication();
+#endif
     if (lifecycle_ && lifecycle_->pending_count() != 0 &&
         !lifecycle_->resume()) {
       std::fprintf(stderr,
@@ -91,7 +96,6 @@ bool ServerRuntime::service_input_session_work(
       return false;
     }
   }
-#endif
   return true;
 }
 

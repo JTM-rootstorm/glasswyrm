@@ -276,30 +276,6 @@ void ServerRuntime::abort_interactive() noexcept {
   mark_cursor_dirty();
 }
 
-std::shared_ptr<const glasswyrm::input::CursorImage>
-ServerRuntime::current_cursor_image() const noexcept {
-  if (interactive_policy_) {
-    if (interactive_policy_->cursor() ==
-        glasswyrm::wm::InteractionCursor::FleurMove)
-      return move_cursor_;
-    if (interactive_policy_->cursor() ==
-        glasswyrm::wm::InteractionCursor::BottomRightResize)
-      return resize_cursor_;
-  }
-  if (const auto& grab = server_.state_.grabs().pointer_grab(); grab) {
-    if (grab->cursor != 0)
-      if (const auto* cursor =
-              server_.state_.resources().find_cursor(grab->cursor))
-        return cursor->image;
-    if (grab->cursor_image)
-      return grab->cursor_image;
-  }
-  const auto target = glasswyrm::input::hit_test_deepest_viewable(
-      server_.state_.resources(), input_state_.pointer_x(),
-      input_state_.pointer_y());
-  return server_.state_.resources().effective_cursor(target);
-}
-
 } // namespace glasswyrm::server
 
 #endif

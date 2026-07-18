@@ -1,6 +1,23 @@
 if get_option('glasswyrmd')
   if get_option('libgwipc') and get_option('gwm') and get_option('gwcomp')
     if get_option('headless_backend')
+      glasswyrmd_synthetic_cursor_test = executable(
+        'glasswyrmd_synthetic_cursor_test',
+        files(
+          tests_source_dir / 'integration/glasswyrmd_synthetic_cursor_test.cpp',
+          tests_source_dir / 'helpers/synthetic_input_client.cpp',
+        ),
+        dependencies: gwipc_dep,
+        include_directories: test_source_root_include,
+      )
+      test(
+        'glasswyrmd-synthetic-cursor',
+        glasswyrmd_synthetic_cursor_test,
+        args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+               gwcomp_program.full_path()],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+        timeout: 30,
+      )
       m13_rejecting_compositor_peer = executable(
         'm13_rejecting_compositor_peer',
         files(tests_source_dir / 'integration/m13_rejecting_compositor_peer.cpp'),
