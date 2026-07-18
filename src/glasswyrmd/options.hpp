@@ -36,6 +36,7 @@ struct Options {
   std::uint32_t repeat_rate_hz = 25;
   bool software_content = false;
   bool game_compat = false;
+  bool output_model = false;
   std::vector<std::string> disabled_extensions;
 
   [[nodiscard]] bool integrated() const noexcept {

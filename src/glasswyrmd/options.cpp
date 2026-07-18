@@ -22,7 +22,8 @@ void print_usage(std::ostream &output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
             "[--software-content] [--synthetic-input-socket PATH] "
-            "[--game-compat] [--disable-extension NAME]... "
+            "[--game-compat] [--output-model] "
+            "[--disable-extension NAME]... "
             "[--x11-trace PATH] [--libinput-device PATH]... "
             "[--xkb-rules NAME] [--xkb-model NAME] [--xkb-layout NAME] "
             "[--xkb-variant NAME] [--xkb-options LIST] "
@@ -120,6 +121,14 @@ ArgumentResult parse_base_argument(std::string_view argument, int &index,
       return ArgumentResult::ExitFailure;
     }
     options.game_compat = true;
+    return ArgumentResult::Parsed;
+  }
+  if (argument == "--output-model") {
+    if (options.output_model) {
+      error << "glasswyrmd: duplicate option: --output-model\n";
+      return ArgumentResult::ExitFailure;
+    }
+    options.output_model = true;
     return ArgumentResult::Parsed;
   }
   if (argument == "--disable-extension") {
@@ -283,6 +292,16 @@ ParseOptionsResult validate_options(const Options &options,
   if (options.software_content && !options.integrated()) {
     error << "glasswyrmd: --software-content requires --wm-socket and "
              "--compositor-socket\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.output_model && !options.integrated()) {
+    error << "glasswyrmd: --output-model requires --wm-socket and "
+             "--compositor-socket\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.output_model && !GW_HAS_LIBGWIPC) {
+    error << "glasswyrmd: --output-model is unavailable because this build "
+             "does not include libgwipc\n";
     return ParseOptionsResult::ExitFailure;
   }
   if (options.game_compat && !GW_HAS_EXPERIMENTAL) {
