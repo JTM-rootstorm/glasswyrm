@@ -30,6 +30,22 @@ gw_scaffold_dep = declare_dependency(
   include_directories: [gw_include_dir, gw_generated_include_dir],
 )
 
+gw_output_model_lib = static_library(
+  'gw-output-model',
+  files(
+    'output/model/identity.cpp',
+    'output/model/layout.cpp',
+    'output/model/mapping.cpp',
+    'output/model/scale.cpp',
+    'output/model/transform.cpp',
+  ),
+  include_directories: include_directories('.'),
+)
+gw_output_model_dep = declare_dependency(
+  link_with: gw_output_model_lib,
+  include_directories: include_directories('.'),
+)
+
 if get_option('gwcomp')
 gw_compositor_geometry_lib = static_library(
   'gwcomp-geometry',
