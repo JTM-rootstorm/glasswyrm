@@ -62,6 +62,23 @@ def m11_extension_name(value):
     return "OTHER" if value in POST_M11_EXTENSION_NAMES else value
 
 
+def m11_event_sequence(events):
+    # KeyRelease input and NoExposure drawing completion are independently
+    # queued. Canonicalize adjacent same-client runs without disturbing other
+    # event ordering.
+    normalized = list(events)
+    for index in range(1, len(normalized)):
+        while (index > 0
+               and normalized[index - 1]["client"] ==
+               normalized[index]["client"]
+               and normalized[index - 1]["event_type"] == 3
+               and normalized[index]["event_type"] == 14):
+            normalized[index - 1], normalized[index] = (
+                normalized[index], normalized[index - 1])
+            index -= 1
+    return normalized
+
+
 def summarize(records):
     requests = []
     replies = set()
@@ -142,7 +159,7 @@ def summarize(records):
         },
         "event_histogram": dict(sorted(event_counts.items(),
                                        key=lambda item: int(item[0]))),
-        "event_sequence": events,
+        "event_sequence": m11_event_sequence(events),
         "application_connection_count": len(accepted_clients),
         "maximum_request_length": max(
             (record["length"] for record in requests), default=0),
