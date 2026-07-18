@@ -14,6 +14,7 @@ import tempfile
 import validate_frame_sets
 
 
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
 FILES = {
     "output-inventory.json": {
         "outputs": [{"id": 1, "name": "LEFT"}, {"id": 2, "name": "RIGHT"}]},
@@ -25,7 +26,10 @@ FILES = {
     "gw-scale-big.json": {"byte_order": "big", "passed": True, "errors": []},
     "gwinfo-outputs.json": {"layout_generation": 8, "outputs": [{}, {}]},
     "gwinfo-windows.json": {"layout_generation": 8, "windows": []},
-    "gwout-result.json": {"result": 0, "applied_generation": 8},
+    "gwout-result.json": {
+        "result": GWIPC_OUTPUT_CONFIGURATION_ACCEPTED,
+        "applied_generation": 8,
+    },
     "renderer-fractional-diff.json": {
         "passed": True, "maximum_channel_difference": 1},
     "scale-client-result.json": {
@@ -145,6 +149,15 @@ with tempfile.TemporaryDirectory() as name:
     checksum(root)
     run(validator, root, True)
     run(validator, root, True, require_complete=True)
+
+    accepted = json.loads((root / "gwout-result.json").read_text())
+    accepted["result"] = 0
+    (root / "gwout-result.json").write_text(json.dumps(accepted) + "\n")
+    checksum(root)
+    run(validator, root, False, "not an accepted commit")
+    (root / "gwout-result.json").write_text(
+        json.dumps(FILES["gwout-result.json"]) + "\n")
+    checksum(root)
 
     manifest = json.loads((root / "frame-sets.jsonl").read_text())
     manifest["outputs"][0]["file"] = "missing.ppm"

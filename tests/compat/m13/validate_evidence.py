@@ -14,6 +14,7 @@ import tempfile
 import validate_frame_sets
 
 
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
 REQUIRED_BASE = "d3440d3b8df1533410a9a2c4be46f2eea0cfb88d"
 REQUIRED_RESULTS = (
     "historical_default strict_software strict_gles sanitizer component_builds "
@@ -74,7 +75,9 @@ EVIDENCE_MEMBERS = {
     "milestone13-output-inventory.json", "milestone13-layout-before.json",
     "milestone13-layout-after.json", "milestone13-randr-little.json",
     "milestone13-randr-big.json", "milestone13-gw-scale-little.json",
-    "milestone13-gw-scale-big.json", "milestone13-scale-client.json",
+    "milestone13-gw-scale-big.json", "milestone13-gwinfo-outputs.json",
+    "milestone13-gwinfo-windows.json", "milestone13-gwout-result.json",
+    "milestone13-scale-client.json",
     "milestone13-frame-sets.jsonl", "milestone13-pointer-crossing.json",
     "milestone13-sdl-displays.json", "milestone13-fullscreen-outputs.json",
     "milestone13-renderer-fractional-diff.json",
@@ -167,6 +170,14 @@ def validate_protocol_result(path: pathlib.Path, byte_order: str) -> None:
         raise ValueError(f"{path.name} is not passing {byte_order}-endian evidence")
 
 
+def validate_gwout_result(path: pathlib.Path) -> None:
+    value = load_object(path)
+    if (value.get("result") != GWIPC_OUTPUT_CONFIGURATION_ACCEPTED
+            or not isinstance(value.get("applied_generation"), int)
+            or value["applied_generation"] <= 0):
+        raise ValueError(f"{path.name} is not an accepted commit")
+
+
 def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
     errors: list[str] = []
     try:
@@ -196,6 +207,8 @@ def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
             for order in ("little", "big"):
                 validate_protocol_result(
                     root / f"milestone13-{protocol}-{order}.json", order)
+
+        validate_gwout_result(root / "milestone13-gwout-result.json")
 
         scale_client = load_object(root / "milestone13-scale-client.json")
         if (scale_client.get("schema") != "glasswyrm.m13-scale-client.v1"
@@ -288,6 +301,13 @@ def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
             missing = EVIDENCE_MEMBERS - names
             if missing:
                 raise ValueError("evidence archive lacks: " + ", ".join(sorted(missing)))
+            validate_gwout_result(extracted / "milestone13-gwout-result.json")
+            for name in ("milestone13-gwinfo-outputs.json",
+                         "milestone13-gwinfo-windows.json",
+                         "milestone13-gwout-result.json"):
+                if (root / name).read_bytes() != (extracted / name).read_bytes():
+                    raise ValueError(
+                        f"evidence archive {name} differs from collected artifact")
             validate_frame_sets.validate_manifest(
                 extracted / "milestone13-frame-sets.jsonl", extracted)
             if ((root / "milestone13-frame-sets.jsonl").read_bytes()

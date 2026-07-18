@@ -14,6 +14,7 @@ from typing import Any
 import validate_frame_sets
 
 
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
 BOOTSTRAP_FILES = {"README.md", "scale-client-result.schema.json"}
 FIXTURE_FILES = {
     "output-inventory.json", "layout-before.json", "layout-after.json",
@@ -153,9 +154,9 @@ def validate_complete(root: pathlib.Path) -> None:
             or not isinstance(gwinfo_windows.get("windows"), list)):
         fail("gwinfo-windows.json is not complete evidence")
     gwout = load_object(root / "gwout-result.json")
-    if (gwout.get("result") not in (0, None)
-            or (gwout.get("passed") is not True and
-                not isinstance(gwout.get("applied_generation"), int))):
+    if (gwout.get("result") != GWIPC_OUTPUT_CONFIGURATION_ACCEPTED
+            or not isinstance(gwout.get("applied_generation"), int)
+            or gwout["applied_generation"] <= 0):
         fail("gwout-result.json is not an accepted commit")
     validate_scale_client(load_object(root / "scale-client-result.json"))
 
