@@ -4,7 +4,7 @@ Status: accepted deterministic fixtures for the exact SDL 2.32.10 X11
 software-renderer profile documented in `docs/compatibility/M12_SDL.md`.
 
 These files were promoted from the checksum-protected full Gentoo VM evidence
-archive captured at commit `6a7697a6ac48a2d9a6c3d23ce9e58343ac5037cc` on the required base
+archive captured at commit `6489bee17ecbdafea649637f2d563bb26c13805d` on the required base
 `ae6b6c93a29a1fb985dcea8455650d15c0fec364`. The SDL source archive SHA-256 was
 `5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165`.
 
