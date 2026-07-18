@@ -29,7 +29,14 @@ bool known_extension_name(const std::string_view name) noexcept {
 
 ExtensionRegistry::ExtensionRegistry(
     const bool enabled, const std::span<const std::string> disabled)
-    : enabled_(enabled) {
+    : ExtensionRegistry(enabled ? ExtensionCapability::GameCompat
+                                : ExtensionCapability::None,
+                        disabled) {}
+
+ExtensionRegistry::ExtensionRegistry(
+    const ExtensionCapability capabilities,
+    const std::span<const std::string> disabled)
+    : capabilities_(capabilities) {
   for (const auto& name : disabled) {
     const auto* extension = find_extension(std::string_view{name});
     if (extension)
@@ -48,9 +55,10 @@ bool ExtensionRegistry::enabled(const std::uint8_t major_opcode) const noexcept 
 
 const ExtensionDescriptor*
 ExtensionRegistry::query(const std::string_view name) const noexcept {
-  if (!enabled_) return nullptr;
   const auto* extension = find_extension(name);
-  if (!extension) return nullptr;
+  if (!extension ||
+      !has_extension_capability(capabilities_, extension->capability))
+    return nullptr;
   const auto index =
       static_cast<std::size_t>(extension - kExtensionRegistry.data());
   return disabled_[index] ? nullptr : extension;
@@ -58,9 +66,10 @@ ExtensionRegistry::query(const std::string_view name) const noexcept {
 
 const ExtensionDescriptor*
 ExtensionRegistry::query(const std::uint8_t major_opcode) const noexcept {
-  if (!enabled_) return nullptr;
   const auto* extension = find_extension(major_opcode);
-  if (!extension) return nullptr;
+  if (!extension ||
+      !has_extension_capability(capabilities_, extension->capability))
+    return nullptr;
   const auto index =
       static_cast<std::size_t>(extension - kExtensionRegistry.data());
   return disabled_[index] ? nullptr : extension;
@@ -68,10 +77,12 @@ ExtensionRegistry::query(const std::uint8_t major_opcode) const noexcept {
 
 std::vector<std::string_view> ExtensionRegistry::enabled_names() const {
   std::vector<std::string_view> result;
-  if (!enabled_) return result;
   result.reserve(kExtensionRegistry.size());
   for (std::size_t index = 0; index < kExtensionRegistry.size(); ++index)
-    if (!disabled_[index]) result.push_back(kExtensionRegistry[index].name);
+    if (!disabled_[index] && has_extension_capability(
+                                 capabilities_,
+                                 kExtensionRegistry[index].capability))
+      result.push_back(kExtensionRegistry[index].name);
   return result;
 }
 
