@@ -190,6 +190,7 @@ if get_option('glasswyrmd')
   endif
 endif
 
+subdir('manifest/support/m13_tooling')
 subdir('manifest/foundation')
 subdir('manifest/server')
 subdir('manifest/graphics')

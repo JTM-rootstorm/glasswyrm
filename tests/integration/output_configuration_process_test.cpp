@@ -1,13 +1,18 @@
 #include <glasswyrm/ipc.h>
 
+#include "protocol/x11/core.hpp"
+#include "tests/helpers/x11_fake_client.hpp"
+#include "tests/helpers/x11_request_builder.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <memory>
 #include <poll.h>
+#include <system_error>
 #include <string>
 #include <sys/prctl.h>
 #include <sys/stat.h>
@@ -20,6 +25,7 @@
 namespace {
 
 using gw::test::require;
+namespace x11 = gw::protocol::x11;
 
 struct Child {
   pid_t pid{-1};
@@ -37,12 +43,16 @@ struct Child {
     }
   }
   bool wait_success() noexcept {
+    return wait_exit_code(0);
+  }
+  bool wait_exit_code(const int expected) noexcept {
     if (pid <= 0)
       return false;
     int status = 0;
     const auto result = ::waitpid(pid, &status, 0);
     pid = -1;
-    return result > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return result > 0 && WIFEXITED(status) &&
+           WEXITSTATUS(status) == expected;
   }
 };
 
@@ -71,6 +81,72 @@ void wait_for_socket(const std::string& path) {
   }
   require(false, "socket readiness timeout: " + path);
 }
+
+std::size_t descriptor_count(const pid_t process) {
+  std::error_code error;
+  std::size_t count = 0;
+  const auto directory =
+      std::filesystem::path("/proc") / std::to_string(process) / "fd";
+  for (std::filesystem::directory_iterator entries(directory, error), end;
+       !error && entries != end; entries.increment(error))
+    ++count;
+  require(!error, "inspect server descriptor count");
+  return count;
+}
+
+void wait_for_descriptor_bound(const pid_t process,
+                               const std::size_t maximum) {
+  for (unsigned attempt = 0; attempt < 200; ++attempt) {
+    if (descriptor_count(process) <= maximum)
+      return;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  require(false, "repeated control peers release their server descriptors");
+}
+
+class PersistentX11Client final {
+ public:
+  explicit PersistentX11Client(const std::string& socket)
+      : client_(socket), wire_(x11::ByteOrder::LittleEndian) {
+    client_.send_all(gw::test::make_setup_request(order_));
+    const auto setup = client_.receive_setup_reply(order_);
+    require(setup.size() >= 16 && setup[0] == 1,
+            "persistent X11 client establishes before output change");
+    window_ = gw::test::read_wire_u32(setup.data() + 12, order_) + 1U;
+    client_.send_all(wire_.create_window(window_, 1, 12, 14, 96, 72));
+    const std::array<std::uint8_t, 4> window_bytes{
+        static_cast<std::uint8_t>(window_),
+        static_cast<std::uint8_t>(window_ >> 8U),
+        static_cast<std::uint8_t>(window_ >> 16U),
+        static_cast<std::uint8_t>(window_ >> 24U)};
+    client_.send_all(wire_.raw(
+        static_cast<std::uint8_t>(x11::CoreOpcode::MapWindow), 0,
+        window_bytes));
+    synchronize();
+    require_usable();
+  }
+
+  void require_usable() {
+    client_.send_all(wire_.get_geometry(window_));
+    const auto geometry = client_.receive_server_packet(order_);
+    require(!geometry.empty() && geometry[0] == 1,
+            "persistent X11 window remains queryable");
+    synchronize();
+  }
+
+ private:
+  void synchronize() {
+    client_.send_all(wire_.get_input_focus());
+    const auto reply = client_.receive_server_packet(order_);
+    require(!reply.empty() && reply[0] == 1,
+            "persistent X11 client remains synchronized");
+  }
+
+  static constexpr auto order_ = x11::ByteOrder::LittleEndian;
+  gw::test::X11FakeClient client_;
+  gw::test::X11RequestBuilder wire_;
+  std::uint32_t window_{};
+};
 
 struct ConnectionDelete {
   void operator()(gwipc_connection* value) const noexcept {
@@ -281,8 +357,9 @@ Reply configure(gwipc_connection* connection, const std::uint64_t id,
 } // namespace
 
 int main(int argc, char** argv) {
-  require(argc == 5,
-          "expected glasswyrmd, gwm, gwcomp, and X11 probe paths");
+  require(argc == 6,
+          "expected glasswyrmd, gwm, gwcomp, X11 probe, and rejecting "
+          "compositor peer paths");
   std::string directory = "/tmp/glasswyrm-output-transaction-XXXXXX";
   require(::mkdtemp(directory.data()) != nullptr,
           "create output transaction directory");
@@ -314,16 +391,28 @@ int main(int argc, char** argv) {
               initial.generation == 1 && initial.root_width == 1280 &&
               initial.root_height == 480,
           "initial query reports the horizontal two-output layout");
+  PersistentX11Client persistent(x11_dir + "/X91");
   const auto accepted = configure(tool.get(), 102, initial);
   require(accepted.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
               accepted.generation == 2 && accepted.root_width == 640 &&
               accepted.root_height == 960 &&
               accepted.primary_output == initial.outputs[1].output_id,
           "tool is acknowledged only after policy and compositor commit");
-  auto probe = launch(argv[4], {"--socket-dir", x11_dir, "--display", "91",
-                                "--basic"});
-  require(probe.wait_success(),
+  persistent.require_usable();
+  auto historical_probe =
+      launch(argv[4], {"--socket-dir", x11_dir, "--display", "91", "--basic"});
+  require(historical_probe.wait_success(),
           "post-configuration lifecycle snapshot remains compositor-valid");
+  auto geometry_probe = launch(argv[4],
+                               {"--socket-dir", x11_dir, "--display", "91",
+                                "--expect-root", "640x960", "--basic"});
+  require(geometry_probe.wait_success(),
+          "new X11 clients observe the committed root dimensions");
+  auto stale_geometry_probe =
+      launch(argv[4], {"--socket-dir", x11_dir, "--display", "91",
+                       "--expect-root", "1280x480", "--basic"});
+  require(stale_geometry_probe.wait_exit_code(1),
+          "the X11 probe rejects stale root dimensions");
   const auto promoted = query(tool.get(), 103);
   require(promoted.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
               promoted.generation == 2 && promoted.outputs.size() == 2 &&
@@ -331,10 +420,82 @@ int main(int argc, char** argv) {
               promoted.outputs[1].logical_y == 480,
           "subsequent query observes the atomically promoted layout");
 
+  const auto descriptor_baseline = descriptor_count(server.pid);
+  for (std::uint64_t repetition = 0; repetition < 32; ++repetition) {
+    auto repeated = connect_tool(control);
+    const auto snapshot = query(repeated.get(), 200 + repetition);
+    require(snapshot.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+                snapshot.generation == 2 && snapshot.outputs.size() == 2,
+            "repeated control peer receives a complete current snapshot");
+  }
+  wait_for_descriptor_bound(server.pid, descriptor_baseline);
+  const auto after_repetition = query(tool.get(), 300);
+  require(after_repetition.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              after_repetition.generation == 2 &&
+              after_repetition.outputs.size() == 2,
+          "healthy control peer remains usable after bounded repetition");
+
   tool.reset();
   server.stop();
   compositor_process.stop();
   wm_process.stop();
   std::filesystem::remove_all(directory);
+
+  std::string rollback_directory =
+      "/tmp/glasswyrm-output-rollback-XXXXXX";
+  require(::mkdtemp(rollback_directory.data()) != nullptr,
+          "create output rollback directory");
+  const auto rollback_wm = rollback_directory + "/gwm.sock";
+  const auto rollback_compositor = rollback_directory + "/gwcomp.sock";
+  const auto rollback_control = rollback_directory + "/control.sock";
+  const auto rollback_x11 = rollback_directory + "/x11";
+  std::filesystem::create_directories(rollback_x11);
+
+  auto rollback_wm_process = launch(argv[2], {"--ipc-socket", rollback_wm});
+  auto rejecting_compositor = launch(argv[5], {rollback_compositor});
+  wait_for_socket(rollback_wm);
+  wait_for_socket(rollback_compositor);
+  auto rollback_server =
+      launch(argv[1], {"--display", "92", "--socket-dir", rollback_x11,
+                       "--wm-socket", rollback_wm, "--compositor-socket",
+                       rollback_compositor, "--output-model",
+                       "--control-socket", rollback_control});
+  wait_for_socket(rollback_control);
+
+  auto rollback_tool = connect_tool(rollback_control);
+  const auto before_rejection = query(rollback_tool.get(), 401);
+  require(before_rejection.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              before_rejection.generation == 1 &&
+              before_rejection.root_width == 1280 &&
+              before_rejection.root_height == 480,
+          "rollback fixture begins with the compositor inventory layout");
+  const auto rejected = configure(rollback_tool.get(), 402, before_rejection);
+  require(rejected.result == GWIPC_OUTPUT_CONFIGURATION_COMPOSITOR_REJECTED &&
+              rejected.generation == 1 && rejected.root_width == 1280 &&
+              rejected.root_height == 480 &&
+              rejected.primary_output == before_rejection.primary_output,
+          "compositor frame rejection reports the retained layout");
+  const auto after_rejection = query(rollback_tool.get(), 403);
+  require(after_rejection.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              after_rejection.generation == 1 &&
+              after_rejection.root_width == 1280 &&
+              after_rejection.root_height == 480 &&
+              after_rejection.primary_output ==
+                  before_rejection.primary_output &&
+              after_rejection.outputs.size() == 2 &&
+              after_rejection.outputs[1].logical_x == 640 &&
+              after_rejection.outputs[1].logical_y == 0,
+          "server and GWM rollback preserve the old output policy");
+  const auto recovered = configure(rollback_tool.get(), 404, after_rejection);
+  require(recovered.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              recovered.generation == 2 && recovered.root_width == 640 &&
+              recovered.root_height == 960,
+          "the split processes accept a later transaction after rollback");
+
+  rollback_tool.reset();
+  rollback_server.stop();
+  rejecting_compositor.stop();
+  rollback_wm_process.stop();
+  std::filesystem::remove_all(rollback_directory);
   return 0;
 }
