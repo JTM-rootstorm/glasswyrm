@@ -146,6 +146,14 @@ if get_option('glasswyrmd')
   )
   test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
   if get_option('libgwipc')
+    output_configuration_coordinator_test = executable(
+      'output_configuration_coordinator_test',
+      files(tests_source_dir / 'unit/output_configuration_coordinator_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('output-configuration-coordinator',
+         output_configuration_coordinator_test, timeout: 10)
     screen_geometry_test = executable(
       'screen_geometry_test',
       files(tests_source_dir / 'unit/screen_geometry_test.cpp'),
