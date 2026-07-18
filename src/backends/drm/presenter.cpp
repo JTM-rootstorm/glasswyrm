@@ -330,7 +330,8 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     }
   }
   pending_->completion_verified = true;
-  return {output::BackendEventKind::Complete, pending_->token, pending_->hash,
+  return {output::BackendEventKind::Complete, pending_->token,
+          pending_frame_set_hash_.value_or(pending_->hash),
           {}};
 }
 
@@ -376,6 +377,7 @@ void DrmPresenter::clear_pending() noexcept {
   if (mirror_) mirror_->abort(pending_->mirror);
   if (report_) report_->abort(pending_->report);
   pending_.reset();
+  pending_frame_set_hash_.reset();
 }
 
 output::BackendEvent DrmPresenter::fatal_event(std::string stage,

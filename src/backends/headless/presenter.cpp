@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace glasswyrm::headless {
 
@@ -45,6 +46,48 @@ output::PresentResult Presenter::present(
   return present;
 }
 
+output::PresentResult Presenter::present(
+    const output::SoftwareFrameSetView &frames) {
+  output::PresentResult present;
+  if (!frames.valid() || frames.outputs->empty() ||
+      frames.outputs->size() > output::SoftwareFrameSet::kMaximumOutputs) {
+    present.error = "headless presenter requires one through eight output frames";
+    return present;
+  }
+  std::vector<StagedFrameDump> staged(frames.outputs->size());
+  std::size_t index = 0;
+  for (const auto &[output_id, output_frame] : *frames.outputs) {
+    if (output_id != output_frame.output.output_id ||
+        output_frame.visible_hash != output_frame.frame.visible_hash() ||
+        output_frame.damage.size() > std::numeric_limits<std::uint32_t>::max()) {
+      present.error = "headless frame-set output metadata is inconsistent";
+      return present;
+    }
+    const FrameDumpMetadata metadata{
+        frames.ordinal,
+        frames.commit_id,
+        frames.generation,
+        output_id,
+        output_frame.output.width,
+        output_frame.output.height,
+        static_cast<std::uint32_t>(output_frame.damage.size())};
+    if (!dumper_.stage(metadata, output_frame.frame.pixels(), staged[index],
+                       present.error) ||
+        staged[index].fnv1a64() != output_frame.visible_hash)
+      return present;
+    ++index;
+  }
+  std::vector<FrameDumpResult> committed;
+  if (!dumper_.commit_all(staged, committed, present.error)) {
+    for (auto &frame : staged)
+      dumper_.abort(frame);
+    return present;
+  }
+  present.disposition = output::PresentDisposition::Complete;
+  present.visible_hash = frames.aggregate_hash;
+  return present;
+}
+
 output::BackendEvent Presenter::service(const short revents) {
   if (revents == 0) return {};
   return {output::BackendEventKind::Fatal, 0, 0,
@@ -58,6 +101,11 @@ output::BackendStateResult Presenter::suspend(std::string& error) {
 
 output::PresentResult Presenter::resume(
     const output::SoftwareFrameView& committed) {
+  return present(committed);
+}
+
+output::PresentResult Presenter::resume(
+    const output::SoftwareFrameSetView &committed) {
   return present(committed);
 }
 

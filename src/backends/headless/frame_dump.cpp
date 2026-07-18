@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <limits>
 #include <sstream>
+#include <string_view>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -41,6 +42,20 @@ std::string frame_name(const FrameDumpMetadata& metadata) {
   stream << "frame-" << std::setfill('0') << std::setw(6) << metadata.frame
          << "-output-" << std::setw(16) << metadata.output_id << ".ppm";
   return stream.str();
+}
+
+std::string manifest_line(const FrameDumpMetadata &metadata,
+                          const std::uint64_t hash,
+                          const std::string_view file_name) {
+  std::ostringstream manifest;
+  manifest << "{\"frame\":" << metadata.frame << ",\"commit_id\":"
+           << metadata.commit_id << ",\"generation\":" << metadata.generation
+           << ",\"output_id\":" << metadata.output_id << ",\"width\":"
+           << metadata.width << ",\"height\":" << metadata.height
+           << ",\"damage_rectangles\":" << metadata.damage_rectangles
+           << ",\"fnv1a64\":\"" << hex64(hash) << "\",\"file\":\""
+           << file_name << "\"}\n";
+  return manifest.str();
 }
 
 }  // namespace
@@ -172,14 +187,7 @@ bool FrameDumper::commit(StagedFrameDump& staged, FrameDumpResult& result,
 
   const auto manifest_path = directory_ / "frames.jsonl";
   std::ofstream manifest(manifest_path, std::ios::binary | std::ios::app);
-  const auto& metadata = staged.metadata_;
-  manifest << "{\"frame\":" << metadata.frame << ",\"commit_id\":"
-           << metadata.commit_id << ",\"generation\":" << metadata.generation
-           << ",\"output_id\":" << metadata.output_id << ",\"width\":"
-           << metadata.width << ",\"height\":" << metadata.height
-           << ",\"damage_rectangles\":" << metadata.damage_rectangles
-           << ",\"fnv1a64\":\"" << hex64(staged.hash_) << "\",\"file\":\""
-           << staged.file_name_ << "\"}\n";
+  manifest << manifest_line(staged.metadata_, staged.hash_, staged.file_name_);
   manifest.flush();
   if (!manifest) {
     error = "frame manifest write failed";
@@ -194,6 +202,125 @@ bool FrameDumper::commit(StagedFrameDump& staged, FrameDumpResult& result,
   staged.active_ = false;
   error.clear();
   return true;
+}
+
+bool FrameDumper::commit_all(const std::span<StagedFrameDump> staged,
+                             std::vector<FrameDumpResult> &results,
+                             std::string &error) const {
+  results.clear();
+  if (staged.empty()) {
+    error = "frame dump set is empty";
+    return false;
+  }
+  std::vector<std::filesystem::path> backups;
+  backups.reserve(staged.size());
+  for (const auto &frame : staged) {
+    backups.push_back(directory_ /
+                      ("." + frame.file_name_ + ".previous." +
+                       std::to_string(static_cast<long long>(::getpid()))));
+    if (!frame.active_ || std::filesystem::exists(backups.back())) {
+      error = "frame dump set cannot stage its publication rollback";
+      return false;
+    }
+  }
+
+  std::string manifest_contents;
+  const auto manifest_path = directory_ / "frames.jsonl";
+  {
+    std::ifstream existing(manifest_path, std::ios::binary);
+    if (existing) {
+      manifest_contents.assign(std::istreambuf_iterator<char>(existing), {});
+      if (existing.bad()) {
+        error = "frame manifest read failed";
+        return false;
+      }
+    }
+  }
+  for (const auto &frame : staged)
+    manifest_contents +=
+        manifest_line(frame.metadata_, frame.hash_, frame.file_name_);
+
+  const auto temporary_manifest = directory_ /
+      (".frames.jsonl.tmp." +
+       std::to_string(static_cast<long long>(::getpid())));
+  const int manifest_fd =
+      ::open(temporary_manifest.c_str(),
+             O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+  if (manifest_fd < 0) {
+    error = std::string("cannot open frame-set manifest temporary file: ") +
+            std::strerror(errno);
+    return false;
+  }
+  const auto manifest_bytes = std::span(
+      reinterpret_cast<const std::uint8_t *>(manifest_contents.data()),
+      manifest_contents.size());
+  bool manifest_staged = write_all(manifest_fd, manifest_bytes, error);
+  if (manifest_staged && ::fsync(manifest_fd) != 0) {
+    error = std::string("frame-set manifest fsync failed: ") +
+            std::strerror(errno);
+    manifest_staged = false;
+  }
+  if (::close(manifest_fd) != 0 && manifest_staged) {
+    error = std::string("frame-set manifest close failed: ") +
+            std::strerror(errno);
+    manifest_staged = false;
+  }
+  if (!manifest_staged) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary_manifest, ignored);
+    return false;
+  }
+
+  std::size_t published = 0;
+  std::vector<bool> backed_up(staged.size());
+  for (; published < staged.size(); ++published) {
+    auto &frame = staged[published];
+    if (std::filesystem::exists(frame.final_path_)) {
+      if (::rename(frame.final_path_.c_str(), backups[published].c_str()) != 0) {
+        error = std::string("frame-set output backup failed: ") +
+                std::strerror(errno);
+        break;
+      }
+      backed_up[published] = true;
+    }
+    if (::rename(frame.temporary_path_.c_str(), frame.final_path_.c_str()) != 0) {
+      error = std::string("frame-set output publish failed: ") +
+              std::strerror(errno);
+      if (backed_up[published]) {
+        (void)::rename(backups[published].c_str(), frame.final_path_.c_str());
+        backed_up[published] = false;
+      }
+      break;
+    }
+  }
+  if (published == staged.size() &&
+      ::rename(temporary_manifest.c_str(), manifest_path.c_str()) != 0) {
+    error = std::string("frame-set manifest publish failed: ") +
+            std::strerror(errno);
+  } else if (published == staged.size()) {
+    results.reserve(staged.size());
+    for (std::size_t index = 0; index < staged.size(); ++index) {
+      auto &frame = staged[index];
+      if (backed_up[index]) {
+        std::error_code ignored;
+        std::filesystem::remove(backups[index], ignored);
+      }
+      results.push_back({frame.final_path_, frame.hash_});
+      frame.active_ = false;
+    }
+    error.clear();
+    return true;
+  }
+
+  std::error_code ignored;
+  std::filesystem::remove(temporary_manifest, ignored);
+  for (std::size_t index = 0; index < published; ++index) {
+    std::filesystem::remove(staged[index].final_path_, ignored);
+    if (backed_up[index])
+      (void)::rename(backups[index].c_str(), staged[index].final_path_.c_str());
+    staged[index].active_ = false;
+  }
+  return false;
 }
 
 void FrameDumper::abort(StagedFrameDump& staged) const noexcept {
