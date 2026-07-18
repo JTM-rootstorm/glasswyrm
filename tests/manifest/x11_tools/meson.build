@@ -7,6 +7,35 @@ x11_setup_parser_test = executable(
 )
 test('x11-setup-parser', x11_setup_parser_test, timeout: 10)
 
+if get_option('tools') and get_option('libgwipc')
+  output_client_unit_test = executable(
+    'output_client_unit_test',
+    files(tests_source_dir / 'tools/output_client_unit_test.cpp'),
+    dependencies: output_client_dep,
+    include_directories: test_source_root_include,
+  )
+  test('output-client-unit', output_client_unit_test, timeout: 10)
+  output_tools_fake_server = executable(
+    'output_tools_fake_server',
+    files(tests_source_dir / 'tools/output_tools_fake_server.cpp'),
+    dependencies: gwipc_dep,
+  )
+  output_tools_test = find_program(
+    tests_source_dir / 'tools/output_tools_test.sh',
+  )
+  test(
+    'output-tools-control-client',
+    output_tools_test,
+    args: [output_tools_fake_server, gwinfo_program, gwout_program],
+    depends: [output_tools_fake_server, gwinfo_program, gwout_program],
+    timeout: 20,
+  )
+  test('gwinfo-help', gwinfo_program, args: ['--help'], timeout: 10)
+  test('gwinfo-version', gwinfo_program, args: ['--version'], timeout: 10)
+  test('gwout-help', gwout_program, args: ['--help'], timeout: 10)
+  test('gwout-version', gwout_program, args: ['--version'], timeout: 10)
+endif
+
 x11_setup_reply_test = executable(
   'x11_setup_reply_test',
   files(tests_source_dir / 'protocol/x11_setup_reply_test.cpp'),
@@ -32,6 +61,25 @@ x11_reply_atom_test = executable(
 test('x11-reply-atom', x11_reply_atom_test, timeout: 10)
 
 if get_option('glasswyrmd')
+  m13_scale_client_program = executable(
+    'm13_scale_client',
+    files(tests_source_dir / 'apps/m13_scale_client.cpp'),
+    dependencies: x11_fake_client_dep,
+    include_directories: test_source_root_include,
+  )
+  test(
+    'm13-scale-client-wire',
+    m13_scale_client_program,
+    args: ['--self-test'],
+    timeout: 10,
+  )
+  test(
+    'm13-scale-client-help',
+    m13_scale_client_program,
+    args: ['--help'],
+    timeout: 10,
+  )
+
   foreach unit_case : [
     ['resource-id', 'resource_id_test.cpp'],
     ['resource-table', 'resource_table_test.cpp'],
