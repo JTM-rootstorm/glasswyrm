@@ -18,6 +18,7 @@ REQUIRED = (
     "source_layout api_consumers m1_m12_regressions output_inventory "
     "stable_id_replay logical_physical_geometry integer_scaling "
     "output_enable_disable pointer_output_crossing sdl_display_discovery "
+    "fullscreen_outputs "
     "fractional_scaling transforms surface_membership primary_transition "
     "legacy_fallback scaled_pixmap gw_scale_events multi_output_randr "
     "gwinfo_text gwinfo_json gwout_commit stale_rejection busy_rejection "
@@ -90,6 +91,16 @@ def write_artifacts(root: pathlib.Path, validator) -> str:
         "milestone13-sdl-displays.json": {
             "passed": True, "sdl_version": "2.32.10", "display_count": 2,
             "displays": [{}, {}]},
+        "milestone13-fullscreen-outputs.json": {
+            "schema": 1, "passed": True,
+            "left": {"fullscreen": True, "primary_output_id":
+                     "0000000000000001", "logical_x": 0, "logical_y": 0,
+                     "logical_width": 640, "logical_height": 480},
+            "right": {"fullscreen": True, "primary_output_id":
+                      "0000000000000002", "logical_x": 640, "logical_y": 0,
+                      "logical_width": 640, "logical_height": 480},
+            "left_restored": {"fullscreen": False},
+            "right_restored": {"fullscreen": False}},
         "milestone13-renderer-fractional-diff.json": {
             "passed": True, "maximum_channel_difference": 1,
             "outputs": [{}, {}]},

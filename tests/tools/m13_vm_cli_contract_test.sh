@@ -68,6 +68,7 @@ for artifact in milestone13-runtime-test.log milestone13-meson-test.log \
   milestone13-gwout.log milestone13-randr.log milestone13-gw-scale.log \
   milestone13-scale-client.json milestone13-renderer-software.jsonl \
   milestone13-pointer-crossing.json milestone13-sdl-displays.json \
+  milestone13-fullscreen-outputs.json \
   milestone13-frame-sets.jsonl \
   milestone13-renderer-gles.jsonl milestone13-drm-report.jsonl \
   milestone13-renderer-drm.jsonl milestone13-drm-representation.json \
