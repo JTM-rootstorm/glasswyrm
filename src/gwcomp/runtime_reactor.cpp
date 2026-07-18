@@ -9,6 +9,10 @@
 namespace glasswyrm::compositor {
 namespace {
 
+constexpr std::uint64_t kOutputModelCapabilities =
+    GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+    GWIPC_CAP_SCALE_METADATA;
+
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 
@@ -26,11 +30,13 @@ int minimum_timeout(const int left, const int right) {
 
 RuntimeReactor::RuntimeReactor(const Options& options, gwipc_listener* listener,
                                SignalRuntime& signals,
-                               gw::compositor::Compositor& compositor)
+                               gw::compositor::Compositor& compositor,
+                               const output::OutputLayout& output_layout)
     : options_(options),
       listener_(listener),
       signals_(signals),
-      compositor_(compositor) {}
+      compositor_(compositor),
+      output_inventory_(output_layout) {}
 
 void RuntimeReactor::ConnectionDeleter::operator()(
     gwipc_connection* value) const {
@@ -87,6 +93,45 @@ void RuntimeReactor::apply_dispatch(const ContractDispatchResult& dispatch) {
     stopping_ = true;
     exit_status_ = 1;
   }
+}
+
+void RuntimeReactor::fail_output_inventory(const char* reason,
+                                           const gwipc_status status) {
+  std::fprintf(stderr, "gwcomp: output inventory failed: %s: %s\n", reason,
+               gwipc_status_string(status));
+  session_state_.peer_disconnected();
+  compositor_.disconnect();
+  producer_.reset();
+  peer_validated_ = false;
+  peer_role_ = GWIPC_ROLE_UNKNOWN;
+  peer_profile_.reset();
+  stopping_ = true;
+  exit_status_ = 1;
+}
+
+void RuntimeReactor::reject_output_inventory_peer(
+    const char* reason, const gwipc_status status) {
+  std::fprintf(stderr, "gwcomp: rejected output inventory peer: %s: %s\n",
+               reason, gwipc_status_string(status));
+  session_state_.peer_disconnected();
+  compositor_.disconnect();
+  producer_.reset();
+  peer_validated_ = false;
+  peer_role_ = GWIPC_ROLE_UNKNOWN;
+  peer_profile_.reset();
+}
+
+OutputInventoryDisposition
+RuntimeReactor::service_output_inventory_query(const gwipc_message& message) {
+  if (!producer_ || !peer_validated_)
+    return OutputInventoryDisposition::NotHandled;
+  const auto result =
+      output_inventory_.service(*producer_, peer_role_, message);
+  if (result.disposition == OutputInventoryDisposition::RejectPeer)
+    reject_output_inventory_peer(result.reason.c_str(), result.status);
+  else if (result.disposition == OutputInventoryDisposition::Fatal)
+    fail_output_inventory(result.reason.c_str(), result.status);
+  return result.disposition;
 }
 
 void RuntimeReactor::service_presentation(const short revents) {
@@ -207,8 +252,13 @@ void RuntimeReactor::validate_producer() {
     return;
   const auto info = gwipc_connection_peer_info(producer_.get());
   peer_role_ = info.role;
+  const auto negotiated_output_model =
+      info.capabilities & kOutputModelCapabilities;
   peer_profile_ =
       gw::compositor::select_peer_profile(peer_role_, info.capabilities);
+  if (peer_profile_ && !options_.headless_outputs.empty() &&
+      negotiated_output_model != kOutputModelCapabilities)
+    peer_profile_.reset();
   if (!peer_profile_) {
     std::fprintf(
         stderr,
@@ -244,7 +294,14 @@ void RuntimeReactor::service_session_messages() {
     (void)gwipc_message_payload(message.get(), &size);
     payload_bytes += size;
     ++messages;
-    if (gwipc_message_type(message.get()) ==
+    const auto output_query =
+        service_output_inventory_query(*message);
+    if (output_query == OutputInventoryDisposition::RejectPeer ||
+        output_query == OutputInventoryDisposition::Fatal) {
+      break;
+    } else if (output_query == OutputInventoryDisposition::Handled) {
+      continue;
+    } else if (gwipc_message_type(message.get()) ==
         GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) {
       gwipc_session_state_acknowledged acknowledged{};
       std::uint64_t reply_to = 0;
@@ -292,6 +349,12 @@ void RuntimeReactor::service_contract_messages() {
     (void)gwipc_message_payload(message.get(), &size);
     payload_bytes += size;
     ++messages;
+    const auto output_query =
+        service_output_inventory_query(*message);
+    if (output_query == OutputInventoryDisposition::RejectPeer ||
+        output_query == OutputInventoryDisposition::Fatal)
+      break;
+    if (output_query == OutputInventoryDisposition::Handled) continue;
     apply_dispatch(dispatch_contract_message(
         producer_.get(), message.get(), peer_role_, *peer_profile_,
         options_.max_frames, compositor_));

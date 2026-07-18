@@ -134,6 +134,30 @@ void require_role_specific_rejected(const std::string& socket) {
   gwipc_connection_destroy(connection);
 }
 
+void require_partial_output_model_rejected(const std::string& socket) {
+  gwipc_connection* connection = nullptr;
+  (void)connect_as(socket, GWIPC_ROLE_PROTOCOL_SERVER,
+                   kProtocolCommonCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE |
+                       GWIPC_CAP_OUTPUT_MANAGEMENT,
+                   &connection);
+  require(connection != nullptr,
+          "partial output-model connection is created");
+  for (int attempt = 0; attempt < 100 &&
+                        gwipc_connection_get_state(connection) !=
+                            GWIPC_CONNECTION_CLOSED;
+       ++attempt) {
+    pollfd descriptor{gwipc_connection_fd(connection),
+                      gwipc_connection_wanted_poll_events(connection), 0};
+    const int ready = ::poll(&descriptor, 1, 20);
+    if (ready > 0)
+      (void)gwipc_connection_process_poll_events(connection,
+                                                 descriptor.revents);
+  }
+  require(gwipc_connection_get_state(connection) == GWIPC_CONNECTION_CLOSED,
+          "partial output-model capability bundle is disconnected");
+  gwipc_connection_destroy(connection);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -192,6 +216,8 @@ int main(int argc, char** argv) {
                    "wrong-role peer is rejected");
   require_valid_connection(socket);
   require_role_specific_rejected(socket);
+  require_valid_connection(socket);
+  require_partial_output_model_rejected(socket);
   require_valid_connection(socket);
   require_rejected(socket, GWIPC_ROLE_TEST_PRODUCER,
                    kRequiredCapabilities & ~GWIPC_CAP_FRAME_ACKNOWLEDGEMENT,

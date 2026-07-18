@@ -70,6 +70,19 @@ if get_option('gwcomp') and get_option('headless_backend')
     timeout: 15,
   )
 
+  gwcomp_output_inventory_process_test = executable(
+    'gwcomp_output_inventory_process_test',
+    files(tests_source_dir / 'integration/gwcomp_output_inventory_process_test.cpp'),
+    dependencies: gwipc_dep,
+  )
+  test(
+    'gwcomp-output-inventory-process',
+    gwcomp_output_inventory_process_test,
+    args: [gwcomp_program.full_path()],
+    depends: gwcomp_program,
+    timeout: 15,
+  )
+
   gwcomp_golden_test = executable(
     'gwcomp_golden_test',
     files(tests_source_dir / 'integration/gwcomp_golden_test.cpp'),
@@ -244,6 +257,14 @@ if get_option('drm_backend')
     include_directories: test_source_root_include,
   )
   test('drm-inventory', drm_inventory_test, timeout: 10)
+
+  drm_runtime_selection_test = executable(
+    'drm_runtime_selection_test',
+    files(tests_source_dir / 'drm/drm_runtime_selection_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drm-runtime-selection', drm_runtime_selection_test, timeout: 10)
 
   foreach drm_model_test : [
     ['drm-connector-name', 'connector_name_test.cpp'],

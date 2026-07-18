@@ -2,9 +2,11 @@
 
 #include "gwcomp/compositor.hpp"
 #include "gwcomp/contract_dispatch.hpp"
+#include "gwcomp/output_inventory_service.hpp"
 #include "gwcomp/options.hpp"
 #include "gwcomp/session_state_coordinator.hpp"
 #include "gwcomp/signal_runtime.hpp"
+#include "output/model/layout.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -19,7 +21,8 @@ class RuntimeReactor final {
  public:
   RuntimeReactor(const Options& options, gwipc_listener* listener,
                  SignalRuntime& signals,
-                 gw::compositor::Compositor& compositor);
+                 gw::compositor::Compositor& compositor,
+                 const output::OutputLayout& output_layout);
 
   [[nodiscard]] int run();
 
@@ -49,11 +52,16 @@ class RuntimeReactor final {
   void service_contract_messages();
   void service_disconnect();
   void apply_dispatch(const ContractDispatchResult& dispatch);
+  [[nodiscard]] OutputInventoryDisposition service_output_inventory_query(
+      const gwipc_message& message);
+  void fail_output_inventory(const char* reason, gwipc_status status);
+  void reject_output_inventory_peer(const char* reason, gwipc_status status);
 
   const Options& options_;
   gwipc_listener* listener_{};
   SignalRuntime& signals_;
   gw::compositor::Compositor& compositor_;
+  OutputInventoryService output_inventory_;
   Connection producer_;
   bool peer_validated_{};
   gwipc_role peer_role_{GWIPC_ROLE_UNKNOWN};
