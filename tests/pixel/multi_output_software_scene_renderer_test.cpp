@@ -1,6 +1,10 @@
 #include "backends/output/software_frame_set.hpp"
 #include "render/software/multi_output_scene_renderer.hpp"
 #include "tests/helpers/test_support.hpp"
+#include "config.hpp"
+#if GW_HAS_GLES_RENDERER
+#include "render/gles/multi_output_scene_renderer.hpp"
+#endif
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -392,6 +396,119 @@ void test_all_native_output_transforms() {
   }
 }
 
+#if GW_HAS_GLES_RENDERER
+void test_multi_output_gles_equivalence() {
+  std::string error;
+  gw::render::gles::ContextInfo context_info;
+  auto renderer = gw::render::gles::MultiOutputGlesSceneRenderer::create(
+      {}, context_info, gw::render::kMaximumGlTextureCacheBytes, error);
+  require(renderer != nullptr, error);
+
+  SceneModel model(SceneProfile::OutputModel);
+  require(model.begin_complete_snapshot(1, 9), "GLES snapshot begins");
+  require(model.apply(output(1, 0, 2, 2, 2, 2)), "GLES left output stages");
+  require(model.apply(output(2, 2, 2, 1, 4, 2, 2, 1)),
+          "GLES scaled right output stages");
+  require(model.apply(surface(10, 1, 0, 0, 4, 2)),
+          "GLES spanning surface stages");
+  const std::vector<std::uint64_t> members{1, 2};
+  require(model.apply(membership(10, 1, members, 1, 1, 9)),
+          "GLES spanning membership stages");
+  commit(model);
+  BufferMappingMap mappings{{20, mapping(20, 4, 2,
+                                          {0xffff0000U, 0xff00ff00U,
+                                           0xff0000ffU, 0xffffffffU,
+                                           0xff00ffffU, 0xffff00ffU,
+                                           0xffffff00U, 0xff101010U})}};
+  const SurfaceAttachmentMap attachments{{10, 20}};
+  const PhysicalDamageMap full{{1, {{0, 0, 2, 2}}},
+                               {2, {{0, 0, 4, 2}}}};
+  auto rendered = renderer->render(SoftwareFrameSetRenderRequest{
+      model, mappings, attachments, full, nullptr, 11, 12, 13});
+  require(rendered.complete() && rendered.frames.outputs().size() == 2 &&
+              rendered.metrics.at(1).used_direct &&
+              rendered.metrics.at(2).used_nearest &&
+              rendered.metrics.at(1).maximum_channel_error == 0 &&
+              rendered.metrics.at(2).maximum_channel_error == 0 &&
+              rendered.metrics.at(1).readback_bytes == 16 &&
+              rendered.metrics.at(2).readback_bytes == 32,
+          rendered.error);
+
+  mappings.clear();
+  mappings.emplace(20, mapping(20, 4, 2, std::vector<std::uint32_t>(8, 0)));
+  const PhysicalDamageMap unchanged;
+  const auto preserved = renderer->render(SoftwareFrameSetRenderRequest{
+      model, mappings, attachments, unchanged, &rendered.frames, 14, 15, 16});
+  require(preserved.complete() &&
+              preserved.metrics.at(1).readback_bytes == 0 &&
+              preserved.metrics.at(2).readback_bytes == 0 &&
+              preserved.frames.outputs().at(2).visible_hash ==
+                  rendered.frames.outputs().at(2).visible_hash,
+          "GLES preserves compatible per-output pixels outside damage");
+
+  SceneModel fractional(SceneProfile::OutputModel);
+  require(fractional.begin_complete_snapshot(1, 2),
+          "GLES fractional snapshot begins");
+  require(fractional.apply(output(1, 0, 4, 1, 5, 1, 5, 4)) &&
+              fractional.apply(surface(1, 1, 0, 0, 4, 1)),
+          "GLES fractional scene stages");
+  const std::vector<std::uint64_t> one{1};
+  require(fractional.apply(membership(1, 1, one, 5, 4, 2)),
+          "GLES fractional membership stages");
+  commit(fractional);
+  mappings.clear();
+  mappings.emplace(2, mapping(2, 4, 1,
+                              {0xff000000U, 0xffff0000U, 0xff00ff00U,
+                               0xff0000ffU}));
+  const SurfaceAttachmentMap fractional_attachments{{1, 2}};
+  const PhysicalDamageMap fractional_damage{{1, {{0, 0, 5, 1}}}};
+  const auto filtered = renderer->render(SoftwareFrameSetRenderRequest{
+      fractional, mappings, fractional_attachments, fractional_damage, nullptr,
+      3, 4, 5});
+  require(filtered.complete() && filtered.metrics.at(1).used_bilinear &&
+              filtered.metrics.at(1).maximum_channel_error <= 1,
+          filtered.error);
+}
+
+void test_all_gles_output_transforms() {
+  std::string error;
+  gw::render::gles::ContextInfo context_info;
+  auto renderer = gw::render::gles::MultiOutputGlesSceneRenderer::create(
+      {}, context_info, gw::render::kMaximumGlTextureCacheBytes, error);
+  require(renderer != nullptr, error);
+  const BufferMappingMap mappings{{
+      2, mapping(2, 2, 3,
+                 {0xff000001U, 0xff000002U, 0xff000003U, 0xff000004U,
+                  0xff000005U, 0xff000006U})}};
+  const SurfaceAttachmentMap attachments{{1, 2}};
+  for (int transform = GWIPC_TRANSFORM_NORMAL;
+       transform <= GWIPC_TRANSFORM_FLIPPED_270; ++transform) {
+    const auto swaps = transform == GWIPC_TRANSFORM_ROTATE_90 ||
+                       transform == GWIPC_TRANSFORM_ROTATE_270 ||
+                       transform == GWIPC_TRANSFORM_FLIPPED_90 ||
+                       transform == GWIPC_TRANSFORM_FLIPPED_270;
+    const std::uint32_t width = swaps ? 3U : 2U;
+    const std::uint32_t height = swaps ? 2U : 3U;
+    SceneModel model(SceneProfile::OutputModel);
+    require(model.begin_complete_snapshot(1, 3) &&
+                model.apply(output(1, 0, 2, 3, width, height, 1, 1,
+                                   static_cast<gwipc_transform>(transform))) &&
+                model.apply(surface(1, 1, 0, 0, 2, 3)),
+            "GLES transformed scene stages");
+    const std::vector<std::uint64_t> members{1};
+    require(model.apply(membership(1, 1, members, 1, 1, 3)),
+            "GLES transformed membership stages");
+    commit(model);
+    const PhysicalDamageMap damage{{1, {{0, 0, width, height}}}};
+    const auto rendered = renderer->render(SoftwareFrameSetRenderRequest{
+        model, mappings, attachments, damage, nullptr, 4, 5, 6});
+    require(rendered.complete() &&
+                rendered.metrics.at(1).maximum_channel_error == 0,
+            rendered.error);
+  }
+}
+#endif
+
 } // namespace
 
 int main() {
@@ -400,4 +517,8 @@ int main() {
   test_fractional_bilinear_reference();
   test_scaled_client_downsample_reference();
   test_all_native_output_transforms();
+#if GW_HAS_GLES_RENDERER
+  test_multi_output_gles_equivalence();
+  test_all_gles_output_transforms();
+#endif
 }

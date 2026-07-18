@@ -297,6 +297,44 @@ int main() {
                   std::string::npos,
           "scene manifest reports deterministic cursor metadata separately");
 
+  gw::compositor::Scene output_model_manifest;
+  output_model_manifest.configuration_generation = 7;
+  output_model_manifest.primary_output_id = 1;
+  auto left = output();
+  auto right = output();
+  right.output_id = 2;
+  right.logical_x = 4;
+  right.scale_numerator = 5;
+  right.scale_denominator = 4;
+  right.physical_pixel_width = 5;
+  output_model_manifest.outputs.emplace(1, left);
+  output_model_manifest.outputs.emplace(2, right);
+  output_model_manifest.surfaces.emplace(10, normal_surface());
+  output_model_manifest.surface_policies.emplace(10, normal_policy());
+  output_model_manifest.surface_outputs.emplace(
+      10, gw::compositor::SurfaceOutputMembership{
+              1, {1, 2}, 1, 1, 2,
+              GWIPC_SURFACE_SCALE_SCALED_PIXMAP, 7, 0});
+  output_model_manifest.surfaces.emplace(20, cursor_surface(2, 0));
+  output_model_manifest.surface_outputs.emplace(
+      20, gw::compositor::SurfaceOutputMembership{
+              1, {1}, 1, 1, 1, GWIPC_SURFACE_SCALE_LEGACY, 7, 0});
+  require(gw::compositor::SceneManifest::describe_output_model(
+              8, 9, output_model_manifest, manifest_result, json, error) &&
+              manifest_result.surface_count == 1 &&
+              manifest_result.cursor_count == 1 &&
+              json.find("\"schema\":\"glasswyrm-scene-v2\"") !=
+                  std::string::npos &&
+              json.find("\"layout_generation\":7") != std::string::npos &&
+              json.find("\"primary_output_id\":1") != std::string::npos &&
+              json.find("\"physical\":{\"width\":5,\"height\":4}") !=
+                  std::string::npos &&
+              json.find("\"memberships\":[1,2]") != std::string::npos &&
+              json.find("\"client_buffer_scale\":2") !=
+                  std::string::npos &&
+              json.find("\"scale_mode\":2") != std::string::npos,
+          "M13 scene manifest records output geometry and scale membership");
+
   compositor.disconnect();
   require(compositor.begin_snapshot(), "cursor replay snapshot begins");
   attach_scene(compositor, cursor_surface(0, 2), error, 101, 201);

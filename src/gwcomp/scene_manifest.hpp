@@ -32,6 +32,9 @@ public:
                                     const Scene &scene,
                                     PreparedSceneManifest &prepared,
                                     std::string &error);
+  [[nodiscard]] static bool prepare_output_model(
+      std::uint64_t commit_id, std::uint64_t generation, const Scene &scene,
+      PreparedSceneManifest &prepared, std::string &error);
   [[nodiscard]] bool publish(PreparedSceneManifest &prepared,
                              std::string &error) const;
   static void abort(PreparedSceneManifest &prepared) noexcept;
@@ -40,6 +43,9 @@ public:
                                      const Scene &scene,
                                      SceneManifestResult &result,
                                      std::string &json, std::string &error);
+  [[nodiscard]] static bool describe_output_model(
+      std::uint64_t commit_id, std::uint64_t generation, const Scene &scene,
+      SceneManifestResult &result, std::string &json, std::string &error);
 
 private:
   std::filesystem::path path_;

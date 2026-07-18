@@ -64,6 +64,7 @@ gw_compositor_geometry_dep = declare_dependency(
 )
 
 gw_render_sources = files(
+  'compositor/output_damage.cpp',
   'render/renderer_factory.cpp',
   'render/renderer_report.cpp',
   'render/software/blend.cpp',
@@ -75,6 +76,7 @@ gw_render_dependencies = [gw_compositor_geometry_dep, gw_output_model_dep]
 if get_option('render_gl')
   gw_render_sources += files(
     'render/gles/context.cpp',
+    'render/gles/multi_output_scene_renderer.cpp',
     'render/gles/scene_renderer.cpp',
     'render/gles/scene_renderer_frame.cpp',
   )
@@ -545,12 +547,15 @@ if get_option('gwcomp')
     'gwcomp/compositor.cpp',
     'gwcomp/buffer_readiness.cpp',
     'gwcomp/scene_manifest.cpp',
+    'gwcomp/scene_manifest_output_model.cpp',
     'gwcomp/runtime.cpp',
     'gwcomp/runtime_reactor.cpp',
     'gwcomp/signal_runtime.cpp',
     'gwcomp/session_state_coordinator.cpp',
     'gwcomp/contract_dispatch.cpp',
     'gwcomp/presentation_transaction.cpp',
+    'gwcomp/presentation_output_model.cpp',
+    'gwcomp/presentation_completion.cpp',
   )
   if get_option('drm_backend')
     gwcomp_options_sources += files('gwcomp/drm_runtime.cpp')

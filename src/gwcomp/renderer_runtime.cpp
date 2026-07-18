@@ -93,4 +93,19 @@ create_runtime_renderer(const Options& options, std::string& error) {
   return renderer;
 }
 
+std::unique_ptr<gw::render::OutputSceneRenderer>
+create_runtime_output_renderer(const Options& options, std::string& error) {
+  std::optional<std::filesystem::path> report_path;
+  if (options.renderer_report)
+    report_path = *options.renderer_report;
+  std::unique_ptr<gw::render::OutputSceneRenderer> renderer;
+  const gw::render::RendererCreateOptions create_options{
+      options.renderer, report_path, validated_render_node(options),
+      gw::render::kMaximumGlTextureCacheBytes};
+  if (!gw::render::create_output_scene_renderer(create_options, renderer,
+                                                error))
+    return {};
+  return renderer;
+}
+
 } // namespace glasswyrm::compositor
