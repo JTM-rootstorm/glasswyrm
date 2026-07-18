@@ -485,10 +485,21 @@ result[active_grab]=passed result[automatic_grab]=passed
   "$source_dir/docs/maintenance/source_size_allowlist.txt"
 result[source_layout]=passed
 
+failure_stage=runtime-storage
+rm -rf -- "$default" "$build" "$asan" "$clang_build" \
+  "$server" "$server_standalone" "$server_synthetic" "$gwm_build" \
+  "$gwcomp_build" "$gwcomp_headless" "$ipc_only" "$session_build"
 failure_stage=uinput-startup
 rm -rf "$runtime"; meson setup "$runtime" "$source_dir" -Dlibinput_backend=true -Ddrm_backend=true -Dheadless_backend=true
 meson compile -C "$runtime"
 full_build_commit=$tested_commit
+failure_stage=runtime-storage
+available_kib=$(df -Pk /var/tmp | awk 'NR == 2 { print $4 }')
+[[ $available_kib =~ ^[0-9]+$ ]] && ((available_kib >= 2 * 1024 * 1024)) || {
+  printf 'M11 runtime requires at least 2 GiB free in /var/tmp; found %s KiB.\n' \
+    "${available_kib:-unknown}" >&2
+  exit 1
+}
 write_interactive_ready_marker "$tested_commit" "$tested_commit"
 fi
 failure_stage=uinput-startup

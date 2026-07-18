@@ -3,13 +3,34 @@
 #ifdef GW_SERVER_HAS_IPC
 
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "glasswyrmd/protocol_event_router.hpp"
 #include "input/input_router.hpp"
+#include "protocol/x11/event_mask.hpp"
 #include "protocol/x11/reply.hpp"
 
 #include <algorithm>
 #include <cstdio>
+#include <span>
 
 namespace glasswyrm::server {
+namespace {
+
+void route_property_notification(
+    const DeferredPropertyMutation& property, const ResourceTable& resources,
+    const std::span<ClientConnection* const> recipients) {
+  ProtocolEventIntent intent;
+  intent.delivery = ProtocolEventDelivery::WindowMask;
+  intent.window = property.window;
+  intent.mask = gw::protocol::x11::event_mask::PropertyChange;
+  intent.event = gw::protocol::x11::PropertyNotifyEvent{
+      property.window, property.atom, property.notify_time,
+      property.value ? gw::protocol::x11::PropertyNotifyState::NewValue
+                     : gw::protocol::x11::PropertyNotifyState::Deleted};
+  ProtocolEventRouter router(resources);
+  (void)router.route(intent, recipients);
+}
+
+}  // namespace
 
 void ServerRuntime::initialize_lifecycle() {
   LifecycleCallbacks callbacks;
@@ -60,7 +81,8 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
                                 snapshot, server_.state_.resources(), submission))
     return false;
   if (bridge_->submit_compositor(submission, error)) return true;
-  if (content_presenter_) content_presenter_->reject_lifecycle();
+  if (content_presenter_)
+    content_presenter_->cancel_lifecycle_submission();
   return false;
 }
 
@@ -94,6 +116,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     for (const auto& item : mutation->second.destroy->postorder) {
       (void)staged.selections().clear_window(item.xid);
       (void)staged.grabs().cleanup_window(item.xid);
+      (void)staged.composite().remove_window(item.xid);
     }
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
@@ -103,8 +126,25 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
              mutation->second.cleanup) {
     auto staged = server_.state_;
     (void)staged.selections().clear_client(mutation->second.cleanup->owner);
+    (void)staged.composite().remove_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
     committed = staged.commit_lifecycle(snapshot);
+    if (committed) server_.state_ = std::move(staged);
+  } else if (active && mutation != pending_mutations_.end() &&
+             mutation->second.property) {
+    auto staged = server_.state_;
+    const auto& property = *mutation->second.property;
+    bool property_committed = false;
+    if (property.value) {
+      property_committed =
+          staged.resources().change_property(
+              property.window, property.atom, *property.value,
+              PropertyMode::Replace) == PropertyMutationStatus::Success;
+    } else {
+      property_committed =
+          staged.resources().delete_property(property.window, property.atom);
+    }
+    committed = property_committed && staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
   } else {
     committed = server_.state_.commit_lifecycle(snapshot);
@@ -138,6 +178,9 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     for (const auto& client : server_.clients_)
       recipients.push_back(client.get());
     EventRouter router(server_.state_.resources());
+    if (mutation != pending_mutations_.end() && mutation->second.property)
+      route_property_notification(*mutation->second.property,
+                                  server_.state_.resources(), recipients);
     if (operation->kind == LifecycleOperationKind::Destroy &&
         mutation != pending_mutations_.end() && mutation->second.destroy) {
       for (const auto& item : mutation->second.destroy->postorder) {
@@ -308,6 +351,35 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
     if (result.deferred_override_redirect) {
       operation.kind = LifecycleOperationKind::OverrideChange;
       found->second.override_redirect = *result.deferred_override_redirect;
+    } else if (result.deferred_policy) {
+      operation.kind = LifecycleOperationKind::PolicyChange;
+      const auto applied_x = found->second.applied_x;
+      const auto applied_y = found->second.applied_y;
+      const auto applied_width = found->second.applied_width;
+      const auto applied_height = found->second.applied_height;
+      const auto stacking = found->second.stacking;
+      const auto visible = found->second.policy_visible;
+      const auto focused = found->second.focused;
+      const auto old_x = found->second.requested_x;
+      const auto old_y = found->second.requested_y;
+      const auto old_width = found->second.requested_width;
+      const auto old_height = found->second.requested_height;
+      found->second = result.deferred_policy->window;
+      found->second.applied_x = applied_x;
+      found->second.applied_y = applied_y;
+      found->second.applied_width = applied_width;
+      found->second.applied_height = applied_height;
+      found->second.stacking = stacking;
+      found->second.policy_visible = visible;
+      found->second.focused = focused;
+      if (result.deferred_policy->request_focus)
+        found->second.focus_serial = *serial;
+      if (found->second.requested_x != old_x ||
+          found->second.requested_y != old_y ||
+          found->second.requested_width != old_width ||
+          found->second.requested_height != old_height)
+        found->second.geometry_serial = *serial;
+      mutation.property = result.deferred_policy->property;
     } else if (result.deferred_configure) {
       operation.kind = LifecycleOperationKind::Configure;
       const auto& request = *result.deferred_configure;
@@ -318,14 +390,14 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
       if (request.border_width)
         found->second.requested_border_width = *request.border_width;
       found->second.geometry_serial = *serial;
-      found->second.stack_sibling = request.sibling.value_or(0);
-      found->second.stack_mode =
-          request.stack_mode == gw::protocol::x11::CoreStackMode::Above
-              ? LifecycleStackMode::Above
-          : request.stack_mode == gw::protocol::x11::CoreStackMode::Below
-              ? LifecycleStackMode::Below
-              : LifecycleStackMode::None;
-      if (request.stack_mode) found->second.stack_serial = *serial;
+      if (request.stack_mode) {
+        found->second.stack_sibling = request.sibling.value_or(0);
+        found->second.stack_mode =
+            request.stack_mode == gw::protocol::x11::CoreStackMode::Above
+                ? LifecycleStackMode::Above
+                : LifecycleStackMode::Below;
+        found->second.stack_serial = *serial;
+      }
     } else {
       operation.kind = result.deferred_map ? LifecycleOperationKind::Map
                                            : LifecycleOperationKind::Unmap;
@@ -357,6 +429,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
                  ? gw::protocol::x11::CoreOpcode::ConfigureWindow
              : result.deferred_override_redirect
                  ? gw::protocol::x11::CoreOpcode::ChangeWindowAttributes
+             : result.deferred_policy && result.deferred_policy->property
+                 ? gw::protocol::x11::CoreOpcode::ChangeProperty
+             : result.deferred_policy
+                 ? gw::protocol::x11::CoreOpcode::SendEvent
              : result.deferred_map ? gw::protocol::x11::CoreOpcode::MapWindow
                                    : gw::protocol::x11::CoreOpcode::UnmapWindow),
          0}));

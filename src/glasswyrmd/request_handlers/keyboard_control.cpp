@@ -120,4 +120,13 @@ DispatchResult bell(const DispatchContext &context,
   return {};
 }
 
+DispatchResult force_screen_saver(const DispatchContext &context,
+                                  const x11::FramedRequest &request) {
+  if (!exact_size(request, 4))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 1)
+    return error(context, request, x11::CoreErrorCode::BadValue, request.data);
+  return {};
+}
+
 } // namespace glasswyrm::server::request_handlers

@@ -65,10 +65,13 @@ private:
   VirtualTerminalState saved_state_{};
   VirtualTerminalMode saved_mode_{};
   int saved_kd_mode_{};
+  int saved_keyboard_mode_{};
   bool have_state_{};
   bool have_mode_{};
   bool have_kd_mode_{};
+  bool have_keyboard_mode_{};
   bool activated_{};
+  bool keyboard_mode_set_{};
   bool process_mode_set_{};
   bool graphics_mode_set_{};
   bool master_owned_{};

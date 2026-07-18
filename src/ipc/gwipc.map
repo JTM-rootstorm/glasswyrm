@@ -40,3 +40,6 @@ GWIPC_0.6 {
     gwipc_contract_encode_session_state_acknowledged;
     gwipc_decoded_session_state_acknowledged;
 } GWIPC_0.5;
+
+GWIPC_0.7 {
+} GWIPC_0.6;

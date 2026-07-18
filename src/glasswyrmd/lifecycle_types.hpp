@@ -18,10 +18,18 @@ struct LifecycleWindow {
   std::uint64_t stack_serial{};
   std::uint32_t stack_sibling{};
   LifecycleStackMode stack_mode{LifecycleStackMode::None};
+  std::uint32_t transient_for{};
+  PolicyWindowType policy_window_type{PolicyWindowType::Normal};
+  PolicyDecoration decoration_preference{PolicyDecoration::Unknown};
+  bool fullscreen_requested{}, maximized_requested{}, above_requested{};
+  bool bypass_compositor{}, attention_requested{}, input_requested{true};
+  std::uint32_t minimum_width{}, minimum_height{};
+  std::uint32_t maximum_width{}, maximum_height{};
+  std::optional<SavedWindowGeometry> saved_normal_geometry;
   std::int32_t applied_x{}, applied_y{}, stacking{-1};
   std::uint32_t applied_width{}, applied_height{};
   std::uint8_t window_type{}, applied_state{};
-  bool managed{}, decoration_eligible{}, attention_requested{};
+  bool managed{}, decoration_eligible{};
   std::uint8_t fullscreen_eligible{}, direct_scanout_eligible{};
 };
 

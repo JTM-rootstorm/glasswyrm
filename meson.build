@@ -131,8 +131,36 @@ if get_option('libinput_backend')
     error('libxkbcommon lacks APIs required by the Glasswyrm keyboard engine')
   endif
 endif
+egl_dep = declare_dependency()
+glesv2_dep = declare_dependency()
+gbm_dep = declare_dependency()
 if get_option('render_gl')
-  error('the OpenGL renderer is not implemented')
+  if not get_option('gwcomp')
+    error('the EGL/GLES renderer requires -Dgwcomp=true')
+  endif
+  egl_dep = dependency('egl', required: true)
+  glesv2_dep = dependency('glesv2', required: true)
+  gbm_dep = dependency('gbm', required: false)
+  gles_probe = '''
+    #include <EGL/egl.h>
+    #include <EGL/eglext.h>
+    #include <GLES2/gl2.h>
+    int main(void) {
+      EGLDisplay display = eglGetPlatformDisplay(
+          EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, 0);
+      glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RGBA,
+                     GL_UNSIGNED_BYTE, 0);
+      glScissor(0, 0, 1, 1);
+      glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+      return display == EGL_NO_DISPLAY;
+    }
+  '''
+  if not meson.get_compiler('cpp').links(
+      gles_probe, dependencies: [egl_dep, glesv2_dep],
+      name: 'required EGL 1.5 platform and GLES2 rendering APIs',
+  )
+    error('EGL/GLES lacks APIs required by the Glasswyrm renderer')
+  endif
 endif
 if get_option('render_vulkan')
   error('the Vulkan renderer is not implemented')
@@ -204,6 +232,9 @@ config_data.set_quoted('GW_PROJECT_VERSION', meson.project_version())
 config_data.set10('GW_HAS_DRM_BACKEND', get_option('drm_backend'))
 config_data.set10('GW_HAS_HEADLESS_BACKEND', get_option('headless_backend'))
 config_data.set10('GW_HAS_LIBINPUT_BACKEND', get_option('libinput_backend'))
+config_data.set10('GW_HAS_GLES_RENDERER', get_option('render_gl'))
+config_data.set10('GW_HAS_GBM', get_option('render_gl') and gbm_dep.found())
+config_data.set10('GW_HAS_EXPERIMENTAL', get_option('experimental'))
 
 configure_file(
   output: 'config.hpp',

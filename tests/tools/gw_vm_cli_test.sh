@@ -266,6 +266,18 @@ PREFLIGHT
   exit 0
 fi
 
+if [[ $script == *'M12 requires /dev/uinput and two usable virtual terminals.'* && $script != *'build=/var/tmp/glasswyrm-build-m12'* ]]; then
+  printf 'guest-script <%s>\n' "${script//$'\n'/ }" >>"$GW_VM_TEST_COMMAND_LOG"
+  cat <<'PREFLIGHT'
+drm_primary_node=/dev/dri/card0
+drm_connector=Virtual-1
+drm_mode=1024x768
+target_vt=/dev/tty2
+uinput_device=/dev/uinput
+PREFLIGHT
+  exit 0
+fi
+
 if [[ $script == *'sed -n "s/^full_build_commit=//p"'* ]]; then
   printf '%s\n' '75c68dc000000000000000000000000000000000'
   exit 0
@@ -673,6 +685,51 @@ FACTS
       printf '%s\n' 'schema=1' 'kind=milestone11-interactive-rerun' \
         'accepted_milestone11_result=false' ;;
     milestone11-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone12-facts.env)
+      cat <<'FACTS'
+required_base_commit=ae6b6c93a29a1fb985dcea8455650d15c0fec364
+tested_commit=86dab3c000000000000000000000000000000000
+failure_stage=
+scenario_exit=0
+sdl_version=2.32.10
+sdl_source_sha256=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
+api_version=0.7.0
+soversion=0
+wire_version=1.0
+drm_mode=1024x768
+compiler_c=gcc test
+compiler_cxx=g++ test
+meson_version=1.11.1
+ninja_version=1.13.2
+systemd_version=systemd 257
+mesa_version=25.1.7
+egl_vendor=Mesa Project
+egl_version=1.5
+gles_version=OpenGL ES 3.2
+gl_vendor=Mesa
+gl_renderer=softpipe
+gl_version=OpenGL ES 3.2 Mesa
+gbm_available=true
+renderer_classification=software
+x_servers_absent=true
+display_manager_absent=true
+clang=passed
+FACTS
+      for result in historical_default strict_software strict_gles sanitizer \
+        component_builds source_layout api_consumers regressions extension_stress uinput \
+        raw_little raw_big xcb_extensions sdl_probe testdraw2 testsprite2 \
+        testsprite_stable_frame extension_registry big_requests \
+        big_requests_fallback mit_shm mit_shm_trace no_shm_fallback xfixes damage \
+        render composite randr colormap fullscreen borderless geometry_restore \
+        eventfd_sync missing_token_wait damage_upload damage_scanout \
+        software_frame gles_frame renderer_equality screenshot_equality \
+        fullscreen_input_close vt_replay gwm_replay compositor_replay cleanup \
+        restoration archive_validation journal_evidence; do
+        printf '%s=passed\n' "$result"
+      done
+      ;;
+    milestone12-*.log) printf 'collected %s\n' "${artifact##*/}" ;;
+    milestone12-*.json|milestone12-*.jsonl) printf '{}\n' ;;
     *) printf 'unexpected artifact request: %s\n' "$artifact" >&2; exit 44 ;;
   esac
   exit 0
@@ -716,6 +773,14 @@ set -euo pipefail
 printf 'scp' >>"$GW_VM_TEST_COMMAND_LOG"
 printf ' <%s>' "$@" >>"$GW_VM_TEST_COMMAND_LOG"
 printf '\n' >>"$GW_VM_TEST_COMMAND_LOG"
+source=${@: -2:1}
+destination=${!#}
+if [[ $source == *:* && -n ${GW_VM_TEST_FAIL_M12_ARTIFACT:-} &&
+      $source == *"$GW_VM_TEST_FAIL_M12_ARTIFACT" ]]; then
+  printf 'injected M12 artifact failure for %s\n' \
+    "$GW_VM_TEST_FAIL_M12_ARTIFACT" >&2
+  exit 46
+fi
 if [[ "$*" == *milestone5-policies.tar* ]]; then
   destination=${!#}
   scratch=$(mktemp -d)
@@ -794,6 +859,43 @@ if [[ "$*" == *milestone11-interactive-evidence.tar* ]]; then
   (cd "$scratch" && sha256sum ./* >SHA256SUMS && tar -cf "$destination" ./*)
   rm -rf "$scratch"
 fi
+if [[ $source == *:*/milestone12-*.ppm ]]; then
+  printf 'P6\n1 1\n255\n000' >"$destination"
+fi
+if [[ $source == *:*/milestone12-efficient-sdl-evidence.tar ]]; then
+  scratch=$(mktemp -d)
+  for name in milestone12-software.ppm milestone12-gles.ppm \
+    milestone12-fullscreen.ppm milestone12-screen.ppm \
+    milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm \
+    milestone12-gles-sdl-probe.ppm milestone12-software-fullscreen.ppm \
+    milestone12-gles-fullscreen.ppm milestone12-software-cursor.ppm \
+    milestone12-gles-cursor.ppm milestone12-software-testsprite.ppm \
+    milestone12-gles-testsprite.ppm; do
+    printf 'P6\n1 1\n255\n000' >"$scratch/$name"
+  done
+  printf 'schema = 1\n' >"$scratch/clients.toml"
+  for name in milestone12-extension-probe.json milestone12-sdl-probe.json \
+    milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+    milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json \
+    milestone12-raw-little-registry.json milestone12-raw-big-registry.json \
+    milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
+    milestone12-sync-report.jsonl milestone12-renderer-summary.json \
+    milestone12-drm-damage-summary.json milestone12-sync-observation.json \
+    milestone12-kms-before.json milestone12-kms-after.json \
+    milestone12-vt-before.json milestone12-vt-after.json \
+    milestone12-getty-state.json milestone12-logind-state.json \
+    milestone12-frame-equivalence.json \
+    milestone12-software-testsprite-stability.json \
+    milestone12-gles-testsprite-stability.json \
+    milestone12-software-replay.json milestone12-gles-replay.json \
+    milestone12-extension-stress.json milestone12-software-trace.jsonl \
+    milestone12-noshm-trace.jsonl; do
+    printf '{}\n' >"$scratch/$name"
+  done
+  (cd "$scratch" && sha256sum ./* >SHA256SUMS && \
+    tar -cf "$destination" ./*)
+  rm -rf "$scratch"
+fi
 EOF
 
 cat >"$fake_bin/git" <<'EOF'
@@ -808,7 +910,16 @@ case " $* " in
       printf ' M tracked-source.cpp\n'
     fi
     ;;
-  *' rev-parse HEAD '*) printf '86dab3c000000000000000000000000000000000\n' ;;
+  *' rev-parse HEAD '*)
+    rev_parse_count=$(grep -Fc ' <rev-parse> <HEAD>' "$GW_VM_TEST_COMMAND_LOG")
+    if [[ ${GW_VM_TEST_HEAD_DRIFT_AFTER:-0} =~ ^[0-9]+$ &&
+          ${GW_VM_TEST_HEAD_DRIFT_AFTER:-0} -gt 0 &&
+          $rev_parse_count -gt ${GW_VM_TEST_HEAD_DRIFT_AFTER} ]]; then
+      printf '97eac4d000000000000000000000000000000000\n'
+    else
+      printf '86dab3c000000000000000000000000000000000\n'
+    fi
+    ;;
   *' merge-base --is-ancestor '*)
     [[ ${GW_VM_TEST_BAD_BASE:-0} != 1 ]]
     ;;
@@ -828,7 +939,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone11-interactive-rerun; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone11-interactive-rerun; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -882,7 +993,9 @@ assert_contains "$work_dir/scenario-m5-injection.out" 'Scenario names are fixed'
 run_failure "$work_dir/scenario-m6-injection.out" "$gw_vm" scenario 'milestone6-runtime-test;touch'
 run_failure "$work_dir/scenario-m7-injection.out" "$gw_vm" scenario 'milestone7-runtime-test;touch'
 run_failure "$work_dir/scenario-m11-injection.out" "$gw_vm" scenario 'milestone11-runtime-test;touch'
+run_failure "$work_dir/scenario-m12-injection.out" "$gw_vm" scenario 'milestone12-runtime-test;touch'
 assert_contains "$work_dir/scenario-m6-injection.out" 'Scenario names are fixed'
+assert_contains "$work_dir/scenario-m12-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset
@@ -1679,6 +1792,14 @@ assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
 assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   'result[source_layout]=passed' \
   'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'rm -rf -- "$default" "$build" "$asan" "$clang_build"' \
+  'rm -rf "$runtime"; meson setup "$runtime" "$source_dir"'
+assert_before "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'rm -rf -- "$default" "$build" "$asan" "$clang_build"' \
+  'write_interactive_ready_marker "$tested_commit" "$tested_commit"'
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'M11 runtime requires at least 2 GiB free in /var/tmp'
 
 : >"$command_log"
 run_failure "$work_dir/milestone11-bad-base.out" \
@@ -1838,6 +1959,337 @@ assert_contains "$command_log" 'milestone11-session-journal.log'
 run_failure "$work_dir/milestone11-bad-archive.out" \
   env GW_VM_TEST_BAD_M11_ARCHIVE=1 "$gw_vm" milestone11-runtime-test --yes
 assert_contains "$work_dir/milestone11-bad-archive.out" 'failed during: artifact-validation'
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-gate.out" "$gw_vm" milestone12-runtime-test
+assert_contains "$work_dir/milestone12-gate.out" \
+  "Action 'milestone12-runtime-test' requires --yes"
+[[ ! -s $command_log ]] || fail 'M12 approval gate reached a host transport command'
+
+run_failure "$work_dir/milestone12-wrapper-gate.out" \
+  "$repo_root/tools/gw-vm.d/scenarios/milestone12-runtime-test.sh"
+assert_contains "$work_dir/milestone12-wrapper-gate.out" \
+  "Action 'milestone12-runtime-test' requires --yes"
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-dirty.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-dirty.out" \
+  'requires committed source outside Plans/'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "source-evidence"'
+
+: >"$command_log"
+run_success "$work_dir/milestone12.out" \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12.out" \
+  'Milestone 12 VM runtime test passed.'
+assert_contains "$artifact_dir/milestone12-summary.json" '"passed": true'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"tested_commit": "86dab3c000000000000000000000000000000000"'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"renderer_equality": "passed"'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"evidence_errors": []'
+assert_file_glob "$artifact_dir/milestone12-efficient-sdl-evidence.tar"
+for artifact in milestone12-runtime-test.log milestone12-meson-test.log \
+  milestone12-source-layout.log milestone12-client-build.log \
+  milestone12-extension-probe.json milestone12-sdl-probe.json \
+  milestone12-extension-trace.json milestone12-renderer-software.jsonl \
+  milestone12-testdraw2-trace.json milestone12-testsprite2-trace.json \
+  milestone12-raw-little-registry.json milestone12-raw-big-registry.json \
+  milestone12-renderer-gles.jsonl milestone12-drm-damage-report.jsonl \
+  milestone12-sync-report.jsonl milestone12-renderer-summary.json \
+  milestone12-drm-damage-summary.json milestone12-sync-observation.json \
+  milestone12-kms-before.json milestone12-kms-after.json \
+  milestone12-vt-before.json milestone12-vt-after.json \
+  milestone12-getty-state.json milestone12-logind-state.json \
+  milestone12-frame-equivalence.json \
+  milestone12-software-testsprite-stability.json \
+  milestone12-gles-testsprite-stability.json \
+  milestone12-software-replay.json milestone12-gles-replay.json \
+  milestone12-extension-stress.json milestone12-software-trace.jsonl \
+  milestone12-noshm-trace.jsonl \
+  milestone12-glasswyrmd-journal.log milestone12-gwm-journal.log \
+  milestone12-gwcomp-journal.log milestone12-facts.env \
+  milestone12-summary.json milestone12-software.ppm milestone12-gles.ppm \
+  milestone12-fullscreen.ppm milestone12-screen.ppm \
+  milestone12-gles-screen.ppm milestone12-software-sdl-probe.ppm \
+  milestone12-gles-sdl-probe.ppm milestone12-software-fullscreen.ppm \
+  milestone12-gles-fullscreen.ppm milestone12-software-cursor.ppm \
+  milestone12-gles-cursor.ppm milestone12-software-testsprite.ppm \
+  milestone12-gles-testsprite.ppm milestone12-efficient-sdl-evidence.tar; do
+  [[ -f $artifact_dir/$artifact ]] ||
+    fail "milestone12 scenario did not create $artifact"
+done
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-artifact-collection.out" \
+  env GW_VM_TEST_FAIL_M12_ARTIFACT=milestone12-fullscreen.ppm \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-artifact-collection.out" \
+  'failed during: artifact-collection'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "artifact-collection"'
+assert_contains "$command_log" \
+  'milestone12-fullscreen.ppm'
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-guest-failure.out" \
+  env GW_VM_TEST_FAIL_MATCH='failure_stage=dependencies' \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$work_dir/milestone12-guest-failure.out" \
+  'failed during: guest-runtime'
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "guest-runtime"'
+assert_contains "$artifact_dir/milestone12-runtime-test.log" \
+  'injected guest failure for failure_stage=dependencies'
+
+: >"$command_log"
+run_failure "$work_dir/milestone12-head-drift.out" \
+  env GW_VM_TEST_HEAD_DRIFT_AFTER=3 \
+  "$gw_vm" milestone12-runtime-test --yes
+assert_contains "$artifact_dir/milestone12-summary.json" \
+  '"failure_stage": "source-identity-changed"'
+assert_contains "$artifact_dir/milestone12-summary.json" '"passed": false'
+
+m12_lib=$repo_root/tools/gw-vm.d/lib/milestone12.sh
+m12_guest_tail=$(bash -c 'source "$1"; milestone12_guest_script_tail' _ "$m12_lib")
+m12_match_function=$(awk '
+  /^capture_matching_mirror\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
+m12_finish_function=$(awk '
+  /^finish_profile\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
+m12_begin_function=$(awk '
+  /^begin_profile\(\)/ { capture = 1 }
+  capture { print }
+  capture && /^}$/ { exit }
+' <<<"$m12_guest_tail")
+m12_match_dir=$work_dir/m12-mirror-match
+mkdir -p "$m12_match_dir/dumps"
+printf 'captured-frame\n' >"$m12_match_dir/dumps/frame-000001.ppm"
+printf 'newer-frame\n' >"$m12_match_dir/dumps/frame-000002.ppm"
+printf 'captured-frame\n' >"$m12_match_dir/screen.ppm"
+run_success "$m12_match_dir/test.out" timeout 2 bash -c \
+  "$m12_match_function"$'\n''current_dump_root=$1; capture_matching_mirror "$2" "$3"' \
+  _ "$m12_match_dir/dumps" "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm"
+cmp "$m12_match_dir/screen.ppm" "$m12_match_dir/matched.ppm" ||
+  fail 'M12 retained-frame matcher did not preserve the captured frame'
+m12_finish_dir=$work_dir/m12-finish-profile
+mkdir -p "$m12_finish_dir/artifacts/software/live-control" \
+  "$m12_finish_dir/runtime" "$m12_finish_dir/dumps"
+printf 'visible-testsprite-frame\n' >"$m12_finish_dir/accepted.ppm"
+run_success "$m12_finish_dir/test.out" bash -c \
+  "$m12_finish_function"$'\n''
+current_resident=true
+current_name=software
+artifact_dir=$1/artifacts
+current_out=$artifact_dir/software
+current_runtime=$1/runtime
+current_dump_root=$1/dumps
+source_dir=$1/source
+current_workload_unit=workload.service
+current_server_unit=server.service
+current_gwcomp_unit=compositor.service
+current_gwm_unit=wm.service
+accepted_frame=$1/accepted.ppm
+wait_path() {
+  [[ -e $current_out/live-control/resident-release ]] || return 1
+  printf "post-release-blank-frame\\n" >"$accepted_frame"
+  : >"$current_out/m12-workloads.json"
+}
+python3() { return 0; }
+systemctl() { return 0; }
+sleep() { :; }
+finish_profile "$accepted_frame"' \
+  _ "$m12_finish_dir"
+printf 'visible-testsprite-frame\n' >"$m12_finish_dir/expected.ppm"
+cmp "$m12_finish_dir/expected.ppm" \
+  "$m12_finish_dir/artifacts/milestone12-software.ppm" ||
+  fail 'M12 finish profile replaced the accepted scene after resident release'
+[[ -e $m12_finish_dir/artifacts/software/live-control/resident-release ]] ||
+  fail 'M12 finish profile did not release resident workloads'
+run_failure "$m12_finish_dir/missing-frame.out" bash -c \
+  "$m12_finish_function"$'\n''
+current_resident=true
+current_name=software
+finish_profile' _
+assert_contains "$m12_finish_dir/missing-frame.out" \
+  'requires an accepted visible frame before release'
+m12_begin_dir=$work_dir/m12-begin-profile
+run_success "$m12_begin_dir.out" bash -c \
+  "$m12_begin_function"$'\n''
+set -euo pipefail
+artifact_dir=$1
+dumps=$1/dumps
+eventfd_live=4
+producer_eventfd_live=4
+consumer_eventfd_live=4
+shm_live=7
+systemctl() { return 0; }
+rm() { return 0; }
+mkdir() { return 0; }
+start_gwm() { return 0; }
+start_gwcomp() { return 0; }
+start_server() { return 0; }
+start_workload() { return 0; }
+resident_alive() { return 0; }
+count_eventfds() { printf "4\n"; }
+shm_count() { printf "7\n"; }
+begin_profile gles gles shm "$1/build" true
+[[ $eventfd_live == 4 && $producer_eventfd_live == 4 &&
+   $consumer_eventfd_live == 4 && $shm_live == 7 ]]' \
+  _ "$m12_begin_dir"
+for expected in ae6b6c93a29a1fb985dcea8455650d15c0fec364 \
+  /var/tmp/glasswyrm-build-m12 /var/tmp/glasswyrm-build-m12-asan \
+  /var/tmp/glasswyrm-build-m12-software /var/tmp/glasswyrm-build-m12-gles \
+  /var/tmp/glasswyrm-build-m12-default /var/tmp/glasswyrm-build-m12-components \
+  /var/tmp/glasswyrm-m12-clients \
+  /var/tmp/glasswyrm-m12-dumps /var/tmp/glasswyrm-m12-scenes \
+  /var/tmp/glasswyrm-m12-renderer /var/tmp/glasswyrm-m12-control \
+  /var/tmp/glasswyrm-m12-artifacts dev-libs/libinput \
+  x11-misc/xkeyboard-config 'media-libs/libglvnd X' \
+  'media-libs/mesa -llvm' 2.32.10 \
+  'systemctl --version' 'pkg-config --modversion gbm' \
+  5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 \
+  -Dexperimental=false -Drender_gl=false -Drender_gl=true \
+  '--game-compat' '--disable-extension' MIT-SHM run_workloads.py \
+  'StandardOutput=journal' 'StandardError=journal' \
+  m12_extension_stress_probe milestone12-extension-stress.json \
+  'done < <(find "$current_dump_root" -type f -name '\''*.ppm'\'' -print | sort -Vr)' \
+  'capture_matching_mirror "$artifact_dir/milestone12-screen.ppm"' \
+  'capture_matching_mirror "$artifact_dir/milestone12-gles-screen.ppm"' \
+  'run_live_replay_gates "$control/software-close.json"' \
+  'run_live_replay_gates "$control/gles-close.json"' \
+  'forced GLES replay did not rebuild its texture cache' \
+  "item.get('full_copy_reason')=='vt-resume'" \
+  "'post_vt_repaint':int(vt_after)>int(vt_before)" \
+  "'close_status_completed':close_status=='completed'" \
+  '--scenario pointer-anchor' \
+  'testsprite_alive' \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"' \
+  'wait_for_resident_scene' \
+  'capture_raised_sdl_probe software' \
+  'capture_raised_sdl_probe gles' \
+  'live-control/raise-window' 'live-control/raised-ready' \
+  'frames_after=$(wait_for_frame_progress "$frames_before")' \
+  "'pointer_anchor_completed':anchor_status=='completed'" \
+  "'post_anchor_repaint':int(anchor_after)>int(anchor_before)" \
+  'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"' \
+  'finish_profile "$artifact_dir/milestone12-gles-testsprite.ppm"' \
+  'assert_close_kept_vt' \
+  '[[ $(cat /sys/class/tty/tty0/active) == ${target_vt##*/} ]]' \
+  'fcntl.ioctl(fd,0x4B44,keyboard,True)' \
+  "'keyboard mode':(vb['keyboard'],va['keyboard'])" \
+  server-historical server-game gwcomp-software-headless gwcomp-software-drm \
+  gwcomp-gles-headless gwcomp-gles-drm components/session x11-misc/lightdm \
+  milestone12-software.ppm milestone12-gles.ppm milestone12-screen.ppm \
+  milestone12-gles-screen.ppm milestone12-software-replay.json \
+  milestone12-gles-replay.json milestone12-efficient-sdl-evidence.tar \
+  'script="$(milestone12_guest_script; milestone12_guest_script_tail)"'; do
+  assert_contains "$m12_lib" "$expected"
+done
+assert_contains "$m12_lib" \
+  'cp "$artifact_dir/milestone12-extension-trace.json" "$evidence/"'
+assert_not_contains "$m12_lib" 'milestone12-{extension-trace}.json'
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'run_live_replay_gates "$control/gles-close.json"'
+assert_before "$m12_lib" \
+  'begin_profile software software shm "$software" true' \
+  'capture_raised_sdl_probe software'
+assert_before "$m12_lib" \
+  'capture_raised_sdl_probe software' \
+  '--scenario basic-typing'
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'capture_raised_sdl_probe gles'
+assert_before "$m12_lib" \
+  'capture_raised_sdl_probe gles' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"'
+m12_sdl_probe=$repo_root/tests/compat/m12/m12_sdl_probe.c
+for expected in 'wait_for_marker(window, control, "raise-window")' \
+  'SDL_RaiseWindow(window)' 'wait_for_input_focus(window)' \
+  'write_marker(control, "raised-ready")' \
+  'wait_for_marker(window, control, "enter-fullscreen")' \
+  'SDL_WINDOW_INPUT_FOCUS'; do
+  assert_contains "$m12_sdl_probe" "$expected"
+done
+assert_before "$m12_sdl_probe" \
+  'wait_for_marker(window, control, "raise-window")' \
+  'SDL_RaiseWindow(window)'
+assert_before "$m12_sdl_probe" \
+  'SDL_RaiseWindow(window)' \
+  'wait_for_input_focus(window)'
+assert_before "$m12_sdl_probe" \
+  'wait_for_input_focus(window)' \
+  'write_marker(control, "raised-ready")'
+assert_before "$m12_sdl_probe" \
+  'write_marker(control, "raised-ready")' \
+  'wait_for_marker(window, control, "enter-fullscreen")'
+assert_before "$m12_lib" \
+  '--scenario pointer-anchor' \
+  'finish_profile "$artifact_dir/milestone12-software-testsprite.ppm"'
+assert_before "$m12_lib" \
+  '--scenario pointer-anchor --result-json "$result_json"' \
+  'grep -Fq '\''"status":"completed"'\'' "$result_json"'
+assert_before "$m12_lib" \
+  'grep -Fq '\''"status":"completed"'\'' "$result_json"' \
+  'wait_for_frame_progress "$frames_before" >/dev/null'
+assert_before "$m12_lib" \
+  'wait_for_frame_progress "$frames_before" >/dev/null' \
+  'settled_mirror "$current_dump_root" >/dev/null'
+assert_before "$m12_lib" \
+  'wait_path "$current_out/live-control/fullscreen-ready"' \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"'
+assert_before "$m12_lib" \
+  'anchor_pointer_for_capture "$control/software-fullscreen-anchor.json"' \
+  '>"$control/software-screen-ready"'
+assert_before "$m12_lib" \
+  'begin_profile gles gles shm "$gles" true' \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"'
+assert_before "$m12_lib" \
+  'anchor_pointer_for_capture "$control/gles-fullscreen-anchor.json"' \
+  '>"$control/gles-screen-ready"'
+assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
+  'https://www.libsdl.org/release/SDL2-2.32.10.tar.gz'
+assert_contains "$repo_root/tests/compat/m12/acquire_sdl.sh" \
+  '--retry-all-errors'
+assert_before "$m12_lib" \
+  'rm -rf -- "$default" "$asan" "${build}-clang" "$components"' \
+  'failure_stage=state-capture'
+assert_contains "$m12_lib" \
+  'M12 runtime requires at least 2 GiB free in /var/tmp'
+assert_before "$m12_lib" \
+  'emerge --oneshot --noreplace' \
+  'pkg-config --exists egl glesv2 gbm'
+assert_before "$m12_lib" \
+  'pkg-config --exists egl glesv2 gbm' \
+  'failure_stage=sdl-acquisition'
+assert_contains "$m12_lib" \
+  'after dependency installation'
+assert_contains "$m12_lib" \
+  'systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true'
+assert_contains "$m12_lib" \
+  'systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"'
+assert_before "$m12_lib" \
+  'systemctl stop "$current_workload_unit" >/dev/null 2>&1 || true' \
+  'systemctl stop "$current_server_unit" "$current_gwcomp_unit" "$current_gwm_unit"'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''glasswyrmd*'\'' --no-pager --quiet'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''gwm*'\'' --no-pager --quiet'
+assert_contains "$m12_lib" \
+  'journalctl --since "@$run_started" -u '\''gwcomp*'\'' --no-pager --quiet'
+assert_before "$m12_lib" \
+  'run_started=$(date +%s)' \
+  'systemd-run --unit=gw-uinput-m12.service'
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 

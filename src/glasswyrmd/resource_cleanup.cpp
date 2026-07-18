@@ -95,6 +95,8 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
     return;
   }
   const std::uint32_t parent_id = window->parent;
+  result.resources_destroyed += remove_damage_for_drawable(xid);
+  result.resources_destroyed += remove_pictures_for_drawable(xid);
   const std::size_t property_bytes = window_property_bytes(*window);
   const auto owner = find(xid)->owner;
   if (auto* parent = find_window(parent_id); parent != nullptr) {
@@ -212,6 +214,11 @@ CleanupResult ResourceTable::commit_client_cleanup(
       else if (find_gc(xid)) (void)free_gc(xid);
       else if (find_font(xid)) (void)close_font(xid);
       else if (find_cursor(xid)) (void)free_cursor(xid);
+      else if (find_colormap(xid)) (void)free_colormap(xid);
+      else if (find_shm_segment(xid)) (void)detach_shm_segment(xid);
+      else if (find_xfixes_region(xid)) (void)destroy_xfixes_region(xid);
+      else if (find_damage(xid)) (void)destroy_damage(xid);
+      else if (find_picture(xid)) (void)free_picture(xid);
       ++result.resources_destroyed;
     }
   }

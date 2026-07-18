@@ -81,7 +81,7 @@ DispatchResult alloc_color(const ServerState& state, const DispatchContext& cont
   if (!reader.read_u32(colormap) || !reader.read_u16(color.red) ||
       !reader.read_u16(color.green) || !reader.read_u16(color.blue) || !reader.skip(2))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  if (colormap != state.screen().default_colormap)
+  if (!state.resources().valid_colormap(colormap))
     return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
   color = quantize_color(color);
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
@@ -98,7 +98,7 @@ DispatchResult named_color(const ServerState& state, const DispatchContext& cont
   if (!reader.read_u32(colormap) || !reader.read_u16(name_length) || !reader.skip(2) ||
       !exact_size(request, 12 + padded_size(name_length)))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  if (colormap != state.screen().default_colormap)
+  if (!state.resources().valid_colormap(colormap))
     return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
   std::span<const std::uint8_t> name;
   if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
@@ -118,7 +118,7 @@ DispatchResult free_colors(const ServerState& state, const DispatchContext& cont
     return error(context, request, x11::CoreErrorCode::BadLength);
   x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
   if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
-  if (colormap != state.screen().default_colormap)
+  if (!state.resources().valid_colormap(colormap))
     return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
   return {};
 }
@@ -129,7 +129,7 @@ DispatchResult query_colors(const ServerState& state, const DispatchContext& con
     return error(context, request, x11::CoreErrorCode::BadLength);
   x11::ByteReader reader(request.body(), context.byte_order); std::uint32_t colormap{};
   if (!reader.read_u32(colormap)) return error(context, request, x11::CoreErrorCode::BadLength);
-  if (colormap != state.screen().default_colormap)
+  if (!state.resources().valid_colormap(colormap))
     return error(context, request, x11::CoreErrorCode::BadColormap, colormap);
   const auto count = (request.bytes.size() - 8) / 4;
   if (count > std::numeric_limits<std::uint16_t>::max()) return error(context, request, x11::CoreErrorCode::BadAlloc);

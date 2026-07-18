@@ -16,6 +16,7 @@ struct CompositorSnapshotSubmission {
   struct Buffer {
     gwipc_buffer_attach attach{};
     int fd{-1};
+    int synchronization_fd{-1};
   };
   struct Damage {
     std::uint64_t surface_id{};
@@ -50,7 +51,8 @@ class CompositorPeer {
 public:
   CompositorPeer(std::string path, gw::protocol::x11::ScreenModel screen,
                  bool software_content = false,
-                 bool session_state = false);
+                 bool session_state = false,
+                 bool cpu_buffer_synchronization = false);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -81,7 +83,6 @@ public:
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
   [[nodiscard]] PeerProcessOutcome drain(std::string &error);
-  void promote_replay_snapshot();
 
   PeerTransport transport_;
   gw::protocol::x11::ScreenModel screen_;

@@ -20,6 +20,10 @@ namespace glasswyrm::server::request_handlers {
 void add_window_damage(DispatchResult& result, const ResourceTable& resources,
                        std::uint32_t drawable,
                        geometry::Rectangle rectangle);
+void add_drawable_damage(DispatchResult& result, ServerState& state,
+                         std::uint32_t drawable,
+                         geometry::Rectangle rectangle,
+                         std::uint32_t timestamp);
 
 class ClipByChildrenGuard {
  public:

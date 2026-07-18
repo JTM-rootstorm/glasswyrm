@@ -315,6 +315,16 @@ CommitResult SceneModel::commit(const gwipc_frame_commit& frame) {
 
 void SceneModel::disconnect() { *this = {}; }
 
+std::vector<std::uint64_t> SceneModel::pending_damage_surface_ids() const {
+  std::vector<std::uint64_t> result;
+  result.reserve(explicit_damage_.size());
+  for (const auto& damage : explicit_damage_)
+    result.push_back(damage.surface_id);
+  std::ranges::sort(result);
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
+}
+
 std::vector<std::uint64_t> SceneModel::stacking_order() const {
   std::vector<const SurfaceUpsert*> surfaces;
   surfaces.reserve(committed_.surfaces.size());

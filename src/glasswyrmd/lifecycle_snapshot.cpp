@@ -17,16 +17,52 @@ LifecycleSnapshot build_lifecycle_snapshot(const ResourceTable& resources,
   for (const auto xid : root->children) {
     const auto* window = resources.find_window(xid);
     if (!window || !resources.is_policy_candidate(xid)) continue;
-    snapshot.windows.emplace(xid, LifecycleWindow{
-        xid, window->parent, window->window_class, window->requested_x,
-        window->requested_y, window->requested_width, window->requested_height,
-        window->requested_border_width, window->attributes.override_redirect,
-        window->map_requested, window->policy_visible, window->focused,
-        window->creation_serial, window->map_serial, window->focus_serial,
-        window->geometry_serial, window->stack_serial, window->stack_sibling,
-        window->stack_mode, window->x, window->y, -1, window->width,
-        window->height, 1, 1, !window->attributes.override_redirect,
-        !window->attributes.override_redirect, false, 1, 0});
+    LifecycleWindow item;
+    item.xid = xid;
+    item.parent = window->parent;
+    item.window_class = window->window_class;
+    item.requested_x = window->requested_x;
+    item.requested_y = window->requested_y;
+    item.requested_width = window->requested_width;
+    item.requested_height = window->requested_height;
+    item.requested_border_width = window->requested_border_width;
+    item.override_redirect = window->attributes.override_redirect;
+    item.map_requested = window->map_requested;
+    item.policy_visible = window->policy_visible;
+    item.focused = window->focused;
+    item.stacking = window->stacking;
+    item.creation_serial = window->creation_serial;
+    item.map_serial = window->map_serial;
+    item.focus_serial = window->focus_serial;
+    item.geometry_serial = window->geometry_serial;
+    item.stack_serial = window->stack_serial;
+    item.stack_sibling = window->stack_sibling;
+    item.stack_mode = window->stack_mode;
+    item.transient_for = window->transient_for;
+    item.policy_window_type = window->policy_window_type;
+    item.decoration_preference = window->decoration_preference;
+    item.fullscreen_requested = window->fullscreen_requested;
+    item.maximized_requested = window->maximized_requested;
+    item.above_requested = window->above_requested;
+    item.bypass_compositor = window->bypass_compositor;
+    item.attention_requested = window->attention_requested;
+    item.input_requested = window->input_requested;
+    item.minimum_width = window->minimum_width;
+    item.minimum_height = window->minimum_height;
+    item.maximum_width = window->maximum_width;
+    item.maximum_height = window->maximum_height;
+    item.saved_normal_geometry = window->saved_normal_geometry;
+    item.applied_x = window->x;
+    item.applied_y = window->y;
+    item.applied_width = window->width;
+    item.applied_height = window->height;
+    item.window_type = static_cast<std::uint8_t>(window->policy_window_type);
+    item.applied_state = 1;
+    item.managed = !window->attributes.override_redirect;
+    item.decoration_eligible = !window->attributes.override_redirect;
+    item.attention_requested = window->attention_requested;
+    item.fullscreen_eligible = 1;
+    snapshot.windows.emplace(xid, std::move(item));
   }
   return snapshot;
 }
@@ -70,6 +106,7 @@ bool apply_policy_state(ResourceTable& resources,
     window->height = static_cast<std::uint16_t>(item.height);
     window->policy_visible = item.visible;
     window->focused = item.focused;
+    window->stacking = item.stacking;
     if (window->map_requested && window->geometry_serial == 0) {
       window->requested_x = item.x; window->requested_y = item.y;
       window->requested_width = item.width; window->requested_height = item.height;

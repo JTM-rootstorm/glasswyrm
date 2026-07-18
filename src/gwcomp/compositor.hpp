@@ -6,6 +6,7 @@
 #include "compositor/buffer.hpp"
 #include "compositor/scene.hpp"
 #include "gwcomp/scene_manifest.hpp"
+#include "render/scene_renderer.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -18,6 +19,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace gw::compositor {
 
@@ -66,10 +68,14 @@ public:
   explicit Compositor(
       std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
       std::optional<std::filesystem::path> scene_manifest = std::nullopt,
-      PresentationTiming timing = {});
+      PresentationTiming timing = {},
+      std::unique_ptr<gw::render::SceneRenderer> renderer = nullptr);
   ~Compositor();
 
   void set_peer_profile(PeerProfile profile) noexcept { profile_ = profile; }
+  void set_cpu_buffer_synchronization(const bool enabled) noexcept {
+    cpu_buffer_synchronization_ = enabled;
+  }
   [[nodiscard]] PeerProfile peer_profile() const noexcept { return profile_; }
   [[nodiscard]] bool begin_snapshot();
   [[nodiscard]] bool end_snapshot();
@@ -81,7 +87,11 @@ public:
   [[nodiscard]] bool apply(const gwipc_surface_remove& value);
   [[nodiscard]] bool apply(const gwipc_surface_damage& value);
   [[nodiscard]] bool attach(const gwipc_buffer_attach& value, int fd,
-                            std::string& error);
+                            int synchronization_fd, std::string& error);
+  [[nodiscard]] bool attach(const gwipc_buffer_attach& value, int fd,
+                            std::string& error) {
+    return attach(value, fd, -1, error);
+  }
   [[nodiscard]] bool detach(const gwipc_buffer_detach& value);
   [[nodiscard]] PresentedFrame commit(const gwipc_frame_commit& value,
                                       std::string& error);
@@ -111,14 +121,23 @@ private:
   using MappingMap = std::map<std::uint64_t, Mapping>;
   using AttachmentMap = std::map<std::uint64_t, std::uint64_t>;
 
+  struct PendingBufferReadiness {
+    gwipc_frame_commit commit{};
+    std::vector<Mapping> mappings;
+    std::size_t next{};
+    PresentationTiming::Clock::time_point deadline;
+  };
+
   SceneModel scene_;
   MappingMap mappings_;
   AttachmentMap pending_attachments_;
   AttachmentMap committed_attachments_;
   AttachmentMap pre_snapshot_attachments_;
   glasswyrm::output::SoftwareFrame output_;
+  std::unique_ptr<gw::render::SceneRenderer> renderer_;
   std::unique_ptr<glasswyrm::output::PresentationBackend> presenter_;
   std::unique_ptr<PresentationTransaction> pending_presentation_;
+  std::optional<PendingBufferReadiness> pending_buffer_readiness_;
   PresentationTiming timing_;
   bool presentation_suspended_{};
   bool presentation_shutdown_{};
@@ -132,6 +151,7 @@ private:
   std::set<std::uint64_t> snapshot_surface_ids_;
   std::set<std::uint64_t> snapshot_policy_ids_;
   PeerProfile profile_{PeerProfile::M4TestProducer};
+  bool cpu_buffer_synchronization_{};
 };
 
 } // namespace gw::compositor

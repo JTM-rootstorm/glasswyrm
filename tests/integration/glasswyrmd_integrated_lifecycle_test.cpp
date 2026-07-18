@@ -84,6 +84,22 @@ std::vector<std::uint8_t> configure(gw::test::X11RequestBuilder &wire,
   return wire.raw(static_cast<std::uint8_t>(x11::CoreOpcode::ConfigureWindow),
                   0, body);
 }
+std::vector<std::uint8_t>
+configure_geometry(gw::test::X11RequestBuilder &wire, std::uint32_t window,
+                   x11::ByteOrder order) {
+  constexpr std::uint16_t mask = x11::ConfigureX | x11::ConfigureY |
+                                 x11::ConfigureWidth | x11::ConfigureHeight;
+  std::vector<std::uint8_t> body;
+  put32(body, window, order);
+  put16(body, mask, order);
+  put16(body, 0, order);
+  put32(body, 90, order);
+  put32(body, 100, order);
+  put32(body, 400, order);
+  put32(body, 260, order);
+  return wire.raw(static_cast<std::uint8_t>(x11::CoreOpcode::ConfigureWindow),
+                  0, body);
+}
 struct Session {
   gw::test::X11FakeClient client;
   gw::test::X11RequestBuilder wire;
@@ -159,7 +175,14 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
       "actual configure emits ConfigureNotify at the deferred sequence");
   session.sync(10);
 
-  auto no_op = configure(session.wire, first, second, order);
+  session.client.send_all(configure_geometry(session.wire, first, order));
+  event = session.packet();
+  gw::test::require(
+      event[0] == 22 && gw::test::read_wire_u16(event.data() + 2, order) == 11,
+      "geometry-only configure preserves prior stack policy state");
+  session.sync(12);
+
+  auto no_op = configure_geometry(session.wire, first, order);
   const auto focus_after_no_op_configure = session.wire.get_input_focus();
   no_op.insert(no_op.end(), focus_after_no_op_configure.begin(),
                focus_after_no_op_configure.end());
@@ -167,7 +190,7 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
   auto no_op_reply = session.packet();
   gw::test::require(
       no_op_reply[0] == 1 &&
-          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 12,
+          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 14,
       "no-op configure emits no event before exact-sequence focus reply");
 
   no_op =
@@ -179,14 +202,14 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
   no_op_reply = session.packet();
   gw::test::require(
       no_op_reply[0] == 1 &&
-          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 14,
+          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 16,
       "no-op map emits no event before exact-sequence focus reply");
   session.client.send_all(session.wire.get_geometry(first));
   auto reply = session.reply();
   gw::test::require(
       reply[0] == 1 &&
-          gw::test::read_wire_u16(reply.data() + 16, order) == 360 &&
-          gw::test::read_wire_u16(reply.data() + 18, order) == 240,
+          gw::test::read_wire_u16(reply.data() + 16, order) == 400 &&
+          gw::test::read_wire_u16(reply.data() + 18, order) == 260,
       "configured geometry is queryable");
   session.client.send_all(session.wire.get_window_attributes(first));
   gw::test::require(session.reply()[0] == 1, "mapped attributes are queryable");
@@ -202,9 +225,9 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
       window_request(session.wire, x11::CoreOpcode::UnmapWindow, first, order));
   event = session.packet();
   gw::test::require(
-      event[0] == 18 && gw::test::read_wire_u16(event.data() + 2, order) == 19,
+      event[0] == 18 && gw::test::read_wire_u16(event.data() + 2, order) == 21,
       "actual unmap emits UnmapNotify at the deferred request sequence");
-  session.sync(20);
+  session.sync(22);
 
   no_op =
       window_request(session.wire, x11::CoreOpcode::UnmapWindow, first, order);
@@ -215,7 +238,7 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
   no_op_reply = session.packet();
   gw::test::require(
       no_op_reply[0] == 1 &&
-          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 22,
+          gw::test::read_wire_u16(no_op_reply.data() + 2, order) == 24,
       "no-op unmap emits no event before exact-sequence focus reply");
   session.client.send_all(session.wire.query_tree(1));
   reply = session.reply();
@@ -226,7 +249,7 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
       session.wire, x11::CoreOpcode::DestroyWindow, first, order));
   event = session.packet();
   gw::test::require(
-      event[0] == 17 && gw::test::read_wire_u16(event.data() + 2, order) == 24,
+      event[0] == 17 && gw::test::read_wire_u16(event.data() + 2, order) == 26,
       "accepted top-level destroy emits DestroyNotify at its sequence");
   session.client.send_all(session.wire.query_tree(1));
   reply = session.reply();

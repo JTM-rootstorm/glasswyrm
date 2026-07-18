@@ -178,11 +178,13 @@ nonzero, opacity is at most 1.0, and all booleans/enums are known.
 
 `BufferAttach` (`0x0120`) carries buffer and surface IDs, dimensions, stride,
 byte offset, storage size, pixel format, modifier, alpha semantics, SDR color
-metadata, synchronization mode, and flags. It has exactly one descriptor.
-Wire 1.0 accepts linear XRGB8888 or premultiplied ARGB8888 with no explicit
-synchronization. Checked geometry must fit the declared storage; `fstat` must
-succeed and the descriptor must be suitable for mapping. M3 validates but does
-not map it.
+metadata, synchronization mode, and flags. Synchronization None has exactly one
+descriptor, the pixel buffer. Synchronization EventFd has exactly two: the
+pixel buffer followed by a nonblocking, close-on-exec eventfd. EventFd requires
+the API 0.7 CPU-buffer-synchronization capability; the payload layout and wire
+version are unchanged. Wire 1.0 accepts linear XRGB8888 or premultiplied
+ARGB8888. Checked geometry must fit the declared storage; `fstat` must succeed
+and the pixel descriptor must be suitable for mapping.
 
 `BufferDetach` (`0x0121`) carries `u64 surface_id, u64 buffer_id`.
 `BufferRelease` (`0x0122`) carries `u64 buffer_id`, `u16 reason`, zero `u16`

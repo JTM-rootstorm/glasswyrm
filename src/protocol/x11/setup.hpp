@@ -78,6 +78,7 @@ evaluate_setup_request(const SetupRequest &request) noexcept;
 struct SetupReplyConfig {
   std::uint32_t resource_id_base{0x00400000};
   std::uint32_t resource_id_mask{kScreenModel.resource_id_mask};
+  bool game_compat{false};
 };
 
 [[nodiscard]] std::vector<std::uint8_t>

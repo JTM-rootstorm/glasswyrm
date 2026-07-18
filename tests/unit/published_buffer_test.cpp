@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 int main() {
   using namespace glasswyrm::server;
@@ -21,6 +22,22 @@ int main() {
   const bool copied = words[6] == 0xff123456U;
   (void)::munmap(mapping, published->size());
   if (!copied) return 5;
+
+  auto synchronized = PublishedWindowBuffer::create(
+      2, 0x200002, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);
+  if (!synchronized || synchronized->synchronization_fd() < 0 ||
+      (::fcntl(synchronized->synchronization_fd(), F_GETFD) & FD_CLOEXEC) ==
+          0 ||
+      (::fcntl(synchronized->synchronization_fd(), F_GETFL) & O_NONBLOCK) ==
+          0 ||
+      !synchronized->signal_ready())
+    return 7;
+  std::uint64_t token = 0;
+  if (::read(synchronized->synchronization_fd(), &token, sizeof(token)) !=
+          static_cast<ssize_t>(sizeof(token)) ||
+      token != 1 || !synchronized->signal_ready() ||
+      !synchronized->retract_ready())
+    return 8;
 
   PublishedBufferStore store(96);
   if (!store.install(0x200001, std::move(published)) ||

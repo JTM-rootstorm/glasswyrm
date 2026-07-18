@@ -118,6 +118,36 @@ int main() {
                x11::CoreOpcode::Bell, 100));
     require(result.output.empty(), "Bell accepts the bounded audible range");
 
+    result = dispatch_request(
+        state, context,
+        finish(header(order, x11::CoreOpcode::ForceScreenSaver, 0, 1),
+               x11::CoreOpcode::ForceScreenSaver));
+    require(result.output.empty(),
+            "ForceScreenSaver reset is an accepted side-effect-free request");
+    result = dispatch_request(
+        state, context,
+        finish(header(order, x11::CoreOpcode::ForceScreenSaver, 1, 1),
+               x11::CoreOpcode::ForceScreenSaver, 1));
+    require(result.output.empty(),
+            "ForceScreenSaver active is an accepted side-effect-free request");
+    require_error(
+        dispatch_request(
+            state, context,
+            finish(header(order, x11::CoreOpcode::ForceScreenSaver, 2, 1),
+                   x11::CoreOpcode::ForceScreenSaver, 2)),
+        order, x11::CoreErrorCode::BadValue, 2,
+        "ForceScreenSaver rejects an invalid mode");
+    auto oversized_screen_saver =
+        header(order, x11::CoreOpcode::ForceScreenSaver, 0, 2);
+    oversized_screen_saver.write_u32(0);
+    require_error(
+        dispatch_request(
+            state, context,
+            finish(std::move(oversized_screen_saver),
+                   x11::CoreOpcode::ForceScreenSaver)),
+        order, x11::CoreErrorCode::BadLength, 0,
+        "ForceScreenSaver rejects an invalid request length");
+
     const auto pointer_request = [&](const std::uint8_t owner_events,
                                      const std::uint8_t pointer_mode,
                                      const std::uint8_t keyboard_mode) {

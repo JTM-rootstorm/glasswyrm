@@ -16,7 +16,8 @@ public:
                 gw::protocol::x11::ScreenModel screen,
                 std::chrono::milliseconds deadline = std::chrono::seconds(10),
                 bool software_content = false,
-                bool session_state = false);
+                bool session_state = false,
+                bool cpu_buffer_synchronization = false);
 
   void start(Clock::time_point now = Clock::now()) noexcept;
   [[nodiscard]] bool service(short policy_revents, short compositor_revents,

@@ -1,5 +1,6 @@
 #include "glasswyrmd/request_dispatcher.hpp"
 
+#include "glasswyrmd/extension_dispatcher.hpp"
 #include "glasswyrmd/request_handlers/common.hpp"
 #include "protocol/x11/core.hpp"
 
@@ -13,6 +14,8 @@ DispatchResult dispatch_request(ServerState& state,
                                 const DispatchContext& context,
                                 const x11::FramedRequest& request) {
   try {
+    if (request.opcode >= 128)
+      return dispatch_extension_request(state, context, request);
     switch (static_cast<x11::CoreOpcode>(request.opcode)) {
       case x11::CoreOpcode::CreateWindow:
         return create_window(state, context, request);
@@ -74,6 +77,10 @@ DispatchResult dispatch_request(ServerState& state,
         return query_pointer(state, context, request);
       case x11::CoreOpcode::TranslateCoordinates:
         return translate_coordinates(state, context, request);
+      case x11::CoreOpcode::WarpPointer:
+        return warp_pointer(state, context, request);
+      case x11::CoreOpcode::SetInputFocus:
+        return set_input_focus(state, context, request);
       case x11::CoreOpcode::QueryKeymap:
         return query_keymap(context, request);
       case x11::CoreOpcode::GetInputFocus:
@@ -90,6 +97,15 @@ DispatchResult dispatch_request(ServerState& state,
         return list_fonts(context, request);
       case x11::CoreOpcode::AllocColor:
         return alloc_color(state, context, request);
+      case x11::CoreOpcode::CreateColormap:
+        return create_colormap(state, context, request);
+      case x11::CoreOpcode::FreeColormap:
+        return free_colormap(state, context, request);
+      case x11::CoreOpcode::InstallColormap:
+      case x11::CoreOpcode::UninstallColormap:
+        return install_colormap(state, context, request);
+      case x11::CoreOpcode::ListInstalledColormaps:
+        return list_installed_colormaps(state, context, request);
       case x11::CoreOpcode::AllocNamedColor:
         return named_color(state, context, request, true);
       case x11::CoreOpcode::FreeColors:
@@ -120,6 +136,8 @@ DispatchResult dispatch_request(ServerState& state,
         return get_keyboard_control(state, context, request);
       case x11::CoreOpcode::Bell:
         return bell(context, request);
+      case x11::CoreOpcode::ForceScreenSaver:
+        return force_screen_saver(context, request);
       case x11::CoreOpcode::GetPointerMapping:
         return get_pointer_mapping(context, request);
       case x11::CoreOpcode::GetModifierMapping:

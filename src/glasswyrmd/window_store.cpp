@@ -7,6 +7,7 @@
 namespace glasswyrm::server {
 
 bool ResourceTable::is_policy_candidate(const std::uint32_t xid) const noexcept {
+  if (xid == 4) return false;
   const auto* window = find_window(xid);
   return window && window->parent == screen_.root_window &&
          window->window_class == WindowClass::InputOutput;

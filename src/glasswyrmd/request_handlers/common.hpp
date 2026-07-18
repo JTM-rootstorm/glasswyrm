@@ -80,6 +80,11 @@ namespace x11 = gw::protocol::x11;
 
 [[nodiscard]] DispatchResult query_tree(ServerState&, const DispatchContext&,
                                         const x11::FramedRequest&);
+[[nodiscard]] DispatchResult warp_pointer(ServerState&, const DispatchContext&,
+                                          const x11::FramedRequest&);
+[[nodiscard]] DispatchResult set_input_focus(ServerState&,
+                                             const DispatchContext&,
+                                             const x11::FramedRequest&);
 [[nodiscard]] DispatchResult intern_atom(ServerState&, const DispatchContext&,
                                          const x11::FramedRequest&);
 [[nodiscard]] DispatchResult get_atom_name(ServerState&, const DispatchContext&,
@@ -122,6 +127,8 @@ namespace x11 = gw::protocol::x11;
     const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult bell(
     const DispatchContext&, const x11::FramedRequest&);
+[[nodiscard]] DispatchResult force_screen_saver(
+    const DispatchContext&, const x11::FramedRequest&);
 
 [[nodiscard]] DispatchResult get_input_focus(const ServerState&,
                                              const DispatchContext&,
@@ -154,6 +161,17 @@ namespace x11 = gw::protocol::x11;
 [[nodiscard]] DispatchResult query_colors(const ServerState&,
                                           const DispatchContext&,
                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult create_colormap(ServerState&,
+                                             const DispatchContext&,
+                                             const x11::FramedRequest&);
+[[nodiscard]] DispatchResult free_colormap(ServerState&,
+                                           const DispatchContext&,
+                                           const x11::FramedRequest&);
+[[nodiscard]] DispatchResult install_colormap(const ServerState&,
+                                              const DispatchContext&,
+                                              const x11::FramedRequest&);
+[[nodiscard]] DispatchResult list_installed_colormaps(
+    const ServerState&, const DispatchContext&, const x11::FramedRequest&);
 [[nodiscard]] DispatchResult create_cursor(ServerState&, const DispatchContext&,
                                            const x11::FramedRequest&);
 [[nodiscard]] DispatchResult create_glyph_cursor(

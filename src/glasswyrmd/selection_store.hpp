@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -13,6 +14,23 @@ struct SelectionOwner {
   std::uint32_t last_change_time{0};
 
   [[nodiscard]] bool operator==(const SelectionOwner&) const noexcept = default;
+};
+
+struct XFixesSelectionSubscription {
+  std::uint64_t client{};
+  std::uint32_t window{};
+  std::uint32_t selection{};
+  std::uint32_t mask{};
+};
+
+struct XFixesSelectionNotification {
+  std::uint64_t client{};
+  std::uint8_t subtype{};
+  std::uint32_t window{};
+  std::uint32_t owner{};
+  std::uint32_t selection{};
+  std::uint32_t timestamp{};
+  std::uint32_t selection_timestamp{};
 };
 
 enum class SelectionOwnershipStatus {
@@ -57,6 +75,18 @@ class SelectionStore {
       std::uint32_t window) noexcept;
   [[nodiscard]] std::vector<std::uint32_t> clear_client(
       std::uint64_t client) noexcept;
+  [[nodiscard]] bool select_xfixes(std::uint64_t client,
+                                   std::uint32_t window,
+                                   std::uint32_t selection,
+                                   std::uint32_t mask);
+  [[nodiscard]] std::vector<XFixesSelectionNotification>
+  xfixes_notifications(std::uint32_t selection, std::uint8_t subtype,
+                       std::uint32_t owner, std::uint32_t timestamp,
+                       std::uint32_t selection_timestamp) const;
+  [[nodiscard]] std::vector<std::pair<std::uint32_t, SelectionOwner>>
+  owned_by_client(std::uint64_t client) const;
+  [[nodiscard]] std::vector<std::pair<std::uint32_t, SelectionOwner>>
+  owned_by_window(std::uint32_t window) const;
   [[nodiscard]] std::size_t size() const noexcept { return owners_.size(); }
 
  private:
@@ -64,6 +94,7 @@ class SelectionStore {
                                   std::uint32_t rhs) noexcept;
 
   std::unordered_map<std::uint32_t, SelectionOwner> owners_;
+  std::vector<XFixesSelectionSubscription> xfixes_subscriptions_;
 };
 
 }  // namespace glasswyrm::server

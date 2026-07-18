@@ -3,6 +3,8 @@
 #include "core/geometry/rectangle.hpp"
 #include "glasswyrmd/pixel_storage.hpp"
 
+#include <glasswyrm/ipc/contracts.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -22,7 +24,9 @@ class PublishedWindowBuffer {
  public:
   static std::unique_ptr<PublishedWindowBuffer> create(
       std::uint64_t buffer_id, std::uint32_t window_xid,
-      const PixelStorage& canonical);
+      const PixelStorage& canonical,
+      gwipc_synchronization_mode synchronization =
+          GWIPC_SYNCHRONIZATION_NONE);
 
   ~PublishedWindowBuffer();
   PublishedWindowBuffer(const PublishedWindowBuffer&) = delete;
@@ -37,6 +41,12 @@ class PublishedWindowBuffer {
   [[nodiscard]] std::uint32_t stride() const noexcept { return stride_; }
   [[nodiscard]] std::size_t size() const noexcept { return size_; }
   [[nodiscard]] int fd() const noexcept { return fd_; }
+  [[nodiscard]] int synchronization_fd() const noexcept {
+    return synchronization_fd_;
+  }
+  [[nodiscard]] gwipc_synchronization_mode synchronization() const noexcept {
+    return synchronization_;
+  }
   [[nodiscard]] bool announced() const noexcept { return announced_; }
   void set_announced(bool announced) noexcept { announced_ = announced; }
 
@@ -44,12 +54,16 @@ class PublishedWindowBuffer {
       const PixelStorage& canonical,
       std::span<const geometry::Rectangle> rectangles) noexcept;
   [[nodiscard]] bool copy_all_from(const PixelStorage& canonical) noexcept;
+  [[nodiscard]] bool signal_ready() noexcept;
+  [[nodiscard]] bool retract_ready() noexcept;
 
  private:
   PublishedWindowBuffer(std::uint64_t buffer_id, std::uint32_t window_xid,
                         std::uint32_t width, std::uint32_t height,
                         std::uint32_t stride, std::size_t size, int fd,
-                        void* mapping) noexcept;
+                        void* mapping,
+                        gwipc_synchronization_mode synchronization,
+                        int synchronization_fd) noexcept;
 
   std::uint64_t buffer_id_{};
   std::uint32_t window_xid_{};
@@ -59,6 +73,9 @@ class PublishedWindowBuffer {
   std::size_t size_{};
   int fd_{-1};
   void* mapping_{nullptr};
+  gwipc_synchronization_mode synchronization_{
+      GWIPC_SYNCHRONIZATION_NONE};
+  int synchronization_fd_{-1};
   bool announced_{};
 };
 

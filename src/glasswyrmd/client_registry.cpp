@@ -1,4 +1,5 @@
 #include "glasswyrmd/server.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -8,6 +9,19 @@
 #include <unistd.h>
 
 namespace glasswyrm::server {
+namespace {
+
+std::optional<std::uint32_t> unix_peer_uid(const int descriptor) noexcept {
+  struct ucred credentials {};
+  socklen_t size = sizeof(credentials);
+  if (::getsockopt(descriptor, SOL_SOCKET, SO_PEERCRED, &credentials, &size) <
+          0 ||
+      size != sizeof(credentials))
+    return std::nullopt;
+  return static_cast<std::uint32_t>(credentials.uid);
+}
+
+}  // namespace
 
 std::optional<std::uint32_t> Server::allocate_resource_base() const {
   constexpr std::uint64_t first_base = 0x00200000U;
@@ -45,7 +59,8 @@ void Server::accept_clients() {
           options_.integrated(), deferred_lifecycle_handler_,
           structural_transition_handler_, drawable_damage_handler_,
           expose_intent_handler_, trace_.get(), input_snapshot_provider_,
-          protocol_event_handler_));
+          protocol_event_handler_, &extensions_, options_.game_compat,
+          unix_peer_uid(descriptor)));
       std::fprintf(
           stderr, "glasswyrmd: accepted client %llu\n",
           static_cast<unsigned long long>(next_client_identifier_ - 1));
@@ -72,6 +87,19 @@ void Server::remove_closed_clients() {
                                 client->resource_id_base());
       return true;
     }
+    DispatchResult selection_notifications;
+    const auto logical_time = input_snapshot_provider_
+                                  ? input_snapshot_provider_().logical_time
+                                  : std::uint32_t{0};
+    for (const auto& [selection, owner] :
+         state_.selections().owned_by_client(client->identifier()))
+      append_xfixes_notifications(
+          selection_notifications,
+          state_.selections().xfixes_notifications(
+              selection, 2, 0, logical_time, owner.last_change_time));
+    if (!selection_notifications.protocol_events.empty() &&
+        protocol_event_handler_)
+      protocol_event_handler_(selection_notifications.protocol_events);
     const auto cleanup = state_.cleanup_client(client->identifier());
     if (cleanup.resources_destroyed != 0 ||
         cleanup.property_bytes_released != 0) {

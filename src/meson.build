@@ -46,19 +46,35 @@ gw_compositor_geometry_dep = declare_dependency(
   include_directories: [include_directories('.'), gw_include_dir],
 )
 
+gw_render_sources = files(
+  'render/renderer_factory.cpp',
+  'render/renderer_report.cpp',
+  'render/software/blend.cpp',
+  'render/software/renderer.cpp',
+  'render/software/scene_renderer.cpp',
+)
+gw_render_dependencies = [gw_compositor_geometry_dep]
+if get_option('render_gl')
+  gw_render_sources += files(
+    'render/gles/context.cpp',
+    'render/gles/scene_renderer.cpp',
+    'render/gles/scene_renderer_frame.cpp',
+  )
+  gw_render_dependencies += [egl_dep, glesv2_dep]
+  if gbm_dep.found()
+    gw_render_dependencies += gbm_dep
+  endif
+endif
 gw_render_software_lib = static_library(
   'gwcomp-render-software',
-  files(
-    'render/software/blend.cpp',
-    'render/software/renderer.cpp',
-  ),
-  dependencies: gw_compositor_geometry_dep,
-  include_directories: include_directories('.'),
+  gw_render_sources,
+  dependencies: gw_render_dependencies,
+  include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 gw_render_software_dep = declare_dependency(
   link_with: gw_render_software_lib,
-  dependencies: gw_compositor_geometry_dep,
-  include_directories: include_directories('.'),
+  dependencies: gw_render_dependencies,
+  include_directories: [include_directories('.'), gw_generated_include_dir],
 )
 
   gw_output_lib = static_library(
@@ -99,16 +115,19 @@ if get_option('drm_backend')
     files(
       'backends/drm/connector_name.cpp',
       'backends/drm/connector_selector.cpp',
+      'backends/drm/damage_copy.cpp',
       'backends/drm/dumb_buffer.cpp',
       'backends/drm/drm_report.cpp',
       'backends/drm/mode_selector.cpp',
       'backends/drm/pipeline_selector.cpp',
       'backends/drm/property_cache.cpp',
     ),
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
   gw_drm_model_dep = declare_dependency(
     link_with: gw_drm_model_lib,
+    dependencies: gw_compositor_geometry_dep,
     include_directories: include_directories('.'),
   )
 
@@ -150,6 +169,7 @@ if get_option('drm_backend')
     'gw-drm-presenter',
     files(
       'backends/drm/presenter.cpp',
+      'backends/drm/presenter_damage.cpp',
       'backends/drm/presenter_pipeline.cpp',
     ),
     dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
@@ -219,7 +239,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.6.0',
+    version: '0.7.0',
     soversion: '0',
     install: true,
   )
@@ -254,7 +274,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.6.0',
+    version: '0.7.0',
   )
 endif
 
@@ -289,6 +309,16 @@ if get_option('glasswyrmd')
       'glasswyrmd/drawable_store.cpp',
       'glasswyrmd/font_store.cpp',
       'glasswyrmd/cursor_store.cpp',
+      'glasswyrmd/colormap_store.cpp',
+      'glasswyrmd/shm_store.cpp',
+      'glasswyrmd/xfixes_region.cpp',
+      'glasswyrmd/xfixes_region_store.cpp',
+      'glasswyrmd/damage_store.cpp',
+      'glasswyrmd/picture.cpp',
+      'glasswyrmd/picture_store.cpp',
+      'glasswyrmd/render_ops.cpp',
+      'glasswyrmd/alpha_storage.cpp',
+      'glasswyrmd/composite_state.cpp',
       'glasswyrmd/property_store.cpp',
       'glasswyrmd/selection_store.cpp',
       'glasswyrmd/grab_state.cpp',
@@ -296,9 +326,27 @@ if get_option('glasswyrmd')
       'glasswyrmd/resource_invariants.cpp',
       'glasswyrmd/atom_table.cpp',
       'glasswyrmd/server_state.cpp',
+      'glasswyrmd/ewmh.cpp',
+      'glasswyrmd/ewmh_client_message.cpp',
+      'glasswyrmd/randr_state.cpp',
       'glasswyrmd/lifecycle_snapshot.cpp',
       'glasswyrmd/lifecycle_coordinator.cpp',
       'glasswyrmd/request_dispatcher.cpp',
+      'glasswyrmd/extension_registry.cpp',
+      'glasswyrmd/extension_dispatcher.cpp',
+      'glasswyrmd/extension_wire.cpp',
+      'glasswyrmd/extension_event_helpers.cpp',
+      'glasswyrmd/extensions/mit_shm.cpp',
+      'glasswyrmd/extensions/xfixes.cpp',
+      'glasswyrmd/extensions/damage.cpp',
+      'glasswyrmd/extensions/render.cpp',
+      'glasswyrmd/extensions/render_query.cpp',
+      'glasswyrmd/extensions/render_picture.cpp',
+      'glasswyrmd/extensions/render_raster.cpp',
+      'glasswyrmd/extensions/composite.cpp',
+      'glasswyrmd/extensions/randr.cpp',
+      'glasswyrmd/extensions/randr_screen.cpp',
+      'glasswyrmd/extensions/randr_crtc.cpp',
       'glasswyrmd/request_handlers/common.cpp',
       'glasswyrmd/request_handlers/drawable_access.cpp',
       'glasswyrmd/request_handlers/lifecycle.cpp',
@@ -314,6 +362,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/request_handlers/grab.cpp',
       'glasswyrmd/request_handlers/keyboard_control.cpp',
       'glasswyrmd/request_handlers/color.cpp',
+      'glasswyrmd/request_handlers/colormap.cpp',
       'glasswyrmd/request_handlers/cursor.cpp',
       'core/geometry/rectangle.cpp',
       'core/geometry/region.cpp',
@@ -354,6 +403,7 @@ if get_option('glasswyrmd')
     gw_server_core_sources += files(
       'glasswyrmd/peer_transport.cpp',
       'glasswyrmd/policy_peer.cpp',
+      'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
@@ -447,7 +497,9 @@ if get_option('gwcomp')
   endif
   gwcomp_options_sources = files(
     'gwcomp/options.cpp',
+    'gwcomp/renderer_runtime.cpp',
     'gwcomp/compositor.cpp',
+    'gwcomp/buffer_readiness.cpp',
     'gwcomp/scene_manifest.cpp',
     'gwcomp/runtime.cpp',
     'gwcomp/signal_runtime.cpp',

@@ -206,6 +206,7 @@ bool create_drm_presenter(
   config.api = presentation_api(options.drm_api);
   config.tty_path = options.tty.value_or("");
   config.vt_signals = {SIGUSR1, SIGUSR2};
+  config.damage_aware_copy = true;
   if (!backend->initialize(config, resources.vt_api.get(), error)) return false;
   if (!backend->fallback_reason().empty())
     std::fprintf(stderr, "gwcomp: atomic DRM fallback: %s\n",

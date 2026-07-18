@@ -125,6 +125,12 @@ void test_buffers_damage_and_frames() {
   require(decode(encode(attach), decoded_attach) == CodecStatus::Ok &&
               decoded_attach.storage_size == attach.storage_size,
           "BufferAttach validates and round trips covered storage geometry");
+  attach.synchronization = SynchronizationMode::EventFd;
+  require(decode(encode(attach), decoded_attach) == CodecStatus::Ok &&
+              decoded_attach.synchronization ==
+                  SynchronizationMode::EventFd,
+          "BufferAttach accepts additive eventfd synchronization metadata");
+  attach.synchronization = SynchronizationMode::None;
   attach.storage_size--;
   require(decode(encode(attach), decoded_attach) == CodecStatus::InvalidValue,
           "undersized buffer storage is rejected with checked geometry");

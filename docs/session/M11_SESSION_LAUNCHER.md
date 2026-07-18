@@ -6,6 +6,10 @@ Milestone 11 three-process desktop. It starts `gwm`, `gwcomp`, and
 client. The three runtime executables are resolved through `PATH` and are
 executed directly; the launcher never invokes a shell.
 
+Milestone 12 extends the same launcher with opt-in game-profile and renderer
+arguments. It does not create a second session mode or change device
+ownership, readiness, supervision, or shutdown semantics.
+
 The launcher is installed only when all three runtime components are enabled.
 It does not acquire devices, change ownership or permissions, or act as a
 session broker. Its caller must already be able to open the selected DRM
@@ -31,12 +35,28 @@ glasswyrm-session
   [--scene-manifest PATH]
   [--drm-report PATH]
   [--x11-trace PATH]
+  [--game-compat]
+  [--disable-extension NAME] ...
+  [--renderer software|gles|auto]
+  [--renderer-report PATH]
   [--client PROGRAM ARG...]
 ```
 
 `--client` consumes the remainder of the command line. Client arguments are
 preserved exactly, including whitespace and shell metacharacters. The client
 receives `DISPLAY=:N` while inheriting the launcher's remaining environment.
+
+The renderer defaults to `software`. `--renderer gles` is a forced selection
+and fails if the compositor build or EGL initialization cannot provide it;
+`auto` may select the documented fallback and records the reason when a report
+path is supplied. The renderer-report target must satisfy `gwcomp`'s secure
+new-file rules.
+
+`--game-compat` forwards the opt-in Milestone 12 server profile. Each
+`--disable-extension NAME` is forwarded in original order and is rejected
+without `--game-compat`. The server itself validates names against the static
+registry. These arguments require an experimental build; historical launcher
+invocations continue to start the software-content profile without extensions.
 
 For example:
 
@@ -58,6 +78,28 @@ glasswyrm-session \
   --client xterm -geometry 80x24+80+80
 ```
 
+An M12 software-renderer session uses the same device and process boundary:
+
+```sh
+glasswyrm-session \
+  --runtime-dir /run/glasswyrm \
+  --display 99 \
+  --drm-device /dev/dri/card0 \
+  --tty /dev/tty2 \
+  --connector Virtual-1 \
+  --mode 1024x768@60000 \
+  --input-device /dev/input/event4 \
+  --input-device /dev/input/event5 \
+  --game-compat \
+  --renderer software \
+  --renderer-report /var/tmp/glasswyrm-renderer.jsonl \
+  --client /path/to/m12_sdl_probe
+```
+
+The fixed acceptance harness also launches a forced-GLES session and a
+`--disable-extension MIT-SHM` fallback session. Those are evidence profiles,
+not a recommendation to disable extensions in ordinary development runs.
+
 ## Runtime and readiness
 
 The absolute runtime directory is created with mode `0700`. An existing
@@ -74,8 +116,8 @@ Startup proceeds only after each dependency exposes its socket:
 
 1. start `gwm`, then wait for `PATH/gwm.sock`;
 2. start DRM `gwcomp`, then wait for `PATH/gwcomp.sock`;
-3. start real-input, software-content `glasswyrmd`, then wait for
-   `/tmp/.X11-unix/XN`;
+3. start real-input, software-content `glasswyrmd` (with the game profile when
+   requested), then wait for `/tmp/.X11-unix/XN`;
 4. start the optional initial client.
 
 Each readiness wait has a ten-second monotonic deadline. A process exit,

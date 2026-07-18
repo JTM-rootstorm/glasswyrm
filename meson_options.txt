@@ -10,7 +10,7 @@ option('headless_backend', type: 'boolean', value: true, description: 'Build the
 option('drm_backend', type: 'boolean', value: false, description: 'Build the Linux DRM/KMS software-scanout backend.')
 option('libinput_backend', type: 'boolean', value: false, description: 'Build the Linux libinput path backend and libxkbcommon keyboard engine.')
 option('render_software', type: 'boolean', value: true, description: 'Build the scalar reference software renderer.')
-option('render_gl', type: 'boolean', value: false, description: 'Reserve the OpenGL renderer build path.')
+option('render_gl', type: 'boolean', value: false, description: 'Build the EGL/OpenGL ES compositor renderer.')
 option('render_vulkan', type: 'boolean', value: false, description: 'Reserve the Vulkan renderer build path.')
 option('asm', type: 'combo', choices: ['auto', 'enabled', 'disabled'], value: 'auto', description: 'Reserve control of optional x86_64 assembly paths.')
 option('asan', type: 'boolean', value: false, description: 'Enable AddressSanitizer.')

@@ -1,4 +1,6 @@
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/ewmh_client_message.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/event_mask.hpp"
@@ -61,6 +63,10 @@ DispatchResult set_selection_owner(ServerState& state,
     return error(context, request, x11::CoreErrorCode::BadAtom, selection);
 
   DispatchResult result;
+  append_xfixes_notifications(
+      result, state.selections().xfixes_notifications(
+                  selection, 0, owner, context.input.logical_time,
+                  change.effective_time));
   if (change.previous_owner &&
       (owner == 0 || change.previous_owner->client != context.client_id ||
        change.previous_owner->window != owner)) {
@@ -177,14 +183,32 @@ DispatchResult send_event(ServerState& state, const DispatchContext& context,
     return result;
   }
 
+  if (type == x11::CoreEventType::UnmapNotify) {
+    std::uint32_t event_window = 0, window = 0;
+    std::uint8_t from_configure = 0;
+    constexpr auto kWithdrawMask = x11::event_mask::SubstructureNotify |
+                                   x11::event_mask::SubstructureRedirect;
+    if (detail != 0 || request.data != 0 || event_mask != kWithdrawMask ||
+        !reader.read_u32(event_window) || !reader.read_u32(window) ||
+        !reader.read_u8(from_configure) || !reader.skip(19) ||
+        event_window != destination || from_configure != 0)
+      return error(context, request, x11::CoreErrorCode::BadValue,
+                   static_cast<std::uint32_t>(raw_type));
+    const auto* record = state.resources().find_window(window);
+    if (!record || record->parent != destination)
+      return error(context, request, x11::CoreErrorCode::BadWindow, window);
+    result.protocol_events.push_back(window_event(
+        destination, event_mask, false,
+        x11::UnmapNotifyEvent{event_window, window, false, true}));
+    return result;
+  }
+
   if (type != x11::CoreEventType::ClientMessage)
     return error(context, request, x11::CoreErrorCode::BadValue, raw_type);
 
   std::uint32_t window = 0, message_type = 0;
   if (!reader.read_u32(window) || !reader.read_u32(message_type))
     return error(context, request, x11::CoreErrorCode::BadLength);
-  if (window != destination)
-    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   if (!state.atoms().valid(message_type))
     return error(context, request, x11::CoreErrorCode::BadAtom, message_type);
 
@@ -213,6 +237,11 @@ DispatchResult send_event(ServerState& state, const DispatchContext& context,
   } else {
     return error(context, request, x11::CoreErrorCode::BadValue, detail);
   }
+  if (auto handled = handle_ewmh_client_message(
+          state, context, request, destination, event))
+    return std::move(*handled);
+  if (window != destination)
+    return error(context, request, x11::CoreErrorCode::BadWindow, window);
   result.protocol_events.push_back(window_event(
       destination, event_mask, request.data != 0, std::move(event)));
   return result;

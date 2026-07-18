@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "probe": "m12_sdl_probe",
+  "sdl_version": "2.32.10",
+  "video_driver": "x11",
+  "display_count": 1,
+  "display_mode": {"width": 1024, "height": 768},
+  "windowed_geometry": {"x": 0, "y": 0, "width": 640, "height": 480},
+  "checks": {
+    "initialized": true,
+    "x11_driver": true,
+    "display_mode": true,
+    "window_created": true,
+    "surface_updated": true,
+    "clipboard_round_trip": true,
+    "custom_cursor": true,
+    "fullscreen_entered": true,
+    "fullscreen_exited": true,
+    "geometry_restored": true,
+    "borderless": true,
+    "close_event": true
+  },
+  "passed": true,
+  "error": ""
+}

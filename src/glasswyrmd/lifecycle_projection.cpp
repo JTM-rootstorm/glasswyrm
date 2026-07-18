@@ -3,6 +3,19 @@
 #include <algorithm>
 
 namespace glasswyrm::server {
+namespace {
+
+std::uint32_t bounded_extent(const std::uint32_t requested,
+                             const std::uint32_t minimum,
+                             const std::uint32_t maximum) {
+  auto result = requested;
+  if (minimum != 0) result = std::max(result, minimum);
+  if (maximum != 0) result = std::min(result, maximum);
+  return result;
+}
+
+}  // namespace
+
 PolicySnapshotSubmission project_policy(const LifecycleSnapshot& snapshot,
                                         std::uint64_t commit,
                                         std::uint64_t generation) {
@@ -11,16 +24,34 @@ PolicySnapshotSubmission project_policy(const LifecycleSnapshot& snapshot,
     (void)id;
     gwipc_policy_lifecycle_window_upsert item{}; item.struct_size=sizeof(item);
     item.window.struct_size=sizeof(item.window); item.window.window_id=value.xid;
-    item.window.parent_window_id=value.parent; item.window.workspace_id=snapshot.workspace_id;
+    item.window.parent_window_id=value.parent; item.window.transient_for=value.transient_for;
+    item.window.workspace_id=snapshot.workspace_id;
     item.window.requested_x=value.requested_x; item.window.requested_y=value.requested_y;
-    item.window.requested_width=value.requested_width; item.window.requested_height=value.requested_height;
+    item.window.requested_width=bounded_extent(value.requested_width,value.minimum_width,value.maximum_width);
+    item.window.requested_height=bounded_extent(value.requested_height,value.minimum_height,value.maximum_height);
     item.window.border_width=value.requested_border_width;
-    item.window.window_type=GWIPC_POLICY_WINDOW_NORMAL;
+    item.window.window_type=static_cast<gwipc_policy_window_type>(value.policy_window_type);
     item.window.map_intent=value.map_requested?GWIPC_POLICY_WANTS_MAP:GWIPC_POLICY_UNMAPPED;
     item.window.override_redirect=value.override_redirect;
-    item.window.decoration_preference=GWIPC_TRI_STATE_UNKNOWN;
+    item.window.decoration_preference=static_cast<gwipc_tri_state>(value.decoration_preference);
+    item.window.fullscreen_requested=value.fullscreen_requested;
+    item.window.maximized_requested=value.maximized_requested;
+    item.window.attention_requested=value.attention_requested;
     item.window.creation_serial=value.creation_serial; item.window.map_serial=value.map_serial;
-    item.window.focus_serial=value.focus_serial; item.geometry_serial=value.geometry_serial;
+    item.window.focus_serial=value.focus_serial;
+    item.window.flags=
+        (value.above_requested
+             ? static_cast<std::uint32_t>(GWIPC_POLICY_WINDOW_FLAG_ABOVE)
+             : 0U)|
+        (value.bypass_compositor
+             ? static_cast<std::uint32_t>(
+                   GWIPC_POLICY_WINDOW_FLAG_BYPASS_COMPOSITOR)
+             : 0U)|
+        (!value.input_requested
+             ? static_cast<std::uint32_t>(
+                   GWIPC_POLICY_WINDOW_FLAG_INPUT_DISABLED)
+             : 0U);
+    item.geometry_serial=value.geometry_serial;
     item.stack_serial=value.stack_serial; item.stack_sibling=value.stack_sibling;
     item.stack_mode=static_cast<gwipc_policy_stack_mode>(value.stack_mode);
     output.windows.push_back(item);

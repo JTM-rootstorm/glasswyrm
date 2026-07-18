@@ -74,6 +74,9 @@ public:
     return keyboard_mapping_;
   }
   [[nodiscard]] bool set_global_auto_repeat(bool enabled) noexcept;
+  void warp_pointer(std::int32_t x, std::int32_t y) noexcept {
+    backend_.warp_pointer(x, y);
+  }
   [[nodiscard]] bool global_auto_repeat() const noexcept {
     return global_auto_repeat_;
   }

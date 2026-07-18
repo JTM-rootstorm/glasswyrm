@@ -1,9 +1,11 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 
+#include "glasswyrmd/extension_registry.hpp"
 #include "input/input_router.hpp"
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/reply.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +51,71 @@ DispatchResult get_input_focus(const ServerState& state,
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 0);
   reply.write_u32(state.focused_window());
   return {std::move(reply).finish()};
+}
+
+DispatchResult set_input_focus(ServerState& state,
+                               const DispatchContext& context,
+                               const x11::FramedRequest& request) {
+  if (!exact_size(request, 12))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 2)
+    return error(context, request, x11::CoreErrorCode::BadValue,
+                 request.data);
+
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t focus{}, time{};
+  if (!reader.read_u32(focus) || !reader.read_u32(time))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  // CurrentTime resolves to the server's logical input clock. Requests from
+  // the future are ignored, as required by the core protocol. The accepted
+  // SDL profile uses CurrentTime.
+  if (time != 0 &&
+      static_cast<std::int32_t>(time - context.input.logical_time) > 0)
+    return {};
+
+  // None (0) and PointerRoot (1) are protocol sentinels, not ordinary window
+  // IDs. The current GWM policy always selects one visible managed top-level,
+  // so these values can only be represented while focus is already at root.
+  if (focus == 0 || focus == 1) {
+    if (state.focused_window() == state.screen().root_window) return {};
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  }
+
+  const auto* window = state.resources().find_window(focus);
+  if (!window)
+    return error(context, request, x11::CoreErrorCode::BadWindow, focus);
+  if (window->map_state != MapState::Viewable)
+    return error(context, request, x11::CoreErrorCode::BadMatch, focus);
+  if (!state.resources().is_policy_candidate(focus) ||
+      window->cleanup_pending || window->attributes.override_redirect)
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  if (state.focused_window() == focus) return {};
+
+  auto snapshot = state.lifecycle_snapshot();
+  auto found = snapshot.windows.find(focus);
+  if (found == snapshot.windows.end())
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  if (context.integrated_lifecycle)
+    return DispatchResult::deferred_policy_change(
+        {found->second, std::nullopt, true});
+
+  const auto serial = state.next_lifecycle_serial();
+  if (!serial)
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
+  for (auto& [xid, candidate] : snapshot.windows) {
+    candidate.focused = xid == focus;
+  }
+  found = snapshot.windows.find(focus);
+  found->second.focus_serial = *serial;
+  snapshot.focused_window = focus;
+  if (!state.commit_lifecycle(snapshot))
+    return error(context, request, x11::CoreErrorCode::BadImplementation,
+                 focus);
+  return {};
 }
 
 std::uint32_t immediate_child_at(const ResourceTable& resources,
@@ -133,6 +200,98 @@ DispatchResult translate_coordinates(const ServerState& state,
   return {std::move(reply).finish()};
 }
 
+DispatchResult warp_pointer(ServerState& state,
+                            const DispatchContext& context,
+                            const x11::FramedRequest& request) {
+  if (!exact_size(request, 24))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  x11::ByteReader reader(request.body(), context.byte_order);
+  std::uint32_t source{}, destination{};
+  std::uint16_t source_x_wire{}, source_y_wire{}, source_width{},
+      source_height{}, destination_x_wire{}, destination_y_wire{};
+  if (!reader.read_u32(source) || !reader.read_u32(destination) ||
+      !reader.read_u16(source_x_wire) || !reader.read_u16(source_y_wire) ||
+      !reader.read_u16(source_width) || !reader.read_u16(source_height) ||
+      !reader.read_u16(destination_x_wire) ||
+      !reader.read_u16(destination_y_wire))
+    return error(context, request, x11::CoreErrorCode::BadLength);
+
+  const WindowResource* source_window = nullptr;
+  std::optional<std::pair<std::int64_t, std::int64_t>> source_origin;
+  if (source != 0) {
+    source_window = state.resources().find_window(source);
+    if (!source_window)
+      return error(context, request, x11::CoreErrorCode::BadWindow, source);
+    source_origin = glasswyrm::input::window_root_origin(state.resources(), source);
+    if (!source_origin)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+
+  std::optional<std::pair<std::int64_t, std::int64_t>> destination_origin;
+  if (destination != 0) {
+    if (!state.resources().find_window(destination))
+      return error(context, request, x11::CoreErrorCode::BadWindow,
+                   destination);
+    destination_origin =
+        glasswyrm::input::window_root_origin(state.resources(), destination);
+    if (!destination_origin)
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+  }
+
+  if (source_window) {
+    const auto window_x = static_cast<std::int64_t>(context.input.root_x) -
+                          source_origin->first;
+    const auto window_y = static_cast<std::int64_t>(context.input.root_y) -
+                          source_origin->second;
+    const auto source_x = static_cast<std::int16_t>(source_x_wire);
+    const auto source_y = static_cast<std::int16_t>(source_y_wire);
+    const auto source_right =
+        source_width == 0
+            ? static_cast<std::int64_t>(source_window->width)
+            : static_cast<std::int64_t>(source_x) + source_width;
+    const auto source_bottom =
+        source_height == 0
+            ? static_cast<std::int64_t>(source_window->height)
+            : static_cast<std::int64_t>(source_y) + source_height;
+    const bool inside_window =
+        window_x >= 0 && window_y >= 0 &&
+        window_x < static_cast<std::int64_t>(source_window->width) &&
+        window_y < static_cast<std::int64_t>(source_window->height);
+    const bool inside_rectangle = window_x >= source_x &&
+                                  window_y >= source_y &&
+                                  window_x < source_right &&
+                                  window_y < source_bottom;
+    if (!inside_window || !inside_rectangle)
+      return {};
+  }
+
+  const auto destination_x = static_cast<std::int16_t>(destination_x_wire);
+  const auto destination_y = static_cast<std::int16_t>(destination_y_wire);
+  const std::int64_t root_x =
+      destination_origin
+          ? static_cast<std::int64_t>(destination_origin->first) + destination_x
+          : static_cast<std::int64_t>(context.input.root_x) + destination_x;
+  const std::int64_t root_y =
+      destination_origin
+          ? static_cast<std::int64_t>(destination_origin->second) + destination_y
+          : static_cast<std::int64_t>(context.input.root_y) + destination_y;
+  const auto bounded_x = std::clamp(
+      root_x, static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()));
+  const auto bounded_y = std::clamp(
+      root_y, static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()),
+      static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()));
+  const auto [clamped_x, clamped_y] = glasswyrm::input::clamp_pointer(
+      static_cast<std::int32_t>(bounded_x),
+      static_cast<std::int32_t>(bounded_y), state.screen().width_pixels,
+      state.screen().height_pixels);
+  if (!context.input.warp_pointer ||
+      !context.input.warp_pointer(clamped_x, clamped_y))
+    return error(context, request, x11::CoreErrorCode::BadImplementation);
+  return {};
+}
+
 DispatchResult query_extension(const DispatchContext& context,
                                const x11::FramedRequest& request) {
   if (request.bytes.size() < 8) return error(context, request, x11::CoreErrorCode::BadLength);
@@ -144,14 +303,33 @@ DispatchResult query_extension(const DispatchContext& context,
   std::span<const std::uint8_t> name;
   if (!reader.read_bytes(name_length, name)) return error(context, request, x11::CoreErrorCode::BadLength);
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
-  reply.write_u8(0); reply.write_u8(0); reply.write_u8(0); reply.write_u8(0);
+  const auto extension_name = std::string_view(
+      reinterpret_cast<const char*>(name.data()), name.size());
+  const auto* extension = context.extensions
+                              ? context.extensions->query(extension_name)
+                              : nullptr;
+  reply.write_u8(extension ? 1 : 0);
+  reply.write_u8(extension ? extension->major_opcode : 0);
+  reply.write_u8(extension ? extension->first_event : 0);
+  reply.write_u8(extension ? extension->first_error : 0);
   return {std::move(reply).finish()};
 }
 
 DispatchResult list_extensions(const DispatchContext& context,
                                const x11::FramedRequest& request) {
   if (!exact_size(request, 4)) return error(context, request, x11::CoreErrorCode::BadLength);
-  return {std::move(x11::ReplyBuilder(context.byte_order, context.sequence, 0)).finish()};
+  const auto names = context.extensions ? context.extensions->enabled_names()
+                                        : std::vector<std::string_view>{};
+  x11::ReplyBuilder reply(context.byte_order, context.sequence,
+                          static_cast<std::uint8_t>(names.size()));
+  std::vector<std::uint8_t> payload;
+  for (const auto name : names) {
+    payload.push_back(static_cast<std::uint8_t>(name.size()));
+    payload.insert(payload.end(), name.begin(), name.end());
+  }
+  while ((payload.size() & 3U) != 0) payload.push_back(0);
+  reply.write_payload(payload);
+  return {std::move(reply).finish()};
 }
 
 std::uint32_t keysym_for(const std::uint8_t keycode, const bool shifted) {

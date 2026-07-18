@@ -9,7 +9,11 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+#include <array>
+#include <cstdio>
+#include <cstring>
 #include <utility>
 
 namespace gw::ipc {
@@ -114,12 +118,34 @@ gwipc_status validate_snapshot(SnapshotState& state, std::uint16_t type,
   return GWIPC_STATUS_OK;
 }
 
-gwipc_status validate_buffer_attach(std::span<const std::uint8_t> payload,
+bool is_eventfd(const int fd) noexcept {
+  std::array<char, 64> path{};
+  const int length = std::snprintf(path.data(), path.size(),
+                                   "/proc/self/fd/%d", fd);
+  if (length <= 0 || static_cast<std::size_t>(length) >= path.size())
+    return false;
+  std::array<char, 64> target{};
+  const auto count = ::readlink(path.data(), target.data(), target.size() - 1);
+  return count == static_cast<ssize_t>(std::strlen("anon_inode:[eventfd]")) &&
+         std::memcmp(target.data(), "anon_inode:[eventfd]",
+                     static_cast<std::size_t>(count)) == 0;
+}
+
+gwipc_status validate_buffer_attach(const gwipc_connection& connection,
+                                    std::span<const std::uint8_t> payload,
                                     std::span<const int> fds,
                                     wire::CodecStatus& codec) {
   wire::BufferAttach value;
   codec = wire::decode(payload, value);
-  if (codec != wire::CodecStatus::Ok || fds.size() != 1) return GWIPC_STATUS_OK;
+  if (codec != wire::CodecStatus::Ok) return GWIPC_STATUS_OK;
+  const bool synchronized =
+      value.synchronization == wire::SynchronizationMode::EventFd;
+  if (synchronized &&
+      (connection.peer.capabilities &
+       GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION) == 0)
+    return GWIPC_STATUS_CAPABILITY_MISMATCH;
+  const std::size_t expected_fds = synchronized ? 2U : 1U;
+  if (fds.size() != expected_fds) return GWIPC_STATUS_OK;
   struct stat status {};
   const int descriptor_flags = ::fcntl(fds[0], F_GETFL);
   if (descriptor_flags < 0 || (descriptor_flags & O_PATH) != 0 ||
@@ -128,6 +154,14 @@ gwipc_status validate_buffer_attach(std::span<const std::uint8_t> payload,
       status.st_size < 0 ||
       static_cast<std::uint64_t>(status.st_size) < value.storage_size)
     return GWIPC_STATUS_PROTOCOL_ERROR;
+  if (synchronized) {
+    const int status_flags = ::fcntl(fds[1], F_GETFL);
+    const int descriptor_status = ::fcntl(fds[1], F_GETFD);
+    if (status_flags < 0 || (status_flags & O_NONBLOCK) == 0 ||
+        descriptor_status < 0 || (descriptor_status & FD_CLOEXEC) == 0 ||
+        !is_eventfd(fds[1]))
+      return GWIPC_STATUS_PROTOCOL_ERROR;
+  }
   return GWIPC_STATUS_OK;
 }
 
@@ -199,7 +233,7 @@ gwipc_status validate_compositor(gwipc_connection& connection,
     }
     case GWIPC_MESSAGE_SURFACE_REMOVE: { wire::SurfaceRemove v; codec=wire::decode(payload,v); break; }
     case GWIPC_MESSAGE_BUFFER_ATTACH:
-      return validate_buffer_attach(payload, fds, codec);
+      return validate_buffer_attach(connection, payload, fds, codec);
     case GWIPC_MESSAGE_BUFFER_DETACH: { wire::BufferDetach v; codec=wire::decode(payload,v); break; }
     case GWIPC_MESSAGE_BUFFER_RELEASE: { wire::BufferRelease v; codec=wire::decode(payload,v); break; }
     case GWIPC_MESSAGE_SURFACE_DAMAGE: { wire::SurfaceDamage v; codec=wire::decode(payload,v); break; }
@@ -330,7 +364,14 @@ gwipc_status validate_application(gwipc_connection& connection,
   if (status != GWIPC_STATUS_OK) return status;
   if (codec != wire::CodecStatus::Ok) return GWIPC_STATUS_PROTOCOL_ERROR;
   if (type == GWIPC_MESSAGE_BUFFER_ATTACH) {
-    if (fds.size() != 1) return GWIPC_STATUS_PROTOCOL_ERROR;
+    wire::BufferAttach attachment;
+    if (wire::decode(payload, attachment) != wire::CodecStatus::Ok)
+      return GWIPC_STATUS_PROTOCOL_ERROR;
+    const std::size_t expected =
+        attachment.synchronization == wire::SynchronizationMode::EventFd
+            ? 2U
+            : 1U;
+    if (fds.size() != expected) return GWIPC_STATUS_PROTOCOL_ERROR;
   } else if (!fds.empty()) {
     return GWIPC_STATUS_PROTOCOL_ERROR;
   }

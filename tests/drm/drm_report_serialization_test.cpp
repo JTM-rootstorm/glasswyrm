@@ -8,6 +8,7 @@
 namespace {
 
 using glasswyrm::drm::DiscoveryReport;
+using glasswyrm::drm::DamageCopyReport;
 using glasswyrm::drm::DrmReportRecord;
 using glasswyrm::drm::FatalReport;
 using glasswyrm::drm::FlipReport;
@@ -91,6 +92,27 @@ int main() {
                  "\"master_owned\":true,\"full_modeset\":true,"
                  "\"committed_hash\":\"00000000000012ab\"}",
                  "stable VT acquire JSON");
+  DamageCopyReport copy;
+  copy.generation = 12;
+  copy.buffer_index = 1;
+  copy.framebuffer_id = 56;
+  copy.full_frame_bytes = 128;
+  copy.copied_bytes = 24;
+  copy.history_span = 2;
+  copy.cumulative_full_frame_bytes = 384;
+  copy.cumulative_copied_bytes = 280;
+  copy.rectangles = {{1, 2, 3, 2}};
+  require_record(
+      copy,
+      "{\"record\":\"damage-copy\",\"generation\":12,\"buffer\":1,"
+      "\"framebuffer_id\":56,\"full_frame_bytes\":128,"
+      "\"copied_bytes\":24,\"copy_rectangles\":[{\"x\":1,\"y\":2,"
+      "\"width\":3,\"height\":2}],\"history_span\":2,"
+      "\"full_copy_reason\":\"none\","
+      "\"cumulative_full_frame_bytes\":384,"
+      "\"cumulative_copied_bytes\":280,"
+      "\"cumulative_copy_ratio_ppm\":729166}",
+      "stable damage-copy JSON");
   require_record(RestoreReport{true, false, true, true},
                  "{\"record\":\"restore\",\"kms\":true,\"vt\":false,"
                  "\"master_drop\":true,\"framebuffer_cleanup\":true}",
