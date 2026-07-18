@@ -82,7 +82,7 @@ enum class OutputCapabilityFlags : std::uint32_t {
   None = 0,
   Connected = UINT32_C(1) << 0U,
   ArbitraryHeadlessMode = UINT32_C(1) << 1U,
-  ModeConfigurable = UINT32_C(1) << 2U,
+  ModeFixed = UINT32_C(1) << 2U,
   ScaleConfigurable = UINT32_C(1) << 3U,
   TransformConfigurable = UINT32_C(1) << 4U,
   PrimaryEligible = UINT32_C(1) << 5U,

@@ -173,6 +173,21 @@ int main() {
                "descriptor names are unique");
 
   changed = layout;
+  changed.descriptors.at(changed.output_order[0]).physical_width_mm = 300;
+  expect_error(std::move(changed), LayoutValidationError::InvalidDescriptor,
+               "physical dimensions are either fully known or absent");
+
+  changed = layout;
+  changed.descriptors.at(changed.output_order[0]).mode_configurable = false;
+  expect_error(std::move(changed), LayoutValidationError::InvalidDescriptor,
+               "arbitrary headless modes require mode configuration");
+
+  changed = layout;
+  changed.descriptors.at(changed.output_order[0]).kind = OutputKind::Drm;
+  expect_error(std::move(changed), LayoutValidationError::InvalidDescriptor,
+               "DRM descriptors cannot advertise arbitrary headless modes");
+
+  changed = layout;
   changed.states.at(changed.output_order[1]).logical_x = -1;
   expect_error(std::move(changed), LayoutValidationError::InvalidPosition,
                "enabled positions are nonnegative");

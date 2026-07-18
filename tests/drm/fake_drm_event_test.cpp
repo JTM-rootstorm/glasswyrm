@@ -23,7 +23,10 @@ glasswyrm::drm::DeviceSnapshot valid_snapshot() {
        {},
        false,
        1,
-       40});
+       40,
+       0,
+       0,
+       {}});
   return snapshot;
 }
 

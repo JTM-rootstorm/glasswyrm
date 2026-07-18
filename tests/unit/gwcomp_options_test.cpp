@@ -34,7 +34,64 @@ int main() {
             options, output, error) != ParseOptionsResult::Run ||
       options.ipc_socket != "/run/gw.sock" ||
       options.dump_dir != "/tmp/frames" || !options.once ||
-      options.max_frames != 12 || !output.empty() || !error.empty())
+      options.max_frames != 12 || !options.headless_outputs.empty() ||
+      !output.empty() || !error.empty())
+    return 1;
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "HEADLESS-LEFT",
+             "--headless-output", "AUX_2:800x600",
+             "--headless-output", "Game.3:1920x1080@59940"},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.headless_outputs.size() != 3 ||
+      options.headless_outputs[0] !=
+          glasswyrm::headless::OutputRequest{"HEADLESS-LEFT", 1024, 768,
+                                             60'000} ||
+      options.headless_outputs[1] !=
+          glasswyrm::headless::OutputRequest{"AUX_2", 800, 600, 60'000} ||
+      options.headless_outputs[2] !=
+          glasswyrm::headless::OutputRequest{"Game.3", 1920, 1080, 59'940} ||
+      !output.empty() || !error.empty())
+    return 1;
+
+  for (const auto* invalid :
+       {"", ":800x600", "-LEFT", "_LEFT", ".LEFT", "LEFT:",
+        "LEFT:800", "LEFT:x600", "LEFT:800x", "LEFT:0x600",
+        "LEFT:800x0", "LEFT:4097x1", "LEFT:4096x4096@",
+        "LEFT:4096x4096@0", "LEFT:1x1@4294967296", "LEFT:800x600:60",
+        "LEFT SCREEN", "L/SCREEN", "L\xC3\x89" "FT"}) {
+    options = {};
+    if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+               "/tmp/frames", "--headless-output", invalid},
+              options, output, error) != ParseOptionsResult::ExitFailure)
+      return 1;
+  }
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", std::string(64, 'A')},
+            options, output, error) != ParseOptionsResult::ExitFailure)
+    return 1;
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "LEFT",
+             "--headless-output", "LEFT:800x600"},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("names must be unique") == std::string::npos)
+    return 1;
+
+  options = {};
+  std::vector<std::string> too_many{"gwcomp", "--ipc-socket", "/run/gw.sock",
+                                    "--dump-dir", "/tmp/frames"};
+  for (int index = 1; index <= 9; ++index) {
+    too_many.push_back("--headless-output");
+    too_many.push_back("HEADLESS-" + std::to_string(index));
+  }
+  if (parse(std::move(too_many), options, output, error) !=
+          ParseOptionsResult::ExitFailure ||
+      error.find("at most 8") == std::string::npos)
     return 1;
 
   options = {};
@@ -83,6 +140,7 @@ int main() {
   if (parse({"gwcomp", "--help"}, options, output, error) !=
           ParseOptionsResult::ExitSuccess ||
       output.find("Usage: gwcomp") == std::string::npos ||
+      output.find("--headless-output") == std::string::npos ||
       output.find("--renderer software|gles|auto") == std::string::npos ||
       output.find("--renderer-report PATH") == std::string::npos)
     return 1;
@@ -142,6 +200,9 @@ int main() {
       {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
        "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
        "--dump-dir", "/tmp/frames"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+       "--headless-output", "HEADLESS-1"},
   };
   for (auto arguments : invalid_drm) {
     options = {};

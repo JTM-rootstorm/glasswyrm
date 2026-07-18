@@ -112,15 +112,16 @@ if get_option('headless_backend')
   gw_headless_lib = static_library(
     'gw-headless',
     files(
+      'backends/headless/inventory.cpp',
       'backends/headless/output.cpp',
       'backends/headless/presenter.cpp',
     ),
-    dependencies: gw_output_dep,
+    dependencies: [gw_output_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
   gw_headless_dep = declare_dependency(
     link_with: gw_headless_lib,
-    dependencies: gw_output_dep,
+    dependencies: [gw_output_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
 endif
@@ -134,16 +135,18 @@ if get_option('drm_backend')
       'backends/drm/damage_copy.cpp',
       'backends/drm/dumb_buffer.cpp',
       'backends/drm/drm_report.cpp',
+      'backends/drm/edid_digest.cpp',
+      'backends/drm/inventory.cpp',
       'backends/drm/mode_selector.cpp',
       'backends/drm/pipeline_selector.cpp',
       'backends/drm/property_cache.cpp',
     ),
-    dependencies: gw_compositor_geometry_dep,
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
   gw_drm_model_dep = declare_dependency(
     link_with: gw_drm_model_lib,
-    dependencies: gw_compositor_geometry_dep,
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
 
@@ -525,6 +528,7 @@ if get_option('gwcomp')
   endif
   gwcomp_options_sources = files(
     'gwcomp/options.cpp',
+    'gwcomp/output_inventory_publisher.cpp',
     'gwcomp/renderer_runtime.cpp',
     'gwcomp/compositor.cpp',
     'gwcomp/buffer_readiness.cpp',
@@ -543,12 +547,12 @@ if get_option('gwcomp')
     'gwcomp-options',
     gwcomp_options_sources,
     include_directories: [include_directories('.'), gw_generated_include_dir],
-    dependencies: [gwipc_dep, gw_compositor_geometry_dep,
+    dependencies: [gwipc_dep, gw_compositor_geometry_dep, gw_output_model_dep,
                    gw_render_software_dep] + gwcomp_backend_dependencies,
   )
   gwcomp_options_dep = declare_dependency(
     link_with: gwcomp_options_lib,
-    dependencies: [gwipc_dep, gw_compositor_geometry_dep,
+    dependencies: [gwipc_dep, gw_compositor_geometry_dep, gw_output_model_dep,
                    gw_render_software_dep] + gwcomp_backend_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )
