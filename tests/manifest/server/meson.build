@@ -346,4 +346,12 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('lifecycle-projection', lifecycle_projection_test, timeout: 10)
+  compositor_output_inventory_test = executable(
+    'compositor_output_inventory_test',
+    files(tests_source_dir / 'unit/compositor_output_inventory_test.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+  )
+  test('compositor-output-inventory', compositor_output_inventory_test,
+       timeout: 10)
 endif
