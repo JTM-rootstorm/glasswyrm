@@ -1,5 +1,6 @@
 #include "glasswyrmd/runtime_bridge.hpp"
 #include "glasswyrmd/cursor_presenter.hpp"
+#include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/output_scene_projection.hpp"
 #include "tests/helpers/test_support.hpp"
 
@@ -264,6 +265,26 @@ int main(int argc, char** argv) {
   output_bridge.clear_transaction_result();
   require(output_bridge.transaction_idle(),
           "second same-layout output-model frame commits independently");
+
+  auto changed_layout = *output_layout;
+  ++changed_layout.generation;
+  for (auto& [unused, state] : changed_layout.states) {
+    (void)unused;
+    state.generation = changed_layout.generation;
+  }
+  require(output_bridge.adopt_output_layout(changed_layout),
+          "output-model bridge adopts the next layout generation");
+  glasswyrm::server::LifecycleSnapshot empty_snapshot;
+  const auto changed_scene = glasswyrm::server::project_compositor(
+      empty_snapshot, 4, 4, true, &changed_layout);
+  require(output_bridge.submit_replay(changed_scene, error),
+          "layout change drops stale retained cursor membership");
+  drive_until(output_bridge,
+              [&] { return output_bridge.replay_result_ready(); },
+              "layout-change compositor frame timed out");
+  output_bridge.clear_transaction_result();
+  require(output_bridge.transaction_idle(),
+          "layout change without a stale cursor returns the bridge to idle");
   stop(output_compositor_process);
   stop(output_policy_process);
   return 0;
