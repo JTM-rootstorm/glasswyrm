@@ -32,6 +32,8 @@ class Presenter final : public output::PresentationBackend {
   }
 
  private:
+  [[nodiscard]] output::PresentResult present_frame_set(
+      const output::SoftwareFrameSetView& frames, bool record_frame_set);
   FrameDumper dumper_;
 };
 

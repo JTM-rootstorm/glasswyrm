@@ -163,6 +163,7 @@ void test_frame_set_bounds_and_historical_visible_hash() {
 
   glasswyrm::output::OutputFrameResult frame;
   frame.output = historical.spec(60'000);
+  frame.logical = {0, 0, 2, 2};
   frame.frame = historical;
   frame.damage = {{0, 0, 2, 2}};
   glasswyrm::output::SoftwareFrameSet set;
@@ -182,6 +183,7 @@ void test_frame_set_bounds_and_historical_visible_hash() {
     glasswyrm::output::OutputFrameResult item;
     require(item.frame.configure(id, 1, 1, error), error);
     item.output = item.frame.spec();
+    item.logical = {static_cast<std::int32_t>(id - 1U), 0, 1, 1};
     const bool appended = bounded.append(std::move(item), error);
     require(appended ==
                 (id <= glasswyrm::output::SoftwareFrameSet::kMaximumOutputs),

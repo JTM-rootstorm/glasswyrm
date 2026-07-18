@@ -170,6 +170,7 @@ void test_accelerated_metric_serialization(const std::filesystem::path& root) {
   result.fallback_reason = "frame-set fallback";
   glasswyrm::output::OutputFrameResult frame;
   frame.output = {1, 3, 3, 60'000};
+  frame.logical = {0, 0, 3, 3};
   frame.scale = {5, 4};
   frame.transform = glasswyrm::output::OutputTransform::Flipped270;
   gw::test::require(frame.frame.configure(1, 3, 3, error), error);

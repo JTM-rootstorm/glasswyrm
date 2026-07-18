@@ -363,6 +363,8 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
     rendered.output = {output_id, output.physical_pixel_width,
                        output.physical_pixel_height,
                        output.refresh_millihertz};
+    rendered.logical = {output.logical_x, output.logical_y,
+                        output.logical_width, output.logical_height};
     rendered.scale = {output.scale_numerator, output.scale_denominator};
     rendered.transform = static_cast<OutputTransform>(output.transform);
     if (!rendered.frame.configure(output_id, output.physical_pixel_width,
