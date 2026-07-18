@@ -44,6 +44,14 @@ records = [
      "event_type": 2, "window": 0x200001},
     {"direction": "event", "client": 7, "sequence": 3,
      "event_type": 2, "window": 0x200001},
+    {"direction": "event", "client": 7, "sequence": 3,
+     "event_type": 3, "window": 0x200001},
+    {"direction": "event", "client": 7, "sequence": 4,
+     "event_type": 14, "window": 0x200002},
+    {"direction": "event", "client": 8, "sequence": 1,
+     "event_type": 3, "window": 0x300001},
+    {"direction": "event", "client": 7, "sequence": 4,
+     "event_type": 14, "window": 0x200002},
     {"direction": "request", "client": 7, "sequence": 11, "opcode": 28,
      "name": "GrabButton", "length": 24, "outcome": "success",
      "error": None},
@@ -75,9 +83,11 @@ assert summary["recurring_requests"] == ["QueryPointer"]
 assert summary["extension_queries"] == ["XInputExtension", "OTHER"]
 assert summary["unknown_opcodes"] == [250]
 assert summary["trace_gated_requests"] == {"GrabButton": 1}
-assert summary["event_histogram"] == {"2": 2}
+assert summary["event_histogram"] == {"2": 2, "3": 2, "14": 2}
 assert summary["event_sequence"] == [
-    {"client": 7, "event_type": 2}, {"client": 7, "event_type": 2}]
+    {"client": 7, "event_type": 2}, {"client": 7, "event_type": 2},
+    {"client": 7, "event_type": 14}, {"client": 7, "event_type": 3},
+    {"client": 8, "event_type": 3}, {"client": 7, "event_type": 14}]
 assert summary["application_connection_count"] == 1
 assert summary["maximum_request_length"] == 40
 
