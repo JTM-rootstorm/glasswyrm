@@ -41,6 +41,14 @@ bool enqueue_contract(gwipc_connection* connection, const std::uint16_t type,
 }
 
 template <class T, class Encoder>
+bool encodable_contract(const T& value, Encoder encoder) {
+  gwipc_contract_payload* raw = nullptr;
+  const auto status = encoder(&value, &raw);
+  std::unique_ptr<gwipc_contract_payload, ContractDelete> payload(raw);
+  return status == GWIPC_STATUS_OK;
+}
+
+template <class T, class Encoder>
 bool enqueue_control(gwipc_connection* connection, const std::uint16_t type,
                      const T& value, Encoder encoder) {
   gwipc_control_payload* raw = nullptr;
@@ -97,8 +105,15 @@ void CompositorPeer::retain_cursor_records(
   };
   if (std::ranges::any_of(submission.surfaces, is_cursor)) return;
   const auto retained = std::ranges::find_if(replay_input_.surfaces, is_cursor);
-  if (retained != replay_input_.surfaces.end())
+  if (retained != replay_input_.surfaces.end()) {
     submission.surfaces.push_back(*retained);
+    const auto membership = std::ranges::find_if(
+        replay_input_.surface_outputs, [&](const auto& state) {
+          return state.state.surface_id == retained->surface_id;
+        });
+    if (membership != replay_input_.surface_outputs.end())
+      submission.surface_outputs.push_back(*membership);
+  }
 }
 
 bool CompositorPeer::validate_surface_membership_records(
@@ -106,17 +121,19 @@ bool CompositorPeer::validate_surface_membership_records(
   std::set<std::uint64_t> surface_ids;
   std::set<std::uint64_t> normal_surface_ids;
   std::set<std::uint64_t> policy_ids;
+  std::set<std::uint64_t> expected_membership_ids;
   std::size_t cursor_count = 0;
   for (const auto& surface : submission.surfaces) {
     const bool cursor =
         surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
     const bool valid_cursor =
         cursor && software_content_ && surface.x11_window_id == 0 &&
-        surface.parent_surface_id == 0 && surface.output_id == 1 &&
+        surface.parent_surface_id == 0 && surface.output_id != 0 &&
         surface.logical_width > 0 && surface.logical_width <= 64 &&
         surface.logical_height > 0 && surface.logical_height <= 64 &&
         surface.transform == GWIPC_TRANSFORM_NORMAL &&
-        surface.opacity == GWIPC_OPACITY_ONE && surface.scale_numerator == 1 &&
+        surface.opacity == GWIPC_OPACITY_ONE &&
+        surface.scale_numerator >= 1 && surface.scale_numerator <= 4 &&
         surface.scale_denominator == 1 &&
         surface.fullscreen_eligible == GWIPC_TRI_STATE_UNKNOWN &&
         surface.direct_scanout_eligible == GWIPC_TRI_STATE_UNKNOWN;
@@ -132,7 +149,11 @@ bool CompositorPeer::validate_surface_membership_records(
       error = "invalid metadata-only surface submission";
       return false;
     }
-    if (!cursor) normal_surface_ids.insert(surface.surface_id);
+    if (!cursor)
+      normal_surface_ids.insert(surface.surface_id);
+    if (surface.presentation_flags !=
+        GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
+      expected_membership_ids.insert(surface.surface_id);
   }
   for (const auto& policy : submission.policies)
     if (policy.surface_id == 0 || policy.x11_window_id == 0 ||
@@ -142,6 +163,25 @@ bool CompositorPeer::validate_surface_membership_records(
     }
   if (normal_surface_ids != policy_ids) {
     error = "surface and policy IDs do not match";
+    return false;
+  }
+  std::set<std::uint64_t> membership_ids;
+  for (const auto& membership : submission.surface_outputs) {
+    const auto& state = membership.state;
+    auto encoded_state = state;
+    encoded_state.output_ids = membership.output_ids.data();
+    encoded_state.output_count = membership.output_ids.size();
+    if (state.struct_size < sizeof(state) || state.surface_id == 0 ||
+        !membership_ids.insert(state.surface_id).second ||
+        !encodable_contract(encoded_state,
+                            gwipc_contract_encode_surface_output_state)) {
+      error = "invalid surface output membership submission";
+      return false;
+    }
+  }
+  if (output_model_ ? membership_ids != expected_membership_ids
+                    : !membership_ids.empty()) {
+    error = "surface output membership IDs do not match surfaces";
     return false;
   }
   return true;
@@ -205,29 +245,42 @@ bool CompositorPeer::enqueue_output_records(
                              submission.generation,
                              item_count,
                              {}};
-  gwipc_output_upsert output{};
-  output.struct_size = sizeof(output);
-  output.output_id = 1;
-  output.enabled = 1;
-  output.logical_width = screen_.width_pixels;
-  output.logical_height = screen_.height_pixels;
-  output.physical_pixel_width = screen_.width_pixels;
-  output.physical_pixel_height = screen_.height_pixels;
-  output.refresh_millihertz = 60000;
-  output.scale_numerator = 1;
-  output.scale_denominator = 1;
-  output.transform = GWIPC_TRANSFORM_NORMAL;
-  output.color.color_space = GWIPC_SDR_COLOR_SPACE_SRGB;
-  output.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
-  output.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
   auto* connection = transport_.connection();
   if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
-                       gwipc_control_encode_snapshot_begin) ||
-      !enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
-                        GWIPC_FLAG_SNAPSHOT_ITEM, output,
-                        gwipc_contract_encode_output_upsert)) {
+                       gwipc_control_encode_snapshot_begin)) {
     error = "could not queue compositor snapshot header";
     return false;
+  }
+  if (output_model_) {
+    for (const auto& output : submission.outputs)
+      if (!enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
+                            GWIPC_FLAG_SNAPSHOT_ITEM, output,
+                            gwipc_contract_encode_output_upsert)) {
+        error = "could not queue compositor output map";
+        return false;
+      }
+  } else {
+    gwipc_output_upsert output{};
+    output.struct_size = sizeof(output);
+    output.output_id = 1;
+    output.enabled = 1;
+    output.logical_width = screen_.width_pixels;
+    output.logical_height = screen_.height_pixels;
+    output.physical_pixel_width = screen_.width_pixels;
+    output.physical_pixel_height = screen_.height_pixels;
+    output.refresh_millihertz = 60000;
+    output.scale_numerator = 1;
+    output.scale_denominator = 1;
+    output.transform = GWIPC_TRANSFORM_NORMAL;
+    output.color.color_space = GWIPC_SDR_COLOR_SPACE_SRGB;
+    output.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
+    output.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, output,
+                          gwipc_contract_encode_output_upsert)) {
+      error = "could not queue compositor snapshot header";
+      return false;
+    }
   }
   return true;
 }
@@ -249,6 +302,17 @@ bool CompositorPeer::enqueue_surface_membership_records(
       error = "could not queue surface policy submission";
       return false;
     }
+  for (const auto& membership : submission.surface_outputs) {
+    auto state = membership.state;
+    state.output_ids = membership.output_ids.data();
+    state.output_count = membership.output_ids.size();
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_OUTPUT_STATE,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, state,
+                          gwipc_contract_encode_surface_output_state)) {
+      error = "could not queue surface output membership";
+      return false;
+    }
+  }
   return true;
 }
 
@@ -285,7 +349,7 @@ bool CompositorPeer::enqueue_snapshot_completion_records(
   gwipc_frame_commit commit{};
   commit.struct_size = sizeof(commit);
   commit.commit_id = submission.commit_id;
-  commit.output_id = 1;
+  commit.output_id = output_model_ ? 0 : 1;
   commit.producer_generation = submission.generation;
   auto* connection = transport_.connection();
   if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
@@ -311,20 +375,48 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission& submission,
     error = "compositor peer is not ready for a complete metadata snapshot";
     return false;
   }
+  if (output_model_) {
+    if (!output_layout_ || complete.outputs.empty() ||
+        complete.outputs.size() != output_layout_->descriptors.size()) {
+      error = "output-model snapshot does not contain the complete output map";
+      return false;
+    }
+    std::set<std::uint64_t> output_ids;
+    for (const auto& output_record : complete.outputs)
+      if (output_record.struct_size < sizeof(output_record) ||
+          output_record.output_id == 0 ||
+          !output_layout_->descriptors.contains(
+              glasswyrm::output::OutputId{output_record.output_id}) ||
+          !encodable_contract(output_record,
+                              gwipc_contract_encode_output_upsert) ||
+          !output_ids.insert(output_record.output_id).second) {
+        error = "output-model snapshot contains an invalid output map";
+        return false;
+      }
+  } else if (!complete.outputs.empty() || !complete.surface_outputs.empty()) {
+    error = "historical compositor snapshot contains output-model records";
+    return false;
+  }
   if (!validate_surface_membership_records(complete, error) ||
       !validate_buffer_damage_records(complete, error) ||
       !compositor_buffer_replay::rearm_snapshot(complete, replay_input_,
                                                 error) ||
       !validate_surface_policy_links(complete, error))
     return false;
+  const auto output_count = output_model_ ? complete.outputs.size() : 1U;
   const auto item_count = static_cast<std::uint32_t>(
-      1 + complete.surfaces.size() + complete.policies.size() +
+      output_count + complete.surfaces.size() + complete.policies.size() +
+      complete.surface_outputs.size() +
       complete.buffers.size() + complete.damages.size());
   if (!enqueue_output_records(complete, item_count, error) ||
       !enqueue_surface_membership_records(complete, error) ||
       !enqueue_buffer_damage_records(complete, error) ||
       !enqueue_snapshot_completion_records(complete, item_count, error))
     return false;
+  for (auto& membership : complete.surface_outputs) {
+    membership.state.output_ids = nullptr;
+    membership.state.output_count = membership.output_ids.size();
+  }
   pending_ = std::move(complete);
   content_submission_ = false;
   state_ = PeerBootstrapState::AwaitingReply;
@@ -384,7 +476,7 @@ bool CompositorPeer::submit_content(
   gwipc_frame_commit commit{};
   commit.struct_size = sizeof(commit);
   commit.commit_id = submission.commit_id;
-  commit.output_id = 1;
+  commit.output_id = output_model_ ? 0 : 1;
   commit.producer_generation = submission.generation;
   if (!enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
                         GWIPC_FLAG_ACK_REQUIRED, commit,

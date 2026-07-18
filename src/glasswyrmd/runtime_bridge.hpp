@@ -109,6 +109,7 @@ private:
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
   bool output_model_{};
+  bool output_scene_submitted_{};
   bool recovering_{};
   bool compositor_reset_{};
 };

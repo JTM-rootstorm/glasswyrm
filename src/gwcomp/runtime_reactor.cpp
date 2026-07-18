@@ -269,6 +269,23 @@ void RuntimeReactor::validate_producer() {
     peer_role_ = GWIPC_ROLE_UNKNOWN;
     return;
   }
+  const auto scene_profile =
+      negotiated_output_model == kOutputModelCapabilities
+          ? gw::compositor::SceneProfile::OutputModel
+          : gw::compositor::SceneProfile::Historical;
+  const auto primary_output_id =
+      scene_profile == gw::compositor::SceneProfile::OutputModel
+          ? output_inventory_.layout().primary_output_id.value
+          : 0;
+  if (!compositor_.configure_scene_profile(scene_profile, primary_output_id)) {
+    std::fprintf(stderr,
+                 "gwcomp: could not configure negotiated scene profile\n");
+    compositor_.disconnect();
+    producer_.reset();
+    peer_role_ = GWIPC_ROLE_UNKNOWN;
+    peer_profile_.reset();
+    return;
+  }
   compositor_.set_peer_profile(*peer_profile_);
   compositor_.set_cpu_buffer_synchronization(
       (info.capabilities & GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION) != 0);
