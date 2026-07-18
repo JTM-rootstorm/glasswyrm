@@ -15,6 +15,7 @@ import tempfile
 import validate_frame_sets
 
 
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
 SOURCE_MAP = {
     "output-inventory.json": "milestone13-output-inventory.json",
     "layout-before.json": "milestone13-layout-before.json",
@@ -86,7 +87,10 @@ def write_sources(evidence: pathlib.Path) -> None:
                               "root_height": 480},
         "gwinfo-outputs.json": {"layout_generation": 4, "outputs": [{}, {}]},
         "gwinfo-windows.json": {"layout_generation": 4, "windows": []},
-        "gwout-result.json": {"result": 0, "applied_generation": 4},
+        "gwout-result.json": {
+            "result": GWIPC_OUTPUT_CONFIGURATION_ACCEPTED,
+            "applied_generation": 4,
+        },
         "renderer-fractional-diff.json": {
             "passed": True, "maximum_channel_difference": 1},
         "scale-client-result.json": {

@@ -13,6 +13,7 @@ import tarfile
 import tempfile
 
 
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
 REQUIRED = (
     "historical_default strict_software strict_gles sanitizer component_builds "
     "source_layout api_consumers m1_m12_regressions output_inventory "
@@ -80,6 +81,14 @@ def write_artifacts(root: pathlib.Path, validator) -> str:
             "layout_generation": 3, "root_width": 1440, "root_height": 600},
         "milestone13-layout-after.json": {
             "layout_generation": 4, "root_width": 1280, "root_height": 480},
+        "milestone13-gwout-result.json": {
+            "result": GWIPC_OUTPUT_CONFIGURATION_ACCEPTED,
+            "applied_generation": 4,
+        },
+        "milestone13-gwinfo-outputs.json": {
+            "layout_generation": 4, "outputs": [{}, {}]},
+        "milestone13-gwinfo-windows.json": {
+            "layout_generation": 4, "windows": []},
         "milestone13-scale-client.json": {
             "schema": "glasswyrm.m13-scale-client.v1",
             "logical_geometry": {"width": 320, "height": 240},
@@ -199,6 +208,19 @@ with tempfile.TemporaryDirectory() as name:
     accepted = json.loads(summary.read_text())
     assert accepted["passed"] is True
     assert accepted["evidence_errors"] == []
+
+    gwout = root / "milestone13-gwout-result.json"
+    gwout.write_text(json.dumps({"result": 0, "applied_generation": 4}) + "\n")
+    rejected_run = subprocess.run(command, text=True, capture_output=True,
+                                  check=False)
+    assert rejected_run.returncode == 2
+    rejected = json.loads(summary.read_text())
+    assert any("gwout-result.json is not an accepted commit" in error
+               for error in rejected["evidence_errors"])
+    gwout.write_text(json.dumps({
+        "result": GWIPC_OUTPUT_CONFIGURATION_ACCEPTED,
+        "applied_generation": 4,
+    }) + "\n")
 
     write_facts(facts, "fractional_scaling")
     facts.write_text(facts.read_text().replace(

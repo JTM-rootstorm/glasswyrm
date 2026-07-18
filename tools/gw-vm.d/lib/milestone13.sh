@@ -8,6 +8,7 @@ M13_REQUIRED_BASE_COMMIT=d3440d3b8df1533410a9a2c4be46f2eea0cfb88d
 M13_GUEST_ARTIFACT_DIR=/var/tmp/glasswyrm-m13-artifacts
 M13_GUEST_CONTROL_DIR=/var/tmp/glasswyrm-m13-control
 M13_SCREENSHOT_WAIT_SECONDS=1800
+M13_GUEST_EXITED_BEFORE_SCREENSHOT=2
 M13_TESTED_COMMIT=
 M13_TEXT_ARTIFACTS=(
   milestone13-runtime-test.log milestone13-meson-test.log
@@ -385,10 +386,12 @@ python3 - "$artifact_dir/milestone13-gwinfo-outputs.json" \
   "$artifact_dir/milestone13-gwout-result.json" <<'PY'
 import json,sys
 outputs,windows,commit=(json.load(open(path)) for path in sys.argv[1:])
+GWIPC_OUTPUT_CONFIGURATION_ACCEPTED=1
 assert [item['name'] for item in outputs['outputs']]==['LEFT','RIGHT']
 assert len({item['id'] for item in outputs['outputs']})==2
 assert windows['windows']==[]
-assert commit['result']==0 and commit['applied_generation']>0
+assert (commit['result']==GWIPC_OUTPUT_CONFIGURATION_ACCEPTED
+        and commit['applied_generation']>0)
 assert (commit['root_width'],commit['root_height'])==(1280,480)
 assert commit['enabled_output_count']==2
 PY
@@ -1171,7 +1174,11 @@ milestone13_poll_marker() {
       grep -Fxq ready <<<"$output" && grep -Fxq mode=1024x768 <<<"$output"; then
       return 0
     fi
-    kill -0 "$guest_pid" 2>/dev/null || return 1
+    if ! kill -0 "$guest_pid" 2>/dev/null; then
+      printf 'M13 guest runtime exited before screenshot marker %s.\n' \
+        "$marker" >&2
+      return "$M13_GUEST_EXITED_BEFORE_SCREENSHOT"
+    fi
     sleep .1
   done
   printf 'Timed out waiting for M13 screenshot marker.\n' >&2
@@ -1193,15 +1200,25 @@ milestone13_capture_screen() {
 }
 
 collect_milestone13_artifacts() {
-  local name failed=0
+  local require_complete=${1:-true} name failed=0
   init_artifacts
   for name in "${M13_TEXT_ARTIFACTS[@]}"; do
     [[ $name == milestone13-runtime-test.log ]] && continue
+    if [[ $require_complete != true ]] &&
+      ! guest_run_script 'set -euo pipefail; test -f "$1"' \
+        "$M13_GUEST_ARTIFACT_DIR/$name" 2>/dev/null; then
+      continue
+    fi
     guest_run_script 'set -euo pipefail; cat "$1"' \
       "$M13_GUEST_ARTIFACT_DIR/$name" >"$ARTIFACTS_PATH_ABS/$name" 2>&1 || failed=1
   done
   for name in "${M13_BINARY_ARTIFACTS[@]}"; do
     [[ $name == milestone13-drm-screen.ppm ]] && continue
+    if [[ $require_complete != true ]] &&
+      ! guest_run_script 'set -euo pipefail; test -f "$1"' \
+        "$M13_GUEST_ARTIFACT_DIR/$name" 2>/dev/null; then
+      continue
+    fi
     scp -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 \
       "$SSH_TARGET:$M13_GUEST_ARTIFACT_DIR/$name" "$ARTIFACTS_PATH_ABS/$name" || failed=1
   done
@@ -1221,7 +1238,8 @@ write_milestone13_summary() {
 }
 
 milestone13_runtime_test() {
-  local approved=$1 failure='' status=0 collection=0 preflight script
+  local approved=$1 failure='' status=0 collection=0 preflight script capture_status=0
+  local collection_required=true
   local drm_device connector target_vt guest_pid=0 guest_status=0
   require_approval milestone13-runtime-test "$approved"
   require_vm_domain
@@ -1254,12 +1272,24 @@ milestone13_runtime_test() {
     guest_run_script "$script" "$GUEST_SOURCE_PATH" "$M13_GUEST_ARTIFACT_DIR" \
       "$drm_device" "$connector" "$target_vt" "$M13_TESTED_COMMIT" \
       >>"$ARTIFACTS_PATH_ABS/milestone13-runtime-test.log" 2>&1 & guest_pid=$!
-    milestone13_capture_screen "$guest_pid" || { status=$?; failure=drm-screenshot; }
-    if wait "$guest_pid"; then :; else
-      guest_status=$?; [[ -n $failure ]] || { status=$guest_status; failure=guest-runtime; }
+    if milestone13_capture_screen "$guest_pid"; then :; else
+      capture_status=$?
+      if ((capture_status == M13_GUEST_EXITED_BEFORE_SCREENSHOT)); then
+        if wait "$guest_pid"; then guest_status=1; else guest_status=$?; fi
+        guest_pid=0; status=$guest_status; failure=guest-runtime
+      else
+        status=$capture_status; failure=drm-screenshot
+      fi
+    fi
+    if ((guest_pid)); then
+      if wait "$guest_pid"; then :; else
+        guest_status=$?
+        [[ -n $failure ]] || { status=$guest_status; failure=guest-runtime; }
+      fi
     fi
   fi
-  collect_milestone13_artifacts || collection=$?
+  [[ -n $failure ]] && collection_required=false
+  collect_milestone13_artifacts "$collection_required" || collection=$?
   if ((collection)) && [[ -z $failure ]]; then status=$collection; failure=artifact-collection; fi
   verify_milestone13_source_identity || { [[ -n $failure ]] || failure=source-identity-changed; status=1; }
   if [[ -n $failure ]]; then
