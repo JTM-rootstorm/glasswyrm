@@ -17,6 +17,14 @@
 #include <utility>
 
 namespace gw::ipc {
+
+bool output_extension_message(std::uint16_t type) noexcept;
+gwipc_status validate_output_extension(
+    const gwipc_connection& connection, std::uint16_t type,
+    std::uint32_t flags, std::span<const std::uint8_t> payload,
+    std::span<const int> fds, const SnapshotState& snapshot,
+    MessageDirection direction);
+
 namespace {
 
 std::uint64_t required_capability(std::uint16_t type) noexcept {
@@ -338,6 +346,15 @@ gwipc_status validate_application(gwipc_connection& connection,
                                   std::span<const int> fds,
                                   SnapshotState& snapshot,
                                   MessageDirection direction) {
+  if (output_extension_message(type)) {
+    const auto status = validate_output_extension(
+        connection, type, flags, payload, fds, snapshot, direction);
+    if (status != GWIPC_STATUS_OK) return status;
+    return validate_snapshot(
+        snapshot, type, flags, payload,
+        (connection.peer.capabilities & GWIPC_CAP_INTERACTIVE_POLICY) != 0 &&
+            policy_output_direction(connection, direction));
+  }
   const auto required = required_capability(type);
   if ((required & connection.peer.capabilities) != required)
     return GWIPC_STATUS_CAPABILITY_MISMATCH;

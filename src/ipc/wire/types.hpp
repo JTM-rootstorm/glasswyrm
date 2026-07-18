@@ -25,9 +25,12 @@ enum class MessageType : std::uint16_t {
   SnapshotAbort = 0x0012,
   OutputUpsert = 0x0100,
   OutputRemove = 0x0101,
+  OutputDescriptorUpsert = 0x0102,
+  OutputModeUpsert = 0x0103,
   SurfaceUpsert = 0x0110,
   SurfaceRemove = 0x0111,
   SurfacePolicyUpsert = 0x0112,
+  SurfaceOutputState = 0x0113,
   BufferAttach = 0x0120,
   BufferDetach = 0x0121,
   BufferRelease = 0x0122,
@@ -38,6 +41,8 @@ enum class MessageType : std::uint16_t {
   PolicyWindowUpsert = 0x0201,
   PolicyWindowRemove = 0x0202,
   PolicyLifecycleWindowUpsert = 0x0203,
+  PolicyOutputUpsert = 0x0204,
+  PolicyWindowOutputHint = 0x0205,
   PolicyCommit = 0x0210,
   PolicyWindowState = 0x0211,
   PolicyAcknowledged = 0x0212,
@@ -49,6 +54,9 @@ enum class MessageType : std::uint16_t {
   SyntheticInputAcknowledged = 0x0310,
   SessionStateChange = 0x0400,
   SessionStateAcknowledged = 0x0401,
+  OutputStateQuery = 0x0500,
+  OutputConfigurationCommit = 0x0501,
+  OutputConfigurationAcknowledged = 0x0502,
 };
 
 enum class MessageFlag : std::uint32_t {
@@ -94,9 +102,14 @@ enum class Capability : std::uint64_t {
   InteractivePolicy = 1ULL << 14U,
   CursorSurface = 1ULL << 15U,
   CpuBufferSynchronization = 1ULL << 16U,
+  OutputManagement = 1ULL << 17U,
+  MultiOutputPolicy = 1ULL << 18U,
+  SurfaceOutputMembership = 1ULL << 19U,
+  ScaleAwareSurfaces = 1ULL << 20U,
+  OutputControl = 1ULL << 21U,
 };
 
-inline constexpr std::uint64_t kKnownCapabilities = 0x1ffffULL;
+inline constexpr std::uint64_t kKnownCapabilities = 0x3fffffULL;
 
 enum class RejectReason : std::uint16_t {
   IncompatibleVersion = 1,

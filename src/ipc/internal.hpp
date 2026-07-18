@@ -24,7 +24,10 @@ inline constexpr std::uint64_t kKnownCapabilities =
     GWIPC_CAP_TRACE_METADATA | GWIPC_CAP_WINDOW_POLICY |
     GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SYNTHETIC_INPUT |
     GWIPC_CAP_SESSION_STATE | GWIPC_CAP_INTERACTIVE_POLICY |
-    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION;
+    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION |
+    GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_MULTI_OUTPUT_POLICY |
+    GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+    GWIPC_CAP_SCALE_AWARE_SURFACES | GWIPC_CAP_OUTPUT_CONTROL;
 
 struct Config {
   std::string path;
@@ -67,6 +70,18 @@ struct SnapshotState {
 struct SessionCorrelation {
   std::uint64_t generation{};
   std::uint16_t state{};
+};
+
+struct OutputRequestCorrelation {
+  std::uint64_t request_id{};
+  std::uint16_t request_type{};
+};
+
+struct OutputCorrelationChanges {
+  std::uint64_t sequence{};
+  std::uint64_t reply_to{};
+  bool request_inserted{};
+  bool acknowledgement{};
 };
 
 bool fill_instance_id(std::array<std::uint8_t, 16>& id) noexcept;
@@ -125,6 +140,10 @@ struct gwipc_connection {
       pending_session_states;
   std::unordered_map<std::uint64_t, gw::ipc::SessionCorrelation>
       incoming_session_states;
+  std::unordered_map<std::uint64_t, gw::ipc::OutputRequestCorrelation>
+      pending_output_requests;
+  std::unordered_map<std::uint64_t, gw::ipc::OutputRequestCorrelation>
+      incoming_output_requests;
   std::uint64_t last_outgoing_session_generation{};
   std::uint64_t last_incoming_session_generation{};
   gw::ipc::SnapshotState outgoing_snapshot;

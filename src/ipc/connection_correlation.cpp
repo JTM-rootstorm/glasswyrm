@@ -11,6 +11,30 @@
 #include <span>
 
 namespace gw::ipc {
+
+gwipc_status prepare_output_request_correlation(
+    gwipc_connection& connection, std::uint16_t type,
+    std::span<const std::uint8_t> payload,
+    OutputCorrelationChanges& changes);
+gwipc_status prepare_output_reply_correlation(
+    const gwipc_connection& connection, std::uint16_t type,
+    std::uint64_t reply_to, std::span<const std::uint8_t> payload,
+    OutputCorrelationChanges& changes);
+void rollback_output_request_correlation(
+    gwipc_connection& connection,
+    const OutputCorrelationChanges& changes) noexcept;
+void commit_output_reply_correlation(
+    gwipc_connection& connection,
+    const OutputCorrelationChanges& changes) noexcept;
+gwipc_status validate_incoming_output_reply_correlation(
+    gwipc_connection& connection, const wire::Envelope& envelope,
+    std::span<const std::uint8_t> payload);
+gwipc_status track_incoming_output_request_correlation(
+    gwipc_connection& connection, const wire::Envelope& envelope,
+    std::span<const std::uint8_t> payload);
+void rollback_incoming_output_request_correlation(
+    gwipc_connection& connection, const wire::Envelope& envelope) noexcept;
+
 namespace {
 
 struct CorrelationChanges {
@@ -26,6 +50,7 @@ struct CorrelationChanges {
   bool synthetic_input_acknowledged{};
   bool session_state_acknowledged{};
   std::uint64_t session_generation{};
+  OutputCorrelationChanges output;
 };
 
 bool synthetic_input_id(std::uint16_t type,
@@ -65,6 +90,11 @@ gwipc_status prepare_request(gwipc_connection& connection,
                              const gwipc_outgoing_message& message,
                              std::span<const std::uint8_t> payload,
                              CorrelationChanges& changes) {
+  changes.output.sequence = changes.sequence;
+  changes.output.reply_to = changes.reply_to;
+  const auto output_status = prepare_output_request_correlation(
+      connection, message.type, payload, changes.output);
+  if (output_status != GWIPC_STATUS_OK) return output_status;
   if (message.type == GWIPC_MESSAGE_PING) {
     wire::Ping ping;
     if (wire::decode(payload, ping) != wire::CodecStatus::Ok)
@@ -125,6 +155,9 @@ gwipc_status prepare_reply(gwipc_connection& connection,
                            const gwipc_outgoing_message& message,
                            std::span<const std::uint8_t> payload,
                            CorrelationChanges& changes) {
+  const auto output_status = prepare_output_reply_correlation(
+      connection, message.type, message.reply_to, payload, changes.output);
+  if (output_status != GWIPC_STATUS_OK) return output_status;
   if (message.type == GWIPC_MESSAGE_FRAME_ACKNOWLEDGED) {
     wire::FrameAcknowledged value;
     const auto expected = connection.incoming_frame_commits.find(
@@ -171,6 +204,7 @@ gwipc_status prepare_reply(gwipc_connection& connection,
 
 void rollback_requests(gwipc_connection& connection,
                        const CorrelationChanges& changes) noexcept {
+  rollback_output_request_correlation(connection, changes.output);
   if (changes.ping_inserted)
     connection.pending_ping_nonces.erase(changes.sequence);
   if (changes.frame_commit_inserted)
@@ -185,6 +219,7 @@ void rollback_requests(gwipc_connection& connection,
 
 void commit_replies(gwipc_connection& connection,
                     const CorrelationChanges& changes) noexcept {
+  commit_output_reply_correlation(connection, changes.output);
   if (changes.frame_acknowledged)
     connection.incoming_frame_commits.erase(changes.reply_to);
   if (changes.policy_acknowledged)
@@ -216,6 +251,9 @@ bool valid_outgoing_flags(const gwipc_outgoing_message& message) noexcept {
 gwipc_status validate_incoming_reply(
     gwipc_connection& connection, const wire::Envelope& envelope,
     std::span<const std::uint8_t> payload) {
+  const auto output_status = validate_incoming_output_reply_correlation(
+      connection, envelope, payload);
+  if (output_status != GWIPC_STATUS_OK) return output_status;
   if (envelope.type == wire::MessageType::Pong) {
     wire::Pong value;
     const auto expected = connection.pending_ping_nonces.find(envelope.reply_to);
@@ -285,6 +323,9 @@ gwipc_status validate_incoming_reply(
 gwipc_status track_incoming_request(
     gwipc_connection& connection, const wire::Envelope& envelope,
     std::span<const std::uint8_t> payload) {
+  const auto output_status = track_incoming_output_request_correlation(
+      connection, envelope, payload);
+  if (output_status != GWIPC_STATUS_OK) return output_status;
   if (envelope.type == wire::MessageType::FrameCommit) {
     wire::FrameCommit value;
     if (wire::decode(payload, value) != wire::CodecStatus::Ok ||
@@ -344,6 +385,7 @@ gwipc_status track_incoming_request(
 
 void rollback_incoming_request(gwipc_connection& connection,
                                const wire::Envelope& envelope) noexcept {
+  rollback_incoming_output_request_correlation(connection, envelope);
   if (envelope.type == wire::MessageType::FrameCommit)
     connection.incoming_frame_commits.erase(envelope.sequence);
   if (envelope.type == wire::MessageType::PolicyCommit)
