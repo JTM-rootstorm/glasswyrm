@@ -8,7 +8,8 @@ namespace glasswyrm::server::request_handlers {
 namespace x11 = gw::protocol::x11;
 
 bool colormap_profile_enabled(const DispatchContext& context) noexcept {
-  return context.extensions && context.extensions->profile_enabled();
+  return context.extensions && context.extensions->profile_enabled(
+                                   ExtensionCapability::GameCompat);
 }
 
 DispatchResult create_colormap(ServerState& state,

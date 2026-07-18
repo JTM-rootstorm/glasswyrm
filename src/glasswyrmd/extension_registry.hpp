@@ -18,9 +18,28 @@ enum class ExtensionKind {
   Render,
   Composite,
   RandR,
+  GwScale,
 };
 
-enum class ExtensionCapability { GameCompat };
+enum class ExtensionCapability : std::uint32_t {
+  None = 0,
+  GameCompat = UINT32_C(1) << 0U,
+  ScaleProtocol = UINT32_C(1) << 1U,
+};
+
+[[nodiscard]] constexpr ExtensionCapability operator|(
+    const ExtensionCapability left,
+    const ExtensionCapability right) noexcept {
+  return static_cast<ExtensionCapability>(static_cast<std::uint32_t>(left) |
+                                          static_cast<std::uint32_t>(right));
+}
+
+[[nodiscard]] constexpr bool has_extension_capability(
+    const ExtensionCapability capabilities,
+    const ExtensionCapability required) noexcept {
+  return (static_cast<std::uint32_t>(capabilities) &
+          static_cast<std::uint32_t>(required)) != 0;
+}
 
 struct ExtensionDescriptor {
   std::string_view name;
@@ -35,7 +54,7 @@ struct ExtensionDescriptor {
   std::uint16_t maximum_minor_version{};
 };
 
-inline constexpr std::array<ExtensionDescriptor, 7> kExtensionRegistry{{
+inline constexpr std::array<ExtensionDescriptor, 8> kExtensionRegistry{{
     {"BIG-REQUESTS", ExtensionKind::BigRequests,
      ExtensionCapability::GameCompat, 128, 0, 0, 0, 0, 1, 0},
     {"MIT-SHM", ExtensionKind::MitShm, ExtensionCapability::GameCompat, 129,
@@ -50,6 +69,8 @@ inline constexpr std::array<ExtensionDescriptor, 7> kExtensionRegistry{{
      ExtensionCapability::GameCompat, 133, 0, 0, 0, 0, 0, 4},
     {"RANDR", ExtensionKind::RandR, ExtensionCapability::GameCompat, 134, 67,
      2, 136, 3, 1, 3},
+    {"GW_SCALE", ExtensionKind::GwScale,
+     ExtensionCapability::ScaleProtocol, 135, 69, 1, 139, 2, 0, 1},
 }};
 
 [[nodiscard]] constexpr bool extension_ranges_are_valid() noexcept {
@@ -88,8 +109,13 @@ class ExtensionRegistry {
  public:
   ExtensionRegistry() = default;
   ExtensionRegistry(bool enabled, std::span<const std::string> disabled);
+  ExtensionRegistry(ExtensionCapability capabilities,
+                    std::span<const std::string> disabled);
 
-  [[nodiscard]] bool profile_enabled() const noexcept { return enabled_; }
+  [[nodiscard]] bool profile_enabled(
+      ExtensionCapability capability) const noexcept {
+    return has_extension_capability(capabilities_, capability);
+  }
   [[nodiscard]] bool enabled(std::string_view name) const noexcept;
   [[nodiscard]] bool enabled(std::uint8_t major_opcode) const noexcept;
   [[nodiscard]] const ExtensionDescriptor*
@@ -99,7 +125,7 @@ class ExtensionRegistry {
   [[nodiscard]] std::vector<std::string_view> enabled_names() const;
 
  private:
-  bool enabled_{false};
+  ExtensionCapability capabilities_{ExtensionCapability::None};
   std::array<bool, kExtensionRegistry.size()> disabled_{};
 };
 

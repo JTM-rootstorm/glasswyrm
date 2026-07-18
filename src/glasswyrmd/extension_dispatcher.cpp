@@ -48,6 +48,8 @@ DispatchResult dispatch_extension_request(
       return extensions::dispatch_composite(state, context, request);
     case ExtensionKind::RandR:
       return extensions::dispatch_randr(state, context, request);
+    case ExtensionKind::GwScale:
+      break;
   }
 
   return request_handlers::error(context, request,

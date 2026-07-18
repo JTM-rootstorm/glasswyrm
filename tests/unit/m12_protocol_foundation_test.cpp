@@ -100,6 +100,10 @@ void test_registry(const x11::ByteOrder order) {
                             query_extension(order, "COMPOSITE"));
   require(result.output[8] == 0,
           "non-canonical Composite capitalization remains absent");
+  result = dispatch_request(state, context,
+                            query_extension(order, "GW_SCALE"));
+  require(result.output[8] == 0,
+          "game compatibility does not implicitly enable GW_SCALE");
 
   result = dispatch_request(
       state, context, finish(header(order, 99, 0, 1), 99));
@@ -107,7 +111,9 @@ void test_registry(const x11::ByteOrder order) {
           "ListExtensions contains all enabled names");
   std::size_t offset = 32;
   for (const auto& extension : kExtensionRegistry) {
-    if (extension.name == "MIT-SHM") continue;
+    if (extension.name == "MIT-SHM" ||
+        extension.capability != ExtensionCapability::GameCompat)
+      continue;
     require(offset < result.output.size() &&
                 result.output[offset] == extension.name.size(),
             "ListExtensions retains registry order");
@@ -132,6 +138,30 @@ void test_registry(const x11::ByteOrder order) {
                   static_cast<std::uint8_t>(x11::CoreErrorCode::BadRequest) &&
               u16(result.output, order, 8) == 7 && result.output[10] == 129,
           "disabled extension opcode reports request major and minor");
+
+  const ExtensionRegistry scale_only(ExtensionCapability::ScaleProtocol, {});
+  context.extensions = &scale_only;
+  result = dispatch_request(state, context,
+                            query_extension(order, "GW_SCALE"));
+  require(result.output[8] == 1 && result.output[9] == 135 &&
+              result.output[10] == 69 && result.output[11] == 139,
+          "scale-protocol capability independently exposes GW_SCALE");
+  result = dispatch_request(state, context,
+                            query_extension(order, "BIG-REQUESTS"));
+  require(result.output[8] == 0,
+          "scale-protocol capability does not imply game compatibility");
+
+  const ExtensionRegistry combined(ExtensionCapability::GameCompat |
+                                       ExtensionCapability::ScaleProtocol,
+                                   {});
+  context.extensions = &combined;
+  require(dispatch_request(state, context,
+                           query_extension(order, "BIG-REQUESTS"))
+                  .output[8] == 1 &&
+              dispatch_request(state, context,
+                               query_extension(order, "GW_SCALE"))
+                      .output[8] == 1,
+          "extension capability bitmask composes independent profiles");
 }
 
 void test_extension_wire(const x11::ByteOrder order) {
