@@ -199,8 +199,8 @@ synchronization, VT recovery, and restoration.
 Regenerate this directory only from a new fully accepted run:
 
 ```sh
-tests/compat/m12/promote_fixtures.py \
-  --artifact-dir artifacts/vm/latest \
+tests/compat/m12/promote_fixtures.py \\
+  --artifact-dir artifacts/vm/latest \\
   --output-dir tests/fixtures/m12
 tests/compat/m12/validate_fixtures.py tests/fixtures/m12
 ```

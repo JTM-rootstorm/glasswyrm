@@ -152,6 +152,10 @@ def main() -> int:
         }
         if {path.name for path in output.iterdir()} != expected:
             return 1
+        if "promote_fixtures.py \\\n  --artifact-dir" not in (
+            output / "README.md"
+        ).read_text():
+            return 1
         accepted["passed"] = False
         write_json(summary, accepted)
         try:
