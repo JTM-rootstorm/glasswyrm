@@ -1,0 +1,11 @@
+#pragma once
+
+#include "glasswyrmd/request_dispatcher.hpp"
+
+namespace glasswyrm::server::extensions {
+
+[[nodiscard]] DispatchResult dispatch_gw_scale(
+    ServerState& state, const DispatchContext& context,
+    const gw::protocol::x11::FramedRequest& request);
+
+}  // namespace glasswyrm::server::extensions

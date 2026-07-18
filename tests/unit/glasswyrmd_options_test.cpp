@@ -123,7 +123,7 @@ int main() {
   if (parse({"glasswyrmd"}, options, output, error) !=
           ParseOptionsResult::Run ||
       options.integrated() || options.real_input_enabled() ||
-      options.output_model ||
+      options.output_model || options.scale_protocol ||
       options.xkb_rules != "evdev" || options.xkb_model != "pc105" ||
       options.xkb_layout != "us" || !options.xkb_variant.empty() ||
       !options.xkb_options.empty() || options.repeat_delay_ms != 500 ||
@@ -140,6 +140,9 @@ int main() {
   }
   if (output.find("--output-model") == std::string::npos) {
     return 18;
+  }
+  if (output.find("--scale-protocol") == std::string::npos) {
+    return 19;
   }
   if (output.find("--synthetic-input-socket PATH") == std::string::npos) {
     return 5;
@@ -166,6 +169,16 @@ int main() {
   }
 
 #if GW_HAS_EXPERIMENTAL
+#if GW_HAS_LIBGWIPC
+  options = {};
+  if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm",
+             "--compositor-socket", "/tmp/comp", "--output-model",
+             "--scale-protocol"},
+            options, output, error) != ParseOptionsResult::Run ||
+      !options.scale_protocol) {
+    return 20;
+  }
+#endif
   options = {};
   if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm", "--compositor-socket",
              "/tmp/comp", "--software-content", "--game-compat",
@@ -178,6 +191,11 @@ int main() {
 #endif
   for (const auto &values : {
            std::vector<std::string>{"glasswyrmd", "--game-compat"},
+           std::vector<std::string>{"glasswyrmd", "--scale-protocol"},
+           std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/wm",
+                                    "--compositor-socket", "/tmp/comp",
+                                    "--output-model", "--scale-protocol",
+                                    "--scale-protocol"},
            std::vector<std::string>{"glasswyrmd", "--disable-extension",
                                     "MIT-SHM"},
            std::vector<std::string>{"glasswyrmd", "--disable-extension",

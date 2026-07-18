@@ -37,6 +37,7 @@ struct Options {
   bool software_content = false;
   bool game_compat = false;
   bool output_model = false;
+  bool scale_protocol = false;
   std::vector<std::string> disabled_extensions;
 
   [[nodiscard]] bool integrated() const noexcept {

@@ -11,8 +11,11 @@ namespace glasswyrm::server {
 namespace {
 
 ExtensionCapability extension_capabilities(const Options& options) noexcept {
-  return options.game_compat ? ExtensionCapability::GameCompat
-                             : ExtensionCapability::None;
+  auto result = options.game_compat ? ExtensionCapability::GameCompat
+                                    : ExtensionCapability::None;
+  if (options.scale_protocol)
+    result = result | ExtensionCapability::ScaleProtocol;
+  return result;
 }
 
 }  // namespace
