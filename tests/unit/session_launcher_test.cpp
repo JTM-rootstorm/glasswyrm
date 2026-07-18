@@ -74,18 +74,24 @@ int run_fixture(int argc, char **argv) {
                ? 0
                : 9;
   }
-  if ((mode != "ready" && mode != "replace-ready") || argc < 5)
+  if ((mode != "ready" && mode != "replace-ready" && mode != "ready-two") ||
+      argc < 5)
     return 8;
 
+  const bool two_paths = mode == "ready-two";
+  const int name_index = two_paths ? 5 : 4;
+  if (argc <= name_index)
+    return 8;
   if (mode == "replace-ready") {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     if (::unlink(argv[3]) != 0)
       return 11;
   }
 
-  fixture_name = argv[4];
-  if (argc > 5)
-    fixture_log_fd = ::open(argv[5], O_WRONLY | O_CREAT | O_APPEND, 0600);
+  fixture_name = argv[name_index];
+  if (argc > name_index + 1)
+    fixture_log_fd =
+        ::open(argv[name_index + 1], O_WRONLY | O_CREAT | O_APPEND, 0600);
   struct sigaction action{};
   action.sa_handler = fixture_signal;
   ::sigemptyset(&action.sa_mask);
@@ -96,6 +102,12 @@ int run_fixture(int argc, char **argv) {
   if (marker < 0)
     return 10;
   (void)::close(marker);
+  if (two_paths) {
+    const int second = ::open(argv[4], O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (second < 0)
+      return 12;
+    (void)::close(second);
+  }
   for (;;)
     ::pause();
 }
@@ -267,6 +279,78 @@ void test_cli_rejections() {
 #endif
 }
 
+void test_headless_output_model_cli() {
+  using namespace glasswyrm::session;
+  std::vector<std::string> arguments = {
+      "glasswyrm-session", "--runtime-dir", "/run/user/0/gw-headless",
+      "--display", "98", "--backend", "headless", "--headless-output",
+      "LEFT:800x600@60000", "--headless-output", "RIGHT:640x480@75000",
+      "--output-model"};
+#if GW_HAS_EXPERIMENTAL
+  arguments.emplace_back("--scale-protocol");
+#endif
+  auto argv = mutable_argv(arguments);
+  Options options;
+  std::ostringstream output;
+  std::ostringstream error;
+  require(parse_options(static_cast<int>(argv.size()), argv.data(), options,
+                        output, error) == ParseOptionsResult::Run,
+          "headless output-model CLI parses");
+  RuntimePaths paths;
+  std::string detail;
+  require(make_runtime_paths(options, paths, detail) && paths.control_socket ==
+              "/run/user/0/gw-headless/control.sock",
+          "output-model session generates a private control socket");
+  const auto plan = build_command_plan(options, paths);
+  require(plan.children.size() == 3 &&
+              plan.children[1].argv ==
+                  std::vector<std::string>(
+                      {"gwcomp", "--backend", "headless", "--ipc-socket",
+                       "/run/user/0/gw-headless/gwcomp.sock", "--dump-dir",
+                       "/run/user/0/gw-headless/frames", "--headless-output",
+                       "LEFT:800x600@60000", "--headless-output",
+                       "RIGHT:640x480@75000", "--renderer", "software"}),
+          "headless compositor argv is deterministic and carries all outputs");
+  require(std::find(plan.children[2].argv.begin(),
+                    plan.children[2].argv.end(), "--output-model") !=
+              plan.children[2].argv.end() &&
+              plan.children[2].additional_readiness_sockets ==
+                  std::vector<std::string>(
+                      {"/run/user/0/gw-headless/control.sock"}),
+          "server argv and readiness include the output-control listener");
+#if GW_HAS_EXPERIMENTAL
+  require(std::find(plan.children[2].argv.begin(),
+                    plan.children[2].argv.end(), "--scale-protocol") !=
+              plan.children[2].argv.end(),
+          "experimental session enables GW_SCALE explicitly");
+#endif
+
+  std::vector<std::string> forbidden = {
+      "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "90",
+      "--backend", "headless", "--drm-device", "/dev/dri/card0"};
+  auto forbidden_argv = mutable_argv(forbidden);
+  Options forbidden_options;
+  std::ostringstream forbidden_error;
+  require(parse_options(static_cast<int>(forbidden_argv.size()),
+                        forbidden_argv.data(), forbidden_options, output,
+                        forbidden_error) == ParseOptionsResult::ExitFailure &&
+              forbidden_error.str().find("forbids DRM") != std::string::npos,
+          "headless session rejects DRM-only options");
+
+  std::vector<std::string> orphan_control = {
+      "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "90",
+      "--backend", "headless", "--control-socket", "/tmp/control.sock"};
+  auto orphan_argv = mutable_argv(orphan_control);
+  Options orphan_options;
+  std::ostringstream orphan_error;
+  require(parse_options(static_cast<int>(orphan_argv.size()),
+                        orphan_argv.data(), orphan_options, output,
+                        orphan_error) == ParseOptionsResult::ExitFailure &&
+              orphan_error.str().find("requires --output-model") !=
+                  std::string::npos,
+          "control socket requires the output model");
+}
+
 glasswyrm::session::ChildSpec ready_child(const std::string &self,
                                           const std::string &socket,
                                           const std::string &name,
@@ -334,7 +418,7 @@ void test_child_failure_and_timeout() {
                                         std::chrono::milliseconds(5)});
   ChildSpec failure{"fixture", {self, "--fixture", "exit", "7"},
                     {},        std::nullopt,
-                    true,      true};
+                    true,      true, {}, true};
   require(failure_supervisor.run({failure}, failure_error) == 1 &&
               failure_error.str().find("required process fixture exited") !=
                   std::string::npos,
@@ -351,6 +435,8 @@ void test_child_failure_and_timeout() {
       {},
       temp.path + "/never.sock",
       false,
+      true,
+      {},
       true};
   const int timeout_result = timeout_supervisor.run({timeout}, timeout_error);
   if (timeout_result != 1 ||
@@ -379,7 +465,9 @@ void test_stale_readiness_path_is_not_accepted() {
                    {},
                    std::nullopt,
                    true,
-                   false};
+                   false,
+                   {},
+                   true};
   std::ostringstream error;
   ProcessSupervisor supervisor({std::chrono::milliseconds(500),
                                 std::chrono::milliseconds(100),
@@ -389,6 +477,27 @@ void test_stale_readiness_path_is_not_accepted() {
     std::cerr << "stale readiness run: " << result << " " << error.str();
   require(result == 0,
           "pre-existing readiness path waits for the child's replacement");
+}
+
+void test_additional_readiness_path() {
+  using namespace glasswyrm::session;
+  TempDirectory temp;
+  const auto self = self_path();
+  const auto primary = temp.path + "/x11.sock";
+  const auto control = temp.path + "/control.sock";
+  ChildSpec service = ready_child(self, primary, "service");
+  service.argv = {self, "--fixture", "ready-two", primary, control,
+                  "service"};
+  service.additional_readiness_sockets.push_back(control);
+  service.additional_readiness_requires_socket = false;
+  ChildSpec client{"client", {self, "--fixture", "exit", "0"}, {},
+                   std::nullopt, true, false, {}, true};
+  std::ostringstream error;
+  ProcessSupervisor supervisor({std::chrono::milliseconds(500),
+                                std::chrono::milliseconds(100),
+                                std::chrono::milliseconds(5)});
+  require(supervisor.run({service, client}, error) == 0,
+          "supervisor waits for every declared readiness socket");
 }
 
 void test_optional_client_and_environment() {
@@ -401,7 +510,9 @@ void test_optional_client_and_environment() {
                    {"DISPLAY=:47"},
                    std::nullopt,
                    true,
-                   false};
+                   false,
+                   {},
+                   true};
   std::ostringstream error;
   ProcessSupervisor supervisor({std::chrono::milliseconds(500),
                                 std::chrono::milliseconds(100),
@@ -420,9 +531,11 @@ int main(int argc, char **argv) {
     return run_fixture(argc, argv);
   test_cli_and_argv();
   test_cli_rejections();
+  test_headless_output_model_cli();
   test_supervisor_readiness_signal_and_reverse_shutdown();
   test_child_failure_and_timeout();
   test_stale_readiness_path_is_not_accepted();
+  test_additional_readiness_path();
   test_optional_client_and_environment();
   if (failures != 0)
     std::cerr << failures << " session launcher test(s) failed\n";
