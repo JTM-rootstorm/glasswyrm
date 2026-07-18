@@ -529,6 +529,7 @@ if get_option('gwcomp')
   gwcomp_options_sources = files(
     'gwcomp/options.cpp',
     'gwcomp/output_inventory_publisher.cpp',
+    'gwcomp/output_inventory_service.cpp',
     'gwcomp/renderer_runtime.cpp',
     'gwcomp/compositor.cpp',
     'gwcomp/buffer_readiness.cpp',

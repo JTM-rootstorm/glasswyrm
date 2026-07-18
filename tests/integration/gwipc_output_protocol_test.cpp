@@ -163,6 +163,39 @@ void test_inventory_surface_and_policy_directions() {
           "policy output requires MultiOutputPolicy");
 }
 
+void test_compositor_snapshot_domain_directions() {
+  auto server = connection(GWIPC_ROLE_PROTOCOL_SERVER,
+                           GWIPC_ROLE_COMPOSITOR, kOutputCapabilities);
+  SnapshotState idle;
+  require(validate(server, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0,
+                   encode(SnapshotBegin{1, SnapshotDomain::CompleteSession, 0,
+                                        1, 0}),
+                   idle, MessageDirection::Outgoing) == GWIPC_STATUS_OK,
+          "server starts only a complete-session compositor snapshot");
+  idle = {};
+  require(validate(server, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0,
+                   encode(SnapshotBegin{2, SnapshotDomain::Outputs, 0, 1, 0}),
+                   idle, MessageDirection::Outgoing) ==
+              GWIPC_STATUS_PROTOCOL_ERROR,
+          "server cannot inject an Outputs snapshot into the compositor");
+
+  auto compositor = connection(GWIPC_ROLE_COMPOSITOR,
+                               GWIPC_ROLE_PROTOCOL_SERVER,
+                               kOutputCapabilities);
+  idle = {};
+  require(validate(compositor, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0,
+                   encode(SnapshotBegin{3, SnapshotDomain::Outputs, 0, 1, 0}),
+                   idle, MessageDirection::Outgoing) == GWIPC_STATUS_OK,
+          "compositor starts an output-inventory snapshot");
+  idle = {};
+  require(validate(
+              compositor, GWIPC_MESSAGE_SNAPSHOT_BEGIN, 0,
+              encode(SnapshotBegin{4, SnapshotDomain::CompleteSession, 0, 1,
+                                   0}),
+              idle, MessageDirection::Outgoing) == GWIPC_STATUS_PROTOCOL_ERROR,
+          "compositor cannot send a complete-session snapshot to the server");
+}
+
 void test_control_directions_flags_and_zero_fds() {
   auto server_compositor = connection(GWIPC_ROLE_PROTOCOL_SERVER,
                                       GWIPC_ROLE_COMPOSITOR,
@@ -412,6 +445,7 @@ void test_incoming_reply_and_failure_rollback() {
 
 int main() {
   test_inventory_surface_and_policy_directions();
+  test_compositor_snapshot_domain_directions();
   test_control_directions_flags_and_zero_fds();
   test_every_output_record_rejects_descriptors();
   test_query_and_configuration_correlation();

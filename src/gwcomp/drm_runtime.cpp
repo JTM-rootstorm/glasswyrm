@@ -75,9 +75,10 @@ std::optional<std::size_t> select_unconstrained_connector(
   return result;
 }
 
-std::optional<drm::Mode> select_default_mode(const drm::Connector& connector) {
+std::optional<std::size_t> select_default_mode(
+    const drm::Connector& connector) {
   if (connector.modes.empty()) return std::nullopt;
-  return *std::ranges::min_element(
+  const auto selected = std::ranges::min_element(
       connector.modes, [](const drm::Mode& left, const drm::Mode& right) {
         const auto left_key = std::tuple{
             !left.preferred,
@@ -95,37 +96,12 @@ std::optional<drm::Mode> select_default_mode(const drm::Connector& connector) {
             right.name, right.clock_khz};
         return left_key < right_key;
       });
-}
-
-std::optional<drm::Mode> selected_mode(const drm::DeviceSnapshot& snapshot,
-                                       const Options& options) {
-  if (!options.mode) {
-    const auto connector =
-        select_unconstrained_connector(snapshot, options.connector);
-    return connector ? select_default_mode(snapshot.connectors[*connector])
-                     : std::nullopt;
-  }
-  const auto connector = drm::select_connector(
-      snapshot.connectors, snapshot.crtcs, options.mode->width,
-      options.mode->height,
-      options.connector
-          ? std::optional<std::string_view>(*options.connector)
-          : std::nullopt);
-  if (connector.status != drm::ConnectorSelectionStatus::Success)
-    return std::nullopt;
-  const auto& candidate = snapshot.connectors[connector.connector_index];
-  const auto mode = drm::select_mode(
-      candidate.modes,
-      {options.mode->width, options.mode->height, 0,
-       options.mode->refresh_millihz});
-  return mode.status == drm::ModeSelectionStatus::Success
-             ? std::optional<drm::Mode>(candidate.modes[mode.mode_index])
-             : std::nullopt;
+  return static_cast<std::size_t>(selected - connector.modes.begin());
 }
 
 bool device_qualifies(const drm::DeviceSnapshot& snapshot,
                       const Options& options) {
-  return selected_mode(snapshot, options).has_value();
+  return resolve_drm_output_selection(snapshot, options).has_value();
 }
 
 drm::DrmPresentationApi presentation_api(const DrmApiMode policy) {
@@ -137,13 +113,9 @@ drm::DrmPresentationApi presentation_api(const DrmApiMode policy) {
   return drm::DrmPresentationApi::Auto;
 }
 
-}  // namespace
-
-DrmRuntimeResources::DrmRuntimeResources() = default;
-DrmRuntimeResources::~DrmRuntimeResources() = default;
-
-bool create_drm_presenter(
+bool create_drm_presenter_impl(
     const Options& options, DrmRuntimeResources& resources,
+    drm::DrmOutputInventory* inventory,
     std::unique_ptr<output::PresentationBackend>& presenter,
     std::string& error) {
   error.clear();
@@ -182,10 +154,20 @@ bool create_drm_presenter(
                                     : discovery.error;
     return false;
   }
-  const auto mode = selected_mode(device->snapshot(), options);
-  if (!mode) {
+  const auto selection =
+      resolve_drm_output_selection(device->snapshot(), options);
+  if (!selection) {
     error = "DRM connector or mode selection is ambiguous or unsupported";
     return false;
+  }
+  const auto selected_mode = device->snapshot()
+                                 .connectors[selection->connector_index]
+                                 .modes[selection->mode_index];
+  if (inventory) {
+    auto built_inventory =
+        drm::build_drm_output_inventory(device->snapshot(), *selection, error);
+    if (!built_inventory) return false;
+    *inventory = std::move(*built_inventory);
   }
   if (options.drm_report)
     resources.report = std::make_unique<drm::DrmReport>(*options.drm_report);
@@ -199,7 +181,8 @@ bool create_drm_presenter(
       std::move(*device), *resources.kms_api, resources.report.get(),
       resources.mirror.get());
   drm::DrmPresenterConfig config;
-  config.output = {0, mode->width, mode->height, mode->refresh_millihz};
+  config.output = {0, selected_mode.width, selected_mode.height,
+                   selected_mode.refresh_millihz};
   config.connector = options.connector;
   config.refresh_millihz =
       options.mode ? options.mode->refresh_millihz : std::nullopt;
@@ -213,6 +196,58 @@ bool create_drm_presenter(
                  backend->fallback_reason().c_str());
   presenter = std::move(backend);
   return true;
+}
+
+}  // namespace
+
+DrmRuntimeResources::DrmRuntimeResources() = default;
+DrmRuntimeResources::~DrmRuntimeResources() = default;
+
+std::optional<drm::DrmInventorySelection>
+resolve_drm_output_selection(const drm::DeviceSnapshot& snapshot,
+                             const Options& options) {
+  if (!options.mode) {
+    const auto connector =
+        select_unconstrained_connector(snapshot, options.connector);
+    if (!connector) return std::nullopt;
+    const auto mode = select_default_mode(snapshot.connectors[*connector]);
+    return mode ? std::optional<drm::DrmInventorySelection>{{*connector, *mode}}
+                : std::nullopt;
+  }
+  const auto connector = drm::select_connector(
+      snapshot.connectors, snapshot.crtcs, options.mode->width,
+      options.mode->height,
+      options.connector ? std::optional<std::string_view>(*options.connector)
+                        : std::nullopt);
+  if (connector.status != drm::ConnectorSelectionStatus::Success)
+    return std::nullopt;
+  const auto& candidate = snapshot.connectors[connector.connector_index];
+  const auto mode = drm::select_mode(
+      candidate.modes,
+      {options.mode->width, options.mode->height, 0,
+       options.mode->refresh_millihz});
+  return mode.status == drm::ModeSelectionStatus::Success
+             ? std::optional<drm::DrmInventorySelection>{{connector
+                                                              .connector_index,
+                                                          mode.mode_index}}
+             : std::nullopt;
+}
+
+bool create_drm_presenter(
+    const Options& options, DrmRuntimeResources& resources,
+    drm::DrmOutputInventory& inventory,
+    std::unique_ptr<output::PresentationBackend>& presenter,
+    std::string& error) {
+  return create_drm_presenter_impl(options, resources, &inventory, presenter,
+                                   error);
+}
+
+bool create_drm_presenter(
+    const Options& options, DrmRuntimeResources& resources,
+    std::unique_ptr<output::PresentationBackend>& presenter,
+    std::string& error) {
+  return create_drm_presenter_impl(options, resources, nullptr, presenter,
+                                   error);
 }
 
 }  // namespace glasswyrm::compositor

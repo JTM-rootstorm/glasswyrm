@@ -319,6 +319,23 @@ bool policy_output_direction(const gwipc_connection& connection,
          receiver == GWIPC_ROLE_PROTOCOL_SERVER;
 }
 
+bool valid_snapshot_begin_domain(const gwipc_connection& connection,
+                                 const std::span<const std::uint8_t> payload,
+                                 const MessageDirection direction) noexcept {
+  wire::SnapshotBegin begin;
+  if (wire::decode(payload, begin) != wire::CodecStatus::Ok) return false;
+  auto sender = connection.config.local_role;
+  auto receiver = connection.peer.role;
+  if (direction == MessageDirection::Incoming) std::swap(sender, receiver);
+  if (sender == GWIPC_ROLE_PROTOCOL_SERVER &&
+      receiver == GWIPC_ROLE_COMPOSITOR)
+    return begin.domain == wire::SnapshotDomain::CompleteSession;
+  if (sender == GWIPC_ROLE_COMPOSITOR &&
+      receiver == GWIPC_ROLE_PROTOCOL_SERVER)
+    return begin.domain == wire::SnapshotDomain::Outputs;
+  return true;
+}
+
 gwipc_status validate_input(std::uint16_t type, std::uint32_t flags,
                             std::span<const std::uint8_t> payload,
                             wire::CodecStatus& codec) {
@@ -346,6 +363,9 @@ gwipc_status validate_application(gwipc_connection& connection,
                                   std::span<const int> fds,
                                   SnapshotState& snapshot,
                                   MessageDirection direction) {
+  if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN &&
+      !valid_snapshot_begin_domain(connection, payload, direction))
+    return GWIPC_STATUS_PROTOCOL_ERROR;
   if (output_extension_message(type)) {
     const auto status = validate_output_extension(
         connection, type, flags, payload, fds, snapshot, direction);

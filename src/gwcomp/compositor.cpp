@@ -20,8 +20,12 @@ select_peer_profile(const gwipc_role role,
   constexpr std::uint64_t buffered =
       GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
       GWIPC_CAP_DAMAGE_REGIONS;
+  constexpr std::uint64_t output_model =
+      GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+      GWIPC_CAP_SCALE_METADATA;
   if (role == GWIPC_ROLE_TEST_PRODUCER) {
-    if ((capabilities & GWIPC_CAP_CURSOR_SURFACE) != 0) return std::nullopt;
+    if ((capabilities & (GWIPC_CAP_CURSOR_SURFACE | output_model)) != 0)
+      return std::nullopt;
     return (capabilities & (common | buffered)) == (common | buffered)
                ? std::optional{PeerProfile::M4TestProducer}
                : std::nullopt;
@@ -29,6 +33,10 @@ select_peer_profile(const gwipc_role role,
   if (role != GWIPC_ROLE_PROTOCOL_SERVER ||
       (capabilities & (common | GWIPC_CAP_WINDOW_LIFECYCLE)) !=
           (common | GWIPC_CAP_WINDOW_LIFECYCLE))
+    return std::nullopt;
+  const auto negotiated_output_model = capabilities & output_model;
+  if (negotiated_output_model != 0 &&
+      negotiated_output_model != output_model)
     return std::nullopt;
   const auto negotiated_buffered = capabilities & buffered;
   if ((capabilities & GWIPC_CAP_CURSOR_SURFACE) != 0 &&

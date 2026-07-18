@@ -6,6 +6,7 @@
 #include "backends/output/presentation_backend.hpp"
 #include "config.hpp"
 #if GW_HAS_HEADLESS_BACKEND
+#include "backends/headless/inventory.hpp"
 #include "backends/headless/presenter.hpp"
 #endif
 #if GW_HAS_DRM_BACKEND
@@ -34,7 +35,9 @@ constexpr std::uint64_t kCommonCapabilities =
     GWIPC_CAP_SDR_COLOR_METADATA | GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
 constexpr std::uint64_t kOfferedCapabilities =
     kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE |
-    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION;
+    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION |
+    GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+    GWIPC_CAP_SCALE_METADATA;
 struct ListenerDeleter {
   void operator()(gwipc_listener* value) const { gwipc_listener_destroy(value); }
 };
@@ -104,9 +107,20 @@ int run(const Options& options) {
 #if GW_HAS_DRM_BACKEND
   DrmRuntimeResources drm_resources;
 #endif
+  output::OutputLayout output_layout;
   std::unique_ptr<glasswyrm::output::PresentationBackend> presenter;
   if (options.backend == Backend::Headless) {
 #if GW_HAS_HEADLESS_BACKEND
+    std::string inventory_error;
+    auto inventory =
+        headless::OutputInventory::build(options.headless_outputs,
+                                         inventory_error);
+    if (!inventory) {
+      std::fprintf(stderr, "gwcomp: headless inventory failed: %s\n",
+                   inventory_error.c_str());
+      return 1;
+    }
+    output_layout = inventory->layout();
     presenter = std::make_unique<glasswyrm::headless::Presenter>(
         options.dump_dir);
 #else
@@ -117,11 +131,14 @@ int run(const Options& options) {
   } else {
 #if GW_HAS_DRM_BACKEND
     std::string drm_error;
-    if (!create_drm_presenter(options, drm_resources, presenter, drm_error)) {
+    drm::DrmOutputInventory inventory;
+    if (!create_drm_presenter(options, drm_resources, inventory, presenter,
+                              drm_error)) {
       std::fprintf(stderr, "gwcomp: DRM initialization failed: %s\n",
                    drm_error.c_str());
       return 1;
     }
+    output_layout = std::move(inventory.layout);
 #else
     std::fprintf(stderr,
                  "gwcomp: DRM backend was not enabled at build time\n");
@@ -156,7 +173,8 @@ int run(const Options& options) {
 
   gw::compositor::Compositor compositor(std::move(presenter), manifest_path,
                                         {}, std::move(renderer));
-  RuntimeReactor reactor(options, listener.get(), signals, compositor);
+  RuntimeReactor reactor(options, listener.get(), signals, compositor,
+                         output_layout);
   int exit_status = reactor.run();
 
   std::string shutdown_error;

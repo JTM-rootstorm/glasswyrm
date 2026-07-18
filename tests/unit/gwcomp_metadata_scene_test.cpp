@@ -125,6 +125,9 @@ void test_profile_selection() {
       GWIPC_CAP_FRAME_ACKNOWLEDGEMENT;
   constexpr auto buffers = GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
                            GWIPC_CAP_DAMAGE_REGIONS;
+  constexpr auto output_model =
+      GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+      GWIPC_CAP_SCALE_METADATA;
   require(gw::compositor::select_peer_profile(
               GWIPC_ROLE_TEST_PRODUCER, common | buffers) ==
               gw::compositor::PeerProfile::M4TestProducer,
@@ -143,6 +146,19 @@ void test_profile_selection() {
               GWIPC_ROLE_PROTOCOL_SERVER,
               common | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_FD_PASSING),
           "partial M7 capability profile is rejected");
+  require(gw::compositor::select_peer_profile(
+              GWIPC_ROLE_PROTOCOL_SERVER,
+              common | GWIPC_CAP_WINDOW_LIFECYCLE | output_model) ==
+              gw::compositor::PeerProfile::M6MetadataProtocolServer,
+          "complete M13 output-model capability profile is selected");
+  require(!gw::compositor::select_peer_profile(
+              GWIPC_ROLE_PROTOCOL_SERVER,
+              common | GWIPC_CAP_WINDOW_LIFECYCLE |
+                  GWIPC_CAP_OUTPUT_MANAGEMENT),
+          "partial M13 output-model capability profile is rejected");
+  require(!gw::compositor::select_peer_profile(
+              GWIPC_ROLE_TEST_PRODUCER, common | buffers | output_model),
+          "TestProducer cannot negotiate output-model capabilities");
 }
 
 void test_buffered_protocol_server(const std::filesystem::path &root) {
