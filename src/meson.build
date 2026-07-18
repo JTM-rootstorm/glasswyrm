@@ -211,6 +211,7 @@ if get_option('libgwipc')
     'ipc/wire/policy_contract.cpp',
     'ipc/wire/lifecycle_contract.cpp',
     'ipc/wire/input_contract.cpp',
+    'ipc/wire/output_contract.cpp',
     'ipc/wire/session_contract.cpp',
   )
   gwipc_private_include = include_directories('.')
@@ -238,11 +239,13 @@ if get_option('libgwipc')
       'ipc/endpoint.cpp',
       'ipc/connection.cpp',
       'ipc/connection_correlation.cpp',
+      'ipc/connection_output_correlation.cpp',
       'ipc/connection_handshake.cpp',
       'ipc/connection_poll.cpp',
       'ipc/connection_queue.cpp',
       'ipc/connection_transport.cpp',
       'ipc/connection_validation.cpp',
+      'ipc/connection_output_validation.cpp',
     ),
     link_whole: gwipc_wire_lib,
     include_directories: [
@@ -255,7 +258,7 @@ if get_option('libgwipc')
       '-Wl,--version-script=' + meson.current_source_dir() / 'ipc/gwipc.map',
     ],
     gnu_symbol_visibility: 'hidden',
-    version: '0.7.0',
+    version: '0.8.0',
     soversion: '0',
     install: true,
   )
@@ -276,6 +279,7 @@ if get_option('libgwipc')
     '../include/glasswyrm/ipc/connection.h',
     '../include/glasswyrm/ipc/message.h',
     '../include/glasswyrm/ipc/contracts.h',
+    '../include/glasswyrm/ipc/output.h',
     '../include/glasswyrm/ipc/control.h',
     '../include/glasswyrm/ipc/policy.h',
     '../include/glasswyrm/ipc/lifecycle.h',
@@ -290,7 +294,7 @@ if get_option('libgwipc')
     filebase: 'gwipc',
     name: 'gwipc',
     description: 'Glasswyrm versioned local IPC contracts',
-    version: '0.7.0',
+    version: '0.8.0',
   )
 endif
 

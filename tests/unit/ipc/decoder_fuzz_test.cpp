@@ -2,6 +2,7 @@
 #include "ipc/wire/control.hpp"
 #include "ipc/wire/envelope.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
+#include "ipc/wire/output_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "tests/helpers/test_support.hpp"
 
@@ -103,6 +104,14 @@ int main() {
     PolicyWindowState policy_state;
     PolicyLifecycleWindowUpsert lifecycle_window;
     SurfacePolicyUpsert surface_policy;
+    OutputDescriptorUpsert output_descriptor;
+    OutputModeUpsert output_mode;
+    SurfaceOutputState surface_output;
+    PolicyOutputUpsert policy_output;
+    PolicyWindowOutputHint output_hint;
+    OutputStateQuery output_query;
+    OutputConfigurationCommit output_commit;
+    OutputConfigurationAcknowledged output_acknowledged;
     (void)decode_envelope(input, next(state) % 18U, next(state) % 1048577U,
                           envelope);
     (void)decode(input, hello);
@@ -121,6 +130,14 @@ int main() {
     (void)decode(input, policy_state);
     (void)decode(input, lifecycle_window);
     (void)decode(input, surface_policy);
+    (void)decode(input, output_descriptor);
+    (void)decode(input, output_mode);
+    (void)decode(input, surface_output);
+    (void)decode(input, policy_output);
+    (void)decode(input, output_hint);
+    (void)decode(input, output_query);
+    (void)decode(input, output_commit);
+    (void)decode(input, output_acknowledged);
     require(damage.rectangles.size() <= kMaximumDamageRectangles,
             "random damage decoding stays within its allocation bound");
     require(hello.name.size() <= kMaximumInstanceLabel &&
@@ -128,6 +145,9 @@ int main() {
                 error.detail.size() <= kMaximumDiagnosticString &&
                 abort.detail.size() <= kMaximumDiagnosticString,
             "random control decoding keeps every variable field bounded");
+    require(output_descriptor.name.size() <= kMaximumOutputNameBytes &&
+                surface_output.output_ids.size() <= kMaximumManagedOutputs,
+            "random output decoding keeps variable fields bounded");
   }
   return 0;
 }

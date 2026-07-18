@@ -17,6 +17,9 @@
 #include <vector>
 
 namespace gw::ipc {
+
+bool output_extension_message(std::uint16_t type) noexcept;
+
 namespace {
 
 using wire::MessageFlag;
@@ -75,9 +78,12 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_SNAPSHOT_ABORT:
     case GWIPC_MESSAGE_OUTPUT_UPSERT:
     case GWIPC_MESSAGE_OUTPUT_REMOVE:
+    case GWIPC_MESSAGE_OUTPUT_DESCRIPTOR_UPSERT:
+    case GWIPC_MESSAGE_OUTPUT_MODE_UPSERT:
     case GWIPC_MESSAGE_SURFACE_UPSERT:
     case GWIPC_MESSAGE_SURFACE_REMOVE:
     case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT:
+    case GWIPC_MESSAGE_SURFACE_OUTPUT_STATE:
     case GWIPC_MESSAGE_BUFFER_ATTACH:
     case GWIPC_MESSAGE_BUFFER_DETACH:
     case GWIPC_MESSAGE_BUFFER_RELEASE:
@@ -88,6 +94,8 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_POLICY_WINDOW_UPSERT:
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE:
     case GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT:
+    case GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT:
+    case GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT:
     case GWIPC_MESSAGE_POLICY_COMMIT:
     case GWIPC_MESSAGE_POLICY_WINDOW_STATE:
     case GWIPC_MESSAGE_POLICY_ACKNOWLEDGED:
@@ -99,6 +107,9 @@ bool supported_established_type(std::uint16_t type) noexcept {
     case GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWLEDGED:
     case GWIPC_MESSAGE_SESSION_STATE_CHANGE:
     case GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED:
+    case GWIPC_MESSAGE_OUTPUT_STATE_QUERY:
+    case GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT:
+    case GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED:
       return true;
     default:
       return false;
@@ -297,6 +308,10 @@ gwipc_status validate_established(gwipc_connection& connection,
   auto code = wire::ProtocolErrorCode::MalformedPayload;
   if (status == GWIPC_STATUS_CAPABILITY_MISMATCH)
     code = wire::ProtocolErrorCode::MissingCapability;
+  else if (output_extension_message(
+               static_cast<std::uint16_t>(envelope.type)) &&
+           !fds.empty())
+    code = wire::ProtocolErrorCode::InvalidDescriptorCount;
   else if (snapshot_control(static_cast<std::uint16_t>(envelope.type)) ||
            wire::has_flag(envelope.flags, MessageFlag::SnapshotItem))
     code = wire::ProtocolErrorCode::SnapshotViolation;

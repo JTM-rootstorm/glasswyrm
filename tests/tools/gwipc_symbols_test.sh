@@ -48,3 +48,25 @@ for symbol in gwipc_contract_encode_policy_lifecycle_window_upsert \
     exit 1
   }
 done
+
+for symbol in gwipc_contract_encode_output_descriptor_upsert \
+  gwipc_decoded_output_descriptor_upsert \
+  gwipc_contract_encode_output_mode_upsert \
+  gwipc_decoded_output_mode_upsert \
+  gwipc_contract_encode_surface_output_state \
+  gwipc_decoded_surface_output_state \
+  gwipc_contract_encode_policy_output_upsert \
+  gwipc_decoded_policy_output_upsert \
+  gwipc_contract_encode_policy_window_output_hint \
+  gwipc_decoded_policy_window_output_hint \
+  gwipc_contract_encode_output_state_query \
+  gwipc_decoded_output_state_query \
+  gwipc_contract_encode_output_configuration_commit \
+  gwipc_decoded_output_configuration_commit \
+  gwipc_contract_encode_output_configuration_acknowledged \
+  gwipc_decoded_output_configuration_acknowledged; do
+  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.8$" || {
+    printf 'missing API 0.8 symbol version: %s\n' "$symbol" >&2
+    exit 1
+  }
+done

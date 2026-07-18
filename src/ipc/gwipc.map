@@ -43,3 +43,23 @@ GWIPC_0.6 {
 
 GWIPC_0.7 {
 } GWIPC_0.6;
+
+GWIPC_0.8 {
+  global:
+    gwipc_contract_encode_output_descriptor_upsert;
+    gwipc_decoded_output_descriptor_upsert;
+    gwipc_contract_encode_output_mode_upsert;
+    gwipc_decoded_output_mode_upsert;
+    gwipc_contract_encode_surface_output_state;
+    gwipc_decoded_surface_output_state;
+    gwipc_contract_encode_policy_output_upsert;
+    gwipc_decoded_policy_output_upsert;
+    gwipc_contract_encode_policy_window_output_hint;
+    gwipc_decoded_policy_window_output_hint;
+    gwipc_contract_encode_output_state_query;
+    gwipc_decoded_output_state_query;
+    gwipc_contract_encode_output_configuration_commit;
+    gwipc_decoded_output_configuration_commit;
+    gwipc_contract_encode_output_configuration_acknowledged;
+    gwipc_decoded_output_configuration_acknowledged;
+} GWIPC_0.7;

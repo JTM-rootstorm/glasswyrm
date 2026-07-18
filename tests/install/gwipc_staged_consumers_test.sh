@@ -19,7 +19,7 @@ library=$(find -L "$stage" -type f -name 'libgwipc.so.*' -print -quit)
 unset PKG_CONFIG_PATH
 export PKG_CONFIG_LIBDIR=${pc_file%/*}
 export PKG_CONFIG_SYSROOT_DIR=$stage
-[[ $(pkg-config --modversion gwipc) == 0.7.0 ]]
+[[ $(pkg-config --modversion gwipc) == 0.8.0 ]]
 read -r -a flags <<<"$(pkg-config --cflags --libs gwipc)"
 [[ " ${flags[*]} " != *"$source_root"* &&
    " ${flags[*]} " != *"$build_root"* ]]
@@ -40,6 +40,8 @@ consumers=(
   '0.6|gwipc_session_cpp_consumer.cpp|c++'
   '0.7|gwipc_sync_c_consumer.c|c'
   '0.7|gwipc_sync_cpp_consumer.cpp|c++'
+  '0.8|gwipc_output_c_consumer.c|c'
+  '0.8|gwipc_output_cpp_consumer.cpp|c++'
 )
 
 for entry in "${consumers[@]}"; do

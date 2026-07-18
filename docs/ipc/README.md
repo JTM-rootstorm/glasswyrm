@@ -3,7 +3,9 @@
 `libgwipc` is Glasswyrm's local, versioned process-contract library. Milestone 3
 established its transport, Milestone 4 added the compositor contract used by
 `gwcomp`, and Milestone 5 adds typed snapshot controls and the capability-gated
-window-policy contract used by `gwm`.
+window-policy contract used by `gwm`. Milestone 13 extends the same wire-major
+with API 0.8 output inventory, multi-output policy, surface membership, and
+same-UID output-control contracts.
 
 - [GWIPC API 0](GWIPC_API_0.md) documents the installed C ABI and C++ wrappers.
 - [GWIPC Wire Version 1](GWIPC_WIRE_V1.md) documents record encoding and the
@@ -15,6 +17,10 @@ window-policy contract used by `gwm`.
 - [GWIPC API 0](GWIPC_API_0.md) and [wire version 1](GWIPC_WIRE_V1.md) also
   record API 0.6 session-state, interactive-policy, and cursor-surface
   additions plus API 0.7 eventfd CPU-buffer synchronization.
+- API 0.8 installs `<glasswyrm/ipc/output.h>`. The API and wire references
+  record its additive output descriptors, modes, surface membership, policy
+  records, query/configuration transaction, role directions, correlation, and
+  zero-descriptor rules.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records
@@ -43,4 +49,11 @@ but a real Gentoo guest result is still required before M5 is declared complete:
 ```sh
 ./tools/gw-vm milestone4-runtime-test --yes
 ./tools/gw-vm milestone5-runtime-test --yes
+```
+
+Milestone 13 retains those historical commands and adds its own clean-guest
+acceptance command:
+
+```sh
+./tools/gw-vm milestone13-runtime-test --yes
 ```

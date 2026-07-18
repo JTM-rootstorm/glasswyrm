@@ -976,6 +976,22 @@ if get_option('drm_backend')
 endif
 
 if get_option('libgwipc')
+  gwipc_output_c_consumer = executable(
+    'gwipc_output_c_consumer',
+    files('install/gwipc_output_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.8-output-c-consumer', gwipc_output_c_consumer, timeout: 10)
+  gwipc_output_cpp_consumer = executable(
+    'gwipc_output_cpp_consumer',
+    files('install/gwipc_output_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.8-output-cpp-consumer', gwipc_output_cpp_consumer,
+       timeout: 10)
+
   gwipc_sync_c_consumer = executable(
     'gwipc_sync_c_consumer',
     files('install/gwipc_sync_c_consumer.c'),
@@ -1033,11 +1049,20 @@ if get_option('libgwipc')
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
 
+  gwipc_output_contract_test = executable(
+    'gwipc_output_contract_test',
+    files('unit/ipc/output_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-output-contract', gwipc_output_contract_test, timeout: 10)
+
   gwipc_buffer_sync_validation_test = executable(
     'gwipc_buffer_sync_validation_test',
     files(
       'unit/ipc/buffer_sync_validation_test.cpp',
       '../src/ipc/connection_validation.cpp',
+      '../src/ipc/connection_output_validation.cpp',
       '../src/ipc/message.cpp',
     ),
     dependencies: [gwipc_dep, gwipc_wire_dep],
@@ -1077,6 +1102,14 @@ if get_option('libgwipc')
   )
   test('gwipc-public-contract-api', gwipc_public_contract_api_test, timeout: 10)
 
+  gwipc_public_output_api_test = executable(
+    'gwipc_public_output_api_test',
+    files('unit/ipc/public_output_api_test.cpp'),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-public-output-api', gwipc_public_output_api_test, timeout: 10)
+
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',
     files('unit/ipc/decoder_fuzz_test.cpp'),
@@ -1098,6 +1131,24 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-transport', gwipc_transport_test, timeout: 10)
+
+  gwipc_output_protocol_test = executable(
+    'gwipc_output_protocol_test',
+    files(
+      'integration/gwipc_output_protocol_test.cpp',
+      '../src/ipc/connection_validation.cpp',
+      '../src/ipc/connection_output_validation.cpp',
+      '../src/ipc/connection_correlation.cpp',
+      '../src/ipc/connection_output_correlation.cpp',
+      '../src/ipc/connection_queue.cpp',
+      '../src/ipc/connection_transport.cpp',
+      '../src/ipc/connection_handshake.cpp',
+      '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-output-protocol', gwipc_output_protocol_test, timeout: 10)
 
   gwipc_endpoint_test = executable(
     'gwipc_endpoint_test',

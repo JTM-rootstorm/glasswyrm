@@ -8,6 +8,7 @@
 #include <glasswyrm/ipc/lifecycle.h>
 #include <glasswyrm/ipc/input.h>
 #include <glasswyrm/ipc/message.h>
+#include <glasswyrm/ipc/output.h>
 #include <glasswyrm/ipc/policy.h>
 #include <glasswyrm/ipc/session.h>
 #include <glasswyrm/ipc/version.h>
