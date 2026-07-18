@@ -53,6 +53,7 @@ gw_compositor_geometry_lib = static_library(
     'compositor/rectangle.cpp',
     'compositor/damage_region.cpp',
     'compositor/scene.cpp',
+    'compositor/scene_validation.cpp',
     'compositor/buffer.cpp',
   ),
   include_directories: [include_directories('.'), gw_include_dir],
