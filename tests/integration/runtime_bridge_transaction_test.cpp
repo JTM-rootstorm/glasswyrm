@@ -29,6 +29,20 @@ pid_t launch(const char* executable, const std::string& socket,
   return child;
 }
 
+pid_t launch_output_model(const char* executable, const std::string& socket,
+                          const std::string& dump) {
+  const auto child = ::fork();
+  require(child >= 0, "fork output-model bridge peer");
+  if (child == 0) {
+    ::execl(executable, executable, "--ipc-socket", socket.c_str(),
+            "--dump-dir", dump.c_str(), "--headless-output",
+            "LEFT:800x600@60000", "--headless-output",
+            "RIGHT:640x480@75000", nullptr);
+    _exit(127);
+  }
+  return child;
+}
+
 void stop(const pid_t child) {
   if (child <= 0) return;
   (void)::kill(child, SIGTERM);
@@ -76,14 +90,14 @@ int main(int argc, char** argv) {
               "bridge bootstrap timed out");
 
   std::string error;
-  require(bridge.submit_policy({2, 2, {}}, error) &&
-              !bridge.submit_policy({3, 3, {}}, error),
+  require(bridge.submit_policy({2, 2, {}, {}, {}}, error) &&
+              !bridge.submit_policy({3, 3, {}, {}, {}}, error),
           "only one policy transaction may be staged");
   drive_until(bridge, [&] { return bridge.policy_result_ready(); },
               "policy result timed out");
   require(bridge.policy_result().generation == 2 &&
               bridge.prepare_rollback() &&
-              bridge.submit_policy({3, 3, {}}, error),
+              bridge.submit_policy({3, 3, {}, {}, {}}, error),
           "policy-ready transaction can explicitly begin rollback");
   drive_until(bridge, [&] { return bridge.policy_result_ready(); },
               "rollback policy result timed out");
@@ -92,7 +106,7 @@ int main(int argc, char** argv) {
   drive_until(bridge, [&] { return bridge.compositor_result_ready(); },
               "compositor result timed out");
   require(bridge.prepare_rollback() &&
-              bridge.submit_policy({4, 4, {}}, error),
+              bridge.submit_policy({4, 4, {}, {}, {}}, error),
           "completed transaction can explicitly begin policy rollback");
 
   const auto compositor_fd_before_policy_restart = bridge.compositor_fd();
@@ -121,7 +135,7 @@ int main(int argc, char** argv) {
   unsupported.window.creation_serial = 1;
   unsupported.stack_mode = GWIPC_POLICY_STACK_NONE;
   require(bridge.prepare_rollback() &&
-              bridge.submit_policy({5, 5, {unsupported}}, error),
+              bridge.submit_policy({5, 5, {unsupported}, {}, {}}, error),
           "submit wire-valid unsupported policy metadata");
   drive_until(bridge, [&] { return bridge.policy_rejected_ready(); },
               "semantic policy rejection timed out");
@@ -132,7 +146,7 @@ int main(int argc, char** argv) {
   require(!bridge.policy_result_ready() &&
               !bridge.compositor_result_ready() &&
               !bridge.prepare_rollback() &&
-              !bridge.submit_policy({5, 5, {}}, error),
+              !bridge.submit_policy({5, 5, {}, {}, {}}, error),
           "start resets transaction stage before peers synchronize");
   stop(compositor_process);
   stop(policy_process);
@@ -199,5 +213,27 @@ int main(int argc, char** argv) {
           "reconnected cursor frame returns the bridge to idle");
   stop(cursor_compositor_process);
   stop(cursor_policy_process);
+
+  const std::string output_policy_socket = root + "/gwm-output-model.sock";
+  const std::string output_compositor_socket =
+      root + "/gwcomp-output-model.sock";
+  const auto output_policy_process = launch(argv[1], output_policy_socket);
+  const auto output_compositor_process = launch_output_model(
+      argv[2], output_compositor_socket, root + "/output-model-dump");
+  RuntimeBridge output_bridge(
+      output_policy_socket, output_compositor_socket,
+      gw::protocol::x11::kScreenModel, std::chrono::seconds(10), false, false,
+      false, true);
+  output_bridge.start();
+  drive_until(output_bridge, [&] { return output_bridge.ready(); },
+              "output-model bridge inventory bootstrap timed out");
+  const auto* output_layout = output_bridge.output_layout();
+  require(output_layout != nullptr && output_layout->descriptors.size() == 2 &&
+              output_layout->enabled_output_count == 2 &&
+              output_layout->root_logical_width == 1440 &&
+              output_layout->root_logical_height == 600,
+          "output-model bridge exposes compositor-authoritative layout");
+  stop(output_compositor_process);
+  stop(output_policy_process);
   return 0;
 }

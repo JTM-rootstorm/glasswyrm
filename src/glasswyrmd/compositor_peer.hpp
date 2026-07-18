@@ -1,8 +1,10 @@
 #pragma once
 
+#include "glasswyrmd/compositor_output_inventory.hpp"
 #include "glasswyrmd/peer_transport.hpp"
 #include "protocol/x11/screen_model.hpp"
 
+#include <memory>
 #include <string>
 #include <optional>
 #include <vector>
@@ -52,7 +54,8 @@ public:
   CompositorPeer(std::string path, gw::protocol::x11::ScreenModel screen,
                  bool software_content = false,
                  bool session_state = false,
-                 bool cpu_buffer_synchronization = false);
+                 bool cpu_buffer_synchronization = false,
+                 bool output_model = false);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -77,11 +80,16 @@ public:
   replay_input() const noexcept {
     return replay_input_;
   }
+  [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
+    return output_layout_ ? &*output_layout_ : nullptr;
+  }
   void forget_cursor_replay() noexcept;
   void disconnect() noexcept;
 
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
+  [[nodiscard]] bool begin_output_inventory(std::string &error);
+  [[nodiscard]] bool accept_output_inventory(std::string &error);
   void retain_cursor_records(CompositorSnapshotSubmission& submission) const;
   [[nodiscard]] bool validate_surface_membership_records(
       const CompositorSnapshotSubmission& submission,
@@ -114,8 +122,13 @@ private:
   std::vector<CompositorBufferRelease> releases_;
   bool software_content_{};
   bool session_state_{};
+  bool output_model_{};
   bool content_submission_{};
   std::vector<CompositorSessionStateChange> session_state_changes_;
+  std::unique_ptr<CompositorOutputInventory> pending_output_inventory_;
+  std::optional<output::OutputLayout> reference_output_inventory_;
+  std::optional<output::OutputLayout> output_layout_;
+  std::uint64_t next_output_query_id_{1};
 };
 
 } // namespace glasswyrm::server

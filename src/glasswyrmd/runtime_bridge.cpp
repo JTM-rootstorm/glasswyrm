@@ -30,6 +30,35 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
     return is_cursor(damage.surface_id);
   });
 }
+
+PolicySnapshotSubmission
+initial_output_policy(const output::OutputLayout &layout) {
+  PolicySnapshotSubmission submission;
+  submission.commit_id = 1;
+  submission.generation = 1;
+  submission.outputs.reserve(layout.output_order.size());
+  for (const auto id : layout.output_order) {
+    const auto &state = layout.states.at(id);
+    gwipc_policy_output_upsert record{};
+    record.struct_size = sizeof(record);
+    record.output_id = id.value;
+    record.logical_x = state.logical_x;
+    record.logical_y = state.logical_y;
+    record.logical_width = state.logical_width;
+    record.logical_height = state.logical_height;
+    record.work_x = state.logical_x;
+    record.work_y = state.logical_y;
+    record.work_width = state.logical_width;
+    record.work_height = state.logical_height;
+    record.scale_numerator = state.scale.numerator;
+    record.scale_denominator = state.scale.denominator;
+    record.transform = static_cast<gwipc_transform>(state.transform);
+    record.enabled = state.enabled;
+    record.primary = state.primary;
+    submission.outputs.push_back(record);
+  }
+  return submission;
+}
 }
 
 RuntimeBridge::RuntimeBridge(std::string policy_path,
@@ -38,16 +67,17 @@ RuntimeBridge::RuntimeBridge(std::string policy_path,
                              const std::chrono::milliseconds deadline,
                              const bool software_content,
                              const bool session_state,
-                             const bool cpu_buffer_synchronization)
-    : policy_(std::move(policy_path), screen),
+                             const bool cpu_buffer_synchronization,
+                             const bool output_model)
+    : policy_(std::move(policy_path), screen, true, output_model),
       compositor_(std::move(compositor_path), screen, software_content,
-                  session_state, cpu_buffer_synchronization),
-      deadline_duration_(deadline) {}
+                  session_state, cpu_buffer_synchronization, output_model),
+      deadline_duration_(deadline), output_model_(output_model) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
   policy_.disconnect();
   compositor_.disconnect();
-  stage_ = Stage::Policy;
+  stage_ = output_model_ ? Stage::Compositor : Stage::Policy;
   deadline_ = now + deadline_duration_;
   retry_at_ = now;
   retry_index_ = 0;
@@ -108,7 +138,11 @@ bool RuntimeBridge::service(const short policy_revents,
       }
       if (compositor_disconnected && policy_in_flight) policy_.disconnect();
       compositor_reset_ = compositor_reset_ || compositor_disconnected;
-      stage_ = policy_.state() == PeerBootstrapState::Disconnected
+      stage_ = output_model_ &&
+                       compositor_.state() ==
+                           PeerBootstrapState::Disconnected
+                   ? Stage::Compositor
+               : policy_.state() == PeerBootstrapState::Disconnected
                    ? Stage::Policy
                    : Stage::Compositor;
       deadline_ = now + deadline_duration_;
@@ -165,7 +199,20 @@ bool RuntimeBridge::service(const short policy_revents,
         schedule_retry(now);
       }
     }
-    if (policy_.state() == PeerBootstrapState::Synchronized) {
+    if (output_model_ && policy_.ready_for_snapshot()) {
+      const auto *layout = compositor_.output_layout();
+      if (layout == nullptr) {
+        stage_ = Stage::Failed;
+        error = "output-model policy bootstrap has no compositor inventory";
+        return false;
+      }
+      auto bootstrap = initial_output_policy(*layout);
+      if (!policy_.submit(bootstrap, error)) {
+        stage_ = Stage::Failed;
+        if (error.empty()) error = "could not submit output policy bootstrap";
+        return false;
+      }
+    } else if (policy_.state() == PeerBootstrapState::Synchronized) {
       stage_ = Stage::Compositor;
       retry_at_ = now;
       retry_index_ = 0;
@@ -192,6 +239,13 @@ bool RuntimeBridge::service(const short policy_revents,
       }
     }
     if (compositor_.state() == PeerBootstrapState::Synchronized) {
+      if (output_model_ &&
+          policy_.state() == PeerBootstrapState::Disconnected) {
+        stage_ = Stage::Policy;
+        retry_at_ = now;
+        retry_index_ = 0;
+        return true;
+      }
       stage_ = Stage::Ready;
       if (recovering_) {
         transaction_stage_ = TransactionStage::None;

@@ -40,6 +40,20 @@ pid_t launch(const char *executable, const std::string &socket,
   }
   return child;
 }
+pid_t launch_output_model(const char *executable, const std::string &socket,
+                          const std::string &dump,
+                          const char *second_output) {
+  const auto child = ::fork();
+  require(child >= 0, "fork output-model compositor");
+  if (child == 0) {
+    ::execl(executable, executable, "--ipc-socket", socket.c_str(),
+            "--dump-dir", dump.c_str(), "--headless-output",
+            "LEFT:800x600@60000", "--headless-output", second_output,
+            nullptr);
+    _exit(127);
+  }
+  return child;
+}
 template <class Peer> void drive(Peer &peer) {
   std::string error;
   const auto deadline =
@@ -58,6 +72,39 @@ template <class Peer> void synchronize(Peer &peer) {
   while (!peer.connect(error))
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   drive(peer);
+}
+void connect_for_output_snapshot(glasswyrm::server::PolicyPeer &peer) {
+  std::string error;
+  while (!peer.connect(error))
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!peer.ready_for_snapshot()) {
+    require(std::chrono::steady_clock::now() < deadline,
+            "output policy handshake timed out");
+    pollfd descriptor{peer.fd(), peer.wanted_events(), 0};
+    require(::poll(&descriptor, 1, 50) >= 0, "poll output policy peer");
+    require(peer.process(descriptor.revents, error) ==
+                glasswyrm::server::PeerProcessOutcome::Progress,
+            error.c_str());
+  }
+}
+gwipc_policy_output_upsert policy_output(
+    const std::uint64_t id, const std::int32_t x, const std::uint32_t width,
+    const std::uint32_t height, const std::uint32_t scale_numerator,
+    const std::uint32_t scale_denominator, const bool primary) {
+  gwipc_policy_output_upsert value{};
+  value.struct_size = sizeof(value);
+  value.output_id = id;
+  value.logical_x = value.work_x = x;
+  value.logical_width = value.work_width = width;
+  value.logical_height = value.work_height = height;
+  value.scale_numerator = scale_numerator;
+  value.scale_denominator = scale_denominator;
+  value.transform = GWIPC_TRANSFORM_NORMAL;
+  value.enabled = 1;
+  value.primary = primary;
+  return value;
 }
 gwipc_policy_lifecycle_window_upsert
 lifecycle(std::uint64_t serial, bool mapped, std::int32_t x, std::int32_t y) {
@@ -209,11 +256,11 @@ int main(int argc, char **argv) {
   for (std::uint64_t id = 2; id <= 5; ++id) {
     const auto window =
         lifecycle(id, id != 2 && id != 5, id >= 4 ? 44 : 10, id >= 4 ? 55 : 20);
-    require(policy.submit({id, id, {window}}, error), error.c_str());
+    require(policy.submit({id, id, {window}, {}, {}}, error), error.c_str());
     drive(policy);
     results.push_back(policy.result());
   }
-  require(policy.submit({6, 6, {}}, error), error.c_str());
+  require(policy.submit({6, 6, {}, {}, {}}, error), error.c_str());
   drive(policy);
   results.push_back(policy.result());
   stop(wm);
@@ -225,6 +272,51 @@ int main(int argc, char **argv) {
   require(!legacy_policy.result().bindings && legacy_policy.policy_hash() != 0,
           "historical policy profile retains a bindings-free v1 snapshot");
   stop(legacy_wm);
+
+  const std::string output_wm_socket = root + "/gwm-output.sock";
+  const auto output_wm = launch(argv[1], output_wm_socket);
+  auto output_screen = gw::protocol::x11::kScreenModel;
+  output_screen.width_pixels = 1440;
+  output_screen.height_pixels = 600;
+  output_screen.width_millimeters = 381;
+  output_screen.height_millimeters = 159;
+  glasswyrm::server::PolicyPeer output_policy(output_wm_socket, output_screen,
+                                               true, true);
+  connect_for_output_snapshot(output_policy);
+  glasswyrm::server::PolicySnapshotSubmission output_submission{
+      1,
+      1,
+      {},
+      {policy_output(11, 0, 800, 600, 1, 1, true),
+       policy_output(12, 800, 640, 480, 3, 2, false)},
+      {}};
+  require(output_policy.submit(output_submission, error), error.c_str());
+  drive(output_policy);
+  const auto output_hash = output_policy.policy_hash();
+  require(output_hash != 0 && output_policy.result().windows.empty() &&
+              output_policy.result().bindings.has_value(),
+          "zero-window multi-output policy snapshot returns a v3 hash");
+  output_policy.disconnect();
+  synchronize(output_policy);
+  require(output_policy.policy_hash() == output_hash,
+          "multi-output reconnect replays the exact v3 policy hash");
+  auto hinted_window = lifecycle(2, true, 0, 0);
+  hinted_window.geometry_serial = 0;
+  gwipc_policy_window_output_hint output_hint{};
+  output_hint.struct_size = sizeof(output_hint);
+  output_hint.window_id = hinted_window.window.window_id;
+  output_hint.preferred_output_id = 12;
+  output_submission.commit_id = 2;
+  output_submission.generation = 2;
+  output_submission.windows = {hinted_window};
+  output_submission.output_hints = {output_hint};
+  require(output_policy.submit(output_submission, error), error.c_str());
+  drive(output_policy);
+  require(output_policy.result().windows.size() == 1 &&
+              output_policy.result().windows.front().output_id == 12,
+          "GWM consumes the preferred-output hint in its v3 transaction");
+  stop(output_wm);
+
   const auto compositor =
       launch(argv[2], comp_socket, "--dump-dir", root + "/dump");
   glasswyrm::server::CompositorPeer display(comp_socket,
@@ -236,6 +328,8 @@ int main(int argc, char **argv) {
     drive(display);
   }
   stop(compositor);
+  require(display.output_layout() == nullptr,
+          "historical compositor profile does not query output inventory");
   for (const auto &entry : std::filesystem::recursive_directory_iterator(root))
     require(entry.path().extension() != ".ppm",
             "metadata sequence creates no PPM");
@@ -350,5 +444,58 @@ int main(int argc, char **argv) {
   require(!replacement->retract_ready() && errno == EAGAIN,
           "reconnect normalizes an existing readiness token without doubling");
   stop(fourth_compositor);
+
+  const std::string output_model_socket = root + "/gwcomp-output-model.sock";
+  auto output_model_compositor = launch_output_model(
+      argv[2], output_model_socket, root + "/output-model-1",
+      "RIGHT:640x480@75000");
+  glasswyrm::server::CompositorPeer output_model_peer(
+      output_model_socket, gw::protocol::x11::kScreenModel, false, false,
+      false, true);
+  synchronize(output_model_peer);
+  const auto *initial_layout = output_model_peer.output_layout();
+  require(initial_layout != nullptr && initial_layout->descriptors.size() == 2 &&
+              initial_layout->states.size() == 2 &&
+              initial_layout->enabled_output_count == 2 &&
+              initial_layout->root_logical_width == 1440 &&
+              initial_layout->root_logical_height == 600,
+          "output-model bootstrap exposes the validated compositor inventory");
+  const auto initial_generation = initial_layout->generation;
+  stop(output_model_compositor);
+  output_model_compositor = launch_output_model(
+      argv[2], output_model_socket, root + "/output-model-2",
+      "RIGHT:640x480@75000");
+  synchronize(output_model_peer);
+  const auto *reconnected_layout = output_model_peer.output_layout();
+  require(reconnected_layout != nullptr &&
+              reconnected_layout->descriptors.size() == 2 &&
+              reconnected_layout->generation == initial_generation,
+          "stable reconnect inventory accepts a fresh compositor generation");
+  stop(output_model_compositor);
+
+  output_model_compositor = launch_output_model(
+      argv[2], output_model_socket, root + "/output-model-changed",
+      "RIGHT:1024x768@60000");
+  std::string reconnect_error;
+  while (!output_model_peer.connect(reconnect_error))
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  const auto reconnect_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  auto reconnect_outcome = glasswyrm::server::PeerProcessOutcome::Progress;
+  while (reconnect_outcome == glasswyrm::server::PeerProcessOutcome::Progress) {
+    require(std::chrono::steady_clock::now() < reconnect_deadline,
+            "changed output inventory timed out");
+    pollfd descriptor{output_model_peer.fd(), output_model_peer.wanted_events(),
+                      0};
+    require(::poll(&descriptor, 1, 50) >= 0,
+            "poll changed output inventory");
+    reconnect_outcome =
+        output_model_peer.process(descriptor.revents, reconnect_error);
+  }
+  require(reconnect_outcome == glasswyrm::server::PeerProcessOutcome::Fatal &&
+              reconnect_error ==
+                  "compositor output inventory changed across reconnect",
+          "descriptor or mode drift is a deterministic fatal divergence");
+  stop(output_model_compositor);
   return 0;
 }

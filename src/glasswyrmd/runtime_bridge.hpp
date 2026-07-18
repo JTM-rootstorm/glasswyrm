@@ -17,7 +17,8 @@ public:
                 std::chrono::milliseconds deadline = std::chrono::seconds(10),
                 bool software_content = false,
                 bool session_state = false,
-                bool cpu_buffer_synchronization = false);
+                bool cpu_buffer_synchronization = false,
+                bool output_model = false);
 
   void start(Clock::time_point now = Clock::now()) noexcept;
   [[nodiscard]] bool service(short policy_revents, short compositor_revents,
@@ -42,6 +43,9 @@ public:
   }
   [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
     return policy_.result();
+  }
+  [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
+    return compositor_.output_layout();
   }
   [[nodiscard]] bool submit_compositor(
       const CompositorSnapshotSubmission& submission, std::string& error);
@@ -104,6 +108,7 @@ private:
   PolicySnapshotSubmission pending_policy_;
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
+  bool output_model_{};
   bool recovering_{};
   bool compositor_reset_{};
 };

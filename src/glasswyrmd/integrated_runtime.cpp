@@ -1,6 +1,7 @@
 #include "glasswyrmd/server_runtime.hpp"
 
 #ifdef GW_SERVER_HAS_IPC
+#include "glasswyrmd/screen_geometry.hpp"
 #include "input/input_router.hpp"
 #include "protocol/x11/event_mask.hpp"
 
@@ -74,7 +75,7 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
       server_.options_.software_content, server_.options_.real_input_enabled(),
-      server_.options_.game_compat);
+      server_.options_.game_compat, server_.options_.output_model);
   if (server_.options_.software_content) {
     content_presenter_ = std::make_unique<ContentPresenter>(
         server_.options_.game_compat ? GWIPC_SYNCHRONIZATION_EVENTFD
@@ -119,6 +120,18 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     }
   }
   if (SignalRuntime::stop_requested()) return 2;
+
+  if (server_.options_.output_model) {
+    const auto *layout = bridge_->output_layout();
+    const auto screen = layout ? derive_output_screen_model(*layout)
+                               : std::nullopt;
+    if (!screen || !server_.state_.update_screen_geometry(*screen)) {
+      std::fprintf(stderr,
+                   "glasswyrmd: compositor output inventory could not "
+                   "initialize the server screen\n");
+      return 1;
+    }
+  }
 
   initialize_lifecycle();
 #if GW_HAS_LIBINPUT_BACKEND
