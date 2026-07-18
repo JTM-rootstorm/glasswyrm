@@ -18,6 +18,8 @@ struct ChildSpec {
   std::optional<std::string> readiness_socket;
   bool readiness_requires_socket = true;
   bool required = true;
+  std::vector<std::string> additional_readiness_sockets;
+  bool additional_readiness_requires_socket = true;
 };
 
 struct SupervisorOptions {
@@ -39,6 +41,14 @@ public:
                         volatile std::sig_atomic_t *pending_signal = nullptr);
 
 private:
+  struct ReadinessPath {
+    std::string path;
+    bool requires_socket = true;
+    bool existed_before_spawn = false;
+    dev_t previous_device = 0;
+    ino_t previous_inode = 0;
+  };
+
   struct Child {
     ChildSpec spec;
     pid_t pid = -1;
@@ -46,6 +56,7 @@ private:
     bool readiness_path_existed = false;
     dev_t readiness_device = 0;
     ino_t readiness_inode = 0;
+    std::vector<ReadinessPath> additional_readiness;
   };
 
   [[nodiscard]] bool spawn(const ChildSpec &spec, std::ostream &error);
