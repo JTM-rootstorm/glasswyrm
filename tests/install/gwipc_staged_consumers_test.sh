@@ -16,6 +16,16 @@ pc_file=$(find "$stage" -type f -name gwipc.pc -print -quit)
 library=$(find -L "$stage" -type f -name 'libgwipc.so.*' -print -quit)
 [[ -n $pc_file && -n $library ]]
 
+tools_enabled=$(meson introspect --buildoptions "$build_root" | python3 -c '
+import json
+import sys
+
+matches = [item for item in json.load(sys.stdin) if item.get("name") == "tools"]
+if len(matches) != 1 or not isinstance(matches[0].get("value"), bool):
+    raise SystemExit("unable to read the Meson tools option")
+print("true" if matches[0]["value"] else "false")
+')
+
 unset PKG_CONFIG_PATH
 export PKG_CONFIG_LIBDIR=${pc_file%/*}
 export PKG_CONFIG_SYSROOT_DIR=$stage
@@ -24,6 +34,21 @@ read -r -a flags <<<"$(pkg-config --cflags --libs gwipc)"
 [[ " ${flags[*]} " != *"$source_root"* &&
    " ${flags[*]} " != *"$build_root"* ]]
 library_dir=${library%/*}
+
+gwinfo=$(find "$stage" -type f -path '*/bin/gwinfo' -perm -0100 -print -quit)
+gwout=$(find "$stage" -type f -path '*/bin/gwout' -perm -0100 -print -quit)
+if [[ $tools_enabled == true ]]; then
+  [[ $gwinfo == "$stage"/* && $gwout == "$stage"/* ]]
+  for tool in "$gwinfo" "$gwout"; do
+    LD_LIBRARY_PATH=$library_dir "$tool" --help >/dev/null
+    version=$(LD_LIBRARY_PATH=$library_dir "$tool" --version)
+    [[ $version == "${tool##*/} "* ]]
+  done
+  printf 'gwipc staged installed output tools: passed\n'
+else
+  [[ -z $gwinfo && -z $gwout ]]
+  printf 'gwipc staged tools-disabled boundary: passed\n'
+fi
 
 consumers=(
   '0.1|gwipc_transport_c_consumer.c|c'
