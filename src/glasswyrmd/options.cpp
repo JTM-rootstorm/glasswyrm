@@ -22,7 +22,7 @@ void print_usage(std::ostream &output) {
   output << "Usage: glasswyrmd [--display N] [--socket-dir PATH] [--help] "
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
             "[--software-content] [--synthetic-input-socket PATH] "
-            "[--game-compat] [--output-model] "
+            "[--game-compat] [--output-model] [--scale-protocol] "
             "[--disable-extension NAME]... "
             "[--x11-trace PATH] [--libinput-device PATH]... "
             "[--xkb-rules NAME] [--xkb-model NAME] [--xkb-layout NAME] "
@@ -129,6 +129,14 @@ ArgumentResult parse_base_argument(std::string_view argument, int &index,
       return ArgumentResult::ExitFailure;
     }
     options.output_model = true;
+    return ArgumentResult::Parsed;
+  }
+  if (argument == "--scale-protocol") {
+    if (options.scale_protocol) {
+      error << "glasswyrmd: duplicate option: --scale-protocol\n";
+      return ArgumentResult::ExitFailure;
+    }
+    options.scale_protocol = true;
     return ArgumentResult::Parsed;
   }
   if (argument == "--disable-extension") {
@@ -302,6 +310,15 @@ ParseOptionsResult validate_options(const Options &options,
   if (options.output_model && !GW_HAS_LIBGWIPC) {
     error << "glasswyrmd: --output-model is unavailable because this build "
              "does not include libgwipc\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.scale_protocol && !options.output_model) {
+    error << "glasswyrmd: --scale-protocol requires --output-model\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.scale_protocol && !GW_HAS_EXPERIMENTAL) {
+    error << "glasswyrmd: --scale-protocol is unavailable because this build "
+             "does not include experimental features\n";
     return ParseOptionsResult::ExitFailure;
   }
   if (options.game_compat && !GW_HAS_EXPERIMENTAL) {

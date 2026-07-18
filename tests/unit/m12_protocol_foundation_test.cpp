@@ -150,6 +150,19 @@ void test_registry(const x11::ByteOrder order) {
                             query_extension(order, "BIG-REQUESTS"));
   require(result.output[8] == 0,
           "scale-protocol capability does not imply game compatibility");
+  auto scale_version = header(order, 135, 0, 3);
+  scale_version.write_u32(0);
+  scale_version.write_u32(9);
+  result = dispatch_request(
+      state, context, finish(std::move(scale_version), 135, 0));
+  require(result.output.size() == 32 && u32(result.output, order, 8) == 0 &&
+              u32(result.output, order, 12) == 1,
+          "GW_SCALE QueryVersion negotiates the frozen 0.1 version");
+  result = dispatch_request(
+      state, context, finish(header(order, 135, 0, 1), 135, 0));
+  require(result.output[1] ==
+              static_cast<std::uint8_t>(x11::CoreErrorCode::BadLength),
+          "GW_SCALE QueryVersion enforces its exact request size");
 
   const ExtensionRegistry combined(ExtensionCapability::GameCompat |
                                        ExtensionCapability::ScaleProtocol,

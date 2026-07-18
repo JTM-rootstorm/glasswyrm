@@ -370,6 +370,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/extensions/randr.cpp',
       'glasswyrmd/extensions/randr_screen.cpp',
       'glasswyrmd/extensions/randr_crtc.cpp',
+      'glasswyrmd/extensions/gw_scale.cpp',
       'glasswyrmd/request_handlers/common.cpp',
       'glasswyrmd/request_handlers/drawable_access.cpp',
       'glasswyrmd/request_handlers/lifecycle.cpp',
