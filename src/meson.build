@@ -453,6 +453,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',
       'glasswyrmd/cursor_presenter.cpp',
+      'glasswyrmd/cursor_runtime.cpp',
       'glasswyrmd/synthetic_input_peer.cpp',
       'glasswyrmd/lifecycle_runtime.cpp',
       'glasswyrmd/input_runtime.cpp',

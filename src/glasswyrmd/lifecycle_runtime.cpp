@@ -173,9 +173,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   if (content_presenter_)
     content_presenter_->accept_lifecycle(snapshot, server_.state_.resources());
-#if GW_HAS_LIBINPUT_BACKEND
   if (cursor_presenter_) mark_cursor_dirty();
-#endif
   return true;
 }
 

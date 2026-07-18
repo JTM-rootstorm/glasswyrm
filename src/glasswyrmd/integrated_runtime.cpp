@@ -80,12 +80,12 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     content_presenter_ = std::make_unique<ContentPresenter>(
         server_.options_.game_compat ? GWIPC_SYNCHRONIZATION_EVENTFD
                                     : GWIPC_SYNCHRONIZATION_NONE);
-#if GW_HAS_LIBINPUT_BACKEND
-    if (server_.options_.real_input_enabled()) {
+    if (server_.options_.real_input_enabled() ||
+        (server_.options_.output_model &&
+         server_.options_.synthetic_input_socket)) {
       cursor_presenter_ = std::make_unique<CursorPresenter>();
-      cursor_dirty_ = true;
+      cursor_dirty_ = server_.options_.real_input_enabled();
     }
-#endif
     server_.drawable_damage_handler_ = [this](
         const std::vector<DrawableDamage>& damage) {
       for (const auto& item : damage)
@@ -190,9 +190,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
   if (!service_peer_replay(error) || !service_output_control_work() ||
       !service_lifecycle_work(compositor_releases))
     return false;
-#if GW_HAS_LIBINPUT_BACKEND
   if (!service_cursor()) return false;
-#endif
   submit_pending_content(error);
   return true;
 }

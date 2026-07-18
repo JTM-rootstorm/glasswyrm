@@ -11,13 +11,16 @@ namespace glasswyrm::server {
 
 void ServerRuntime::service_input(const short listener_events,
                                   const short connection_events) {
+  const bool was_connected = input_peer_->connected();
   if ((listener_events & POLLIN) != 0) input_peer_->accept_provider();
   input_peer_->service(connection_events);
+  if (input_peer_->connected() != was_connected) mark_cursor_dirty();
   if (input_peer_->consume_disconnect()) {
     if (pending_focus_input_)
       pending_focus_input_->provider_connected = false;
     input_state_.reset_provider_state();
     expected_input_id_ = 1;
+    mark_cursor_dirty();
     std::fprintf(stderr, "glasswyrmd: input provider state cleared\n");
   }
   const auto acknowledge = [&](const SyntheticInputRecord& record,
@@ -69,6 +72,7 @@ void ServerRuntime::service_input(const short listener_events,
           server_.state_.resources(), x, y);
       (void)input_state_.accept_time(record.time_ms);
       input_state_.set_pointer(x, y, new_target);
+      mark_cursor_dirty();
       delivered += router.route_crossing(old_target, new_target,
                                           server_.state_.focused_window(),
                                           input_state_, recipients);
