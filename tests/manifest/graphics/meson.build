@@ -166,6 +166,15 @@ compositor_scene_test = executable(
 )
 test('compositor-scene', compositor_scene_test, timeout: 10)
 
+compositor_multi_output_scene_test = executable(
+  'compositor_multi_output_scene_test',
+  files(tests_source_dir / 'unit/compositor_multi_output_scene_test.cpp'),
+  dependencies: gw_compositor_geometry_dep,
+  include_directories: test_source_root_include,
+)
+test('compositor-multi-output-scene', compositor_multi_output_scene_test,
+     timeout: 10)
+
 compositor_buffer_test = executable(
   'compositor_buffer_test',
   files(tests_source_dir / 'unit/compositor_buffer_test.cpp'),
