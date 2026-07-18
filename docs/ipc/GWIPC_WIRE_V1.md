@@ -335,6 +335,16 @@ The window ID is nonzero. Output IDs may be zero where the producer has no
 previous or preferred assignment. These output records extend the policy hash
 as profile v3; v1 base-policy and v2 interactive-binding bytes do not change.
 
+The canonical v3 base hash is FNV-1a 64-bit over the literal
+`glasswyrm-policy-v3`, the existing little-endian generation and context
+fields, a little-endian `u32` output count plus output records sorted by output
+ID, a little-endian `u32` hint count plus hints sorted by window ID, and the
+existing exact 64-byte policy-window records in output order. Output hash
+records omit wire padding: ID; logical rectangle; work rectangle; scale;
+one-byte transform, enabled, and primary; then flags. Hint hash records are
+window, previous output, preferred output, and flags. Interactive v3 hashes use
+the same v3 tag around the base v3 hash and the unchanged v2 binding fields.
+
 `PolicyWindowState` (`0x0211`) is an output `SnapshotItem`. It carries identity,
 workspace/output, final geometry, signed stacking, window and applied-state
 enums, exact visibility/focus/management/decoration/override/attention

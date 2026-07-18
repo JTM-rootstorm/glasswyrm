@@ -11,6 +11,13 @@ snapshot ID, generation, expected count, actual count, and item placement are
 validated by `libgwipc`; `gwm` additionally requires the policy domain and one
 context.
 
+With `MultiOutputPolicy` and `ScaleMetadata` negotiated together, the context
+is followed by one `PolicyOutputUpsert` for every known output, zero or more
+window records, and at most one `PolicyWindowOutputHint` for each included
+window. Item order is accepted independently of canonical hash order. The
+snapshot must contain at least one output and exactly one enabled primary;
+old profiles reject the M13-only records.
+
 Beginning a snapshot saves the prior pending state and replaces pending state
 with an empty staging state. Ending a valid snapshot marks the staged raw state
 complete but does not evaluate it. A following `PolicyCommit` performs the
@@ -55,6 +62,10 @@ policy window records only; the context contributes to the hash but is not an
 output item. Windows are ordered as visible ascending stack followed by hidden
 ascending ID.
 
+M13 output and hint records are input-only; GWM returns the same policy-window
+and optional bindings records as before, with output assignment carried by each
+policy-window state.
+
 The acknowledgement reports the incoming commit ID and producer generation,
 the applied generation, canonical policy hash, total window count, and result.
 The reply is validated against the original commit sequence and ID by
@@ -72,3 +83,7 @@ complete snapshot. Sending the same valid state in a different item order, or
 after reconnect, produces the same output records and policy hash. The
 synthetic producer and policy tests exercise these deterministic boundaries;
 they do not connect the real X11 server or compositor.
+
+An M13 reconnect must reproduce the exact policy-hash v3 value. A different
+hash for the same complete replay is deterministic divergence and terminates
+the peer relationship rather than accepting altered placement policy.
