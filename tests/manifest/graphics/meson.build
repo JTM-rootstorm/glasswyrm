@@ -215,6 +215,18 @@ test(
   timeout: 10,
 )
 
+multi_output_software_scene_renderer_test = executable(
+  'multi_output_software_scene_renderer_test',
+  files(tests_source_dir / 'pixel/multi_output_software_scene_renderer_test.cpp'),
+  dependencies: [gw_render_software_dep, gw_output_dep],
+  include_directories: test_source_root_include,
+)
+test(
+  'multi-output-software-scene-renderer',
+  multi_output_software_scene_renderer_test,
+  timeout: 10,
+)
+
 software_frame_test = executable(
   'software_frame_test',
   files(tests_source_dir / 'output/software_frame_test.cpp'),
