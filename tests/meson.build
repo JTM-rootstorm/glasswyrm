@@ -6,6 +6,48 @@ scaffold_test = executable(
 
 test('scaffold', scaffold_test)
 
+output_scale_test = executable(
+  'output_scale_test',
+  files('unit/output/output_scale_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-scale', output_scale_test)
+
+output_transform_test = executable(
+  'output_transform_test',
+  files('unit/output/output_transform_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-transform', output_transform_test)
+
+output_identity_test = executable(
+  'output_identity_test',
+  files('unit/output/output_identity_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-identity', output_identity_test)
+
+output_layout_test = executable(
+  'output_layout_test',
+  files('unit/output/output_layout_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-layout', output_layout_test)
+
+output_mapping_test = executable(
+  'output_mapping_test',
+  files('unit/output/output_mapping_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-mapping', output_mapping_test)
+
+output_damage_mapping_test = executable(
+  'output_damage_mapping_test',
+  files('unit/output/output_damage_mapping_test.cpp'),
+  dependencies: gw_output_model_dep,
+)
+test('output-damage-mapping', output_damage_mapping_test)
+
 if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
   session_launcher_test = executable(
     'session_launcher_test',
