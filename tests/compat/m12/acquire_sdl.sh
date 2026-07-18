@@ -23,7 +23,9 @@ for tool in curl sha256sum gpg awk tr; do
   command -v "$tool" >/dev/null || { printf 'Missing required tool: %s\n' "$tool" >&2; exit 1; }
 done
 mkdir -p "$output"
-curl_options=(-L --fail --silent --show-error --connect-timeout 20 \
+# Keep the pinned acquisition independent of ambient user curl configuration.
+# In particular, a VM snapshot may retain a stale development connect-to rule.
+curl_options=(-q -L --fail --silent --show-error --connect-timeout 20 \
   --retry 5 --retry-delay 2 --retry-all-errors)
 curl "${curl_options[@]}" -o "$archive" "$archive_url"
 curl "${curl_options[@]}" -o "$signature" "$signature_url"
