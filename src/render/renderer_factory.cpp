@@ -14,6 +14,53 @@
 namespace gw::render {
 namespace {
 
+OutputRendererMetrics adapt_metrics(
+    const software::OutputSoftwareRenderMetrics& source,
+    const glasswyrm::output::OutputFrameResult& frame) {
+  OutputRendererMetrics result;
+  result.physical_damage_rectangles = frame.damage;
+  result.scale = frame.scale;
+  result.transform = frame.transform;
+  result.used_direct = source.used_direct;
+  result.used_nearest = source.used_nearest;
+  result.used_bilinear = source.used_bilinear;
+  return result;
+}
+
+#if GW_HAS_GLES_RENDERER
+OutputRendererMetrics adapt_metrics(
+    const gles::OutputGlesRenderMetrics& source,
+    const glasswyrm::output::OutputFrameResult& frame) {
+  OutputRendererMetrics result;
+  result.texture_uploads = source.texture_uploads;
+  result.texture_upload_bytes = source.texture_upload_bytes;
+  result.physical_damage_rectangles = frame.damage;
+  result.readback_bytes = source.readback_bytes;
+  result.texture_cache_bytes = source.texture_cache_bytes;
+  result.scale = frame.scale;
+  result.transform = frame.transform;
+  result.maximum_fractional_comparison_error = source.maximum_channel_error;
+  result.used_direct = source.used_direct;
+  result.used_nearest = source.used_nearest;
+  result.used_bilinear = source.used_bilinear;
+  return result;
+}
+
+void describe_context(RendererSelectionReport& selection,
+                      const gles::ContextInfo& context) {
+  selection.egl_platform = context.platform;
+  selection.egl_vendor = context.egl_vendor;
+  selection.egl_version = context.egl_version;
+  selection.gles_version = context.gles_version;
+  selection.gl_vendor = context.gl_vendor;
+  selection.gl_renderer = context.gl_renderer;
+  selection.gl_version = context.gl_version;
+  selection.gbm_device = context.gbm_device;
+  selection.render_node = context.render_node;
+  selection.software_renderer = context.software_renderer;
+}
+#endif
+
 class ReportingSceneRenderer final : public SceneRenderer {
 public:
   ReportingSceneRenderer(std::unique_ptr<SceneRenderer> renderer,
@@ -80,8 +127,17 @@ public:
   OutputSceneRenderResult render(
       const software::SoftwareFrameSetRenderRequest& request) override {
     auto rendered = renderer_->render(request);
-    return {rendered.disposition, std::move(rendered.frames), "gles", {},
-            std::move(rendered.error)};
+    OutputSceneRenderResult result;
+    result.disposition = rendered.disposition;
+    result.selected_renderer = "gles";
+    result.error = std::move(rendered.error);
+    for (const auto& [id, metrics] : rendered.metrics) {
+      const auto frame = rendered.frames.outputs().find(id);
+      if (frame != rendered.frames.outputs().end())
+        result.metrics.emplace(id, adapt_metrics(metrics, frame->second));
+    }
+    result.frames = std::move(rendered.frames);
+    return result;
   }
 
   void disconnect() noexcept override { renderer_->disconnect(); }
@@ -93,17 +149,59 @@ private:
 
 class SoftwareOutputSceneRenderer final : public OutputSceneRenderer {
 public:
+  explicit SoftwareOutputSceneRenderer(std::string fallback_reason = {})
+      : fallback_reason_(std::move(fallback_reason)) {}
+
   OutputSceneRenderResult render(
       const software::SoftwareFrameSetRenderRequest& request) override {
     auto rendered = renderer_.render(request);
-    return {rendered.disposition, std::move(rendered.frames), "software", {},
-            std::move(rendered.error)};
+    OutputSceneRenderResult result;
+    result.disposition = rendered.disposition;
+    result.selected_renderer = "software";
+    result.fallback_reason = fallback_reason_;
+    result.error = std::move(rendered.error);
+    for (const auto& [id, metrics] : rendered.metrics) {
+      const auto frame = rendered.frames.outputs().find(id);
+      if (frame != rendered.frames.outputs().end())
+        result.metrics.emplace(id, adapt_metrics(metrics, frame->second));
+    }
+    for (auto& [id, metrics] : result.metrics) {
+      (void)id;
+      metrics.fallback_reason = fallback_reason_;
+    }
+    result.frames = std::move(rendered.frames);
+    return result;
   }
 
   void disconnect() noexcept override {}
 
 private:
   software::MultiOutputSoftwareSceneRenderer renderer_;
+  std::string fallback_reason_;
+};
+
+class ReportingOutputSceneRenderer final : public OutputSceneRenderer {
+public:
+  ReportingOutputSceneRenderer(std::unique_ptr<OutputSceneRenderer> renderer,
+                               std::unique_ptr<RendererReport> report)
+      : renderer_(std::move(renderer)), report_(std::move(report)) {}
+
+  OutputSceneRenderResult render(
+      const software::SoftwareFrameSetRenderRequest& request) override {
+    auto result = renderer_->render(request);
+    std::string report_error;
+    if (!report_->append_output_frame(request, result, report_error)) {
+      result.disposition = RenderDisposition::Fatal;
+      result.error = std::move(report_error);
+    }
+    return result;
+  }
+
+  void disconnect() noexcept override { renderer_->disconnect(); }
+
+private:
+  std::unique_ptr<OutputSceneRenderer> renderer_;
+  std::unique_ptr<RendererReport> report_;
 };
 
 #if GW_HAS_GLES_RENDERER
@@ -123,6 +221,10 @@ public:
       reason.resize(240);
     rendered = software_.render(request);
     rendered.fallback_reason = std::move(reason);
+    for (auto& [id, metrics] : rendered.metrics) {
+      (void)id;
+      metrics.fallback_reason = rendered.fallback_reason;
+    }
     return rendered;
   }
 
@@ -229,6 +331,11 @@ bool create_output_scene_renderer(
     std::unique_ptr<OutputSceneRenderer>& renderer, std::string& error) {
   renderer.reset();
   error.clear();
+  std::unique_ptr<OutputSceneRenderer> selected;
+  std::string selected_name = "software";
+  std::vector<std::string> fallback_reasons;
+  RendererSelectionReport selection;
+  selection.requested = options.requested;
 #if GW_HAS_GLES_RENDERER
   if (options.requested != RendererRequest::Software) {
     gles::ContextInfo context_info;
@@ -236,24 +343,49 @@ bool create_output_scene_renderer(
         {options.render_node}, context_info, options.maximum_texture_bytes,
         error);
     if (gles_renderer) {
-      renderer = std::make_unique<GlesOutputSceneRenderer>(
+      selected_name = "gles";
+      fallback_reasons = context_info.fallback_reasons;
+      describe_context(selection, context_info);
+      selected = std::make_unique<GlesOutputSceneRenderer>(
           std::move(gles_renderer));
       if (options.requested == RendererRequest::Auto)
-        renderer =
-            std::make_unique<AutoOutputSceneRenderer>(std::move(renderer));
-      return true;
+        selected =
+            std::make_unique<AutoOutputSceneRenderer>(std::move(selected));
+    } else {
+      if (options.requested == RendererRequest::Gles)
+        return false;
+      fallback_reasons = context_info.fallback_reasons;
+      if (fallback_reasons.size() == 4) fallback_reasons.pop_back();
+      if (error.size() > 240) error.resize(240);
+      fallback_reasons.emplace_back(std::move(error));
+      error.clear();
     }
-    if (options.requested == RendererRequest::Gles)
-      return false;
-    error.clear();
   }
 #else
   if (options.requested == RendererRequest::Gles) {
     error = "GLES renderer was not enabled at build time";
     return false;
   }
+  if (options.requested == RendererRequest::Auto)
+    fallback_reasons.emplace_back("GLES renderer was not enabled at build time");
 #endif
-  renderer = std::make_unique<SoftwareOutputSceneRenderer>();
+  if (!selected) {
+    std::string frame_fallback;
+    if (options.requested == RendererRequest::Auto && !fallback_reasons.empty())
+      frame_fallback = fallback_reasons.back();
+    selected =
+        std::make_unique<SoftwareOutputSceneRenderer>(std::move(frame_fallback));
+  }
+  if (!options.report_path) {
+    renderer = std::move(selected);
+    return true;
+  }
+  auto report = std::make_unique<RendererReport>(*options.report_path);
+  selection.selected = selected_name;
+  selection.fallback_reasons = fallback_reasons;
+  if (!report->initialize(selection, error)) return false;
+  renderer = std::make_unique<ReportingOutputSceneRenderer>(
+      std::move(selected), std::move(report));
   return true;
 }
 

@@ -52,6 +52,13 @@ sampling stays unchanged, while fractional and downscaled paths use the fixed
 filtering contract. GLES must match the software reference within documented
 bounds and cannot mix renderers inside one frame-set transaction.
 
+Renderer diagnostics retain the historical `selection` and `frame` JSONL
+records unchanged. Output-model frames add a versioned `output-frame` record
+with deterministic output-ID order. Each output reports physical damage,
+texture upload and cache work, readback bytes, active sampling filters,
+rational scale, transform, bounded fallback reason, and the maximum
+software-reference channel error observed by fractional GLES sampling.
+
 `GW_SCALE` 0.1 is an explicit experimental client contract for preferred
 scale, membership notifications, and retained scaled-pixmap presentation. It
 does not imply toolkit support. RANDR remains the standard output-reporting and

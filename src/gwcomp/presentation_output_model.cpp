@@ -40,7 +40,7 @@ PresentationTransaction::prepare_output_frame_set(
     render::software::MultiOutputSoftwareSceneRenderer renderer;
     auto software = renderer.render(request);
     rendered = {software.disposition, std::move(software.frames), "software",
-                {}, std::move(software.error)};
+                {}, std::move(software.error), {}};
   }
   if (!rendered.complete()) {
     presented.result =
