@@ -477,6 +477,9 @@ if get_option('gwm')
     'gw-wm-policy',
     files(
       'wm/interactive_policy.cpp',
+      'wm/multi_output_assignment.cpp',
+      'wm/multi_output_engine.cpp',
+      'wm/multi_output_geometry.cpp',
       'wm/policy_engine.cpp',
       'wm/policy_focus.cpp',
       'wm/policy_geometry.cpp',

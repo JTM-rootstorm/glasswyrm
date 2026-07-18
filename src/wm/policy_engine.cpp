@@ -16,8 +16,12 @@ Evaluation evaluate(const RawState& raw, const std::uint64_t generation) {
   auto& policy = result.policy;
   policy.generation = generation;
   policy.context = raw.context;
-  detail::apply_placement_and_fullscreen_geometry(raw, policy);
-  detail::assign_outputs(raw, policy);
+  if (raw.outputs.empty()) {
+    detail::apply_placement_and_fullscreen_geometry(raw, policy);
+    detail::assign_outputs(raw, policy);
+  } else {
+    detail::apply_multi_output_geometry(raw, policy);
+  }
   detail::apply_focus_and_visibility(raw, policy);
   detail::apply_stacking_and_transient_ordering(raw, policy);
   policy.hash = detail::policy_hash(policy);

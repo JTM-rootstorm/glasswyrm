@@ -16,6 +16,8 @@ class Transaction {
   [[nodiscard]] bool end_snapshot();
   [[nodiscard]] bool abort_snapshot();
   [[nodiscard]] bool upsert(const Context& context);
+  [[nodiscard]] bool upsert(const OutputContext& output);
+  [[nodiscard]] bool upsert(const WindowOutputHint& hint);
   [[nodiscard]] bool upsert(const RawWindow& window);
   [[nodiscard]] bool remove(std::uint32_t window_id);
   [[nodiscard]] Evaluation commit(std::uint64_t generation,
