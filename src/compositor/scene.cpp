@@ -103,6 +103,17 @@ bool SceneModel::end_complete_snapshot() {
   return true;
 }
 
+bool SceneModel::set_snapshot_output_configuration(
+    const std::uint64_t primary_output_id,
+    const std::uint64_t configuration_generation) noexcept {
+  if (profile_ != SceneProfile::OutputModel || !snapshot_active_ ||
+      primary_output_id == 0 || configuration_generation == 0)
+    return false;
+  pending_.primary_output_id = primary_output_id;
+  pending_.configuration_generation = configuration_generation;
+  return true;
+}
+
 void SceneModel::abort_complete_snapshot() {
   if (!snapshot_active_)
     return;

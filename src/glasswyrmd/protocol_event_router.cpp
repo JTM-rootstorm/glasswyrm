@@ -59,8 +59,12 @@ std::vector<std::uint8_t> encode_for(const ClientConnection& client,
                                             RandROutputChangeNotifyEvent>) {
           return encode_randr_output_change_notify(
               client.byte_order(), client.last_request_sequence(), value);
-        } else {
+        } else if constexpr (std::is_same_v<Event,
+                                            RandROutputPropertyNotifyEvent>) {
           return encode_randr_output_property_notify(
+              client.byte_order(), client.last_request_sequence(), value);
+        } else {
+          return encode_gw_scale_notify(
               client.byte_order(), client.last_request_sequence(), value);
         }
       },

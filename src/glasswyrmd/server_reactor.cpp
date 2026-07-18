@@ -62,6 +62,8 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
     std::optional<std::size_t> compositor_index;
     std::optional<std::size_t> input_listener_index;
     std::optional<std::size_t> input_connection_index;
+    std::vector<OutputControlPollDescriptor> output_control_descriptors;
+    std::size_t output_control_offset{};
 #if GW_HAS_LIBINPUT_BACKEND
     std::optional<std::size_t> real_input_index;
     std::optional<std::size_t> repeat_index;
@@ -85,6 +87,12 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
       input_connection_index = descriptors.size();
       descriptors.push_back(pollfd{input_peer_->connection_fd(),
                                    input_peer_->connection_events(), 0});
+    }
+    if (output_control_peer_) {
+      output_control_descriptors = output_control_peer_->poll_descriptors();
+      output_control_offset = descriptors.size();
+      for (const auto &entry : output_control_descriptors)
+        descriptors.push_back(pollfd{entry.descriptor, entry.events, 0});
     }
 #if GW_HAS_LIBINPUT_BACKEND
     if (real_input_) {
@@ -146,6 +154,13 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
 #endif
     }
 #ifdef GW_SERVER_HAS_IPC
+    if (output_control_peer_) {
+      for (std::size_t index = 0; index < output_control_descriptors.size();
+           ++index)
+        output_control_descriptors[index].revents =
+            descriptors[output_control_offset + index].revents;
+      output_control_peer_->service(output_control_descriptors);
+    }
     if (bridge_ &&
         !service_integrated(descriptors[*policy_index].revents,
                             descriptors[*compositor_index].revents))

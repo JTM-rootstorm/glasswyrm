@@ -277,7 +277,12 @@ void RuntimeReactor::validate_producer() {
       scene_profile == gw::compositor::SceneProfile::OutputModel
           ? output_inventory_.layout().primary_output_id.value
           : 0;
-  if (!compositor_.configure_scene_profile(scene_profile, primary_output_id)) {
+  const auto output_layout_generation =
+      scene_profile == gw::compositor::SceneProfile::OutputModel
+          ? output_inventory_.layout().generation
+          : 0;
+  if (!compositor_.configure_scene_profile(
+          scene_profile, primary_output_id, output_layout_generation)) {
     std::fprintf(stderr,
                  "gwcomp: could not configure negotiated scene profile\n");
     compositor_.disconnect();

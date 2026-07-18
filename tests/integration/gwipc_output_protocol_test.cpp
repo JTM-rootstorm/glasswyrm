@@ -141,6 +141,23 @@ void test_inventory_surface_and_policy_directions() {
               GWIPC_STATUS_PROTOCOL_ERROR,
           "membership rejects a non-complete snapshot");
 
+  auto server_tool = connection(GWIPC_ROLE_PROTOCOL_SERVER,
+                                GWIPC_ROLE_DIAGNOSTIC_TOOL,
+                                kOutputCapabilities);
+  outputs = snapshot(SnapshotDomain::Outputs);
+  require(validate(server_tool, GWIPC_MESSAGE_SURFACE_OUTPUT_STATE,
+                   GWIPC_FLAG_SNAPSHOT_ITEM, encode(surface_output()), outputs,
+                   MessageDirection::Outgoing) == GWIPC_STATUS_OK,
+          "server publishes membership in a diagnostic output snapshot");
+  auto tool_server = connection(GWIPC_ROLE_DIAGNOSTIC_TOOL,
+                                GWIPC_ROLE_PROTOCOL_SERVER,
+                                kOutputCapabilities);
+  outputs = snapshot(SnapshotDomain::Outputs);
+  require(validate(tool_server, GWIPC_MESSAGE_SURFACE_OUTPUT_STATE,
+                   GWIPC_FLAG_SNAPSHOT_ITEM, encode(surface_output()), outputs,
+                   MessageDirection::Outgoing) == GWIPC_STATUS_PROTOCOL_ERROR,
+          "diagnostic tools cannot inject surface membership");
+
   auto server_gwm = connection(GWIPC_ROLE_PROTOCOL_SERVER,
                                GWIPC_ROLE_WINDOW_MANAGER,
                                kOutputCapabilities);

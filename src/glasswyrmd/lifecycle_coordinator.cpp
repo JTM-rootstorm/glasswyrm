@@ -77,6 +77,9 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
       target->second.focused = focused;
       break;
     }
+    case LifecycleOperationKind::ScaleChange:
+      target->second.scale = source->second.scale;
+      break;
     case LifecycleOperationKind::Focus:
       target->second.focus_serial = source->second.focus_serial;
       break;

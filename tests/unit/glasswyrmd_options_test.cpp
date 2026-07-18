@@ -106,6 +106,23 @@ int main() {
   }
 #endif
 
+#if GW_HAS_LIBGWIPC
+  options = {};
+  if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm",
+             "--compositor-socket", "/tmp/comp", "--output-model",
+             "--control-socket", "/tmp/control"},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.control_socket != "/tmp/control") {
+    return 21;
+  }
+#endif
+  options = {};
+  if (parse({"glasswyrmd", "--control-socket", "/tmp/control"}, options,
+            output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("requires --output-model") == std::string::npos) {
+    return 22;
+  }
+
   for (const auto &values : {
            std::vector<std::string>{"glasswyrmd", "--output-model"},
            std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/wm",
@@ -143,6 +160,9 @@ int main() {
   }
   if (output.find("--scale-protocol") == std::string::npos) {
     return 19;
+  }
+  if (output.find("--control-socket PATH") == std::string::npos) {
+    return 23;
   }
   if (output.find("--synthetic-input-socket PATH") == std::string::npos) {
     return 5;

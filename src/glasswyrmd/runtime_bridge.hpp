@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <string>
+#include <utility>
 
 namespace glasswyrm::server {
 
@@ -46,6 +47,13 @@ public:
   }
   [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
     return compositor_.output_layout();
+  }
+  [[nodiscard]] bool can_adopt_output_layout(
+      const output::OutputLayout& layout) const noexcept {
+    return compositor_.can_adopt_output_layout(layout);
+  }
+  [[nodiscard]] bool adopt_output_layout(output::OutputLayout layout) {
+    return compositor_.adopt_output_layout(std::move(layout));
   }
   [[nodiscard]] bool submit_compositor(
       const CompositorSnapshotSubmission& submission, std::string& error);

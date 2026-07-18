@@ -84,6 +84,7 @@ struct StructuralTransition {
 struct DrawableDamage {
   std::uint32_t window{};
   glasswyrm::geometry::Rectangle rectangle{};
+  std::optional<glasswyrm::geometry::Rectangle> buffer_rectangle;
 };
 struct ExposeIntent {
   std::uint32_t window{};
@@ -138,6 +139,16 @@ struct RandROutputPropertyNotifyEvent {
   std::uint8_t status{};
 };
 
+struct GwScaleNotifyEvent {
+  std::uint8_t reason_mask{};
+  std::uint32_t window{};
+  std::uint32_t primary_output{};
+  std::uint32_t preferred_scale_numerator{1};
+  std::uint32_t preferred_scale_denominator{1};
+  std::uint32_t accepted_buffer_scale{1};
+  std::uint64_t layout_generation{1};
+};
+
 using ProtocolEvent = std::variant<
     gw::protocol::x11::PropertyNotifyEvent,
     gw::protocol::x11::SelectionClearEvent,
@@ -150,7 +161,8 @@ using ProtocolEvent = std::variant<
     RandRScreenChangeNotifyEvent,
     RandRCrtcChangeNotifyEvent,
     RandROutputChangeNotifyEvent,
-    RandROutputPropertyNotifyEvent>;
+    RandROutputPropertyNotifyEvent,
+    GwScaleNotifyEvent>;
 
 enum class ProtocolEventDelivery { DirectClient, WindowOwner, WindowMask };
 
@@ -176,6 +188,11 @@ struct DeferredPolicyMutation {
   bool request_focus{};
 };
 
+struct DeferredScaleMutation {
+  std::uint32_t window{};
+  WindowScaleState scale;
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -187,6 +204,7 @@ struct DispatchResult {
   bool deferred_map{false};
   std::optional<bool> deferred_override_redirect;
   std::optional<DeferredPolicyMutation> deferred_policy;
+  std::optional<DeferredScaleMutation> deferred_scale;
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
@@ -230,6 +248,13 @@ struct DispatchResult {
     result.kind = DispatchKind::DeferredLifecycle;
     result.deferred_window = change.window.xid;
     result.deferred_policy = std::move(change);
+    return result;
+  }
+  static DispatchResult deferred_scale_change(DeferredScaleMutation change) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = change.window;
+    result.deferred_scale = std::move(change);
     return result;
   }
 };

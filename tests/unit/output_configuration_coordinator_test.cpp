@@ -87,6 +87,29 @@ output::OutputLayout inventory() {
   return value;
 }
 
+output::OutputLayout drm_inventory() {
+  constexpr output::OutputId output_id{31};
+  constexpr output::OutputModeId mode_id{41};
+  output::OutputLayout value;
+  auto output_descriptor =
+      descriptor(output_id, mode_id, "Virtual-1", 1024, 768, true);
+  output_descriptor.kind = output::OutputKind::Drm;
+  output_descriptor.mode_configurable = false;
+  output_descriptor.arbitrary_headless_mode = false;
+  value.descriptors.emplace(output_id, std::move(output_descriptor));
+  value.states.emplace(output_id,
+                       state(output_id, mode_id, 0, 0, 1024, 768, true));
+  value.primary_output_id = output_id;
+  value.root_logical_width = 1024;
+  value.root_logical_height = 768;
+  value.generation = 1;
+  value.enabled_output_count = 1;
+  value.output_order = {output_id};
+  require(static_cast<bool>(output::validate_layout(value)),
+          "test DRM inventory is valid");
+  return value;
+}
+
 OutputUpsert upsert(const output::OutputState &state) {
   OutputUpsert value;
   value.output_id = state.output_id.value;
@@ -201,6 +224,15 @@ void test_transaction_and_rollback() {
   require(ack && ack->result == OutputConfigurationResult::InternalError &&
               ack->applied_generation == 1,
           "rollback failure reports deterministic fatal internal result");
+
+  ack = prepare(coordinator, 31, 1, kRight.value, proposed);
+  require(!ack, "internal promotion failure transaction prepares");
+  ack = coordinator.fail_internal();
+  require(ack && ack->result == OutputConfigurationResult::InternalError &&
+              ack->applied_generation == 1 &&
+              coordinator.committed_layout().generation == 1 &&
+              coordinator.stage() == OutputConfigurationStage::Idle,
+          "local promotion failure preserves the exact committed layout");
 
   ack = prepare(coordinator, 4, 1, kRight.value, proposed);
   require(!ack && coordinator.accept_policy() &&
@@ -321,11 +353,58 @@ void test_arbitrary_headless_mode() {
           "invalid coordinator reports deterministic internal failure");
 }
 
+void test_single_output_drm_configuration() {
+  constexpr output::OutputId output_id{31};
+  OutputConfigurationCoordinator coordinator(drm_inventory());
+  const auto current = records(coordinator.committed_layout());
+
+  auto changed = current;
+  changed[0].logical_x = 1;
+  require_rejection(coordinator, 40, changed, output_id.value,
+                    OutputConfigurationResult::InvalidLayout);
+
+  changed = current;
+  changed[0].physical_pixel_width = 800;
+  changed[0].logical_width = 800;
+  require_rejection(coordinator, 41, changed, output_id.value,
+                    OutputConfigurationResult::UnsupportedMode);
+
+  changed = current;
+  changed[0].scale_numerator = 4;
+  changed[0].scale_denominator = 3;
+  changed[0].logical_width = 768;
+  changed[0].logical_height = 576;
+  changed[0].transform = gw::ipc::wire::Transform::Rotate180;
+  auto ack = prepare(coordinator, 42, 1, output_id.value, changed);
+  const auto *transaction = coordinator.transaction();
+  require(!ack && transaction &&
+              transaction->proposed_layout.root_logical_width == 768 &&
+              transaction->proposed_layout.root_logical_height == 576 &&
+              transaction->proposed_layout.states.at(output_id).scale ==
+                  output::RationalScale{4, 3} &&
+              transaction->proposed_layout.states.at(output_id).transform ==
+                  output::OutputTransform::Rotate180 &&
+              transaction->proposed_layout.states.at(output_id)
+                      .physical_width == 1024 &&
+              transaction->proposed_layout.states.at(output_id)
+                      .physical_height == 768,
+          "single-output DRM accepts compositor scale and transform while "
+          "retaining its fixed native mode and origin");
+  require(coordinator.accept_policy() && coordinator.accept_compositor(),
+          "accepted DRM configuration reaches commit stage");
+  ack = coordinator.commit();
+  require(ack && ack->result == OutputConfigurationResult::Accepted &&
+              ack->root_logical_width == 768 &&
+              ack->root_logical_height == 576,
+          "accepted DRM scale and transform commit atomically");
+}
+
 } // namespace
 
 int main() {
   test_transaction_and_rollback();
   test_validation_results();
   test_arbitrary_headless_mode();
+  test_single_output_drm_configuration();
   return 0;
 }

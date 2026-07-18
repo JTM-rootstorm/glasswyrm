@@ -20,6 +20,8 @@ bool ServerRuntime::service_peer_readiness(const short policy_events,
     return false;
   }
   compositor_reset = bridge_->take_compositor_reset();
+  if (compositor_reset && output_configuration_active())
+    output_configuration_peer_reset_ = true;
   return true;
 }
 
@@ -106,7 +108,8 @@ bool ServerRuntime::service_peer_replay(std::string& error) {
     content_replay_attempted_ = true;
     auto replay = project_compositor(
         lifecycle_->committed(), next_compositor_commit_++,
-        next_compositor_generation_++, true);
+        next_compositor_generation_++, true,
+        server_.options_.output_model ? bridge_->output_layout() : nullptr);
     if (!content_presenter_->prepare_replay(
             lifecycle_->committed(), server_.state_.resources(), replay) ||
         !bridge_->submit_replay(replay, error)) {
@@ -153,7 +156,10 @@ bool ServerRuntime::service_lifecycle_work(
     const auto* active = lifecycle_->active();
     auto evaluated = active
                          ? apply_policy_result(active->proposed,
-                                               bridge_->policy_result())
+                                               bridge_->policy_result(),
+                                               server_.options_.output_model
+                                                   ? bridge_->output_layout()
+                                                   : nullptr)
                          : std::nullopt;
     if (!evaluated) {
       bridge_->clear_transaction_result();
@@ -214,12 +220,6 @@ bool ServerRuntime::service_lifecycle_work(
                  static_cast<unsigned long long>(release.buffer_id),
                  static_cast<unsigned>(release.reason));
   }
-  return true;
-}
-
-bool ServerRuntime::service_output_control_work() {
-  // M13 output-control work has a dedicated coordinator seam. Phase 0 keeps it
-  // inert so the historical integrated reactor has no new listener or wire path.
   return true;
 }
 

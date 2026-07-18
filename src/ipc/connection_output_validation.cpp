@@ -55,6 +55,13 @@ struct Roles {
                           GWIPC_ROLE_COMPOSITOR);
       required = GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
                  GWIPC_CAP_SCALE_METADATA;
+      if (!valid) {
+        valid = exact_roles(roles, GWIPC_ROLE_PROTOCOL_SERVER,
+                            GWIPC_ROLE_DIAGNOSTIC_TOOL);
+        required = GWIPC_CAP_OUTPUT_CONTROL |
+                   GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+                   GWIPC_CAP_SCALE_METADATA;
+      }
       break;
     case GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT:
     case GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT:
@@ -98,8 +105,9 @@ struct Roles {
 }
 
 [[nodiscard]] gwipc_status validate_flags_and_snapshot(
-    const std::uint16_t type, const std::uint32_t flags,
-    const SnapshotState& snapshot) noexcept {
+    const gwipc_connection& connection, const std::uint16_t type,
+    const std::uint32_t flags, const SnapshotState& snapshot,
+    const MessageDirection direction) noexcept {
   switch (type) {
     case GWIPC_MESSAGE_OUTPUT_DESCRIPTOR_UPSERT:
     case GWIPC_MESSAGE_OUTPUT_MODE_UPSERT:
@@ -110,8 +118,13 @@ struct Roles {
                  : GWIPC_STATUS_PROTOCOL_ERROR;
     case GWIPC_MESSAGE_SURFACE_OUTPUT_STATE:
       return flags == GWIPC_FLAG_SNAPSHOT_ITEM && snapshot.active &&
-                     snapshot.domain == static_cast<std::uint16_t>(
-                                            wire::SnapshotDomain::CompleteSession)
+                     (snapshot.domain == static_cast<std::uint16_t>(
+                                             wire::SnapshotDomain::CompleteSession) ||
+                      (snapshot.domain == static_cast<std::uint16_t>(
+                                              wire::SnapshotDomain::Outputs) &&
+                       exact_roles(message_roles(connection, direction),
+                                   GWIPC_ROLE_PROTOCOL_SERVER,
+                                   GWIPC_ROLE_DIAGNOSTIC_TOOL)))
                  ? GWIPC_STATUS_OK
                  : GWIPC_STATUS_PROTOCOL_ERROR;
     case GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT:
@@ -202,7 +215,8 @@ gwipc_status validate_output_extension(
   if (!fds.empty()) return GWIPC_STATUS_PROTOCOL_ERROR;
   auto status = validate_roles_and_capabilities(connection, type, direction);
   if (status != GWIPC_STATUS_OK) return status;
-  status = validate_flags_and_snapshot(type, flags, snapshot);
+  status =
+      validate_flags_and_snapshot(connection, type, flags, snapshot, direction);
   if (status != GWIPC_STATUS_OK) return status;
   return valid_payload(type, payload) ? GWIPC_STATUS_OK
                                       : GWIPC_STATUS_PROTOCOL_ERROR;

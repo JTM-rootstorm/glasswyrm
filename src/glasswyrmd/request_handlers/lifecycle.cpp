@@ -1,6 +1,7 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 #include "glasswyrmd/ewmh.hpp"
 #include "glasswyrmd/extension_event_helpers.hpp"
+#include "glasswyrmd/gw_scale_state.hpp"
 
 #include "glasswyrmd/request_handlers/drawable_access.hpp"
 #include "glasswyrmd/request_handlers/window_attributes.hpp"
@@ -114,6 +115,20 @@ void add_local_lifecycle_effects(DispatchResult& result,
     add_child_outer_damage(result, state, *transition.before, timestamp);
     add_parent_reveal(result, state.resources(), *transition.before);
   }
+}
+
+void invalidate_scaled_parent_for_mapped_child(
+    DispatchResult& result, ServerState& state, const std::uint32_t child_xid) {
+  const auto* child = state.resources().find_window(child_xid);
+  if (!child || child->window_class != WindowClass::InputOutput ||
+      !child->map_requested)
+    return;
+  auto* parent = state.resources().find_window(child->parent);
+  if (!parent || parent->parent != state.screen().root_window ||
+      !invalidate_scaled_pixmap(parent->scale))
+    return;
+  append_gw_scale_notifications(result, *parent, child->parent,
+                                kGwScaleInvalidatedReason);
 }
 DispatchResult create_window(ServerState& state, const DispatchContext& context,
                              const x11::FramedRequest& request) {
@@ -302,6 +317,9 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
       add_local_lifecycle_effects(result, state,
                                   result.structural_transitions.back(),
                                   context.input.logical_time);
+      if (mapped)
+        invalidate_scaled_parent_for_mapped_child(result, state,
+                                                  decoded.window);
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -413,6 +431,8 @@ DispatchResult map_subwindows(ServerState& state,
     add_local_lifecycle_effects(result, state,
                                 result.structural_transitions.back(),
                                 context.input.logical_time);
+    if (mapped)
+      invalidate_scaled_parent_for_mapped_child(result, state, child);
   }
   return result;
 }

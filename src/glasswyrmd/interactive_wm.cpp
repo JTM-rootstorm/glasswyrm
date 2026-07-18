@@ -48,7 +48,8 @@ bool ServerRuntime::initialize_interactive_policy() {
 }
 
 bool ServerRuntime::begin_interactive_pointer(const RealInputEvent &event) {
-  if (!interactive_bindings_ || !interactive_policy_ || !event.pressed)
+  if (output_configuration_active() || !interactive_bindings_ ||
+      !interactive_policy_ || !event.pressed)
     return false;
   const auto modifiers = static_cast<std::uint16_t>(event.state_before & 0xffU);
   glasswyrm::wm::InteractionKind kind = glasswyrm::wm::InteractionKind::None;
@@ -97,7 +98,9 @@ bool ServerRuntime::begin_interactive_pointer(const RealInputEvent &event) {
   operation.window = target;
   operation.proposed = std::move(proposed);
   pending_real_focus_ = PendingRealFocus{server_.state_.focused_window()};
-  const auto status = content_presenter_ && !bridge_->transaction_idle()
+  const auto status = output_configuration_active() ||
+                              (content_presenter_ &&
+                               !bridge_->transaction_idle())
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status != EnqueueStatus::Queued) {
@@ -133,9 +136,10 @@ bool ServerRuntime::update_interactive_geometry() {
   operation.proposed = std::move(proposed);
   interactive_geometry_token_ = operation.token;
   const auto status =
-      content_presenter_ &&
+      output_configuration_active() ||
+              (content_presenter_ &&
               (content_presenter_->frame_in_flight() ||
-               (cursor_presenter_ && !bridge_->transaction_idle()))
+               (cursor_presenter_ && !bridge_->transaction_idle())))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status != EnqueueStatus::Queued) {
@@ -210,9 +214,10 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
       pending_mutations_.emplace(operation.token, std::move(mutation));
       const auto token = operation.token;
       const auto status =
-          content_presenter_ &&
+          output_configuration_active() ||
+                  (content_presenter_ &&
                   (content_presenter_->frame_in_flight() ||
-                   (cursor_presenter_ && !bridge_->transaction_idle()))
+                   (cursor_presenter_ && !bridge_->transaction_idle())))
               ? lifecycle_->enqueue_paused(std::move(operation))
               : lifecycle_->enqueue(std::move(operation));
       if (status != EnqueueStatus::Queued)

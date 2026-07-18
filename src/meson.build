@@ -33,6 +33,7 @@ gw_scaffold_dep = declare_dependency(
 gw_output_model_lib = static_library(
   'gw-output-model',
   files(
+    'output/model/drm_configuration.cpp',
     'output/model/identity.cpp',
     'output/model/layout.cpp',
     'output/model/mapping.cpp',
@@ -358,8 +359,10 @@ if get_option('glasswyrmd')
       'glasswyrmd/ewmh.cpp',
       'glasswyrmd/ewmh_client_message.cpp',
       'glasswyrmd/randr_state.cpp',
+      'glasswyrmd/output_configuration_events.cpp',
       'glasswyrmd/lifecycle_snapshot.cpp',
       'glasswyrmd/lifecycle_coordinator.cpp',
+      'glasswyrmd/gw_scale_state.cpp',
       'glasswyrmd/request_dispatcher.cpp',
       'glasswyrmd/extension_registry.cpp',
       'glasswyrmd/extension_dispatcher.cpp',
@@ -406,12 +409,12 @@ if get_option('glasswyrmd')
       'input/input_router.cpp',
       'input/cursor_model.cpp',
     ),
-    dependencies: gw_x11_setup_dep,
+    dependencies: [gw_x11_setup_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
   gw_server_state_dep = declare_dependency(
     link_with: gw_server_state_lib,
-    dependencies: gw_x11_setup_dep,
+    dependencies: [gw_x11_setup_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
   gw_server_core_sources = files(
@@ -436,7 +439,12 @@ if get_option('glasswyrmd')
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_output_inventory.cpp',
+      'glasswyrmd/output_scene_projection.cpp',
+      'glasswyrmd/output_control_windows.cpp',
       'glasswyrmd/output_configuration_coordinator.cpp',
+      'glasswyrmd/output_control_peer.cpp',
+      'glasswyrmd/output_configuration_runtime.cpp',
+      'gwcomp/output_inventory_publisher.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/compositor_peer_submission.cpp',
       'glasswyrmd/screen_geometry.cpp',

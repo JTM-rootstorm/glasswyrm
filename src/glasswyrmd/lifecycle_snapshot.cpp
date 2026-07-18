@@ -57,11 +57,15 @@ LifecycleSnapshot build_lifecycle_snapshot(const ResourceTable& resources,
     item.applied_width = window->width;
     item.applied_height = window->height;
     item.window_type = static_cast<std::uint8_t>(window->policy_window_type);
-    item.applied_state = 1;
-    item.managed = !window->attributes.override_redirect;
-    item.decoration_eligible = !window->attributes.override_redirect;
+    item.applied_state = window->policy_applied_state;
+    item.managed = window->policy_managed;
+    item.decoration_eligible = window->policy_decoration_eligible;
     item.attention_requested = window->attention_requested;
-    item.fullscreen_eligible = 1;
+    item.fullscreen_eligible = window->policy_fullscreen_eligible;
+    item.direct_scanout_eligible = window->policy_direct_scanout_eligible;
+    item.assigned_output_id = window->assigned_output_id;
+    item.output_memberships = window->output_memberships;
+    item.scale = window->scale;
     snapshot.windows.emplace(xid, std::move(item));
   }
   return snapshot;

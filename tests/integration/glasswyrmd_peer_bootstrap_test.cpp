@@ -408,7 +408,7 @@ int main(int argc, char **argv) {
   errno = 0;
   require(!buffer->retract_ready() && errno == EAGAIN,
           "reconnecting compositor consumes exactly one rearmed token");
-  glasswyrm::server::CompositorContentSubmission resumed_content{7, 7, {}};
+  glasswyrm::server::CompositorContentSubmission resumed_content{7, 7, {}, {}};
   glasswyrm::server::CompositorSnapshotSubmission::Damage resumed_damage;
   resumed_damage.surface_id = (UINT64_C(1) << 32U) | 100U;
   resumed_damage.rectangles.push_back({0, 0, buffer->width(), buffer->height()});
@@ -461,6 +461,27 @@ int main(int argc, char **argv) {
               initial_layout->root_logical_height == 600,
           "output-model bootstrap exposes the validated compositor inventory");
   const auto initial_generation = initial_layout->generation;
+  auto adopted_layout = *initial_layout;
+  const auto right = std::ranges::find_if(
+      adopted_layout.descriptors, [](const auto &item) {
+        return item.second.name == "RIGHT";
+      });
+  require(right != adopted_layout.descriptors.end(),
+          "find reconnect output by stable name");
+  auto &right_state = adopted_layout.states.at(right->first);
+  ++adopted_layout.generation;
+  right_state.scale = {5, 4};
+  right_state.logical_width = 512;
+  right_state.logical_height = 384;
+  right_state.generation = adopted_layout.generation;
+  for (auto &[unused, state] : adopted_layout.states) {
+    (void)unused;
+    state.generation = adopted_layout.generation;
+  }
+  adopted_layout.root_logical_width = 1312;
+  require(static_cast<bool>(glasswyrm::output::validate_layout(adopted_layout)) &&
+              output_model_peer.adopt_output_layout(adopted_layout),
+          "adopt a non-default committed layout before reconnect");
   stop(output_model_compositor);
   output_model_compositor = launch_output_model(
       argv[2], output_model_socket, root + "/output-model-2",
@@ -469,8 +490,11 @@ int main(int argc, char **argv) {
   const auto *reconnected_layout = output_model_peer.output_layout();
   require(reconnected_layout != nullptr &&
               reconnected_layout->descriptors.size() == 2 &&
-              reconnected_layout->generation == initial_generation,
-          "stable reconnect inventory accepts a fresh compositor generation");
+              reconnected_layout->generation == initial_generation + 1 &&
+              reconnected_layout->root_logical_width == 1312 &&
+              reconnected_layout->states.at(right->first).scale ==
+                  glasswyrm::output::RationalScale{5, 4},
+          "stable reconnect inventory preserves the committed layout");
   stop(output_model_compositor);
 
   output_model_compositor = launch_output_model(

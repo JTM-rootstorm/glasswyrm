@@ -1,5 +1,7 @@
 #include "glasswyrmd/runtime_bridge.hpp"
 
+#include "glasswyrmd/output_scene_projection.hpp"
+
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -78,8 +80,10 @@ initial_compositor_scene(const output::OutputLayout& layout) {
   CompositorSnapshotSubmission submission;
   submission.commit_id = 1;
   submission.generation = layout.generation;
+  submission.primary_output_id = layout.primary_output_id.value;
+  submission.output_layout_generation = layout.generation;
   submission.outputs.reserve(layout.output_order.size());
-  for (const auto id : layout.output_order) {
+  const auto append = [&](const output::OutputId id) {
     const auto& state = layout.states.at(id);
     gwipc_output_upsert record{};
     record.struct_size = sizeof(record);
@@ -97,7 +101,11 @@ initial_compositor_scene(const output::OutputLayout& layout) {
     record.transform = static_cast<gwipc_transform>(state.transform);
     record.color = color_record(state.color);
     submission.outputs.push_back(record);
-  }
+  };
+  append(layout.primary_output_id);
+  for (const auto id : layout.output_order)
+    if (id != layout.primary_output_id)
+      append(id);
   return submission;
 }
 }
@@ -407,7 +415,15 @@ bool RuntimeBridge::submit_cursor(
     error = "cursor submission attempted while transaction stage is busy";
     return false;
   }
-  if (!compositor_.submit_cursor(submission, commit_id, generation, error))
+  auto projected = submission;
+  if (output_model_) {
+    const auto* layout = compositor_.output_layout();
+    if (!layout || !populate_cursor_output_state(projected, *layout)) {
+      error = "cursor output membership could not be projected";
+      return false;
+    }
+  }
+  if (!compositor_.submit_cursor(projected, commit_id, generation, error))
     return false;
   pending_compositor_ = compositor_.replay_input();
   pending_compositor_.commit_id = commit_id;
@@ -415,11 +431,18 @@ bool RuntimeBridge::submit_cursor(
   std::erase_if(pending_compositor_.surfaces, [](const auto& surface) {
     return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
   });
-  pending_compositor_.surfaces.push_back(submission.surface);
+  std::erase_if(pending_compositor_.surface_outputs,
+                [&](const auto& membership) {
+                  return membership.state.surface_id ==
+                         projected.surface.surface_id;
+                });
+  pending_compositor_.surfaces.push_back(projected.surface);
+  if (output_model_)
+    pending_compositor_.surface_outputs.push_back(projected.surface_output);
   pending_compositor_.buffers.clear();
   pending_compositor_.damages.clear();
-  if (submission.buffer) pending_compositor_.buffers.push_back(*submission.buffer);
-  if (submission.damage) pending_compositor_.damages.push_back(*submission.damage);
+  if (projected.buffer) pending_compositor_.buffers.push_back(*projected.buffer);
+  if (projected.damage) pending_compositor_.damages.push_back(*projected.damage);
   transaction_stage_ = TransactionStage::Cursor;
   return true;
 }

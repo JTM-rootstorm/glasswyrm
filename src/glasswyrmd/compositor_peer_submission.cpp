@@ -242,7 +242,9 @@ bool CompositorPeer::enqueue_output_records(
                              submission.commit_id,
                              GWIPC_SNAPSHOT_COMPLETE_SESSION,
                              0,
-                             submission.generation,
+                             output_model_
+                                 ? submission.output_layout_generation
+                                 : submission.generation,
                              item_count,
                              {}};
   auto* connection = transport_.connection();
@@ -344,8 +346,11 @@ bool CompositorPeer::enqueue_buffer_damage_records(
 bool CompositorPeer::enqueue_snapshot_completion_records(
     const CompositorSnapshotSubmission& submission,
     const std::uint32_t item_count, std::string& error) {
-  gwipc_snapshot_end end{sizeof(end), submission.commit_id,
-                         submission.generation, item_count, {}};
+  gwipc_snapshot_end end{
+      sizeof(end), submission.commit_id,
+      output_model_ ? submission.output_layout_generation
+                    : submission.generation,
+      item_count, {}};
   gwipc_frame_commit commit{};
   commit.struct_size = sizeof(commit);
   commit.commit_id = submission.commit_id;
@@ -377,6 +382,9 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission& submission,
   }
   if (output_model_) {
     if (!output_layout_ || complete.outputs.empty() ||
+        complete.primary_output_id == 0 ||
+        complete.output_layout_generation == 0 ||
+        complete.outputs.front().output_id != complete.primary_output_id ||
         complete.outputs.size() != output_layout_->descriptors.size()) {
       error = "output-model snapshot does not contain the complete output map";
       return false;
@@ -439,7 +447,11 @@ bool CompositorPeer::submit_cursor(
   std::erase_if(complete.surfaces, [](const auto& surface) {
     return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
   });
+  std::erase_if(complete.surface_outputs, [&](const auto& membership) {
+    return membership.state.surface_id == submission.surface.surface_id;
+  });
   complete.surfaces.push_back(submission.surface);
+  if (output_model_) complete.surface_outputs.push_back(submission.surface_output);
   complete.buffers.clear();
   complete.damages.clear();
   if (submission.buffer) complete.buffers.push_back(*submission.buffer);
@@ -455,10 +467,19 @@ bool CompositorPeer::submit_content(
     error = "compositor peer is not ready for incremental content";
     return false;
   }
-  if (!compositor_buffer_replay::rearm_content(submission.damages,
-                                               replay_input_, error))
+  CompositorSnapshotSubmission staged;
+  staged.surfaces = replay_input_.surfaces;
+  staged.buffers = submission.buffers;
+  staged.damages = submission.damages;
+  if (!validate_buffer_damage_records(staged, error) ||
+      !compositor_buffer_replay::rearm_snapshot(staged, replay_input_, error))
     return false;
   auto* connection = transport_.connection();
+  for (const auto& buffer : submission.buffers)
+    if (!enqueue_buffer(connection, buffer)) {
+      error = "could not queue incremental compositor buffer";
+      return false;
+    }
   for (const auto& damage : submission.damages) {
     gwipc_surface_damage value{};
     value.struct_size = sizeof(value);

@@ -86,6 +86,12 @@ class LibinputBackend {
   [[nodiscard]] std::int32_t pointer_x() const noexcept { return pointer_x_; }
   [[nodiscard]] std::int32_t pointer_y() const noexcept { return pointer_y_; }
   void warp_pointer(std::int32_t x, std::int32_t y) noexcept;
+  [[nodiscard]] bool can_update_root_bounds(std::uint32_t width,
+                                            std::uint32_t height) const noexcept {
+    return initialized_ && width != 0 && height != 0;
+  }
+  [[nodiscard]] bool update_root_bounds(std::uint32_t width,
+                                        std::uint32_t height) noexcept;
   [[nodiscard]] std::size_t held_key_count() const noexcept;
   [[nodiscard]] std::size_t held_button_count() const noexcept;
   [[nodiscard]] std::size_t bounded_diagnostic_count() const noexcept {

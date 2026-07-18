@@ -99,6 +99,20 @@ void test_priority_cleanup_runs_after_active_before_fifo() {
           "priority cleanup starts before ordinary pending FIFO work");
 }
 
+void test_replace_committed_requires_idle_boundary() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
+  require(coordinator.can_replace_committed() &&
+              coordinator.replace_committed(snapshot(2)) &&
+              coordinator.committed().focused_window == 2,
+          "output configuration may replace lifecycle truth while idle");
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              !coordinator.can_replace_committed() &&
+              !coordinator.replace_committed(snapshot(3)) &&
+              coordinator.committed().focused_window == 2,
+          "failed lifecycle promotion preserves the exact old snapshot");
+}
+
 void test_compositor_rejection_rolls_back_both_peers() {
   Recorder recorder;
   LifecycleCoordinator coordinator(snapshot(1), 4, recorder.callbacks());
@@ -313,6 +327,7 @@ void test_create_destroy_rebase_latest_snapshot() {
 int main() {
   test_capacity_and_successful_fifo();
   test_priority_cleanup_runs_after_active_before_fifo();
+  test_replace_committed_requires_idle_boundary();
   test_compositor_rejection_rolls_back_both_peers();
   test_cancellation_before_policy_result();
   test_disconnect_replays_each_phase();
