@@ -125,7 +125,7 @@ for key in "${required_results[@]}"; do result[$key]=failed; done
 clang=unavailable layout_generation=unknown output_ids=unknown
 headless_aggregate_hash=unknown drm_mode=1024x768
 service_checks=0
-randr_pid=0 legacy_pid=0 scale_pid=0
+randr_pid=0 legacy_pid=0 scale_pid=0 synthetic_pid=0
 gles_legacy_pid=0 drm_legacy_pid=0
 getty_state_captured=false logind_state_captured=false original_vt=
 getty_unit='' getty_active_before='' getty_enabled_before=''
@@ -163,8 +163,8 @@ cleanup() {
   local saved_status=$?
   set +e
   local pid
-  for pid in "$randr_pid" "$legacy_pid" "$scale_pid" "$gles_legacy_pid" \
-    "$drm_legacy_pid"; do
+  for pid in "$randr_pid" "$legacy_pid" "$scale_pid" "$synthetic_pid" \
+    "$gles_legacy_pid" "$drm_legacy_pid"; do
     if ((pid > 0)); then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" >/dev/null 2>&1 || true
@@ -526,27 +526,53 @@ assert_window_memberships "$left_id" "$control_data/legacy-left.json"
 copy_latest_output "$left_id" "$control_data/milestone13-legacy-left.ppm"
 
 scene_line_before=$(wc -l <"$scenes/scene.jsonl")
+crossing_release=$control_data/pointer-release
+rm -f "$crossing_release"
 "$synthetic_input" --socket "$runtime/input.sock" --scenario crossing \
-  --output "$control_data/pointer-acks.json"
-python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
-  "$scene_line_before" "$left_id" "$right_id" \
-  "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
+  --output "$control_data/pointer-acks.json" \
+  --hold-until "$crossing_release" &
+synthetic_pid=$!
+for _ in {1..400}; do
+  [[ -s $control_data/pointer-acks.json ]] && break
+  sleep .05
+done
+[[ -s $control_data/pointer-acks.json ]]
+crossing_ready=false
+for _ in {1..400}; do
+  if python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
+    "$scene_line_before" "$left_id" "$right_id" \
+    "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
 import json,sys
 acks=json.load(open(sys.argv[1]))
-records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
+try:
+    records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
+except json.JSONDecodeError:
+    raise SystemExit(1)
 events=acks['acknowledgements']
 assert acks['scenario']=='crossing' and len(events)==4
 assert (events[1]['root_x'],events[1]['root_y'])==(100,100)
 assert events[2]['root_x']==700 and events[2]['root_y']==479
 assert events[1]['result']=='accepted' and events[2]['result'] in ('accepted','clamped')
-cursor_ids=[record['cursor_surface']['output_id'] for record in records
-            if 'cursor_surface' in record]
+assert all(record.get('schema')=='glasswyrm-scene-v2' for record in records)
+cursor_ids=[output_id for record in records
+            for cursor in record.get('cursors',[])
+            for output_id in cursor.get('memberships',[])]
 left,right=int(sys.argv[4],16),int(sys.argv[5],16)
 assert left in cursor_ids and right in cursor_ids
 assert cursor_ids.index(left)<len(cursor_ids)-1-cursor_ids[::-1].index(right)
 json.dump({'schema':1,'passed':True,'acknowledgements':events,
            'cursor_output_ids':cursor_ids},open(sys.argv[6],'w'),sort_keys=True)
 PY
+  then
+    crossing_ready=true
+    break
+  fi
+  sleep .05
+done
+[[ $crossing_ready == true ]]
+: >"$crossing_release"
+wait "$synthetic_pid"
+synthetic_pid=0
 result[pointer_output_crossing]=passed
 
 before_frames=$(frame_count); legacy_command fullscreen on

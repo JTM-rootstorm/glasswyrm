@@ -54,8 +54,10 @@ bool wait_for_file(const std::filesystem::path& path) {
   return false;
 }
 
-bool wait_for_cursor(const std::filesystem::path& manifest,
-                     const std::int32_t x, const std::int32_t y) {
+bool wait_for_cursor_membership(const std::filesystem::path& manifest,
+                                const std::int32_t x, const std::int32_t y,
+                                const bool expect_empty,
+                                std::string* membership = nullptr) {
   const auto deadline = std::chrono::steady_clock::now() +
                         std::chrono::seconds(5);
   const auto position = "\"x\":" + std::to_string(x) +
@@ -63,11 +65,23 @@ bool wait_for_cursor(const std::filesystem::path& manifest,
   while (std::chrono::steady_clock::now() < deadline) {
     std::ifstream input(manifest);
     const std::string contents{std::istreambuf_iterator<char>(input), {}};
-    if (contents.find("\"schema\":\"glasswyrm-scene-v2\"") !=
-            std::string::npos &&
-        contents.find("\"cursor_count\":1") != std::string::npos &&
-        contents.find(position) != std::string::npos)
+    std::string latest_membership;
+    bool found = false;
+    for (auto cursor = contents.find(position); cursor != std::string::npos;
+         cursor = contents.find(position, cursor + position.size())) {
+      const auto start = contents.find("\"memberships\":[", cursor);
+      const auto end = start == std::string::npos
+                           ? std::string::npos
+                           : contents.find(']', start);
+      if (start == std::string::npos || end == std::string::npos) continue;
+      const auto values = start + sizeof("\"memberships\":[") - 1;
+      latest_membership = contents.substr(values, end - values);
+      found = true;
+    }
+    if (found && latest_membership.empty() == expect_empty) {
+      if (membership) *membership = latest_membership;
       return true;
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   return false;
@@ -99,14 +113,27 @@ int main(int argc, char** argv) {
                 "--synthetic-input-socket", input_socket});
 
   require(wait_for_file(input_socket), "synthetic input listener appears");
+  std::string left_membership;
+  std::string right_membership;
   {
     gw::test::SyntheticInputClient provider(input_socket);
-    const auto motion = provider.motion(1, 2, 900, 100);
-    require(motion.root_x == 900 && motion.root_y == 100,
-            "synthetic motion reaches the output-model server");
-    require(wait_for_cursor(manifest, 900, 100),
-            "scene v2 publishes the connected synthetic cursor position");
+    const auto left = provider.motion(1, 2, 100, 100);
+    require(left.root_x == 100 && left.root_y == 100,
+            "synthetic motion reaches the left output");
+    require(wait_for_cursor_membership(manifest, 100, 100, false,
+                                       &left_membership),
+            "scene v2 publishes the connected cursor on the left output");
+    const auto right = provider.motion(2, 3, 900, 100);
+    require(right.root_x == 900 && right.root_y == 100,
+            "synthetic motion reaches the right output");
+    require(wait_for_cursor_membership(manifest, 900, 100, false,
+                                       &right_membership),
+            "scene v2 publishes the connected cursor on the right output");
+    require(left_membership != right_membership,
+            "cursor output membership changes across the output boundary");
   }
+  require(wait_for_cursor_membership(manifest, 900, 100, true),
+          "synthetic provider disconnect hides the cursor membership");
 
   stop(server);
   stop(wm);

@@ -49,7 +49,8 @@ struct Record {
 
 void usage(FILE* output) {
   std::fprintf(output,
-      "Usage: gwinput_m8 --socket PATH --scenario NAME --output PATH\n"
+      "Usage: gwinput_m8 --socket PATH --scenario NAME --output PATH "
+      "[--hold-until PATH]\n"
       "Scenarios: barrier, motion, crossing, buttons, button-motion, "
       "modifiers, keyboard, click-focus, invalid-transition, malformed, "
       "queue-limit, reconnect, m9-xeyes, m10-xeyes-repaint\n");
@@ -256,7 +257,7 @@ const char* result_name(gwipc_synthetic_input_result value) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string socket, name, output;
+  std::string socket, name, output, hold_until;
   for (int index = 1; index < argc; ++index) {
     const std::string_view arg(argv[index]);
     if (arg == "--help") { usage(stdout); return 0; }
@@ -264,6 +265,7 @@ int main(int argc, char** argv) {
     if (arg == "--socket") socket = argv[++index];
     else if (arg == "--scenario") name = argv[++index];
     else if (arg == "--output") output = argv[++index];
+    else if (arg == "--hold-until") hold_until = argv[++index];
     else { usage(stderr); return 2; }
   }
   if (socket.empty() || output.empty() || !known_scenario(name)) {
@@ -306,5 +308,18 @@ int main(int argc, char** argv) {
            << ack.delivered_event_count << '}';
   }
   stream << "]}\n";
-  return stream ? 0 : 1;
+  stream.close();
+  if (!stream) return 1;
+  if (!hold_until.empty()) {
+    bool released = false;
+    for (int attempt = 0; attempt != 400; ++attempt) {
+      if (std::ifstream(hold_until)) {
+        released = true;
+        break;
+      }
+      if (!pump(connection.get(), 50)) return 1;
+    }
+    if (!released) return 1;
+  }
+  return 0;
 }
