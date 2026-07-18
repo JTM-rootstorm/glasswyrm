@@ -62,7 +62,7 @@ def main() -> int:
                        request(7, 72, length=4096),
                        request(8, 72, length=4 * 1024 * 1024), *xfixes_probe])
         result = module.validate(shm, no_shm)
-        if not result["passed"]:
+        if not result["passed"] or set(result["profiles"]) != {"shm", "no-shm"}:
             return 1
         if not all(result["independent_extension_coverage"].values()):
             return 1
