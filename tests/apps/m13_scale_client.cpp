@@ -3,6 +3,7 @@
 #include "m13_scale_client_hold.hpp"
 #include "m13_scale_client_options.hpp"
 #include "protocol/x11/byte_cursor.hpp"
+#include "protocol/x11/setup.hpp"
 
 #include <array>
 #include <algorithm>
@@ -66,6 +67,20 @@ std::uint32_t u32(const std::vector<std::uint8_t>& bytes,
                   const std::size_t offset, const x11::ByteOrder order) {
   require(offset + 4 <= bytes.size(), "truncated CARD32");
   return gw::test::read_wire_u32(bytes.data() + offset, order);
+}
+
+std::uint32_t setup_root(const std::vector<std::uint8_t>& reply,
+                         const x11::ByteOrder order) {
+  require(reply.size() >= 40 && reply[0] == 1 && reply[28] != 0,
+          "invalid X11 setup success");
+  const auto vendor_length = u16(reply, 24, order);
+  const auto vendor_padded = (static_cast<std::size_t>(vendor_length) + 3U) &
+                             ~std::size_t{3};
+  const auto screen_offset = 40U + vendor_padded +
+                             static_cast<std::size_t>(reply[29]) * 8U;
+  require(screen_offset + 4U <= reply.size(),
+          "truncated X11 setup screen record");
+  return u32(reply, screen_offset, order);
 }
 
 struct WindowScale {
@@ -153,9 +168,9 @@ class Session {
       : client_(socket_path), order_(order), timeout_ms_(timeout_ms) {
     client_.send_all(gw::test::make_setup_request(order_));
     const auto setup = client_.receive_setup_reply(order_, timeout_ms_);
-    require(setup.size() >= 84 && setup[0] == 1, "X11 setup failed");
+    require(setup.size() >= 40 && setup[0] == 1, "X11 setup failed");
     resource_base_ = u32(setup, 12, order_);
-    root_ = u32(setup, 80, order_);
+    root_ = setup_root(setup, order_);
   }
 
   std::uint32_t resource(const std::uint32_t offset) const {
@@ -174,8 +189,14 @@ class Session {
     for (;;) {
       auto packet = client_.receive_server_packet(order_, timeout_ms_);
       if (packet[0] == 1 || packet[0] == 0) {
-        require(u16(packet, 2, order_) == sequence,
-                "reply sequence mismatch");
+        const auto received_sequence = u16(packet, 2, order_);
+        if (received_sequence != sequence)
+          throw std::runtime_error(
+              "reply sequence mismatch: expected " +
+              std::to_string(sequence) + ", received " +
+              std::to_string(received_sequence) + ", packet type " +
+              std::to_string(packet[0]) + ", detail " +
+              std::to_string(packet[1]));
         require(packet[0] == 1, "server returned an X11 error");
         return packet;
       }
@@ -250,6 +271,14 @@ int self_test() {
   gw::test::m13::self_test_options();
   for (const auto order : {x11::ByteOrder::LittleEndian,
                            x11::ByteOrder::BigEndian}) {
+    x11::SetupReplyConfig setup_config;
+    setup_config.screen.root_window = UINT32_C(0x11223344);
+    for (const bool game_compat : {false, true}) {
+      setup_config.game_compat = game_compat;
+      const auto setup = x11::encode_setup_success(order, setup_config);
+      require(setup_root(setup, order) == setup_config.screen.root_window,
+              "dynamic X11 setup root parsing mismatch");
+    }
     const auto present = request(order, 135, 5, [](auto& writer) {
       writer.write_u32(0x11223344);
       writer.write_u32(0x55667788);
