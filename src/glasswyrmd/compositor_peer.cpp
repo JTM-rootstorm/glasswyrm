@@ -15,6 +15,9 @@ constexpr gwipc_capabilities kMetadataCapabilities =
 constexpr gwipc_capabilities kContentCapabilities =
     kMetadataCapabilities | GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_CURSOR_SURFACE;
+constexpr gwipc_capabilities kOutputModelCapabilities =
+    GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+    GWIPC_CAP_SCALE_METADATA;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -64,29 +67,113 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   });
 }
 
+bool same_mode_identity(const output::OutputMode &left,
+                        const output::OutputMode &right) noexcept {
+  return left.id == right.id && left.output_id == right.output_id &&
+         left.physical_width == right.physical_width &&
+         left.physical_height == right.physical_height &&
+         left.refresh_millihertz == right.refresh_millihertz &&
+         left.flags == right.flags && left.name == right.name &&
+         left.preferred == right.preferred;
+}
+
+bool same_descriptor_identity(const output::OutputDescriptor &left,
+                              const output::OutputDescriptor &right) noexcept {
+  if (left.id != right.id || left.name != right.name ||
+      left.kind != right.kind || left.connected != right.connected ||
+      left.physical_width_mm != right.physical_width_mm ||
+      left.physical_height_mm != right.physical_height_mm ||
+      left.supported_transform_mask != right.supported_transform_mask ||
+      left.minimum_scale != right.minimum_scale ||
+      left.maximum_scale != right.maximum_scale ||
+      left.maximum_scale_denominator != right.maximum_scale_denominator ||
+      left.mode_configurable != right.mode_configurable ||
+      left.scale_configurable != right.scale_configurable ||
+      left.transform_configurable != right.transform_configurable ||
+      left.primary_eligible != right.primary_eligible ||
+      left.arbitrary_headless_mode != right.arbitrary_headless_mode ||
+      left.maximum_physical_width != right.maximum_physical_width ||
+      left.maximum_physical_height != right.maximum_physical_height ||
+      left.maximum_physical_pixels != right.maximum_physical_pixels ||
+      left.modes.size() != right.modes.size())
+    return false;
+  return std::ranges::equal(left.modes, right.modes, same_mode_identity);
+}
+
+bool same_inventory_identity(const output::OutputLayout &left,
+                             const output::OutputLayout &right) noexcept {
+  if (left.descriptors.size() != right.descriptors.size()) return false;
+  for (const auto &[id, descriptor] : left.descriptors) {
+    const auto found = right.descriptors.find(id);
+    if (found == right.descriptors.end() ||
+        !same_descriptor_identity(descriptor, found->second))
+      return false;
+  }
+  return true;
+}
+
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
                                const bool software_content,
                                const bool session_state,
-                               const bool cpu_buffer_synchronization)
+                               const bool cpu_buffer_synchronization,
+                               const bool output_model)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
                  (software_content ? kContentCapabilities
                                    : kMetadataCapabilities) |
                      (session_state ? GWIPC_CAP_SESSION_STATE : 0) |
                      (cpu_buffer_synchronization
                           ? GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION
-                          : 0),
+                          : 0) |
+                     (output_model ? kOutputModelCapabilities : 0),
                  "glasswyrmd-compositor"),
       screen_(screen), software_content_(software_content),
-      session_state_(session_state) {}
+      session_state_(session_state), output_model_(output_model) {}
 
 bool CompositorPeer::connect(std::string &error) {
   disconnect();
   if (!transport_.connect(error))
     return false;
   state_ = PeerBootstrapState::Connecting;
+  return true;
+}
+
+bool CompositorPeer::begin_output_inventory(std::string &error) {
+  if (next_output_query_id_ == 0) {
+    error = "compositor output inventory query identity was exhausted";
+    return false;
+  }
+  pending_output_inventory_ = std::make_unique<CompositorOutputInventory>();
+  const auto query_id = next_output_query_id_++;
+  if (!pending_output_inventory_->start(transport_.connection(), query_id,
+                                        error)) {
+    pending_output_inventory_.reset();
+    return false;
+  }
+  state_ = PeerBootstrapState::AwaitingReply;
+  return true;
+}
+
+bool CompositorPeer::accept_output_inventory(std::string &error) {
+  const auto *layout = pending_output_inventory_
+                           ? pending_output_inventory_->layout()
+                           : nullptr;
+  if (layout == nullptr) {
+    error = "compositor output inventory completed without a layout";
+    return false;
+  }
+  if (reference_output_inventory_ &&
+      !same_inventory_identity(*reference_output_inventory_, *layout)) {
+    error = "compositor output inventory changed across reconnect";
+    return false;
+  }
+  if (!reference_output_inventory_) reference_output_inventory_ = *layout;
+  output_layout_ = *layout;
+  pending_output_inventory_.reset();
+  state_ = PeerBootstrapState::Synchronized;
+  error.clear();
   return true;
 }
 
@@ -136,6 +223,16 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     if (status != GWIPC_STATUS_OK) {
       error = "compositor peer receive failed";
       return PeerProcessOutcome::Fatal;
+    }
+    if (pending_output_inventory_) {
+      if (!pending_output_inventory_->consume(message.get(), error))
+        return PeerProcessOutcome::Fatal;
+      if (pending_output_inventory_->state() ==
+          CompositorInventoryState::Complete) {
+        if (!accept_output_inventory(error)) return PeerProcessOutcome::Fatal;
+        return PeerProcessOutcome::Progress;
+      }
+      continue;
     }
     if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
         session_state_) {
@@ -216,10 +313,13 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
     state_ = PeerBootstrapState::Failed;
     return PeerProcessOutcome::Disconnected;
   }
-  if (state_ == PeerBootstrapState::Connecting && transport_.established() &&
-      !send_bootstrap(error)) {
-    state_ = PeerBootstrapState::Failed;
-    return PeerProcessOutcome::Fatal;
+  if (state_ == PeerBootstrapState::Connecting && transport_.established()) {
+    const bool started = output_model_ ? begin_output_inventory(error)
+                                       : send_bootstrap(error);
+    if (!started) {
+      state_ = PeerBootstrapState::Failed;
+      return PeerProcessOutcome::Fatal;
+    }
   }
   if (state_ == PeerBootstrapState::AwaitingReply) {
     const auto outcome = drain(error);
@@ -245,5 +345,6 @@ void CompositorPeer::disconnect() noexcept {
   content_submission_ = false;
   releases_.clear();
   session_state_changes_.clear();
+  pending_output_inventory_.reset();
 }
 } // namespace glasswyrm::server
