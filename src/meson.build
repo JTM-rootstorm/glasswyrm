@@ -67,10 +67,11 @@ gw_render_sources = files(
   'render/renderer_factory.cpp',
   'render/renderer_report.cpp',
   'render/software/blend.cpp',
+  'render/software/multi_output_scene_renderer.cpp',
   'render/software/renderer.cpp',
   'render/software/scene_renderer.cpp',
 )
-gw_render_dependencies = [gw_compositor_geometry_dep]
+gw_render_dependencies = [gw_compositor_geometry_dep, gw_output_model_dep]
 if get_option('render_gl')
   gw_render_sources += files(
     'render/gles/context.cpp',
@@ -98,14 +99,15 @@ gw_render_software_dep = declare_dependency(
     'gw-output',
     files(
       'backends/output/software_frame.cpp',
+      'backends/output/software_frame_set.cpp',
       'backends/headless/frame_dump.cpp',
     ),
-    dependencies: gw_compositor_geometry_dep,
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
   gw_output_dep = declare_dependency(
     link_with: gw_output_lib,
-    dependencies: gw_compositor_geometry_dep,
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
   )
 
