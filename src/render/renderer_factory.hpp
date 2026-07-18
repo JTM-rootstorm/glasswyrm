@@ -10,11 +10,14 @@
 
 namespace gw::render {
 
+class RendererReport;
+
 struct RendererCreateOptions {
   RendererRequest requested{RendererRequest::Software};
   std::optional<std::filesystem::path> report_path;
   std::optional<std::filesystem::path> render_node;
   std::uint64_t maximum_texture_bytes{kMaximumGlTextureCacheBytes};
+  std::shared_ptr<RendererReport> shared_report;
 };
 
 [[nodiscard]] bool create_scene_renderer(

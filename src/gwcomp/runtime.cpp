@@ -87,18 +87,11 @@ int run(const Options& options) {
   }
 
   std::string renderer_error;
-  auto renderer = create_runtime_renderer(options, renderer_error);
-  if (!renderer) {
-    std::fprintf(stderr, "gwcomp: renderer initialization failed: %s\n",
-                 renderer_error.c_str());
-    return 1;
-  }
-  auto output_renderer =
-      create_runtime_output_renderer(options, renderer_error);
-  if (!output_renderer) {
-    std::fprintf(stderr,
-                 "gwcomp: output renderer initialization failed: %s\n",
-                 renderer_error.c_str());
+  std::unique_ptr<gw::render::SceneRenderer> renderer;
+  std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer;
+  if (!create_runtime_renderers(options, renderer, output_renderer,
+                                renderer_error)) {
+    std::fprintf(stderr, "gwcomp: %s\n", renderer_error.c_str());
     return 1;
   }
   SignalRuntime signals;

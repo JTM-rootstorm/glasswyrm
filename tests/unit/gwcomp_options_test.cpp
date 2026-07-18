@@ -1,5 +1,11 @@
 #include "gwcomp/options.hpp"
+#include "gwcomp/renderer_runtime.hpp"
 
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -221,6 +227,26 @@ int main() {
               options, output, error) != ParseOptionsResult::ExitFailure)
       return 1;
   }
+
+  std::string temporary = "/tmp/glasswyrm-runtime-renderer-test-XXXXXX";
+  if (::mkdtemp(temporary.data()) == nullptr) return 1;
+  const auto report_path =
+      std::filesystem::path(temporary) / "renderer.jsonl";
+  options = {};
+  options.renderer_report = report_path.string();
+  std::unique_ptr<gw::render::SceneRenderer> renderer;
+  std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer;
+  if (!glasswyrm::compositor::create_runtime_renderers(
+          options, renderer, output_renderer, error))
+    return 1;
+  std::ifstream report_input(report_path, std::ios::binary);
+  const std::string report{std::istreambuf_iterator<char>(report_input), {}};
+  const auto first_selection = report.find("{\"record\":\"selection\"");
+  if (!renderer || !output_renderer || first_selection == std::string::npos ||
+      report.find("{\"record\":\"selection\"", first_selection + 1) !=
+          std::string::npos)
+    return 1;
+  std::filesystem::remove_all(temporary);
 
   return 0;
 }

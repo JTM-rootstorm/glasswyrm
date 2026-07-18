@@ -37,6 +37,7 @@ public:
 
   [[nodiscard]] bool initialize(const RendererSelectionReport& selection,
                                 std::string& error);
+  [[nodiscard]] bool initialized() const noexcept { return descriptor_ >= 0; }
   [[nodiscard]] bool append_frame(const RenderFrameRequest& request,
                                   const RenderFrameResult& result,
                                   std::string_view selected,
