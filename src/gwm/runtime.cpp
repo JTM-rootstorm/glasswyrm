@@ -19,7 +19,8 @@ constexpr std::uint64_t kRequiredCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_WINDOW_POLICY;
 constexpr std::uint64_t kOfferedCapabilities =
     kRequiredCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE |
-    GWIPC_CAP_INTERACTIVE_POLICY;
+    GWIPC_CAP_INTERACTIVE_POLICY | GWIPC_CAP_MULTI_OUTPUT_POLICY |
+    GWIPC_CAP_SCALE_METADATA;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 constexpr std::uint32_t kMaximumQueuedBytes = GWIPC_HARD_MAXIMUM_QUEUED_BYTES;

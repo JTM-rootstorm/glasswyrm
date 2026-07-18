@@ -13,6 +13,8 @@ namespace glasswyrm::server {
 struct PolicySnapshotSubmission {
   std::uint64_t commit_id{}, generation{};
   std::vector<gwipc_policy_lifecycle_window_upsert> windows;
+  std::vector<gwipc_policy_output_upsert> outputs;
+  std::vector<gwipc_policy_window_output_hint> output_hints;
 };
 
 struct PolicySnapshotResult {
@@ -24,7 +26,7 @@ struct PolicySnapshotResult {
 class PolicyPeer {
 public:
   PolicyPeer(std::string path, gw::protocol::x11::ScreenModel screen,
-             bool interactive_policy = true);
+             bool interactive_policy = true, bool output_model = false);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -37,6 +39,10 @@ public:
   }
   [[nodiscard]] bool submit(const PolicySnapshotSubmission &submission,
                             std::string &error);
+  [[nodiscard]] bool ready_for_snapshot() const noexcept {
+    return transport_.established() &&
+           state_ == PeerBootstrapState::Connecting;
+  }
   [[nodiscard]] const PolicySnapshotResult &result() const noexcept {
     return result_;
   }
@@ -57,6 +63,8 @@ private:
   bool reply_snapshot_active_{};
   bool reply_snapshot_complete_{};
   bool interactive_profile_{};
+  bool output_model_profile_{};
+  bool replaying_{};
   PolicySnapshotSubmission pending_;
   PolicySnapshotSubmission replay_input_;
   PolicySnapshotResult result_;
