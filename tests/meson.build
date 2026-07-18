@@ -781,7 +781,23 @@ software_scene_renderer_test = executable(
   dependencies: [gw_render_software_dep, gw_output_dep],
   include_directories: test_source_root_include,
 )
-test('software-scene-renderer', software_scene_renderer_test, timeout: 10)
+software_scene_renderer_environment = []
+if get_option('render_gl')
+  # GLVND otherwise probes every installed EGL vendor. Keep this Mesa
+  # surfaceless renderer test deterministic and isolated from unrelated
+  # vendor plug-in initialization and process-global state.
+  software_scene_renderer_environment += [
+    '__EGL_VENDOR_LIBRARY_FILENAMES=' + (
+      meson.current_source_dir() / 'pixel/mesa_egl_vendor.json'
+    ),
+  ]
+endif
+test(
+  'software-scene-renderer',
+  software_scene_renderer_test,
+  env: software_scene_renderer_environment,
+  timeout: 10,
+)
 
 software_frame_test = executable(
   'software_frame_test',
