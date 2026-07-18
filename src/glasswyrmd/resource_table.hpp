@@ -325,6 +325,7 @@ class ResourceTable {
   [[nodiscard]] std::uint32_t all_event_selections(
       std::uint32_t window) const noexcept;
   void remove_event_selections(ClientId client) noexcept;
+  void remove_gw_scale_selections(ClientId client) noexcept;
 
   [[nodiscard]] PropertyMutationStatus change_property(
       std::uint32_t window, std::uint32_t property_atom, Property value,

@@ -136,6 +136,7 @@ ClientCleanupPlan ResourceTable::prepare_client_cleanup(const ClientId owner) {
   constexpr auto kSubstructureNotifyMask =
       gw::protocol::x11::event_mask::SubstructureNotify;
   remove_event_selections(owner);
+  remove_gw_scale_selections(owner);
   ClientCleanupPlan plan;
   plan.owner = owner;
   const auto owned = resources_by_owner_.find(owner);

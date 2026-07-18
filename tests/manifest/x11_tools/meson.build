@@ -56,6 +56,7 @@ if get_option('glasswyrmd')
     ['randr-reporting', 'randr_reporting_test.cpp'],
     ['randr-config', 'randr_config_test.cpp'],
     ['randr-event-wire', 'randr_event_wire_test.cpp'],
+    ['gw-scale-dispatch', 'gw_scale_dispatch_test.cpp'],
     ['ewmh-root', 'ewmh_root_test.cpp'],
     ['ewmh-policy', 'ewmh_policy_test.cpp'],
     ['ewmh-client-message', 'ewmh_client_message_test.cpp'],
