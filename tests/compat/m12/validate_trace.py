@@ -198,7 +198,7 @@ def validate(shm: pathlib.Path, no_shm: pathlib.Path) -> dict[str, Any]:
     no_shm_records = read_records(no_shm)
     profiles = {
         "shm": shm_profile(shm_records),
-        "no_shm": no_shm_profile(no_shm_records),
+        "no-shm": no_shm_profile(no_shm_records),
     }
     errors = [name for name, profile in profiles.items() if not profile["passed"]]
     coverage = {
