@@ -76,6 +76,24 @@ bool descriptor_limits_are_valid(const OutputDescriptor &descriptor) noexcept {
   return true;
 }
 
+bool descriptor_metadata_is_valid(const OutputDescriptor &descriptor) noexcept {
+  const bool physical_dimensions_known =
+      descriptor.physical_width_mm != 0 && descriptor.physical_height_mm != 0;
+  const bool physical_dimensions_absent =
+      descriptor.physical_width_mm == 0 && descriptor.physical_height_mm == 0;
+  if ((!physical_dimensions_known && !physical_dimensions_absent) ||
+      (descriptor.supported_transform_mask & ~kAllOutputTransformsMask) != 0 ||
+      descriptor.supported_transform_mask == 0)
+    return false;
+  switch (descriptor.kind) {
+  case OutputKind::Headless:
+    return !descriptor.arbitrary_headless_mode || descriptor.mode_configurable;
+  case OutputKind::Drm:
+    return !descriptor.arbitrary_headless_mode;
+  }
+  return false;
+}
+
 bool valid_descriptor_modes(const OutputDescriptor &descriptor) {
   if (descriptor.modes.size() > kMaximumModesPerOutput)
     return false;
@@ -177,6 +195,8 @@ LayoutValidationResult validate_inventory_geometry(const OutputLayout &layout,
       return failure(LayoutValidationError::InvalidIdentity, id);
     if (!valid_name(descriptor.name) || !names.insert(descriptor.name).second)
       return failure(LayoutValidationError::InvalidName, id);
+    if (!descriptor_metadata_is_valid(descriptor))
+      return failure(LayoutValidationError::InvalidDescriptor, id);
     if (state->second.enabled) {
       if (state->second.logical_x < 0 || state->second.logical_y < 0)
         return failure(LayoutValidationError::InvalidPosition, id);
@@ -312,6 +332,8 @@ layout_validation_error_name(const LayoutValidationError error) noexcept {
     return "invalid-identity";
   case LayoutValidationError::InvalidName:
     return "invalid-name";
+  case LayoutValidationError::InvalidDescriptor:
+    return "invalid-descriptor";
   case LayoutValidationError::InvalidPosition:
     return "invalid-position";
   case LayoutValidationError::OverlappingOutputs:

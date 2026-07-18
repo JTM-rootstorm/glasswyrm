@@ -120,13 +120,22 @@ gwcomp_signal_runtime_test = executable(
 )
 test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
 
-gwcomp_buffer_readiness_test = executable(
+  gwcomp_buffer_readiness_test = executable(
   'gwcomp_buffer_readiness_test',
   files(tests_source_dir / 'unit/gwcomp_buffer_readiness_test.cpp'),
   dependencies: gwcomp_options_dep,
   include_directories: test_source_root_include,
 )
-test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10)
+  test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10)
+
+  gwcomp_output_inventory_publisher_test = executable(
+    'gwcomp_output_inventory_publisher_test',
+    files(tests_source_dir / 'unit/gwcomp_output_inventory_publisher_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-output-inventory-publisher',
+       gwcomp_output_inventory_publisher_test, timeout: 10)
 
 compositor_geometry_test = executable(
   'compositor_geometry_test',
@@ -200,8 +209,16 @@ frame_dump_staging_test = executable(
 )
 test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
 
-if get_option('headless_backend')
-  headless_output_test = executable(
+  if get_option('headless_backend')
+    headless_inventory_test = executable(
+      'headless_inventory_test',
+      files(tests_source_dir / 'unit/headless_inventory_test.cpp'),
+      dependencies: gw_headless_dep,
+      include_directories: test_source_root_include,
+    )
+    test('headless-inventory', headless_inventory_test, timeout: 10)
+
+    headless_output_test = executable(
     'headless_output_test',
     files(tests_source_dir / 'unit/headless_output_test.cpp'),
     dependencies: gw_headless_dep,
@@ -220,6 +237,14 @@ endif
 endif
 
 if get_option('drm_backend')
+  drm_inventory_test = executable(
+    'drm_inventory_test',
+    files(tests_source_dir / 'drm/drm_inventory_test.cpp'),
+    dependencies: gw_drm_model_dep,
+    include_directories: test_source_root_include,
+  )
+  test('drm-inventory', drm_inventory_test, timeout: 10)
+
   foreach drm_model_test : [
     ['drm-connector-name', 'connector_name_test.cpp'],
     ['drm-connector-selector', 'connector_selector_test.cpp'],

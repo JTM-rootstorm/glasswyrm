@@ -1,4 +1,5 @@
 #include "backends/drm/drm_api.hpp"
+#include "backends/drm/edid_digest.hpp"
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -77,6 +78,11 @@ struct PropertyDeleter {
     drmModeFreeProperty(value);
   }
 };
+struct PropertyBlobDeleter {
+  void operator()(drmModePropertyBlobRes *value) const noexcept {
+    drmModeFreePropertyBlob(value);
+  }
+};
 struct BusIdDeleter {
   void operator()(char *value) const noexcept { drmFreeBusid(value); }
 };
@@ -110,6 +116,34 @@ std::optional<std::uint64_t> property_value(const int fd,
         drmModeGetProperty(fd, properties->props[index]));
     if (property && name == property->name)
       return properties->prop_values[index];
+  }
+  return std::nullopt;
+}
+
+std::optional<std::vector<std::uint8_t>> property_blob(
+    const int fd, const std::uint32_t object_id,
+    const std::uint32_t object_type, const std::string_view name) {
+  const std::unique_ptr<drmModeObjectProperties, ObjectPropertiesDeleter>
+      properties(drmModeObjectGetProperties(fd, object_id, object_type));
+  if (!properties)
+    return std::nullopt;
+  for (std::uint32_t index = 0; index < properties->count_props; ++index) {
+    const std::unique_ptr<drmModePropertyRes, PropertyDeleter> property(
+        drmModeGetProperty(fd, properties->props[index]));
+    if (!property || name != property->name ||
+        (property->flags & DRM_MODE_PROP_BLOB) == 0)
+      continue;
+    const auto blob_id = properties->prop_values[index];
+    if (blob_id == 0)
+      return std::vector<std::uint8_t>{};
+    const std::unique_ptr<drmModePropertyBlobRes, PropertyBlobDeleter> blob(
+        drmModeGetPropertyBlob(fd, static_cast<std::uint32_t>(blob_id)));
+    if (!blob || (blob->length != 0 && !blob->data))
+      return std::nullopt;
+    if (blob->length == 0)
+      return std::vector<std::uint8_t>{};
+    const auto *data = static_cast<const std::uint8_t *>(blob->data);
+    return std::vector<std::uint8_t>(data, data + blob->length);
   }
   return std::nullopt;
 }
@@ -207,6 +241,14 @@ bool enumerate_connectors(const int fd, const drmModeRes &resources,
     discovered.type = connector->connector_type;
     discovered.type_id = connector->connector_type_id;
     discovered.status = connection_status(connector->connection);
+    discovered.physical_width_mm = connector->mmWidth;
+    discovered.physical_height_mm = connector->mmHeight;
+    if (const auto edid = property_blob(fd, connector->connector_id,
+                                        DRM_MODE_OBJECT_CONNECTOR, "EDID");
+        edid && !edid->empty()) {
+      const auto digest = derive_edid_identity_digest(*edid);
+      discovered.edid_digest.assign(digest.begin(), digest.end());
+    }
     discovered.non_desktop =
         property_value(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR,
                        "non-desktop")
@@ -293,6 +335,15 @@ std::string inherited_device_path(const int fd) {
   return error ? link.string() : canonical.string();
 }
 
+std::string sysfs_device_identity(const dev_t device) {
+  std::error_code error;
+  const auto sysfs = std::filesystem::canonical(
+      "/sys/dev/char/" + std::to_string(::major(device)) + ":" +
+          std::to_string(::minor(device)) + "/device",
+      error);
+  return error ? std::string{} : "sysfs:" + sysfs.string();
+}
+
 DeviceOpenResult inspect_device(const int fd, std::string path,
                                 const DeviceOpenOptions &options) {
   struct stat status{};
@@ -326,6 +377,7 @@ DeviceOpenResult inspect_device(const int fd, std::string path,
   const std::unique_ptr<char, BusIdDeleter> bus(drmGetBusid(fd));
   if (bus)
     snapshot.driver.bus_info = bus.get();
+  snapshot.sysfs_identity = sysfs_device_identity(status.st_rdev);
 
   std::uint64_t dumb_buffer{};
   if (drmGetCap(fd, DRM_CAP_DUMB_BUFFER, &dumb_buffer) != 0 || dumb_buffer == 0)

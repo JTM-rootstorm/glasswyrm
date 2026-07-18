@@ -61,6 +61,9 @@ struct Connector {
   bool non_desktop{false};
   std::uint32_t possible_crtc_mask{};
   std::uint32_t current_crtc_id{};
+  std::uint32_t physical_width_mm{};
+  std::uint32_t physical_height_mm{};
+  std::vector<std::uint8_t> edid_digest;
 };
 
 struct Crtc {

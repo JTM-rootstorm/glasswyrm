@@ -21,6 +21,7 @@ struct DriverMetadata {
 
 struct DeviceSnapshot {
   std::string canonical_path;
+  std::string sysfs_identity;
   std::uint32_t device_major{};
   std::uint32_t device_minor{};
   DriverMetadata driver;

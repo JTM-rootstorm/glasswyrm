@@ -14,6 +14,7 @@ enum class LayoutValidationError {
   InvalidPrimaryOutput,
   InvalidIdentity,
   InvalidName,
+  InvalidDescriptor,
   InvalidPosition,
   OverlappingOutputs,
   InvalidRootExtent,
