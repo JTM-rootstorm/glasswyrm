@@ -49,6 +49,8 @@ class DrmPresenter final : public output::PresentationBackend,
 
   [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameView& frame) override;
+  [[nodiscard]] output::PresentResult present(
+      const output::SoftwareFrameSetView& frames) override;
   [[nodiscard]] int poll_fd() const noexcept override;
   [[nodiscard]] short poll_events() const noexcept override;
   [[nodiscard]] output::BackendEvent service(short revents) override;
@@ -59,6 +61,8 @@ class DrmPresenter final : public output::PresentationBackend,
   [[nodiscard]] output::BackendStateResult suspend(std::string& error) override;
   [[nodiscard]] output::PresentResult resume(
       const output::SoftwareFrameView& committed) override;
+  [[nodiscard]] output::PresentResult resume(
+      const output::SoftwareFrameSetView& committed) override;
   [[nodiscard]] output::BackendStateResult shutdown(
       std::string& error) noexcept override;
 
@@ -134,6 +138,7 @@ class DrmPresenter final : public output::PresentationBackend,
   ReportApiPath selected_api_{ReportApiPath::Legacy};
   std::unique_ptr<session::DirectVirtualTerminalSession> direct_session_;
   std::unique_ptr<PendingPresentation> pending_;
+  std::optional<std::uint64_t> pending_frame_set_hash_;
   std::unique_ptr<DamageCopyHistory> damage_history_;
   std::vector<std::uint32_t> committed_pixels_;
   std::uint64_t committed_hash_{};

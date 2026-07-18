@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backends/output/software_frame.hpp"
+#include "backends/output/software_frame_set.hpp"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +34,14 @@ class PresentationBackend {
   virtual ~PresentationBackend() = default;
 
   [[nodiscard]] virtual PresentResult present(const SoftwareFrameView& frame) = 0;
+  // The M13 boundary is additive while historical producers still submit one
+  // SoftwareFrameView. Backends keep both entry points until the integrated
+  // transaction migrates without changing historical fixtures.
+  [[nodiscard]] virtual PresentResult present(
+      const SoftwareFrameSetView&) {
+    return {PresentDisposition::Rejected, 0, 0,
+            "presentation backend does not support output frame sets"};
+  }
   [[nodiscard]] virtual int poll_fd() const noexcept = 0;
   [[nodiscard]] virtual short poll_events() const noexcept = 0;
   // Pending diagnostics remain staged through service(); the coordinator calls
@@ -52,6 +61,11 @@ class PresentationBackend {
   [[nodiscard]] virtual BackendStateResult suspend(std::string& error) = 0;
   [[nodiscard]] virtual PresentResult resume(
       const SoftwareFrameView& committed) = 0;
+  [[nodiscard]] virtual PresentResult resume(
+      const SoftwareFrameSetView&) {
+    return {PresentDisposition::Rejected, 0, 0,
+            "presentation backend cannot resume output frame sets"};
+  }
   [[nodiscard]] virtual BackendStateResult shutdown(
       std::string& error) noexcept = 0;
 };

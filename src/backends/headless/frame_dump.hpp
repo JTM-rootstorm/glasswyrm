@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace glasswyrm::headless {
 
@@ -66,6 +67,9 @@ class FrameDumper {
                            StagedFrameDump& staged, std::string& error) const;
   [[nodiscard]] bool commit(StagedFrameDump& staged, FrameDumpResult& result,
                             std::string& error) const;
+  [[nodiscard]] bool commit_all(std::span<StagedFrameDump> staged,
+                                std::vector<FrameDumpResult>& results,
+                                std::string& error) const;
   void abort(StagedFrameDump& staged) const noexcept;
 
   [[nodiscard]] bool dump(const FrameDumpMetadata& metadata,

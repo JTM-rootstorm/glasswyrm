@@ -191,6 +191,7 @@ if get_option('drm_backend')
     'gw-drm-presenter',
     files(
       'backends/drm/presenter.cpp',
+      'backends/drm/presenter_frame_set.cpp',
       'backends/drm/presenter_damage.cpp',
       'backends/drm/presenter_pipeline.cpp',
     ),

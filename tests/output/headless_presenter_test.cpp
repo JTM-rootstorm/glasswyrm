@@ -1,10 +1,13 @@
 #include "backends/headless/presenter.hpp"
 #include "backends/output/software_frame.hpp"
+#include "backends/output/software_frame_set.hpp"
 
 #include "tests/helpers/test_support.hpp"
 
 #include <array>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <unistd.h>
 
@@ -58,6 +61,64 @@ int main() {
   gw::test::require(rejected.disposition == PresentDisposition::Rejected &&
                         !rejected.error.empty(),
                     "invalid presentation is rejected without publication");
+
+  glasswyrm::output::SoftwareFrameSet frames;
+  for (const auto id : {UINT64_C(30), UINT64_C(31)}) {
+    glasswyrm::output::OutputFrameResult output;
+    gw::test::require(output.frame.configure(id, 1, 1, error), error);
+    output.frame.pixels()[0] =
+        id == 30 ? UINT32_C(0xff102030) : UINT32_C(0xff405060);
+    output.output = output.frame.spec(60'000);
+    output.damage = {{0, 0, 1, 1}};
+    gw::test::require(frames.append(std::move(output), error), error);
+  }
+  gw::test::require(frames.finalize(8, 30, 200, 9, 2, error), error);
+  const auto multi = presenter.present(frames.view());
+  gw::test::require(
+      multi.disposition == PresentDisposition::Complete &&
+          multi.visible_hash == frames.aggregate_hash() &&
+          std::filesystem::exists(
+              directory / "frame-000002-output-0000000000000030.ppm") &&
+          std::filesystem::exists(
+              directory / "frame-000002-output-0000000000000031.ppm"),
+      "headless frame-set presentation publishes every output together: " +
+          multi.error);
+  const auto resumed = presenter.resume(frames.view());
+  gw::test::require(
+      resumed.disposition == PresentDisposition::Complete &&
+          resumed.visible_hash == frames.aggregate_hash(),
+      "headless frame-set resume atomically replaces its output artifacts");
+  const auto manifest_path = directory / "frames.jsonl";
+  std::ifstream manifest_input(manifest_path, std::ios::binary);
+  const std::string manifest_before{
+      std::istreambuf_iterator<char>(manifest_input), {}};
+  gw::test::require(
+      manifest_before.find("\"output_id\":30") != std::string::npos &&
+          manifest_before.find("\"output_id\":31") != std::string::npos,
+      "headless frame-set manifest records each sorted output");
+
+  glasswyrm::output::SoftwareFrameSet failing;
+  for (const auto id : {UINT64_C(32), UINT64_C(33)}) {
+    glasswyrm::output::OutputFrameResult output;
+    gw::test::require(output.frame.configure(id, 1, 1, error), error);
+    output.output = output.frame.spec(60'000);
+    gw::test::require(failing.append(std::move(output), error), error);
+  }
+  gw::test::require(failing.finalize(8, 32, 201, 10, 3, error), error);
+  const auto collision = directory /
+      (".frame-000003-output-0000000000000033.ppm.tmp." +
+       std::to_string(static_cast<long long>(::getpid())));
+  std::ofstream(collision, std::ios::binary) << "foreign";
+  const auto atomic_rejection = presenter.present(failing.view());
+  std::ifstream manifest_after_input(manifest_path, std::ios::binary);
+  const std::string manifest_after{
+      std::istreambuf_iterator<char>(manifest_after_input), {}};
+  gw::test::require(
+      atomic_rejection.disposition == PresentDisposition::Rejected &&
+          !std::filesystem::exists(
+              directory / "frame-000003-output-0000000000000032.ppm") &&
+          manifest_after == manifest_before,
+      "headless frame-set publication rolls back every output on failure");
 
   gw::test::require(
       presenter.shutdown(error) ==
