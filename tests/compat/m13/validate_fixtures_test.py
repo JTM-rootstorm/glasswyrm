@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 
+import validate_frame_sets
+
 
 FILES = {
     "output-inventory.json": {
@@ -63,6 +65,52 @@ def write_ppm(path: pathlib.Path, width: int, height: int, seed: int) -> None:
     path.write_bytes(f"P6\n{width} {height}\n255\n".encode() + payload)
 
 
+def frame_output(path: pathlib.Path, output_id: str, logical_x: int,
+                 scale: tuple[int, int], transform: str) -> dict:
+    width, height, pixels = validate_frame_sets.read_ppm(path)
+    numerator, denominator = scale
+    transformed_width, transformed_height = width, height
+    if transform in {"rotate-90", "rotate-270", "flipped-90", "flipped-270"}:
+        transformed_width, transformed_height = height, width
+    return {
+        "output_id": output_id,
+        "physical": {"width": width, "height": height},
+        "logical": {
+            "x": logical_x, "y": 0,
+            "width": (transformed_width * denominator + numerator - 1) // numerator,
+            "height": (transformed_height * denominator + numerator - 1) // numerator,
+        },
+        "scale": {"numerator": numerator, "denominator": denominator},
+        "transform": transform,
+        "damage": [{"x": 0, "y": 0, "width": width, "height": height}],
+        "file": path.name,
+        "fnv1a64": f"{validate_frame_sets.fnv1a64(pixels):016x}",
+    }
+
+
+def write_frame_manifest(root: pathlib.Path) -> None:
+    outputs = [
+        frame_output(root / "legacy-spanning-left.ppm",
+                     "0000000000000001", 0, (1, 1), "normal"),
+        frame_output(root / "flipped.ppm", "0000000000000002", 640,
+                     (5, 4), "flipped"),
+    ]
+    record = {
+        "schema_version": 13,
+        "transaction_ordinal": 1,
+        "commit_id": 9,
+        "generation": 8,
+        "layout_generation": 8,
+        "primary_output_id": "0000000000000001",
+        "output_count": len(outputs),
+        "outputs": outputs,
+    }
+    record["aggregate_hash"] = f"{validate_frame_sets.aggregate_hash(record):016x}"
+    (root / "frame-sets.jsonl").write_text(
+        json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8")
+
+
 def run(validator: pathlib.Path, directory: pathlib.Path,
         expected: bool, message: str = "", require_complete: bool = False) -> None:
     command = [validator, directory]
@@ -93,13 +141,18 @@ with tempfile.TemporaryDirectory() as name:
         width, height = ((640, 480) if "left" in filename
                          else (800, 600))
         write_ppm(root / filename, width, height, seed)
-    (root / "frame-sets.jsonl").write_text(json.dumps({
-        "generation": 8, "aggregate_hash": "0123456789abcdef",
-        "outputs": [{"id": 1}, {"id": 2}],
-    }) + "\n", encoding="utf-8")
+    write_frame_manifest(root)
     checksum(root)
     run(validator, root, True)
     run(validator, root, True, require_complete=True)
+
+    manifest = json.loads((root / "frame-sets.jsonl").read_text())
+    manifest["outputs"][0]["file"] = "missing.ppm"
+    (root / "frame-sets.jsonl").write_text(json.dumps(manifest) + "\n")
+    checksum(root)
+    run(validator, root, False, "must resolve to exactly one PPM")
+    write_frame_manifest(root)
+    checksum(root)
 
     bad = json.loads((root / "renderer-fractional-diff.json").read_text())
     bad["maximum_channel_difference"] = 2

@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 
 import validate_fixtures
+import validate_frame_sets
 
 
 REQUIRED_BASE = "d3440d3b8df1533410a9a2c4be46f2eea0cfb88d"
@@ -38,6 +39,9 @@ SOURCE_MAP = {
     "scale-client-result.json": "milestone13-scale-client.json",
     "renderer-fractional-diff.json": "milestone13-renderer-fractional-diff.json",
 }
+SCENARIO_PPM_FILES = tuple(
+    sorted(name for name in SOURCE_MAP if name.endswith(".ppm"))
+)
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -90,6 +94,44 @@ def extract_evidence(archive: pathlib.Path, directory: pathlib.Path) -> None:
         raise ValueError("evidence archive lacks: " + ", ".join(sorted(missing)))
 
 
+def rewrite_frame_set_references(source: pathlib.Path, evidence: pathlib.Path,
+                                 staging: pathlib.Path) -> None:
+    validate_frame_sets.validate_manifest(source, evidence)
+    candidates = {
+        name: validate_frame_sets.read_ppm(staging / name)
+        for name in SCENARIO_PPM_FILES
+    }
+    rewritten: list[str] = []
+    for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+        record = json.loads(line)
+        if not isinstance(record, dict) or not isinstance(record.get("outputs"), list):
+            raise ValueError(f"frame-set record {number} is not an object")
+        for output in record["outputs"]:
+            if not isinstance(output, dict):
+                raise ValueError(f"frame-set record {number} has a non-object output")
+            original_name = output.get("file")
+            if (not isinstance(original_name, str)
+                    or pathlib.PurePath(original_name).name != original_name):
+                raise ValueError(
+                    f"frame-set record {number} has an unsafe output file")
+            original = validate_frame_sets.read_ppm(evidence / original_name)
+            visible = output.get("fnv1a64")
+            matches = [name for name, candidate in candidates.items()
+                       if candidate == original and
+                       f"{validate_frame_sets.fnv1a64(candidate[2]):016x}" ==
+                       visible]
+            if len(matches) != 1:
+                raise ValueError(
+                    f"frame-set output {original_name!r} matches "
+                    f"{len(matches)} named fixture PPMs; exactly one is required")
+            output["file"] = matches[0]
+        rewritten.append(json.dumps(record, separators=(",", ":"),
+                                    sort_keys=True))
+    destination = staging / "frame-sets.jsonl"
+    destination.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    validate_frame_sets.validate_manifest(destination, staging)
+
+
 def readme(summary: dict) -> str:
     return f"""# Milestone 13 output and scaling fixtures
 
@@ -133,7 +175,11 @@ def promote(artifacts: pathlib.Path, output: pathlib.Path) -> None:
         staging = pathlib.Path(staging_name)
         extract_evidence(archive, evidence)
         for destination, source in SOURCE_MAP.items():
+            if destination == "frame-sets.jsonl":
+                continue
             shutil.copyfile(evidence / source, staging / destination)
+        rewrite_frame_set_references(
+            evidence / SOURCE_MAP["frame-sets.jsonl"], evidence, staging)
         shutil.copyfile(schema, staging / schema.name)
         (staging / "README.md").write_text(readme(summary), encoding="utf-8")
         names = sorted(path.name for path in staging.iterdir() if path.is_file())
