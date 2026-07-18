@@ -106,11 +106,16 @@ void CompositorPeer::retain_cursor_records(
   if (std::ranges::any_of(submission.surfaces, is_cursor)) return;
   const auto retained = std::ranges::find_if(replay_input_.surfaces, is_cursor);
   if (retained != replay_input_.surfaces.end()) {
-    submission.surfaces.push_back(*retained);
     const auto membership = std::ranges::find_if(
         replay_input_.surface_outputs, [&](const auto& state) {
           return state.state.surface_id == retained->surface_id;
         });
+    if (output_model_ &&
+        (membership == replay_input_.surface_outputs.end() ||
+         membership->state.layout_generation !=
+             submission.output_layout_generation))
+      return;
+    submission.surfaces.push_back(*retained);
     if (membership != replay_input_.surface_outputs.end())
       submission.surface_outputs.push_back(*membership);
   }
