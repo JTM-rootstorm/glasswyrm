@@ -129,6 +129,13 @@ void synchronize_ewmh_root_properties(ServerState& state) {
   std::vector<std::pair<std::int32_t, std::uint32_t>> stacked_clients;
   const auto* root = state.resources().find_window(state.screen().root_window);
   if (!root) return;
+  const auto cardinal = std::uint32_t{6};
+  replace(state, state.screen().root_window, "_NET_DESKTOP_GEOMETRY", cardinal,
+          std::vector<std::uint32_t>{state.screen().width_pixels,
+                                     state.screen().height_pixels});
+  replace(state, state.screen().root_window, "_NET_WORKAREA", cardinal,
+          std::vector<std::uint32_t>{0, 0, state.screen().width_pixels,
+                                     state.screen().height_pixels});
   for (const auto xid : root->children) {
     const auto* window = state.resources().find_window(xid);
     if (!window || !state.resources().is_policy_candidate(xid)) continue;

@@ -1,7 +1,9 @@
 #include "glasswyrmd/screen_geometry.hpp"
 
+#include "glasswyrmd/server_state.hpp"
 #include "output/model/layout.hpp"
 #include "tests/helpers/test_support.hpp"
+#include "tests/unit/ewmh_test_support.hpp"
 
 #include <cstdint>
 
@@ -112,6 +114,49 @@ int main() {
   require(tie_model && tie_model->width_millimeters == 64 &&
               tie_model->height_millimeters == 64,
           "96-DPI geometry rounds an exact positive half upward");
+
+  glasswyrm::server::ServerState state;
+  require(state.update_screen_geometry(*model) &&
+              state.screen().width_pixels == 1440 &&
+              state.resources().screen().height_pixels == 600 &&
+              state.resources().find_window(state.screen().root_window)->width ==
+                  1440 &&
+              state.resources().find_window(state.screen().root_window)
+                      ->height == 600,
+          "server and root resource adopt dynamic geometry atomically");
+  auto changed_identity = *model;
+  ++changed_identity.root_visual;
+  require(!state.update_screen_geometry(changed_identity) &&
+              state.screen().root_visual ==
+                  gw::protocol::x11::kScreenModel.root_visual &&
+              state.screen().width_pixels == 1440 &&
+              state.resources().screen().width_pixels == 1440 &&
+              state.resources().find_window(state.screen().root_window)->width ==
+                  1440 &&
+              state.resources().find_window(state.screen().root_window)
+                      ->height == 600,
+          "screen updates reject fixed X11 identity changes without mutation");
+
+  glasswyrm::server::ServerState game_state(
+      gw::protocol::x11::kScreenModel, true);
+  require(game_state.game_compat() && game_state.update_screen_geometry(*model),
+          "game-compatible server adopts output geometry");
+  const auto geometry_atom =
+      game_state.atoms().find("_NET_DESKTOP_GEOMETRY").value();
+  const auto workarea_atom = game_state.atoms().find("_NET_WORKAREA").value();
+  require(ewmh_test::property_values(game_state, game_state.screen().root_window,
+                                     geometry_atom) ==
+                  std::vector<std::uint32_t>({1440, 600}) &&
+              ewmh_test::property_values(game_state,
+                                         game_state.screen().root_window,
+                                         workarea_atom) ==
+                  std::vector<std::uint32_t>({0, 0, 1440, 600}),
+          "screen update refreshes protected EWMH geometry and work area");
+
+  auto zero_physical = *model;
+  zero_physical.width_millimeters = 0;
+  require(!state.update_screen_geometry(zero_physical),
+          "screen update rejects zero physical geometry");
 
   auto invalid = layout();
   invalid.generation = 0;

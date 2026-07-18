@@ -195,6 +195,7 @@ class ResourceTable {
                          ResourceLimits limits = {});
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
+  [[nodiscard]] bool update_screen_geometry(ScreenModel screen) noexcept;
   [[nodiscard]] const ResourceRecord* find(std::uint32_t xid) const noexcept;
   [[nodiscard]] ResourceRecord* find(std::uint32_t xid) noexcept;
   [[nodiscard]] const WindowResource* find_window(

@@ -145,7 +145,7 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
   body.write_u32(config.resource_id_mask);
   body.write_u32(0); // motion buffer size
   body.write_u16(static_cast<std::uint16_t>(kVendor.size()));
-  body.write_u16(kScreenModel.maximum_request_length);
+  body.write_u16(config.screen.maximum_request_length);
   body.write_u8(1);                         // screens
   body.write_u8(config.game_compat ? 4 : 2); // pixmap formats
   body.write_u8(0);                         // image byte order: LSBFirst
@@ -183,35 +183,35 @@ std::vector<std::uint8_t> encode_setup_success(const ByteOrder order,
     body.write_padding(5);
   }
 
-  body.write_u32(kScreenModel.root_window);
-  body.write_u32(kScreenModel.default_colormap);
+  body.write_u32(config.screen.root_window);
+  body.write_u32(config.screen.default_colormap);
   body.write_u32(0x00ffffff); // white pixel
   body.write_u32(0);          // black pixel
   body.write_u32(0);          // current input masks
-  body.write_u16(kScreenModel.width_pixels);
-  body.write_u16(kScreenModel.height_pixels);
-  body.write_u16(kScreenModel.width_millimeters);
-  body.write_u16(kScreenModel.height_millimeters);
+  body.write_u16(config.screen.width_pixels);
+  body.write_u16(config.screen.height_pixels);
+  body.write_u16(config.screen.width_millimeters);
+  body.write_u16(config.screen.height_millimeters);
   body.write_u16(1); // installed colormaps min
   body.write_u16(1); // installed colormaps max
-  body.write_u32(kScreenModel.root_visual);
+  body.write_u32(config.screen.root_visual);
   body.write_u8(0);  // backing store: Never
   body.write_u8(0);  // save unders
-  body.write_u8(kScreenModel.root_depth);
+  body.write_u8(config.screen.root_depth);
   body.write_u8(config.game_compat ? 4 : 2); // allowed depths
 
-  body.write_u8(kScreenModel.root_depth);
+  body.write_u8(config.screen.root_depth);
   body.write_padding(1);
   body.write_u16(1); // visuals
   body.write_padding(4);
 
-  body.write_u32(kScreenModel.root_visual);
+  body.write_u32(config.screen.root_visual);
   body.write_u8(4); // TrueColor
   body.write_u8(8); // bits per RGB value
   body.write_u16(256);
-  body.write_u32(kScreenModel.red_mask);
-  body.write_u32(kScreenModel.green_mask);
-  body.write_u32(kScreenModel.blue_mask);
+  body.write_u32(config.screen.red_mask);
+  body.write_u32(config.screen.green_mask);
+  body.write_u32(config.screen.blue_mask);
   body.write_padding(4);
 
   body.write_u8(1);  // depth-one pixmaps
