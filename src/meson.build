@@ -434,6 +434,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_output_inventory.cpp',
+      'glasswyrmd/output_configuration_coordinator.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/compositor_peer_submission.cpp',
       'glasswyrmd/screen_geometry.cpp',
