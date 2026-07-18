@@ -61,6 +61,11 @@ no-follow, close-on-exec semantics. Its device and inode are revalidated before
 every append. Replacement of the report path is fatal rather than silently
 redirecting evidence.
 
+The historical and output-model renderer adapters in one `gwcomp` process
+share that secured descriptor. This preserves one exclusive-create boundary
+while allowing the report to retain both legacy `frame` and output-model
+`output-frame` records during profile transitions.
+
 The first record identifies the requested and selected renderer, EGL/GLES/GL
 fields, GBM/render-node fields, software-renderer classification, and bounded
 fallback reasons. Unavailable graphics fields are JSON `null`, not invented

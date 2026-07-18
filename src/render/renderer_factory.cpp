@@ -64,7 +64,7 @@ void describe_context(RendererSelectionReport& selection,
 class ReportingSceneRenderer final : public SceneRenderer {
 public:
   ReportingSceneRenderer(std::unique_ptr<SceneRenderer> renderer,
-                         std::unique_ptr<RendererReport> report,
+                         std::shared_ptr<RendererReport> report,
                          std::string selected)
       : renderer_(std::move(renderer)), report_(std::move(report)),
         selected_(std::move(selected)) {}
@@ -86,7 +86,7 @@ public:
 
 private:
   std::unique_ptr<SceneRenderer> renderer_;
-  std::unique_ptr<RendererReport> report_;
+  std::shared_ptr<RendererReport> report_;
   std::string selected_;
 };
 
@@ -183,7 +183,7 @@ private:
 class ReportingOutputSceneRenderer final : public OutputSceneRenderer {
 public:
   ReportingOutputSceneRenderer(std::unique_ptr<OutputSceneRenderer> renderer,
-                               std::unique_ptr<RendererReport> report)
+                               std::shared_ptr<RendererReport> report)
       : renderer_(std::move(renderer)), report_(std::move(report)) {}
 
   OutputSceneRenderResult render(
@@ -201,7 +201,7 @@ public:
 
 private:
   std::unique_ptr<OutputSceneRenderer> renderer_;
-  std::unique_ptr<RendererReport> report_;
+  std::shared_ptr<RendererReport> report_;
 };
 
 #if GW_HAS_GLES_RENDERER
@@ -250,12 +250,31 @@ const char* renderer_request_name(const RendererRequest request) noexcept {
   return "software";
 }
 
+namespace {
+
+std::shared_ptr<RendererReport> prepare_report(
+    const RendererCreateOptions& options,
+    const RendererSelectionReport& selection, std::string& error) {
+  if (options.report_path && options.shared_report) {
+    error = "renderer report path and shared report are mutually exclusive";
+    return {};
+  }
+  auto report = options.shared_report;
+  if (!report && options.report_path)
+    report = std::make_shared<RendererReport>(*options.report_path);
+  if (report && !report->initialized() && !report->initialize(selection, error))
+    return {};
+  return report;
+}
+
+} // namespace
+
 bool create_scene_renderer(
     const RendererRequest requested,
     const std::optional<std::filesystem::path>& report_path,
     std::unique_ptr<SceneRenderer>& renderer, std::string& error) {
   return create_scene_renderer({requested, report_path, std::nullopt,
-                                kMaximumGlTextureCacheBytes},
+                                kMaximumGlTextureCacheBytes, {}},
                                renderer, error);
 }
 
@@ -312,15 +331,15 @@ bool create_scene_renderer(
 #endif
   if (!selected)
     selected = std::make_unique<software::SoftwareSceneRenderer>();
-  if (!options.report_path) {
+  if (!options.report_path && !options.shared_report) {
     renderer = std::move(selected);
     return true;
   }
 
-  auto report = std::make_unique<RendererReport>(*options.report_path);
   selection.selected = selected_name;
   selection.fallback_reasons = fallback_reasons;
-  if (!report->initialize(selection, error)) return false;
+  auto report = prepare_report(options, selection, error);
+  if (!report) return false;
   renderer = std::make_unique<ReportingSceneRenderer>(
       std::move(selected), std::move(report), selected_name);
   return true;
@@ -376,14 +395,14 @@ bool create_output_scene_renderer(
     selected =
         std::make_unique<SoftwareOutputSceneRenderer>(std::move(frame_fallback));
   }
-  if (!options.report_path) {
+  if (!options.report_path && !options.shared_report) {
     renderer = std::move(selected);
     return true;
   }
-  auto report = std::make_unique<RendererReport>(*options.report_path);
   selection.selected = selected_name;
   selection.fallback_reasons = fallback_reasons;
-  if (!report->initialize(selection, error)) return false;
+  auto report = prepare_report(options, selection, error);
+  if (!report) return false;
   renderer = std::make_unique<ReportingOutputSceneRenderer>(
       std::move(selected), std::move(report));
   return true;

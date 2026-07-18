@@ -27,6 +27,16 @@ std::string read_file(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(input), {}};
 }
 
+std::size_t occurrence_count(const std::string_view contents,
+                             const std::string_view needle) {
+  std::size_t count = 0;
+  for (std::size_t offset = 0;
+       (offset = contents.find(needle, offset)) != std::string_view::npos;
+       offset += needle.size())
+    ++count;
+  return count;
+}
+
 gwipc_sdr_color_metadata srgb() {
   return {GWIPC_SDR_COLOR_SPACE_SRGB, GWIPC_TRANSFER_FUNCTION_SRGB,
           GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
@@ -56,6 +66,21 @@ gw::compositor::SceneModel output_scene() {
   gw::test::require(model.commit(commit).accepted(),
                     "commit report output snapshot");
   return model;
+}
+
+gw::compositor::Scene legacy_scene() {
+  gw::compositor::Scene scene;
+  gwipc_output_upsert output{};
+  output.struct_size = sizeof(output);
+  output.output_id = 1;
+  output.enabled = 1;
+  output.logical_width = output.physical_pixel_width = 2;
+  output.logical_height = output.physical_pixel_height = 2;
+  output.scale_numerator = output.scale_denominator = 1;
+  output.transform = GWIPC_TRANSFORM_NORMAL;
+  output.color = srgb();
+  scene.output = output;
+  return scene;
 }
 
 void test_historical_bytes(const std::filesystem::path& root) {
@@ -101,7 +126,7 @@ void test_output_metrics(const std::filesystem::path& root) {
   std::string error;
   const gw::render::RendererCreateOptions options{
       gw::render::RendererRequest::Software, path, std::nullopt,
-      gw::render::kMaximumGlTextureCacheBytes};
+      gw::render::kMaximumGlTextureCacheBytes, {}};
   gw::test::require(
       gw::render::create_output_scene_renderer(options, renderer, error),
       error);
@@ -146,6 +171,90 @@ void test_output_metrics(const std::filesystem::path& root) {
           contents.find("\"maximum_fractional_comparison_error\":0",
                         output_record) != std::string::npos,
       "output renderer report contains deterministic per-output metrics");
+}
+
+void test_shared_legacy_and_output_report(const std::filesystem::path& root) {
+  const auto path = root / "shared.jsonl";
+  auto report = std::make_shared<gw::render::RendererReport>(path);
+  const gw::render::RendererCreateOptions options{
+      gw::render::RendererRequest::Software, std::nullopt, std::nullopt,
+      gw::render::kMaximumGlTextureCacheBytes, report};
+  std::unique_ptr<gw::render::SceneRenderer> legacy_renderer;
+  std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer;
+  std::string error;
+  gw::test::require(
+      gw::render::create_scene_renderer(options, legacy_renderer, error),
+      error);
+  gw::test::require(gw::render::create_output_scene_renderer(
+                        options, output_renderer, error),
+                    error);
+
+  auto legacy = legacy_scene();
+  const std::vector<std::uint64_t> stacking;
+  const gw::render::BufferMappingMap mappings;
+  const gw::render::SurfaceAttachmentMap attachments;
+  const std::vector<gw::compositor::Rectangle> legacy_damage;
+  const gw::render::RenderFrameRequest legacy_request{
+      legacy, stacking, mappings, attachments, legacy_damage, nullptr,
+      7, 8, 9};
+  gw::test::require(legacy_renderer->render(legacy_request).complete(),
+                    "shared report accepts a legacy frame");
+
+  auto scene = output_scene();
+  const gw::render::software::PhysicalDamageMap output_damage;
+  const gw::render::software::SoftwareFrameSetRenderRequest output_request{
+      scene, mappings, attachments, output_damage, nullptr, 7, 8, 10};
+  gw::test::require(output_renderer->render(output_request).complete(),
+                    "shared report accepts an output-model frame");
+
+  const auto contents = read_file(path);
+  gw::test::require(
+      occurrence_count(contents, "{\"record\":\"selection\"") == 1 &&
+          occurrence_count(contents, "{\"record\":\"frame\"") == 1 &&
+          occurrence_count(contents, "{\"record\":\"output-frame\"") == 1,
+      "one secure report retains legacy and output-model records");
+}
+
+void test_shared_report_replacement_is_fatal(
+    const std::filesystem::path& root) {
+  const auto path = root / "shared-replaced.jsonl";
+  auto report = std::make_shared<gw::render::RendererReport>(path);
+  const gw::render::RendererCreateOptions options{
+      gw::render::RendererRequest::Software, std::nullopt, std::nullopt,
+      gw::render::kMaximumGlTextureCacheBytes, report};
+  std::unique_ptr<gw::render::SceneRenderer> legacy_renderer;
+  std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer;
+  std::string error;
+  gw::test::require(
+      gw::render::create_scene_renderer(options, legacy_renderer, error) &&
+          gw::render::create_output_scene_renderer(options, output_renderer,
+                                                   error),
+      error);
+  std::filesystem::rename(path, root / "original-shared.jsonl");
+  std::ofstream(path) << "replacement\n";
+
+  auto legacy = legacy_scene();
+  const std::vector<std::uint64_t> stacking;
+  const gw::render::BufferMappingMap mappings;
+  const gw::render::SurfaceAttachmentMap attachments;
+  const std::vector<gw::compositor::Rectangle> legacy_damage;
+  const gw::render::RenderFrameRequest legacy_request{
+      legacy, stacking, mappings, attachments, legacy_damage, nullptr,
+      7, 8, 9};
+  const auto legacy_result = legacy_renderer->render(legacy_request);
+
+  auto scene = output_scene();
+  const gw::render::software::PhysicalDamageMap output_damage;
+  const gw::render::software::SoftwareFrameSetRenderRequest output_request{
+      scene, mappings, attachments, output_damage, nullptr, 7, 8, 10};
+  const auto output_result = output_renderer->render(output_request);
+  gw::test::require(
+      legacy_result.disposition == gw::render::RenderDisposition::Fatal &&
+          legacy_result.error == "renderer report target was replaced" &&
+          output_result.disposition == gw::render::RenderDisposition::Fatal &&
+          output_result.error == "renderer report target was replaced" &&
+          read_file(path) == "replacement\n",
+      "shared renderers reject a replaced report target");
 }
 
 void test_accelerated_metric_serialization(const std::filesystem::path& root) {
@@ -221,7 +330,7 @@ void test_auto_startup_fallback(const std::filesystem::path& root) {
   std::string error;
   const gw::render::RendererCreateOptions options{
       gw::render::RendererRequest::Auto, path, std::nullopt,
-      gw::render::kMaximumGlTextureCacheBytes};
+      gw::render::kMaximumGlTextureCacheBytes, {}};
   gw::test::require(
       gw::render::create_output_scene_renderer(options, renderer, error),
       error);
@@ -250,6 +359,8 @@ int main() {
   const auto root = temporary_directory();
   test_historical_bytes(root);
   test_output_metrics(root);
+  test_shared_legacy_and_output_report(root);
+  test_shared_report_replacement_is_fatal(root);
   test_accelerated_metric_serialization(root);
 #if !GW_HAS_GLES_RENDERER
   test_auto_startup_fallback(root);
