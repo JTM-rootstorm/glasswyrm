@@ -349,7 +349,9 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes,
   const bool valid = decoded.buffer_id != 0 && decoded.surface_id != 0 &&
                      reserved1 == 0 && reserved2 == 0 && geometry_valid &&
                      format_valid && decoded.modifier == 0 &&
-                     decoded.synchronization == SynchronizationMode::None &&
+                     (decoded.synchronization == SynchronizationMode::None ||
+                      decoded.synchronization ==
+                          SynchronizationMode::EventFd) &&
                      decoded.flags == 0;
   const auto status = final_status(reader, valid);
   if (status == CodecStatus::Ok) {

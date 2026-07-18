@@ -24,6 +24,7 @@ struct DrmPresenter::PendingPresentation {
   headless::StagedFrameDump mirror;
   StagedDrmReport report;
   std::vector<std::uint32_t> pixels;
+  DamageCopyPlan damage_copy;
   bool completion_verified{};
 };
 DrmPresenter::DrmPresenter(Device device, KmsApi& kms, DrmReport* report,
@@ -49,6 +50,9 @@ bool DrmPresenter::initialize(const DrmPresenterConfig& config,
     return false;
   }
   config_ = config;
+  if (config.damage_aware_copy)
+    damage_history_ = std::make_unique<DamageCopyHistory>(
+        config.output.width, config.output.height);
   if (report_ && !report_->initialize(error)) return false;
   if (!select_pipeline(error)) {
     record_fatal("initialization", error);
@@ -177,15 +181,24 @@ output::PresentResult DrmPresenter::present_initial(
   auto& target = buffers_.front();
   headless::StagedFrameDump mirror;
   StagedDrmReport report;
-  if (!target.copy_from(frame.pixels, error) || target.visible_hash() != hash) {
+  DamageCopyPlan damage_copy;
+  if (!copy_frame_to(target, frame, hash, FullCopyReason::None, damage_copy, error) ||
+      target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("initial-copy", error); fatal_ = true;
     return {output::PresentDisposition::Fatal, 0, 0, error};
   }
   const ModesetReport record{frame.ordinal, frame.commit_id, frame.generation, 0,
                              target.framebuffer_id(), hash, hash, selected_api_};
-  if (!stage_mirror(frame, mirror, error) ||
-      (report_ && !report_->stage(record, report, error))) {
+  bool report_staged = true;
+  if (report_ && config_.damage_aware_copy) {
+    const std::array<DrmReportRecord, 2> records{
+        record, damage_copy_report(target, damage_copy, frame.generation, 0)};
+    report_staged = report_->stage(records, report, error);
+  } else if (report_) {
+    report_staged = report_->stage(record, report, error);
+  }
+  if (!stage_mirror(frame, mirror, error) || !report_staged) {
     if (mirror_) mirror_->abort(mirror);
     if (report_) report_->abort(report);
     return {output::PresentDisposition::Rejected, 0, 0, error};
@@ -205,6 +218,8 @@ output::PresentResult DrmPresenter::present_initial(
   }
   committed_pixels_.assign(frame.pixels.begin(), frame.pixels.end());
   committed_hash_ = hash;
+  committed_generation_ = frame.generation;
+  complete_damage_copy(target, damage_copy, frame.generation);
   initial_modeset_ = true;
   return {output::PresentDisposition::Complete, 0, hash, {}};
 }
@@ -223,7 +238,9 @@ output::PresentResult DrmPresenter::present_flip(
   value.next_front_index = 1U - front_index_;
   value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
-  if (!target.copy_from(frame.pixels, error) || target.visible_hash() != hash) {
+  if (!copy_frame_to(target, frame, hash, FullCopyReason::None,
+                     value.damage_copy, error) ||
+      target.visible_hash() != hash) {
     error = error.empty() ? "canonical and scanout hashes differ" : error;
     record_fatal("flip-copy", error);
     fatal_ = true;
@@ -239,8 +256,17 @@ output::PresentResult DrmPresenter::present_flip(
       value.hash,
       std::numeric_limits<std::uint64_t>::max(),
       selected_api_};
-  if (!stage_mirror(frame, value.mirror, error) ||
-      (report_ && !report_->stage(staged_record, value.report, error)) ||
+  bool report_staged = true;
+  if (report_ && config_.damage_aware_copy) {
+    const std::array<DrmReportRecord, 2> records{
+        staged_record,
+        damage_copy_report(target, value.damage_copy, frame.generation,
+                           static_cast<std::uint32_t>(value.next_front_index))};
+    report_staged = report_->stage(records, value.report, error);
+  } else if (report_) {
+    report_staged = report_->stage(staged_record, value.report, error);
+  }
+  if (!stage_mirror(frame, value.mirror, error) || !report_staged ||
       !device_.arm_page_flip(value.cookie, error)) {
     if (mirror_) mirror_->abort(value.mirror);
     if (report_) report_->abort(value.report);
@@ -291,8 +317,17 @@ output::BackendEvent DrmPresenter::service(const short revents) {
   std::string error;
   if (report_) {
     report_->abort(pending_->report);
-    if (!report_->stage(record, pending_->report, error))
+    if (config_.damage_aware_copy) {
+      const std::array<DrmReportRecord, 2> records{
+          record, damage_copy_report(
+                      buffers_.back(), pending_->damage_copy,
+                      pending_->generation,
+                      static_cast<std::uint32_t>(pending_->next_front_index))};
+      if (!report_->stage(records, pending_->report, error))
+        return fatal_event("page-flip-report", std::move(error));
+    } else if (!report_->stage(record, pending_->report, error)) {
       return fatal_event("page-flip-report", std::move(error));
+    }
   }
   pending_->completion_verified = true;
   return {output::BackendEventKind::Complete, pending_->token, pending_->hash,
@@ -313,10 +348,13 @@ bool DrmPresenter::finalize_pending(const std::uint64_t token,
     clear_pending();
     return false;
   }
+  complete_damage_copy(buffers_.back(), pending_->damage_copy,
+                       pending_->generation);
   buffers_.promote_back();
   front_index_ = pending_->next_front_index;
   committed_pixels_ = std::move(pending_->pixels);
   committed_hash_ = pending_->hash;
+  committed_generation_ = pending_->generation;
   clear_pending();
   return true;
 }
@@ -383,6 +421,10 @@ output::BackendStateResult DrmPresenter::suspend(std::string& error) {
     return output::BackendStateResult::Fatal;
   }
   suspended_ = true;
+  if (config_.damage_aware_copy && damage_history_) {
+    damage_history_->clear();
+    buffers_.invalidate_content();
+  }
   if (direct_session_) {
     const VtReport record{VtTransition::Release, false, false, committed_hash_};
     if (!append_report(record, error)) return output::BackendStateResult::Fatal;
@@ -452,16 +494,27 @@ bool DrmPresenter::present_committed_frame(std::string& error) {
     return false;
   }
   auto& target = buffers_.back();
-  if (!target.copy_from(committed_pixels_, error) ||
+  const output::SoftwareFrameView frame{
+      config_.output, committed_pixels_, {}, 0, committed_generation_, 0};
+  DamageCopyPlan damage_copy;
+  if (!copy_frame_to(target, frame, committed_hash_, FullCopyReason::VirtualTerminalResume,
+                     damage_copy, error) ||
       target.visible_hash() != committed_hash_) {
     if (error.empty()) error = "re-modeset scanout hash differs from committed frame";
     return false;
   }
+  const auto next_front_index = static_cast<std::uint32_t>(1U - front_index_);
+  const auto damage_report = damage_copy_report(
+      target, damage_copy, committed_generation_, next_front_index);
   if (!blocking_modeset(target, error)) return false;
+  complete_damage_copy(target, damage_copy, committed_generation_);
   buffers_.promote_back();
   front_index_ = 1U - front_index_;
   display_taken_ = true;
   if (direct_session_) {
+    if (config_.damage_aware_copy &&
+        !append_report(damage_report, error))
+      return false;
     const VtReport record{VtTransition::Acquire, true, true, committed_hash_};
     return append_report(record, error);
   }

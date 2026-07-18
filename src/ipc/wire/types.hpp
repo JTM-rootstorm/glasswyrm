@@ -93,9 +93,10 @@ enum class Capability : std::uint64_t {
   SessionState = 1ULL << 13U,
   InteractivePolicy = 1ULL << 14U,
   CursorSurface = 1ULL << 15U,
+  CpuBufferSynchronization = 1ULL << 16U,
 };
 
-inline constexpr std::uint64_t kKnownCapabilities = 0xffffULL;
+inline constexpr std::uint64_t kKnownCapabilities = 0x1ffffULL;
 
 enum class RejectReason : std::uint16_t {
   IncompatibleVersion = 1,

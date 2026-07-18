@@ -1,26 +1,15 @@
 #include "gwcomp/presentation_transaction.hpp"
 
 #include "gwcomp/compositor.hpp"
-#include "render/software/renderer.hpp"
+#include "render/scene_renderer.hpp"
 
 #include <algorithm>
 #include <chrono>
-#include <cstddef>
 #include <limits>
 #include <poll.h>
-#include <span>
 
 namespace gw::compositor {
 namespace {
-
-using gw::render::software::FramebufferView;
-using gw::render::software::ImageView;
-using gw::render::software::PixelFormat;
-using gw::render::software::RenderResult;
-
-std::span<std::byte> pixel_bytes(std::span<std::uint32_t> pixels) {
-  return {reinterpret_cast<std::byte*>(pixels.data()), pixels.size_bytes()};
-}
 
 std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
                                         const gwipc_output_upsert& output) {
@@ -131,6 +120,7 @@ PresentedFrame PresentationTransaction::commit(
   auto& pending_attachments_ = compositor.pending_attachments_;
   auto& committed_attachments_ = compositor.committed_attachments_;
   auto& output_ = compositor.output_;
+  auto& renderer_ = compositor.renderer_;
   auto& presenter_ = compositor.presenter_;
   auto& scene_manifest_ = compositor.scene_manifest_;
   auto& frame_ordinal_ = compositor.frame_ordinal_;
@@ -305,60 +295,30 @@ PresentedFrame PresentationTransaction::commit(
   }
   result.damage = attachment_damage.rectangles();
 
-  glasswyrm::output::SoftwareFrame scratch;
-  if (!scratch.configure(staged.output->output_id,
-                         staged.output->logical_width,
-                         staged.output->logical_height, error)) {
-    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+  const auto stacking_order = candidate.stacking_order();
+  const gw::render::RenderFrameRequest render_request{
+      staged,
+      stacking_order,
+      mappings_,
+      pending_attachments_,
+      result.damage,
+      &output_,
+      value.commit_id,
+      value.producer_generation,
+      frame_ordinal_ + 1U};
+  auto rendered = renderer_->render(render_request);
+  if (!rendered.complete()) {
+    presented.result = rendered.disposition ==
+                               gw::render::RenderDisposition::InvalidBuffer
+                           ? GWIPC_FRAME_REJECTED_INVALID_BUFFER
+                           : GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    if (rendered.disposition == gw::render::RenderDisposition::Fatal)
+      presented.disposition = PresentedFrame::Disposition::Fatal;
+    error = rendered.error.empty() ? "scene renderer rejected the frame"
+                                   : std::move(rendered.error);
     return presented;
   }
-  if (output_.enabled() && output_.id() == scratch.id() &&
-      output_.width() == scratch.width() &&
-      output_.height() == scratch.height()) {
-    std::copy(output_.pixels().begin(), output_.pixels().end(),
-              scratch.pixels().begin());
-  }
-  FramebufferView framebuffer{pixel_bytes(scratch.pixels()), scratch.width(),
-                              scratch.height(), scratch.width() * 4U};
-  for (const auto& rectangle : result.damage) {
-    if (gw::render::software::clear(framebuffer, rectangle) !=
-        RenderResult::Success) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "framebuffer damage is invalid";
-      return presented;
-    }
-    for (const auto surface_id : candidate.stacking_order()) {
-      const auto& surface = staged.surfaces.at(surface_id);
-      if (!surface.visible || surface.opacity == 0 ||
-          surface.presentation_flags ==
-              GWIPC_SURFACE_PRESENTATION_METADATA_ONLY)
-        continue;
-      auto bounds = surface_bounds(surface, *staged.output);
-      if (!bounds || !intersection(*bounds, rectangle)) continue;
-      const auto mapping = mappings_.at(pending_attachments_.at(surface_id));
-      Rectangle local{0, 0, surface.logical_width, surface.logical_height};
-      if (surface.clipping) {
-        local = {surface.clip_x, surface.clip_y, surface.clip_width,
-                 surface.clip_height};
-      }
-      const ImageView image{
-          mapping->bytes(), mapping->width(), mapping->height(),
-          mapping->stride(),
-          mapping->pixel_format() == GWIPC_PIXEL_FORMAT_XRGB8888
-              ? PixelFormat::Xrgb8888
-              : PixelFormat::Argb8888Premultiplied};
-      const auto render = gw::render::software::composite(
-          framebuffer, image, local, surface.logical_x + local.x,
-          surface.logical_y + local.y, surface.opacity);
-      if (render != RenderResult::Success) {
-        presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-        error = render == RenderResult::InvalidPremultipliedPixel
-                    ? "ARGB buffer contains a non-premultiplied pixel"
-                    : "buffer view is invalid";
-        return presented;
-      }
-    }
-  }
+  auto scratch = std::move(rendered.frame);
 
   const glasswyrm::output::SoftwareFrameView frame{
       scratch.spec(staged.output->refresh_millihertz),

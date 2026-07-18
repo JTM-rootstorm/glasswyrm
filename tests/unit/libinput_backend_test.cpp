@@ -138,6 +138,21 @@ int main() {
   require(extra_button_codes == std::vector<std::uint32_t>{2, 3, 9},
           "middle, right, and extra evdev buttons use their core mappings");
 
+  backend.warp_pointer(20, 30);
+  relative = event(input::LibinputEventKind::MotionRelative, 2, 11600);
+  relative.x = 0.9;
+  relative.y = 0.9;
+  api.queue(relative);
+  relative.time_usec = 11700;
+  relative.x = 0.2;
+  relative.y = 0.2;
+  api.queue(relative);
+  const auto after_warp = backend.service();
+  require(after_warp.records.size() == 1 &&
+              after_warp.records[0].root_x == 21 &&
+              after_warp.records[0].root_y == 31,
+          "pointer warp resets the relative-motion origin and fraction");
+
   auto key = event(input::LibinputEventKind::Key, 1, 12000);
   key.code = KEY_A;
   key.pressed = true;
@@ -175,7 +190,7 @@ int main() {
   api.queue(event(input::LibinputEventKind::Unsupported, 2, 15000));
   const auto bounded = backend.service({1, 1});
   require(bounded.status == input::InputServiceStatus::BudgetExhausted &&
-              bounded.consumed_events == 1 && api.consumed_event_count() == 25,
+              bounded.consumed_events == 1 && api.consumed_event_count() == 27,
           "event and work budgets preserve reactor fairness");
 
   input::FakeLibinputApi dispatch_failure_api;

@@ -32,6 +32,9 @@ struct Seen {
   bool scene_manifest{};
   bool drm_report{};
   bool x11_trace{};
+  bool renderer{};
+  bool renderer_report{};
+  bool game_compat{};
 };
 
 void print_usage(std::ostream &output) {
@@ -42,6 +45,8 @@ void print_usage(std::ostream &output) {
             "  [--xkb-options LIST] [--drm-api auto|atomic|legacy]\n"
             "  [--mirror-dump-dir PATH] [--scene-manifest PATH]\n"
             "  [--drm-report PATH] [--x11-trace PATH]\n"
+            "  [--game-compat] [--disable-extension NAME] ...\n"
+            "  [--renderer software|gles|auto] [--renderer-report PATH]\n"
             "  [--client PROGRAM ARG...] [--help] [--version]\n";
 }
 
@@ -100,6 +105,21 @@ bool validate(const Options &options, const Seen &seen, std::ostream &error) {
     error << "glasswyrm-session: --drm-api requires auto, atomic, or legacy\n";
     return false;
   }
+  if (options.renderer != "software" && options.renderer != "gles" &&
+      options.renderer != "auto") {
+    error << "glasswyrm-session: --renderer requires software, gles, or auto\n";
+    return false;
+  }
+  if (!options.game_compat && !options.disabled_extensions.empty()) {
+    error << "glasswyrm-session: --disable-extension requires --game-compat\n";
+    return false;
+  }
+#if !GW_HAS_EXPERIMENTAL
+  if (options.game_compat) {
+    error << "glasswyrm-session: --game-compat is unavailable in this build\n";
+    return false;
+  }
+#endif
   if (std::any_of(options.input_devices.begin(), options.input_devices.end(),
                   [](const auto &path) { return path.empty(); })) {
     error << "glasswyrm-session: --input-device requires a non-empty path\n";
@@ -223,6 +243,26 @@ ParseOptionsResult parse_options(int argc, char **argv, Options &options,
     else if (argument == "--x11-trace")
       parsed = take_optional(argc, argv, index, argument, options.x11_trace,
                              seen.x11_trace, error);
+    else if (argument == "--game-compat") {
+      if (seen.game_compat) {
+        error << "glasswyrm-session: duplicate option: --game-compat\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      seen.game_compat = true;
+      options.game_compat = true;
+    } else if (argument == "--disable-extension") {
+      if (++index >= argc || argv[index][0] == '\0') {
+        error << "glasswyrm-session: --disable-extension requires a non-empty name\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.disabled_extensions.emplace_back(argv[index]);
+    } else if (argument == "--renderer")
+      parsed = take_value(argc, argv, index, argument, options.renderer,
+                          seen.renderer, error);
+    else if (argument == "--renderer-report")
+      parsed = take_optional(argc, argv, index, argument,
+                             options.renderer_report, seen.renderer_report,
+                             error);
     else {
       error << "glasswyrm-session: unknown option: " << argument << '\n';
       print_usage(error);
@@ -276,10 +316,13 @@ CommandPlan build_command_plan(const Options &options,
                      "--mode",
                      options.mode,
                      "--drm-api",
-                     options.drm_api};
+                     options.drm_api,
+                     "--renderer",
+                     options.renderer};
   append_option(compositor.argv, "--mirror-dump-dir", options.mirror_dump_dir);
   append_option(compositor.argv, "--scene-manifest", options.scene_manifest);
   append_option(compositor.argv, "--drm-report", options.drm_report);
+  append_option(compositor.argv, "--renderer-report", options.renderer_report);
   compositor.readiness_socket = paths.compositor_socket;
 
   auto &server = plan.children.emplace_back();
@@ -296,6 +339,12 @@ CommandPlan build_command_plan(const Options &options,
                  options.xkb_layout,
                  "--xkb-model",
                  options.xkb_model};
+  if (options.game_compat)
+    server.argv.emplace_back("--game-compat");
+  for (const auto &name : options.disabled_extensions) {
+    server.argv.emplace_back("--disable-extension");
+    server.argv.push_back(name);
+  }
   for (const auto &device : options.input_devices) {
     server.argv.emplace_back("--libinput-device");
     server.argv.push_back(device);

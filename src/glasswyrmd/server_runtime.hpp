@@ -72,6 +72,7 @@ class ServerRuntime {
     std::uint64_t creation_serial{};
     std::optional<WindowDestroyPlan> destroy;
     std::optional<ClientCleanupPlan> cleanup;
+    std::optional<DeferredPropertyMutation> property;
   };
 
   void initialize_lifecycle();
@@ -86,6 +87,7 @@ class ServerRuntime {
   [[nodiscard]] bool service_integrated(short policy_events,
                                         short compositor_events);
   void service_input(short listener_events, short connection_events);
+  [[nodiscard]] bool warp_pointer(std::int32_t x, std::int32_t y);
 #if GW_HAS_LIBINPUT_BACKEND
   [[nodiscard]] bool initialize_real_input();
   [[nodiscard]] bool service_real_input(short input_events,

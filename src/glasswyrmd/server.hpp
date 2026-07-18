@@ -1,6 +1,7 @@
 #pragma once
 
 #include "glasswyrmd/client_connection.hpp"
+#include "glasswyrmd/extension_registry.hpp"
 #include "glasswyrmd/options.hpp"
 #include "glasswyrmd/server_state.hpp"
 
@@ -40,6 +41,7 @@ class Server {
   void unlink_owned_socket();
 
   Options options_;
+  ExtensionRegistry extensions_;
   std::string socket_path_;
   int listener_ = -1;
   dev_t socket_device_ = 0;

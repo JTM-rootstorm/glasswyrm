@@ -2,6 +2,8 @@
 
 #ifdef GW_SERVER_HAS_IPC
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "input/input_router.hpp"
+#include "protocol/x11/event_mask.hpp"
 
 #include <chrono>
 #include <cerrno>
@@ -11,6 +13,37 @@
 #endif
 
 namespace glasswyrm::server {
+
+#ifdef GW_SERVER_HAS_IPC
+bool ServerRuntime::warp_pointer(const std::int32_t x,
+                                 const std::int32_t y) {
+  const auto old_target = input_state_.pointer_target();
+  const auto new_target = glasswyrm::input::hit_test_deepest_viewable(
+      server_.state_.resources(), x, y);
+  input_state_.advance_time();
+  input_state_.set_pointer(x, y, new_target);
+#if GW_HAS_LIBINPUT_BACKEND
+  if (real_input_)
+    real_input_->warp_pointer(x, y);
+#endif
+  cursor_dirty_ = true;
+
+  std::vector<ClientConnection*> clients;
+  clients.reserve(server_.clients_.size());
+  for (const auto& client : server_.clients_)
+    clients.push_back(client.get());
+  EventRouter router(server_.state_.resources());
+  (void)router.route_crossing(old_target, new_target,
+                              server_.state_.focused_window(), input_state_,
+                              clients);
+  (void)router.route_input_grabbed(
+      server_.state_.grabs(), gw::protocol::x11::CoreEventType::MotionNotify,
+      0, input_state_.time(), new_target, input_state_.mask(),
+      glasswyrm::input::motion_delivery_mask(input_state_), x, y, new_target,
+      clients);
+  return true;
+}
+#endif
 
 int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
 #ifdef GW_SERVER_HAS_IPC
@@ -22,6 +55,10 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     snapshot.pointer_target = input_state_.pointer_target();
     snapshot.logical_time = input_state_.time();
     snapshot.keymap = input_state_.query_keymap();
+    snapshot.warp_pointer = [this](const std::int32_t x,
+                                   const std::int32_t y) {
+      return warp_pointer(x, y);
+    };
 #if GW_HAS_LIBINPUT_BACKEND
     if (real_input_) {
       snapshot.keyboard_mapping = real_input_->keyboard_mapping();
@@ -37,9 +74,12 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
   bridge_ = std::make_unique<RuntimeBridge>(
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
-      server_.options_.software_content, server_.options_.real_input_enabled());
+      server_.options_.software_content, server_.options_.real_input_enabled(),
+      server_.options_.game_compat);
   if (server_.options_.software_content) {
-    content_presenter_ = std::make_unique<ContentPresenter>();
+    content_presenter_ = std::make_unique<ContentPresenter>(
+        server_.options_.game_compat ? GWIPC_SYNCHRONIZATION_EVENTFD
+                                    : GWIPC_SYNCHRONIZATION_NONE);
 #if GW_HAS_LIBINPUT_BACKEND
     if (server_.options_.real_input_enabled()) {
       cursor_presenter_ = std::make_unique<CursorPresenter>();
@@ -206,7 +246,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
       if (!content_presenter_->prepare_replay(
               lifecycle_->committed(), server_.state_.resources(), replay) ||
           !bridge_->submit_replay(replay, error)) {
-        content_presenter_->reject_lifecycle();
+        content_presenter_->cancel_lifecycle_submission();
         std::fprintf(stderr,
                      "glasswyrmd: compositor content replay failed: %s\n",
                      error.c_str());
@@ -320,7 +360,7 @@ bool ServerRuntime::service_integrated(const short policy_events,
             lifecycle_->committed(), server_.state_.resources(),
             next_compositor_commit_++, next_compositor_generation_++, content)) {
       if (!bridge_->submit_content(content, error)) {
-        content_presenter_->reject_content();
+        content_presenter_->cancel_content_submission();
         std::fprintf(stderr, "glasswyrmd: content submission failed: %s\n",
                      error.c_str());
       }

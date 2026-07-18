@@ -59,6 +59,12 @@ public:
     value = saved_kd_mode;
     return true;
   }
+  bool get_keyboard_mode(int, int &value) override {
+    if (!log_.record("get_keyboard_mode"))
+      return false;
+    value = saved_keyboard_mode;
+    return true;
+  }
   bool activate(int, unsigned number) override {
     return log_.record("activate:" + std::to_string(number));
   }
@@ -78,6 +84,12 @@ public:
     restored_kd_mode = value;
     return log_.record("restore_kd:" + std::to_string(value));
   }
+  bool set_keyboard_mode(int, int value) override {
+    restored_keyboard_mode = value;
+    return log_.record(value == 4 ? "disable_keyboard"
+                                 : "restore_keyboard:" +
+                                       std::to_string(value));
+  }
   bool acknowledge_release(int) override { return log_.record("ack_release"); }
   bool acknowledge_acquire(int) override { return log_.record("ack_acquire"); }
   void close_terminal(int) noexcept override { (void)log_.record("close"); }
@@ -87,8 +99,10 @@ public:
   VirtualTerminalState saved_state{2, 0, 0};
   VirtualTerminalMode saved_mode{0, 1, 3, 4, 5};
   int saved_kd_mode{0};
+  int saved_keyboard_mode{3};
   VirtualTerminalMode restored_mode{};
   int restored_kd_mode{-1};
+  int restored_keyboard_mode{-1};
 
 private:
   OperationLog &log_;
@@ -190,7 +204,8 @@ void lifecycle_and_restore_order() {
                     "save active VT and enter active state");
   require_subsequence(
       log.values,
-      {"get_state", "get_mode", "get_kd_mode", "activate:4", "wait:4",
+      {"get_state", "get_mode", "get_kd_mode", "get_keyboard_mode",
+       "activate:4", "wait:4", "disable_keyboard",
        "set_process:" + std::to_string(SIGUSR1) + ":" + std::to_string(SIGUSR2),
        "set_graphics", "acquire_master"},
       "acquisition order");
@@ -209,13 +224,15 @@ void lifecycle_and_restore_order() {
   gw::test::require(session.restore(error), "restore direct session");
   require_subsequence(log.values,
                       {"restore_display", "release_scanout", "drop_master",
-                       "restore_kd:0", "restore_vt_mode", "activate:2",
-                       "wait:2", "close"},
+                       "restore_kd:0", "restore_vt_mode",
+                       "restore_keyboard:3", "activate:2", "wait:2", "close"},
                       "normal restoration order");
   gw::test::require(api.restored_kd_mode == api.saved_kd_mode &&
+                        api.restored_keyboard_mode ==
+                            api.saved_keyboard_mode &&
                         api.restored_mode.release_signal ==
                             api.saved_mode.release_signal,
-                    "restore saved KD and VT modes");
+                    "restore saved KD, VT, and keyboard modes");
 }
 
 void acquisition_failures_unwind() {
@@ -225,8 +242,10 @@ void acquisition_failures_unwind() {
       "get_state",
       "get_mode",
       "get_kd_mode",
+      "get_keyboard_mode",
       "activate:4",
       "wait:4",
+      "disable_keyboard",
       "set_process:" + std::to_string(SIGUSR1) + ":" + std::to_string(SIGUSR2),
       "set_graphics",
       "acquire_master"};
@@ -255,7 +274,8 @@ void acquisition_failures_unwind() {
   (void)session.acquire("/dev/tty4", signals(), error);
   require_subsequence(log.values,
                       {"set_graphics", "acquire_master", "restore_kd:0",
-                       "restore_vt_mode", "activate:2", "wait:2", "close"},
+                       "restore_vt_mode", "restore_keyboard:3", "activate:2",
+                       "wait:2", "close"},
                       "reverse-order failed-acquire cleanup");
 }
 
@@ -273,8 +293,8 @@ void suspended_restore_reacquires_display_authority() {
   require_subsequence(log.values,
                       {"ack_release", "activate:4", "wait:4", "acquire_master",
                        "restore_display", "release_scanout", "drop_master",
-                       "restore_kd:0", "restore_vt_mode", "activate:2",
-                       "wait:2", "close"},
+                       "restore_kd:0", "restore_vt_mode",
+                       "restore_keyboard:3", "activate:2", "wait:2", "close"},
                       "suspended restoration reacquires display authority");
 }
 
@@ -322,8 +342,27 @@ void scanout_cleanup_failure_is_fatal() {
                     "scanout cleanup failure makes restoration fail");
   require_subsequence(log.values,
                       {"restore_display", "release_scanout", "drop_master",
-                       "restore_kd:0", "restore_vt_mode", "close"},
+                       "restore_kd:0", "restore_vt_mode",
+                       "restore_keyboard:3", "close"},
                       "cleanup failure preserves remaining restore order");
+}
+
+void keyboard_restore_failure_is_fatal() {
+  OperationLog log;
+  FakeVirtualTerminalApi api(log);
+  FakeDisplayControl display(log);
+  DirectVirtualTerminalSession session(api, display);
+  std::string error;
+  gw::test::require(session.acquire("/dev/tty4", signals(), error),
+                    "prepare keyboard restoration failure");
+  log.fail_on = "restore_keyboard:3";
+  gw::test::require(!session.restore(error) &&
+                        error.find("restore original keyboard mode") !=
+                            std::string::npos,
+                    "keyboard restoration failure is fatal and reported");
+  require_subsequence(log.values,
+                      {"restore_keyboard:3", "activate:2", "wait:2", "close"},
+                      "keyboard failure preserves remaining restore order");
 }
 
 } // namespace
@@ -336,5 +375,6 @@ int main() {
   suspended_restore_reacquires_display_authority();
   transition_failures();
   scanout_cleanup_failure_is_fatal();
+  keyboard_restore_failure_is_fatal();
   return 0;
 }

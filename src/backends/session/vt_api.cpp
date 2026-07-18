@@ -101,6 +101,14 @@ bool LinuxVirtualTerminalApi::get_kd_mode(const int fd, int& mode) {
   return true;
 }
 
+bool LinuxVirtualTerminalApi::get_keyboard_mode(const int fd, int& mode) {
+  if (::ioctl(fd, KDGKBMODE, &mode) != 0) {
+    remember_error();
+    return false;
+  }
+  return true;
+}
+
 bool LinuxVirtualTerminalApi::activate(const int fd, const unsigned number) {
   if (::ioctl(fd, VT_ACTIVATE, number) != 0) {
     remember_error();
@@ -144,6 +152,14 @@ bool LinuxVirtualTerminalApi::set_graphics_mode(const int fd) {
 
 bool LinuxVirtualTerminalApi::set_kd_mode(const int fd, const int mode) {
   if (::ioctl(fd, KDSETMODE, mode) != 0) {
+    remember_error();
+    return false;
+  }
+  return true;
+}
+
+bool LinuxVirtualTerminalApi::set_keyboard_mode(const int fd, const int mode) {
+  if (::ioctl(fd, KDSKBMODE, mode) != 0) {
     remember_error();
     return false;
   }

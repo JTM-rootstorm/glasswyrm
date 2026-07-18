@@ -24,7 +24,10 @@ ClientConnection::ClientConnection(const int descriptor,
                                    ExposeIntentHandler expose_handler,
                                    CompatibilityTrace* trace,
                                    InputSnapshotProvider input_snapshot_provider,
-                                   ProtocolEventHandler protocol_event_handler)
+                                   ProtocolEventHandler protocol_event_handler,
+                                   const ExtensionRegistry* extensions,
+                                   const bool game_compat,
+                                   std::optional<std::uint32_t> peer_uid)
     : descriptor_(descriptor),
       identifier_(identifier),
       resource_id_base_(resource_id_base),
@@ -36,7 +39,10 @@ ClientConnection::ClientConnection(const int descriptor,
       expose_handler_(std::move(expose_handler)),
       trace_(trace),
       input_snapshot_provider_(std::move(input_snapshot_provider)),
-      protocol_event_handler_(std::move(protocol_event_handler)) {
+      protocol_event_handler_(std::move(protocol_event_handler)),
+      extensions_(extensions),
+      game_compat_(game_compat),
+      peer_uid_(peer_uid) {
   if (trace_) trace_->connection(identifier_, "accepted");
 }
 
@@ -133,6 +139,7 @@ void ClientConnection::prepare_setup_reply() {
       x11::SetupReplyConfig config;
       config.resource_id_base = resource_id_base_;
       config.resource_id_mask = server_state_.screen().resource_id_mask;
+      config.game_compat = game_compat_;
       (void)enqueue(x11::encode_setup_success(request.byte_order, config));
       request_framer_.emplace(request.byte_order,
                               server_state_.screen().maximum_request_length);
@@ -220,7 +227,8 @@ void ClientConnection::process_input(
                                       integrated_lifecycle_,
                                       input_snapshot_provider_
                                           ? input_snapshot_provider_()
-                                          : InputSnapshot{}};
+                                          : InputSnapshot{},
+                                      extensions_, peer_uid_};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
         if (trace_) {
@@ -236,6 +244,8 @@ void ClientConnection::process_input(
             !enqueue(std::move(result_packet.output))) {
           return;
         }
+        if (result_packet.enable_big_requests)
+          request_framer_->enable_big_requests();
         if (!result_packet.structural_transitions.empty() &&
             transition_handler_)
           transition_handler_(result_packet.structural_transitions);

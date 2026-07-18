@@ -18,6 +18,7 @@ struct ScreenModel {
   std::uint32_t blue_mask{0x000000ff};
   std::uint16_t maximum_request_length{65535};
   std::uint32_t resource_id_mask{0x001fffff};
+  std::uint32_t refresh_millihertz{60000};
 };
 
 inline constexpr ScreenModel kScreenModel{};

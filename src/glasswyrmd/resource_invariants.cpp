@@ -28,22 +28,74 @@ bool ResourceTable::invariants_hold() const noexcept {
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
-      if ((!resource.owner && resource.type != ResourceType::Font) ||
+      if ((!resource.owner && resource.type != ResourceType::Font &&
+           resource.type != ResourceType::Colormap) ||
           resource.type == ResourceType::Window) return false;
       if (!resource.owner) {
-        if (xid != kDefaultFontXid ||
-            !std::holds_alternative<FontResource>(resource.payload)) return false;
+        const bool default_font =
+            xid == kDefaultFontXid &&
+            std::holds_alternative<FontResource>(resource.payload);
+        const bool default_colormap =
+            xid == screen_.default_colormap &&
+            std::holds_alternative<ColormapResource>(resource.payload);
+        if (!default_font && !default_colormap) return false;
         continue;
       }
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(), xid) != 1)
         return false;
-      if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload))
-        calculated_drawable_bytes += pixmap->byte_size();
+      if (const auto* pixmap = std::get_if<PixmapResource>(&resource.payload)) {
+        bool counted = false;
+        for (const auto& [other_xid, other_resource] : resources_) {
+          if (other_xid >= xid) continue;
+          const auto* other =
+              std::get_if<PixmapResource>(&other_resource.payload);
+          if (other && other->storage_identity() == pixmap->storage_identity()) {
+            counted = true;
+            break;
+          }
+        }
+        if (!counted) calculated_drawable_bytes += pixmap->byte_size();
+        const bool valid_storage =
+            (pixmap->depth == 1 && pixmap->bitmap()) ||
+            (pixmap->depth == 8 && pixmap->alpha()) ||
+            ((pixmap->depth == 24 || pixmap->depth == 32) && pixmap->pixels());
+        if (resource.type != ResourceType::Pixmap || !valid_storage)
+          return false;
+      }
       if (const auto* cursor = std::get_if<CursorResource>(&resource.payload)) {
         if (!cursor->image) return false;
         calculated_cursor_bytes += cursor->image->byte_size();
+      }
+      if (const auto* segment =
+              std::get_if<ShmSegmentResource>(&resource.payload)) {
+        if (!segment->mapping || segment->size == 0 || segment->shmid < 0)
+          return false;
+      }
+      if (const auto* region =
+              std::get_if<XFixesRegionResource>(&resource.payload)) {
+        if (resource.type != ResourceType::XFixesRegion ||
+            region->rectangles.size() >
+                limits_.maximum_xfixes_region_rectangles)
+          return false;
+      }
+      if (const auto* damage = std::get_if<DamageResource>(&resource.payload)) {
+        if (resource.type != ResourceType::Damage ||
+            (!find_window(damage->drawable) && !find_pixmap(damage->drawable)) ||
+            damage->accumulated.size() >
+                limits_.maximum_xfixes_region_rectangles)
+          return false;
+      }
+      if (const auto* picture = std::get_if<Picture>(&resource.payload)) {
+        if (resource.type != ResourceType::Picture) return false;
+        if (const auto* source =
+                std::get_if<DrawablePictureSource>(&picture->source())) {
+          const auto* drawable = find(source->drawable);
+          if (!drawable || (!find_window(source->drawable) &&
+                            !find_pixmap(source->drawable)))
+            return false;
+        }
       }
       continue;
     }
@@ -61,11 +113,13 @@ bool ResourceTable::invariants_hold() const noexcept {
     calculated_property_bytes += window_property_bytes(*window);
     if (xid != screen_.root_window) {
       const auto* parent = find_window(window->parent);
+      const bool server_proxy = xid == 4 && !resource.owner;
       if (parent == nullptr ||
           std::count(parent->children.begin(), parent->children.end(), xid) != 1 ||
-          !resource.owner) {
+          (!resource.owner && !server_proxy)) {
         return false;
       }
+      if (server_proxy) continue;
       const auto owner_iterator = resources_by_owner_.find(*resource.owner);
       if (owner_iterator == resources_by_owner_.end() ||
           std::count(owner_iterator->second.begin(), owner_iterator->second.end(),

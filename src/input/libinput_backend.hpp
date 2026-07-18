@@ -85,6 +85,7 @@ class LibinputBackend {
   [[nodiscard]] InputReadiness readiness() const noexcept;
   [[nodiscard]] std::int32_t pointer_x() const noexcept { return pointer_x_; }
   [[nodiscard]] std::int32_t pointer_y() const noexcept { return pointer_y_; }
+  void warp_pointer(std::int32_t x, std::int32_t y) noexcept;
   [[nodiscard]] std::size_t held_key_count() const noexcept;
   [[nodiscard]] std::size_t held_button_count() const noexcept;
   [[nodiscard]] std::size_t bounded_diagnostic_count() const noexcept {

@@ -25,6 +25,8 @@ int main() {
   require(x11_request_name(26) == "GrabPointer");
   require(x11_request_name(35) == "AllowEvents");
   require(x11_request_name(38) == "QueryPointer");
+  require(x11_request_name(41) == "WarpPointer");
+  require(x11_request_name(42) == "SetInputFocus");
   require(x11_request_name(44) == "QueryKeymap");
   require(x11_request_name(45) == "OpenFont");
   require(x11_request_name(65) == "PolyLine");
@@ -51,6 +53,9 @@ int main() {
     const std::vector<std::uint8_t> query_extension{
         98, 0, 4, 0, 6, 0, 0, 0, 'R', 'E', 'N', 'D', 'E', 'R', 0, 0};
     trace->request(1, 43, 98, query_extension.size(), {}, query_extension);
+    const std::vector<std::uint8_t> shm_put_image{
+        129, 3, 10, 0, 0, 0, 0, 0};
+    trace->request(1, 44, 129, 40, {}, shm_put_image);
     std::vector<std::uint8_t> motion(32);
     motion[0] = 6; motion[2] = 0x34; motion[3] = 0x12;
     motion[12] = 0x44; motion[13] = 0x33; motion[14] = 0x22; motion[15] = 0x11;
@@ -71,6 +76,7 @@ int main() {
           "{\"direction\":\"request\",\"client\":1,\"sequence\":42,\"opcode\":70,\"name\":\"PolyFillRectangle\",\"length\":36,\"outcome\":\"success\",\"error\":null}\n"
           "{\"direction\":\"reply\",\"client\":1,\"sequence\":42}\n"
           "{\"direction\":\"request\",\"client\":1,\"sequence\":43,\"opcode\":98,\"name\":\"QueryExtension\",\"extension\":\"RENDER\",\"length\":16,\"outcome\":\"success\",\"error\":null}\n"
+          "{\"direction\":\"request\",\"client\":1,\"sequence\":44,\"opcode\":129,\"name\":\"Unknown\",\"extension\":\"MIT-SHM\",\"minor\":3,\"length\":40,\"outcome\":\"success\",\"error\":null}\n"
           "{\"direction\":\"event\",\"client\":1,\"sequence\":4660,\"event_type\":6,\"window\":287454020}\n"
           "{\"direction\":\"event\",\"client\":2,\"sequence\":43981,\"event_type\":12,\"window\":16909060}\n"
           "{\"direction\":\"request\",\"client\":1,\"sequence\":43,\"opcode\":250,\"name\":\"Unknown\",\"length\":8,\"outcome\":\"error\",\"error\":\"BadRequest\"}\n"

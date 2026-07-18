@@ -1,7 +1,8 @@
 #include "glasswyrmd/compositor_peer.hpp"
 
+#include "glasswyrmd/compositor_buffer_replay.hpp"
+
 #include <algorithm>
-#include <map>
 #include <memory>
 #include <set>
 
@@ -84,8 +85,10 @@ bool enqueue_buffer(gwipc_connection* connection,
   message.flags = GWIPC_FLAG_SNAPSHOT_ITEM;
   message.payload = data;
   message.payload_size = size;
-  message.fds = &buffer.fd;
-  message.fd_count = 1;
+  const int fds[2] = {buffer.fd, buffer.synchronization_fd};
+  message.fds = fds;
+  message.fd_count =
+      buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD ? 2 : 1;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
 void forget_cursor(CompositorSnapshotSubmission& submission) {
@@ -103,16 +106,21 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
     return cursor_surfaces.contains(damage.surface_id);
   });
 }
+
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
                                const bool software_content,
-                               const bool session_state)
+                               const bool session_state,
+                               const bool cpu_buffer_synchronization)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
                  (software_content ? kContentCapabilities
                                    : kMetadataCapabilities) |
-                     (session_state ? GWIPC_CAP_SESSION_STATE : 0),
+                     (session_state ? GWIPC_CAP_SESSION_STATE : 0) |
+                     (cpu_buffer_synchronization
+                          ? GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION
+                          : 0),
                  "glasswyrmd-compositor"),
       screen_(screen), software_content_(software_content),
       session_state_(session_state) {}
@@ -126,6 +134,9 @@ bool CompositorPeer::connect(std::string &error) {
 }
 
 bool CompositorPeer::send_bootstrap(std::string &error) {
+  if (replay_input_.commit_id != 0 &&
+      !compositor_buffer_replay::prepare(replay_input_, error))
+    return false;
   return submit(replay_input_.commit_id != 0
                     ? replay_input_
                     : CompositorSnapshotSubmission{1, 1, {}, {}, {}, {}},
@@ -202,7 +213,10 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
   }
   std::set<std::uint64_t> buffer_ids;
   for (const auto& buffer : complete.buffers) {
-    if (buffer.fd < 0 || buffer.attach.buffer_id == 0 ||
+    const bool synchronized =
+        buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD;
+    if (buffer.fd < 0 || synchronized != (buffer.synchronization_fd >= 0) ||
+        buffer.attach.buffer_id == 0 ||
         !buffer_ids.insert(buffer.attach.buffer_id).second ||
         !surface_ids.contains(buffer.attach.surface_id)) {
       error = "invalid buffered compositor attachment";
@@ -214,6 +228,9 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
       error = "invalid buffered compositor damage";
       return false;
     }
+  if (!compositor_buffer_replay::rearm_snapshot(complete, replay_input_,
+                                                error))
+    return false;
   for (const auto &surface : complete.surfaces) {
     if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
       continue;
@@ -351,6 +368,9 @@ bool CompositorPeer::submit_content(
     error = "compositor peer is not ready for incremental content";
     return false;
   }
+  if (!compositor_buffer_replay::rearm_content(submission.damages,
+                                               replay_input_, error))
+    return false;
   auto* connection = transport_.connection();
   for (const auto& damage : submission.damages) {
     gwipc_surface_damage value{};
@@ -419,28 +439,6 @@ bool CompositorPeer::acknowledge_session_state(
   }
   error.clear();
   return true;
-}
-
-void CompositorPeer::promote_replay_snapshot() {
-  CompositorSnapshotSubmission replay = pending_;
-  replay.buffers.clear();
-  std::map<std::uint64_t, CompositorSnapshotSubmission::Buffer> attachments;
-  const std::set<std::uint64_t> retained_surfaces = [&] {
-    std::set<std::uint64_t> ids;
-    for (const auto& surface : pending_.surfaces) ids.insert(surface.surface_id);
-    return ids;
-  }();
-  for (const auto& buffer : replay_input_.buffers)
-    if (retained_surfaces.contains(buffer.attach.surface_id))
-      attachments[buffer.attach.surface_id] = buffer;
-  for (const auto& buffer : pending_.buffers)
-    attachments[buffer.attach.surface_id] = buffer;
-  replay.buffers.reserve(attachments.size());
-  for (const auto& surface : pending_.surfaces) {
-    const auto found = attachments.find(surface.surface_id);
-    if (found != attachments.end()) replay.buffers.push_back(found->second);
-  }
-  replay_input_ = std::move(replay);
 }
 
 PeerProcessOutcome CompositorPeer::drain(std::string &error) {
@@ -520,7 +518,8 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       error = "invalid compositor bootstrap acknowledgement";
       return PeerProcessOutcome::Fatal;
     }
-    if (!content_submission_) promote_replay_snapshot();
+    if (!content_submission_)
+      compositor_buffer_replay::promote(pending_, replay_input_);
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }

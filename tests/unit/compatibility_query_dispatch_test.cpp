@@ -4,8 +4,10 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 
 using namespace glasswyrm::server;
 namespace x11 = gw::protocol::x11;
@@ -53,8 +55,19 @@ int main() {
     require(state.resources().create_window(1,0x400000,0x1fffff,top)==CreateWindowStatus::Success && state.resources().create_window(1,0x400000,0x1fffff,child)==CreateWindowStatus::Success,"create coordinate hierarchy");
     state.resources().find_window(top.xid)->map_state=MapState::Viewable; state.resources().find_window(child.xid)->map_state=MapState::Viewable;
     context.input={115,75,0x0105,child.xid,77};
+    std::optional<std::pair<std::int32_t, std::int32_t>> warped;
+    context.input.warp_pointer = [&warped](const std::int32_t x,
+                                           const std::int32_t y) {
+      warped = std::pair{x, y};
+      return true;
+    };
     writer=header(order,x11::CoreOpcode::QueryPointer,2); writer.write_u32(top.xid); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::QueryPointer)); require(result.output[1]==1 && u32(result.output,order,8)==state.screen().root_window && u32(result.output,order,12)==child.xid && static_cast<std::int16_t>(u16(result.output,order,20))==15 && static_cast<std::int16_t>(u16(result.output,order,22))==25 && u16(result.output,order,24)==0x0105,"QueryPointer child and relative coordinates");
     writer=header(order,x11::CoreOpcode::TranslateCoordinates,4); writer.write_u32(child.xid); writer.write_u32(top.xid); writer.write_u16(static_cast<std::uint16_t>(-1)); writer.write_u16(2); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::TranslateCoordinates)); require(result.output[1]==1 && u32(result.output,order,8)==child.xid && static_cast<std::int16_t>(u16(result.output,order,12))==10 && static_cast<std::int16_t>(u16(result.output,order,14))==23,"TranslateCoordinates nested signed point");
+    writer=header(order,x11::CoreOpcode::WarpPointer,6); writer.write_u32(top.xid); writer.write_u32(child.xid); writer.write_u16(10); writer.write_u16(20); writer.write_u16(20); writer.write_u16(20); writer.write_u16(2); writer.write_u16(3); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::WarpPointer)); require(result.output.empty() && warped == std::pair<std::int32_t, std::int32_t>{113,74},"WarpPointer conditional nested destination");
+    warped.reset(); writer=header(order,x11::CoreOpcode::WarpPointer,6); writer.write_u32(top.xid); writer.write_u32(child.xid); writer.write_u16(0); writer.write_u16(0); writer.write_u16(5); writer.write_u16(5); writer.write_u16(2); writer.write_u16(3); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::WarpPointer)); require(result.output.empty() && !warped,"WarpPointer source miss is a no-op");
+    writer=header(order,x11::CoreOpcode::WarpPointer,6); writer.write_u32(0); writer.write_u32(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(static_cast<std::uint16_t>(-200)); writer.write_u16(30); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::WarpPointer)); require(result.output.empty() && warped == std::pair<std::int32_t, std::int32_t>{0,105},"WarpPointer relative destination clamps to root");
+    writer=header(order,x11::CoreOpcode::WarpPointer,6); writer.write_u32(0); writer.write_u32(0x4fffff); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::WarpPointer)); require(result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadWindow),"WarpPointer invalid destination is BadWindow");
+    context.input.warp_pointer = {}; writer=header(order,x11::CoreOpcode::WarpPointer,6); writer.write_u32(0); writer.write_u32(top.xid); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(0); writer.write_u16(1); writer.write_u16(1); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::WarpPointer)); require(result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadImplementation),"WarpPointer requires a runtime route");
     writer=header(order,x11::CoreOpcode::QueryPointer,2); writer.write_u32(0x4fffff); result=dispatch_request(state,context,finish(std::move(writer),x11::CoreOpcode::QueryPointer)); require(result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadWindow),"QueryPointer BadWindow");
   }
 }

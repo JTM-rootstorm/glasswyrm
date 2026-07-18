@@ -67,10 +67,26 @@ std::optional<std::string_view> extension_name(
   const std::string_view candidate(
       reinterpret_cast<const char*>(bytes.data() + 8), length);
   constexpr std::string_view known[] = {
-      "SHAPE", "RENDER", "XInputExtension", "XFIXES", "DAMAGE", "Present"};
+      "SHAPE",          "BIG-REQUESTS", "MIT-SHM", "XInputExtension",
+      "XFIXES",         "DAMAGE",       "RENDER",  "Composite",
+      "RANDR",          "Present"};
   for (const auto name : known)
     if (candidate == name) return name;
   return std::string_view{"OTHER"};
+}
+
+std::optional<std::string_view> dispatched_extension_name(
+    const std::uint8_t opcode) {
+  switch (opcode) {
+    case 128: return "BIG-REQUESTS";
+    case 129: return "MIT-SHM";
+    case 130: return "XFIXES";
+    case 131: return "DAMAGE";
+    case 132: return "RENDER";
+    case 133: return "Composite";
+    case 134: return "RANDR";
+    default: return std::nullopt;
+  }
 }
 
 std::size_t event_window_offset(const std::uint8_t type) {
@@ -115,6 +131,8 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 35: return "AllowEvents";
     case 38: return "QueryPointer";
     case 40: return "TranslateCoordinates";
+    case 41: return "WarpPointer";
+    case 42: return "SetInputFocus";
     case 43: return "GetInputFocus";
     case 44: return "QueryKeymap";
     case 45: return "OpenFont";
@@ -137,6 +155,11 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 72: return "PutImage";
     case 74: return "PolyText8";
     case 76: return "ImageText8";
+    case 78: return "CreateColormap";
+    case 79: return "FreeColormap";
+    case 81: return "InstallColormap";
+    case 82: return "UninstallColormap";
+    case 83: return "ListInstalledColormaps";
     case 84: return "AllocColor";
     case 85: return "AllocNamedColor";
     case 88: return "FreeColors";
@@ -153,6 +176,7 @@ std::string_view x11_request_name(const std::uint8_t opcode) noexcept {
     case 102: return "ChangeKeyboardControl";
     case 103: return "GetKeyboardControl";
     case 104: return "Bell";
+    case 115: return "ForceScreenSaver";
     case 117: return "GetPointerMapping";
     case 119: return "GetModifierMapping";
     case 127: return "NoOperation";
@@ -235,6 +259,11 @@ void CompatibilityTrace::request(const std::uint64_t client,
   if (opcode == 98) {
     const auto extension = extension_name(request_bytes, byte_order);
     line << ",\"extension\":\"" << extension.value_or("OTHER") << "\"";
+  } else if (const auto extension = dispatched_extension_name(opcode);
+             extension) {
+    line << ",\"extension\":\"" << *extension << "\"";
+    if (request_bytes.size() >= 2)
+      line << ",\"minor\":" << static_cast<unsigned int>(request_bytes[1]);
   }
   line << ",\"length\":" << length
        << ",\"outcome\":\"" << (is_error ? "error" : "success")

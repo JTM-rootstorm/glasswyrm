@@ -1,5 +1,7 @@
 #include "glasswyrmd/request_handlers/common.hpp"
 
+#include "glasswyrmd/ewmh.hpp"
+
 #include "protocol/x11/byte_cursor.hpp"
 #include "protocol/x11/event_mask.hpp"
 #include "protocol/x11/reply.hpp"
@@ -126,8 +128,44 @@ DispatchResult change_property(ServerState& state,
   if (!data) {
     return error(context, request, x11::CoreErrorCode::BadAlloc);
   }
+  if (ewmh_property_is_protected(state, window, property_atom))
+    return error(context, request, x11::CoreErrorCode::BadAccess,
+                 property_atom);
+  Property value{type_atom, std::move(*data)};
+  if (ewmh_property_affects_policy(state, property_atom) &&
+      state.resources().is_policy_candidate(window)) {
+    auto staged = state;
+    const auto status = staged.resources().change_property(
+        window, property_atom, std::move(value),
+        static_cast<PropertyMode>(request.data));
+    if (status != PropertyMutationStatus::Success) {
+      if (status == PropertyMutationStatus::BadMatch)
+        return error(context, request, x11::CoreErrorCode::BadMatch);
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
+    }
+    if (!interpret_ewmh_window(staged, window))
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    if (context.integrated_lifecycle) {
+      const auto snapshot = staged.lifecycle_snapshot();
+      const auto found = snapshot.windows.find(window);
+      if (found == snapshot.windows.end())
+        return error(context, request, x11::CoreErrorCode::BadImplementation);
+      const auto* staged_window = staged.resources().find_window(window);
+      return DispatchResult::deferred_policy_change(
+          {found->second,
+           DeferredPropertyMutation{
+               window, property_atom,
+               staged_window->properties.at(property_atom),
+               context.input.logical_time},
+           false});
+    }
+    state = std::move(staged);
+    synchronize_ewmh_root_properties(state);
+    return property_result(context, window, property_atom,
+                           x11::PropertyNotifyState::NewValue);
+  }
   const auto status = state.resources().change_property(
-      window, property_atom, Property{type_atom, std::move(*data)},
+      window, property_atom, std::move(value),
       static_cast<PropertyMode>(request.data));
   switch (status) {
     case PropertyMutationStatus::Success:
@@ -160,8 +198,33 @@ DispatchResult delete_property(ServerState& state,
   if (!state.atoms().valid(property_atom)) {
     return error(context, request, x11::CoreErrorCode::BadAtom, property_atom);
   }
+  if (ewmh_property_is_protected(state, window, property_atom))
+    return error(context, request, x11::CoreErrorCode::BadAccess,
+                 property_atom);
   const bool existed =
       state.resources().find_window(window)->properties.contains(property_atom);
+  if (existed && ewmh_property_affects_policy(state, property_atom) &&
+      state.resources().is_policy_candidate(window)) {
+    auto staged = state;
+    (void)staged.resources().delete_property(window, property_atom);
+    if (!interpret_ewmh_window(staged, window))
+      return error(context, request, x11::CoreErrorCode::BadImplementation);
+    if (context.integrated_lifecycle) {
+      const auto snapshot = staged.lifecycle_snapshot();
+      const auto found = snapshot.windows.find(window);
+      if (found == snapshot.windows.end())
+        return error(context, request, x11::CoreErrorCode::BadImplementation);
+      return DispatchResult::deferred_policy_change(
+          {found->second,
+           DeferredPropertyMutation{window, property_atom, std::nullopt,
+                                    context.input.logical_time},
+           false});
+    }
+    state = std::move(staged);
+    synchronize_ewmh_root_properties(state);
+    return property_result(context, window, property_atom,
+                           x11::PropertyNotifyState::Deleted);
+  }
   (void)state.resources().delete_property(window, property_atom);
   return existed ? property_result(context, window, property_atom,
                                    x11::PropertyNotifyState::Deleted)

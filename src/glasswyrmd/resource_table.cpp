@@ -29,6 +29,10 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   resources_.emplace(
       screen.root_window,
       ResourceRecord{ResourceType::Window, std::nullopt, std::move(root)});
+  resources_.emplace(
+      screen.default_colormap,
+      ResourceRecord{ResourceType::Colormap, std::nullopt,
+                     ColormapResource{screen.root_visual}});
   resources_.emplace(kDefaultFontXid,
                      ResourceRecord{ResourceType::Font, std::nullopt,
                                     FontResource{}});
@@ -96,6 +100,65 @@ const CursorResource* ResourceTable::find_cursor(
   return resource ? std::get_if<CursorResource>(&resource->payload) : nullptr;
 }
 
+const ColormapResource* ResourceTable::find_colormap(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<ColormapResource>(&resource->payload) : nullptr;
+}
+
+bool ResourceTable::valid_colormap(const std::uint32_t xid) const noexcept {
+  return xid == screen_.default_colormap || find_colormap(xid) != nullptr;
+}
+
+const ShmSegmentResource* ResourceTable::find_shm_segment(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<ShmSegmentResource>(&resource->payload)
+                  : nullptr;
+}
+
+ShmSegmentResource* ResourceTable::find_shm_segment(
+    const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<ShmSegmentResource>(&resource->payload)
+                  : nullptr;
+}
+
+const XFixesRegionResource* ResourceTable::find_xfixes_region(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<XFixesRegionResource>(&resource->payload)
+                  : nullptr;
+}
+
+XFixesRegionResource* ResourceTable::find_xfixes_region(
+    const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<XFixesRegionResource>(&resource->payload)
+                  : nullptr;
+}
+
+const DamageResource* ResourceTable::find_damage(
+    const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<DamageResource>(&resource->payload) : nullptr;
+}
+
+DamageResource* ResourceTable::find_damage(const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<DamageResource>(&resource->payload) : nullptr;
+}
+
+const Picture* ResourceTable::find_picture(const std::uint32_t xid) const noexcept {
+  const auto* resource = find(xid);
+  return resource ? std::get_if<Picture>(&resource->payload) : nullptr;
+}
+
+Picture* ResourceTable::find_picture(const std::uint32_t xid) noexcept {
+  auto* resource = find(xid);
+  return resource ? std::get_if<Picture>(&resource->payload) : nullptr;
+}
+
 std::shared_ptr<const input::CursorImage> ResourceTable::effective_cursor(
     const std::uint32_t pointer_target) const noexcept {
   auto current = pointer_target;
@@ -128,6 +191,30 @@ std::size_t ResourceTable::resource_count_by_owner(
     const ClientId owner) const noexcept {
   const auto iterator = resources_by_owner_.find(owner);
   return iterator == resources_by_owner_.end() ? 0 : iterator->second.size();
+}
+
+bool ResourceTable::create_server_proxy_window(const std::uint32_t xid) {
+  if (xid == 0 || resources_.contains(xid)) return false;
+  WindowResource proxy;
+  proxy.parent = screen_.root_window;
+  proxy.width = 1;
+  proxy.height = 1;
+  proxy.requested_width = 1;
+  proxy.requested_height = 1;
+  proxy.depth = screen_.root_depth;
+  proxy.window_class = WindowClass::InputOutput;
+  proxy.visual = screen_.root_visual;
+  proxy.attributes.colormap = screen_.default_colormap;
+  try {
+    resources_.emplace(
+        xid, ResourceRecord{ResourceType::Window, std::nullopt,
+                            std::move(proxy)});
+    find_window(screen_.root_window)->children.push_back(xid);
+    return true;
+  } catch (...) {
+    resources_.erase(xid);
+    return false;
+  }
 }
 
 }  // namespace glasswyrm::server

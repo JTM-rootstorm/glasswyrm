@@ -16,7 +16,7 @@
 
 namespace gw::ipc {
 
-inline constexpr std::uint32_t kKnownCapabilities =
+inline constexpr std::uint64_t kKnownCapabilities =
     GWIPC_CAP_FD_PASSING | GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE |
     GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_SCALE_METADATA |
@@ -24,7 +24,7 @@ inline constexpr std::uint32_t kKnownCapabilities =
     GWIPC_CAP_TRACE_METADATA | GWIPC_CAP_WINDOW_POLICY |
     GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SYNTHETIC_INPUT |
     GWIPC_CAP_SESSION_STATE | GWIPC_CAP_INTERACTIVE_POLICY |
-    GWIPC_CAP_CURSOR_SURFACE;
+    GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION;
 
 struct Config {
   std::string path;

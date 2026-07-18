@@ -1,6 +1,9 @@
 #include "glasswyrmd/content_presenter.hpp"
 #include "glasswyrmd/server_state.hpp"
 
+#include <cerrno>
+#include <unistd.h>
+
 int main() {
   using namespace glasswyrm::server;
   ServerState state;
@@ -60,5 +63,25 @@ int main() {
   presenter.damage(spec.xid, {4, 5, 1, 1});
   presenter.accept_content();
   if (!presenter.has_pending_damage()) return 5;
+
+  ContentPresenter synchronized(GWIPC_SYNCHRONIZATION_EVENTFD);
+  CompositorSnapshotSubmission synchronized_submission{6, 6, {}, {}, {}, {}};
+  if (!synchronized.prepare_lifecycle(snapshot, state.resources(),
+                                      synchronized_submission) ||
+      synchronized_submission.buffers.size() != 1 ||
+      synchronized_submission.damages.size() != 1 ||
+      synchronized_submission.buffers.front().attach.synchronization !=
+          GWIPC_SYNCHRONIZATION_EVENTFD ||
+      synchronized_submission.buffers.front().synchronization_fd < 0)
+    return 10;
+  const int synchronization_fd =
+      ::dup(synchronized_submission.buffers.front().synchronization_fd);
+  if (synchronization_fd < 0) return 11;
+  synchronized.cancel_lifecycle_submission();
+  std::uint64_t token = 0;
+  errno = 0;
+  const auto count = ::read(synchronization_fd, &token, sizeof(token));
+  (void)::close(synchronization_fd);
+  if (count >= 0 || errno != EAGAIN) return 12;
   return 0;
 }

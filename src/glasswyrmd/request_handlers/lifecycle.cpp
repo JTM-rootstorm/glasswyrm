@@ -1,4 +1,6 @@
 #include "glasswyrmd/request_handlers/common.hpp"
+#include "glasswyrmd/ewmh.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
 
 #include "glasswyrmd/request_handlers/drawable_access.hpp"
 #include "glasswyrmd/request_handlers/window_attributes.hpp"
@@ -66,10 +68,13 @@ std::optional<geometry::Rectangle> child_outer_rectangle(
 }
 
 void add_child_outer_damage(DispatchResult& result,
-                            const ResourceTable& resources,
-                            const StructuralEventState& state) {
+                            ServerState& server_state,
+                            const StructuralEventState& state,
+                            const std::uint32_t timestamp) {
   const auto rectangle = child_outer_rectangle(state);
-  if (rectangle) add_window_damage(result, resources, state.parent, *rectangle);
+  if (rectangle)
+    add_drawable_damage(result, server_state, state.parent, *rectangle,
+                        timestamp);
 }
 
 void add_parent_reveal(DispatchResult& result, const ResourceTable& resources,
@@ -83,29 +88,31 @@ void add_parent_reveal(DispatchResult& result, const ResourceTable& resources,
 }
 
 void add_local_lifecycle_effects(DispatchResult& result,
-                                 const ResourceTable& resources,
-                                 const StructuralTransition& transition) {
+                                 ServerState& state,
+                                 const StructuralTransition& transition,
+                                 const std::uint32_t timestamp) {
   if (!transition.before) return;
-  const auto* target = resources.find_window(transition.before->target);
+  const auto* target = state.resources().find_window(transition.before->target);
   if (!target || target->window_class != WindowClass::InputOutput) return;
   if (transition.kind == StructuralTransitionKind::Map && transition.committed &&
       !transition.before->viewable && transition.committed->viewable) {
-    add_window_damage(result, resources, transition.committed->target,
-                      {0, 0, transition.committed->width,
-                       transition.committed->height});
+    add_drawable_damage(result, state, transition.committed->target,
+                        {0, 0, transition.committed->width,
+                         transition.committed->height},
+                        timestamp);
   } else if (transition.kind == StructuralTransitionKind::Unmap &&
              transition.before->viewable && transition.committed &&
              !transition.committed->viewable) {
-    add_child_outer_damage(result, resources, *transition.before);
-    add_parent_reveal(result, resources, *transition.before);
+    add_child_outer_damage(result, state, *transition.before, timestamp);
+    add_parent_reveal(result, state.resources(), *transition.before);
   } else if (transition.kind == StructuralTransitionKind::Configure &&
              transition.committed) {
-    add_child_outer_damage(result, resources, *transition.before);
-    add_child_outer_damage(result, resources, *transition.committed);
+    add_child_outer_damage(result, state, *transition.before, timestamp);
+    add_child_outer_damage(result, state, *transition.committed, timestamp);
   } else if (transition.kind == StructuralTransitionKind::Destroy &&
              transition.before->viewable) {
-    add_child_outer_damage(result, resources, *transition.before);
-    add_parent_reveal(result, resources, *transition.before);
+    add_child_outer_damage(result, state, *transition.before, timestamp);
+    add_parent_reveal(result, state.resources(), *transition.before);
   }
 }
 DispatchResult create_window(ServerState& state, const DispatchContext& context,
@@ -146,7 +153,6 @@ DispatchResult create_window(ServerState& state, const DispatchContext& context,
   }
 
   auto decoded = decode_window_attributes(reader, value_mask, spec.attributes,
-                                          state.screen().default_colormap,
                                           state.resources());
   if (!decoded.success) return error(context, request, decoded.error, decoded.bad_value);
   spec.attributes = decoded.attributes;
@@ -214,6 +220,8 @@ DispatchResult destroy_window(ServerState& state,
   if (context.integrated_lifecycle && state.resources().cleanup_pending(window))
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   if (window == state.screen().root_window) return {};
+  if (state.game_compat() && window == kEwmhSupportingWindow)
+    return error(context, request, x11::CoreErrorCode::BadAccess, window);
   if (context.integrated_lifecycle &&
       state.resources().is_policy_candidate(window)) {
     return DispatchResult::deferred_destroy_window(window);
@@ -233,14 +241,24 @@ DispatchResult destroy_window(ServerState& state,
         {StructuralTransitionKind::Destroy, std::move(before), std::nullopt});
   }
   if (!result.structural_transitions.empty())
-    add_local_lifecycle_effects(result, state.resources(),
-                                result.structural_transitions.back());
+    add_local_lifecycle_effects(result, state,
+                                result.structural_transitions.back(),
+                                context.input.logical_time);
   const auto status = state.resources().commit_destroy_plan(*destroyed);
   if (status == DestroyWindowStatus::BadWindow) {
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
   }
-  for (const auto& item : destroyed->postorder)
+  for (const auto& item : destroyed->postorder) {
+    for (const auto& [selection, owner] :
+         state.selections().owned_by_window(item.xid))
+      append_xfixes_notifications(
+          result, state.selections().xfixes_notifications(
+                      selection, 1, 0, context.input.logical_time,
+                      owner.last_change_time));
     (void)state.selections().clear_window(item.xid);
+    (void)state.randr().clear_window(item.xid);
+    (void)state.composite().remove_window(item.xid);
+  }
   return result;
 }
 
@@ -281,8 +299,9 @@ DispatchResult map_window(ServerState& state, const DispatchContext& context,
           {mapped ? StructuralTransitionKind::Map
                   : StructuralTransitionKind::Unmap,
            before, capture_structural_state(state.resources(), decoded.window)});
-      add_local_lifecycle_effects(result, state.resources(),
-                                  result.structural_transitions.back());
+      add_local_lifecycle_effects(result, state,
+                                  result.structural_transitions.back(),
+                                  context.input.logical_time);
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -335,8 +354,9 @@ DispatchResult configure_window(ServerState& state,
       result.structural_transitions.push_back(
           {StructuralTransitionKind::Configure, before,
            capture_structural_state(state.resources(), decoded.window)});
-      add_local_lifecycle_effects(result, state.resources(),
-                                  result.structural_transitions.back());
+      add_local_lifecycle_effects(result, state,
+                                  result.structural_transitions.back(),
+                                  context.input.logical_time);
       return result;
     }
     case LocalLifecycleStatus::BadWindow:
@@ -390,8 +410,9 @@ DispatchResult map_subwindows(ServerState& state,
         {mapped ? StructuralTransitionKind::Map
                 : StructuralTransitionKind::Unmap,
          before, capture_structural_state(state.resources(), child)});
-    add_local_lifecycle_effects(result, state.resources(),
-                                result.structural_transitions.back());
+    add_local_lifecycle_effects(result, state,
+                                result.structural_transitions.back(),
+                                context.input.logical_time);
   }
   return result;
 }

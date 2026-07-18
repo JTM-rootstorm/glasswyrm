@@ -13,6 +13,14 @@ These documents define the implemented reference boundary:
   metrics, requests, glyph rasterization, and compatibility limits.
 - [Milestone 9 child composition](M9_CHILD_WINDOW_COMPOSITION.md): recursive
   server-side child flattening without a GWIPC ABI change.
+- [Milestone 12 renderer abstraction](M12_RENDERER_ABSTRACTION.md): renderer
+  selection, the exact software reference path, component-neutral frames, and
+  deterministic renderer reporting below the scene transaction.
+- [Milestone 12 buffer synchronization](M12_BUFFER_SYNCHRONIZATION.md): GWIPC
+  0.7 eventfd readiness ordering, ownership, failure, and replay semantics.
+- [Milestone 12 EGL/GLES renderer](M12_EGL_GLES.md): the opt-in GLES 2.0
+  profile, GBM and surfaceless context order, bounded texture cache,
+  damage-aware upload/readback, fallback rules, and equivalence boundary.
 
 The compositor-facing profile is documented separately in
 [M7 buffered ProtocolServer surfaces](../compositor/M7_BUFFERED_PROTOCOL_SURFACES.md).

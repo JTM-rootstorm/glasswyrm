@@ -84,6 +84,9 @@ DispatchResult create_pixmap(ServerState& state, const DispatchContext& context,
   std::uint32_t xid{}, drawable{}; std::uint16_t width{}, height{};
   (void)reader.read_u32(xid); (void)reader.read_u32(drawable);
   (void)reader.read_u16(width); (void)reader.read_u16(height);
+  if (!state.game_compat() && request.data != 1 && request.data != 24)
+    return error(context, request, x11::CoreErrorCode::BadValue,
+                 request.data);
   switch (state.resources().create_pixmap(context.client_id, context.resource_base,
       context.resource_mask, xid, drawable, request.data, width, height)) {
     case CreatePixmapStatus::Success: return {};

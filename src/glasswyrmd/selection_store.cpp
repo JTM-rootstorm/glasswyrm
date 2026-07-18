@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <new>
 
 namespace glasswyrm::server {
 
@@ -82,6 +83,9 @@ std::vector<std::uint32_t> SelectionStore::clear_window(
     owner = owners_.erase(owner);
   }
   std::ranges::sort(cleared);
+  std::erase_if(xfixes_subscriptions_, [window](const auto& subscription) {
+    return subscription.window == window;
+  });
   return cleared;
 }
 
@@ -97,7 +101,69 @@ std::vector<std::uint32_t> SelectionStore::clear_client(
     owner = owners_.erase(owner);
   }
   std::ranges::sort(cleared);
+  std::erase_if(xfixes_subscriptions_, [client](const auto& subscription) {
+    return subscription.client == client;
+  });
   return cleared;
+}
+
+bool SelectionStore::select_xfixes(const std::uint64_t client,
+                                   const std::uint32_t window,
+                                   const std::uint32_t selection,
+                                   const std::uint32_t mask) {
+  const auto found = std::ranges::find_if(
+      xfixes_subscriptions_, [=](const auto& subscription) {
+        return subscription.client == client &&
+               subscription.window == window &&
+               subscription.selection == selection;
+      });
+  if (mask == 0) {
+    if (found != xfixes_subscriptions_.end()) xfixes_subscriptions_.erase(found);
+    return true;
+  }
+  if (found != xfixes_subscriptions_.end()) {
+    found->mask = mask;
+    return true;
+  }
+  if (xfixes_subscriptions_.size() >= 4096) return false;
+  try {
+    xfixes_subscriptions_.push_back({client, window, selection, mask});
+  } catch (const std::bad_alloc&) {
+    return false;
+  }
+  return true;
+}
+
+std::vector<XFixesSelectionNotification> SelectionStore::xfixes_notifications(
+    const std::uint32_t selection, const std::uint8_t subtype,
+    const std::uint32_t owner, const std::uint32_t timestamp,
+    const std::uint32_t selection_timestamp) const {
+  std::vector<XFixesSelectionNotification> result;
+  const auto bit = std::uint32_t{1} << subtype;
+  for (const auto& subscription : xfixes_subscriptions_)
+    if (subscription.selection == selection && (subscription.mask & bit) != 0)
+      result.push_back({subscription.client, subtype, subscription.window,
+                        owner, selection, timestamp, selection_timestamp});
+  std::ranges::sort(result, {}, &XFixesSelectionNotification::client);
+  return result;
+}
+
+std::vector<std::pair<std::uint32_t, SelectionOwner>>
+SelectionStore::owned_by_client(const std::uint64_t client) const {
+  std::vector<std::pair<std::uint32_t, SelectionOwner>> result;
+  for (const auto& entry : owners_)
+    if (entry.second.client == client) result.push_back(entry);
+  std::ranges::sort(result, {}, &std::pair<std::uint32_t, SelectionOwner>::first);
+  return result;
+}
+
+std::vector<std::pair<std::uint32_t, SelectionOwner>>
+SelectionStore::owned_by_window(const std::uint32_t window) const {
+  std::vector<std::pair<std::uint32_t, SelectionOwner>> result;
+  for (const auto& entry : owners_)
+    if (entry.second.window == window) result.push_back(entry);
+  std::ranges::sort(result, {}, &std::pair<std::uint32_t, SelectionOwner>::first);
+  return result;
 }
 
 }  // namespace glasswyrm::server

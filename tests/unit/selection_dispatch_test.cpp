@@ -189,6 +189,31 @@ int main() {
                         .data)[4] == 5,
             "SendEvent preserves byte-ordered ClientMessage32 payloads");
 
+    auto withdraw = header(order, x11::CoreOpcode::SendEvent, 11);
+    withdraw.write_u32(state.screen().root_window);
+    withdraw.write_u32(x11::event_mask::SubstructureNotify |
+                       x11::event_mask::SubstructureRedirect);
+    withdraw.write_u8(
+        static_cast<std::uint8_t>(x11::CoreEventType::UnmapNotify));
+    withdraw.write_u8(0);
+    withdraw.write_u16(0);
+    withdraw.write_u32(state.screen().root_window);
+    withdraw.write_u32(first_base + 1);
+    withdraw.write_u8(0);
+    withdraw.write_padding(19);
+    result = dispatch_request(
+        state, first,
+        finish(std::move(withdraw), x11::CoreOpcode::SendEvent));
+    require(result.protocol_events.size() == 1 &&
+                result.protocol_events[0].window == state.screen().root_window &&
+                result.protocol_events[0].mask ==
+                    (x11::event_mask::SubstructureNotify |
+                     x11::event_mask::SubstructureRedirect) &&
+                std::get<x11::UnmapNotifyEvent>(
+                    result.protocol_events[0].event)
+                    .synthetic,
+            "SendEvent accepts the validated ICCCM withdraw notification");
+
     auto change_property = header(order, x11::CoreOpcode::ChangeProperty, 7);
     change_property.write_u32(first_base + 1);
     change_property.write_u32(property);

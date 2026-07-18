@@ -6,6 +6,11 @@
 #include "glasswyrmd/graphics_context.hpp"
 #include "glasswyrmd/font.hpp"
 #include "glasswyrmd/cursor_resource.hpp"
+#include "glasswyrmd/colormap.hpp"
+#include "glasswyrmd/shm_segment.hpp"
+#include "glasswyrmd/xfixes_region.hpp"
+#include "glasswyrmd/damage_resource.hpp"
+#include "glasswyrmd/picture.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,13 +23,27 @@ namespace glasswyrm::server {
 
 using ClientId = std::uint64_t;
 
-enum class ResourceType { Window, Pixmap, GraphicsContext, Font, Cursor };
+enum class ResourceType {
+  Window,
+  Pixmap,
+  GraphicsContext,
+  Font,
+  Cursor,
+  Colormap,
+  ShmSegment,
+  XFixesRegion,
+  Damage,
+  Picture,
+};
 
 struct ResourceRecord {
   ResourceType type{ResourceType::Window};
   std::optional<ClientId> owner;
   std::variant<WindowResource, PixmapResource, GraphicsContextResource,
-               FontResource, CursorResource> payload;
+               FontResource, CursorResource, ColormapResource,
+               ShmSegmentResource, XFixesRegionResource, DamageResource,
+               Picture>
+      payload;
 };
 
 enum class CreateWindowStatus {
@@ -66,6 +85,51 @@ enum class CloseFontStatus { Success, BadFont };
 enum class CreateCursorStatus { Success, BadIdChoice, BadAlloc };
 enum class FreeCursorStatus { Success, BadCursor };
 enum class RecolorCursorStatus { Success, BadCursor, BadAlloc };
+enum class CreateColormapStatus {
+  Success,
+  BadIdChoice,
+  BadWindow,
+  BadMatch,
+  BadAlloc,
+};
+enum class FreeColormapStatus { Success, BadColormap, BadAccess };
+enum class AttachShmStatus {
+  Success,
+  BadIdChoice,
+  BadValue,
+  BadAccess,
+  BadAlloc,
+};
+enum class DetachShmStatus { Success, BadSegment };
+enum class RegionStatus {
+  Success,
+  BadIdChoice,
+  BadRegion,
+  BadValue,
+  BadAlloc,
+};
+enum class DamageStatus {
+  Success,
+  BadIdChoice,
+  BadDamage,
+  BadDrawable,
+  BadValue,
+  BadAlloc,
+};
+struct DamageMutationResult {
+  DamageStatus status{DamageStatus::Success};
+  std::vector<DamageNotification> notifications;
+};
+enum class PictureResourceStatus {
+  Success,
+  BadIdChoice,
+  BadPicture,
+  BadDrawable,
+  BadFormat,
+  BadMatch,
+  BadValue,
+  BadAlloc,
+};
 
 struct CleanupResult {
   std::size_t resources_destroyed{0};
@@ -115,6 +179,14 @@ struct ResourceLimits {
   std::size_t maximum_total_fonts{1024};
   std::size_t maximum_cursors_per_client{256};
   std::size_t maximum_total_cursor_bytes{4U * 1024U * 1024U};
+  std::size_t maximum_colormaps_per_client{4096};
+  std::size_t maximum_shm_segments_per_client{256};
+  std::size_t maximum_shm_bytes_per_client{512U * 1024U * 1024U};
+  std::size_t maximum_xfixes_regions_per_client{4096};
+  std::size_t maximum_xfixes_region_rectangles{
+      kMaximumXFixesRegionRectangles};
+  std::size_t maximum_damage_resources_per_client{4096};
+  std::size_t maximum_pictures_per_client{8192};
 };
 
 class ResourceTable {
@@ -135,11 +207,28 @@ class ResourceTable {
   [[nodiscard]] const FontResource* find_font(std::uint32_t xid) const noexcept;
   [[nodiscard]] const CursorResource* find_cursor(
       std::uint32_t xid) const noexcept;
+  [[nodiscard]] const ColormapResource* find_colormap(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] bool valid_colormap(std::uint32_t xid) const noexcept;
+  [[nodiscard]] const ShmSegmentResource* find_shm_segment(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] ShmSegmentResource* find_shm_segment(
+      std::uint32_t xid) noexcept;
+  [[nodiscard]] const XFixesRegionResource* find_xfixes_region(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] XFixesRegionResource* find_xfixes_region(
+      std::uint32_t xid) noexcept;
+  [[nodiscard]] const DamageResource* find_damage(
+      std::uint32_t xid) const noexcept;
+  [[nodiscard]] DamageResource* find_damage(std::uint32_t xid) noexcept;
+  [[nodiscard]] const Picture* find_picture(std::uint32_t xid) const noexcept;
+  [[nodiscard]] Picture* find_picture(std::uint32_t xid) noexcept;
   [[nodiscard]] std::shared_ptr<const input::CursorImage> effective_cursor(
       std::uint32_t pointer_target) const noexcept;
   [[nodiscard]] const std::shared_ptr<const input::CursorImage>&
   root_default_cursor() const noexcept { return root_default_cursor_; }
   [[nodiscard]] bool is_policy_candidate(std::uint32_t xid) const noexcept;
+  [[nodiscard]] bool create_server_proxy_window(std::uint32_t xid);
   [[nodiscard]] LocalLifecycleStatus set_local_map_intent(std::uint32_t xid,
                                                           bool mapped);
   [[nodiscard]] LocalLifecycleStatus configure_local(
@@ -159,6 +248,9 @@ class ResourceTable {
       std::uint32_t xid, std::uint32_t drawable, std::uint8_t depth,
       std::uint16_t width, std::uint16_t height);
   [[nodiscard]] FreePixmapStatus free_pixmap(std::uint32_t xid);
+  [[nodiscard]] CreatePixmapStatus name_window_pixmap(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t window);
   [[nodiscard]] CreateGcStatus create_gc(
       ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
       std::uint32_t xid, std::uint32_t drawable, GraphicsContextResource gc);
@@ -174,6 +266,46 @@ class ResourceTable {
   [[nodiscard]] RecolorCursorStatus recolor_cursor(
       std::uint32_t xid, input::CursorColor foreground,
       input::CursorColor background);
+  [[nodiscard]] CreateColormapStatus create_colormap(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t window, std::uint32_t visual);
+  [[nodiscard]] FreeColormapStatus free_colormap(std::uint32_t xid);
+  [[nodiscard]] AttachShmStatus attach_shm_segment(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t shmid, bool read_only,
+      std::uint32_t peer_uid);
+  [[nodiscard]] DetachShmStatus detach_shm_segment(std::uint32_t xid);
+  [[nodiscard]] RegionStatus create_xfixes_region(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::span<const geometry::Rectangle> rectangles);
+  [[nodiscard]] RegionStatus destroy_xfixes_region(std::uint32_t xid);
+  [[nodiscard]] RegionStatus set_xfixes_region(
+      std::uint32_t xid, std::span<const geometry::Rectangle> rectangles);
+  [[nodiscard]] RegionStatus copy_xfixes_region(std::uint32_t source,
+                                                std::uint32_t destination);
+  [[nodiscard]] RegionStatus combine_xfixes_regions(
+      std::uint32_t source1, std::uint32_t source2,
+      std::uint32_t destination, std::uint8_t operation);
+  [[nodiscard]] RegionStatus translate_xfixes_region(
+      std::uint32_t xid, std::int16_t dx, std::int16_t dy);
+  [[nodiscard]] RegionStatus extents_xfixes_region(
+      std::uint32_t source, std::uint32_t destination);
+  [[nodiscard]] DamageStatus create_damage(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, std::uint32_t drawable, DamageReportLevel level);
+  [[nodiscard]] DamageStatus destroy_damage(std::uint32_t xid);
+  [[nodiscard]] DamageMutationResult subtract_damage(
+      std::uint32_t xid, std::uint32_t repair_region,
+      std::uint32_t parts_region);
+  [[nodiscard]] DamageMutationResult add_damage(
+      std::uint32_t drawable,
+      std::span<const geometry::Rectangle> rectangles);
+  [[nodiscard]] std::vector<DamageNotification> damage_drawable(
+      std::uint32_t drawable, geometry::Rectangle rectangle);
+  [[nodiscard]] PictureResourceStatus create_picture(
+      ClientId owner, std::uint32_t resource_base, std::uint32_t resource_mask,
+      std::uint32_t xid, Picture picture);
+  [[nodiscard]] PictureResourceStatus free_picture(std::uint32_t xid);
   [[nodiscard]] DestroyWindowStatus destroy_window(std::uint32_t xid,
                                                    CleanupResult* result = nullptr);
   [[nodiscard]] std::optional<WindowDestroyPlan> capture_destroy_plan(
@@ -220,6 +352,9 @@ class ResourceTable {
 
  private:
   void destroy_leaf(std::uint32_t xid, CleanupResult& result);
+  std::size_t remove_damage_for_drawable(std::uint32_t drawable);
+  std::size_t remove_pictures_for_drawable(std::uint32_t drawable);
+  void recompute_canonical_drawable_bytes() noexcept;
   void recompute_map_states_from(std::uint32_t xid, bool parent_viewable);
 
   ScreenModel screen_;

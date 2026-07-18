@@ -1,5 +1,6 @@
 #include "ipc/connection_internal.hpp"
 
+#include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/control.hpp"
 
 #include <sys/socket.h>
@@ -299,9 +300,19 @@ gwipc_status validate_established(gwipc_connection& connection,
   else if (snapshot_control(static_cast<std::uint16_t>(envelope.type)) ||
            wire::has_flag(envelope.flags, MessageFlag::SnapshotItem))
     code = wire::ProtocolErrorCode::SnapshotViolation;
-  else if (envelope.type == MessageType::BufferAttach)
-    code = fds.size() == 1 ? wire::ProtocolErrorCode::InvalidDescriptor
-                           : wire::ProtocolErrorCode::InvalidDescriptorCount;
+  else if (envelope.type == MessageType::BufferAttach) {
+    wire::BufferAttach attachment;
+    const auto decoded = wire::decode(payload, attachment);
+    const std::size_t expected =
+        decoded == wire::CodecStatus::Ok &&
+                attachment.synchronization ==
+                    wire::SynchronizationMode::EventFd
+            ? 2U
+            : 1U;
+    code = fds.size() == expected
+               ? wire::ProtocolErrorCode::InvalidDescriptor
+               : wire::ProtocolErrorCode::InvalidDescriptorCount;
+  }
   return protocol_failure(connection, code, envelope,
                           "invalid application message", status);
 }

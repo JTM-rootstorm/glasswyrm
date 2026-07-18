@@ -1,0 +1,74 @@
+{
+  "byte_order": "big",
+  "checks": {
+    "BIG-REQUESTS": true,
+    "Composite": true,
+    "DAMAGE": true,
+    "MIT-SHM": true,
+    "RANDR": true,
+    "RENDER": true,
+    "XFIXES": true,
+    "stable_list": true,
+    "unknown_absent": true
+  },
+  "error": "",
+  "evidence": {
+    "assignments": {
+      "BIG-REQUESTS": {
+        "error": 0,
+        "event": 0,
+        "major": 128,
+        "present": true
+      },
+      "Composite": {
+        "error": 0,
+        "event": 0,
+        "major": 133,
+        "present": true
+      },
+      "DAMAGE": {
+        "error": 130,
+        "event": 66,
+        "major": 131,
+        "present": true
+      },
+      "MIT-SHM": {
+        "error": 128,
+        "event": 64,
+        "major": 129,
+        "present": true
+      },
+      "RANDR": {
+        "error": 136,
+        "event": 67,
+        "major": 134,
+        "present": true
+      },
+      "RENDER": {
+        "error": 131,
+        "event": 0,
+        "major": 132,
+        "present": true
+      },
+      "XFIXES": {
+        "error": 129,
+        "event": 65,
+        "major": 130,
+        "present": true
+      }
+    },
+    "list_extensions": [
+      "BIG-REQUESTS",
+      "MIT-SHM",
+      "XFIXES",
+      "DAMAGE",
+      "RENDER",
+      "Composite",
+      "RANDR"
+    ]
+  },
+  "passed": true,
+  "probe": "m12_raw_probe",
+  "scenario": "registry",
+  "schema": 1
+}

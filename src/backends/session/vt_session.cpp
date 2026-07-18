@@ -1,5 +1,6 @@
 #include "backends/session/vt_session.hpp"
 
+#include <linux/kd.h>
 #include <utility>
 
 namespace glasswyrm::session {
@@ -88,6 +89,12 @@ bool DirectVirtualTerminalSession::acquire(const std::string_view path,
     return false;
   }
   have_kd_mode_ = true;
+  if (!api_.get_keyboard_mode(terminal_fd_, saved_keyboard_mode_)) {
+    append_api_error("query keyboard mode", error);
+    unwind_failed_acquire(error);
+    return false;
+  }
+  have_keyboard_mode_ = true;
   if (!api_.activate(terminal_fd_, terminal_number_)) {
     append_api_error("activate virtual terminal", error);
     unwind_failed_acquire(error);
@@ -99,6 +106,12 @@ bool DirectVirtualTerminalSession::acquire(const std::string_view path,
     unwind_failed_acquire(error);
     return false;
   }
+  if (!api_.set_keyboard_mode(terminal_fd_, K_OFF)) {
+    append_api_error("disable virtual-terminal keyboard processing", error);
+    unwind_failed_acquire(error);
+    return false;
+  }
+  keyboard_mode_set_ = true;
   if (!api_.set_process_mode(terminal_fd_, signals.release_signal,
                              signals.acquire_signal)) {
     append_api_error("set VT_PROCESS mode", error);
@@ -248,6 +261,14 @@ bool DirectVirtualTerminalSession::restore(std::string &error) {
       process_mode_set_ = false;
     }
   }
+  if (keyboard_mode_set_ && have_keyboard_mode_) {
+    if (!api_.set_keyboard_mode(terminal_fd_, saved_keyboard_mode_)) {
+      append_api_error("restore original keyboard mode", error);
+      success = false;
+    } else {
+      keyboard_mode_set_ = false;
+    }
+  }
   if (activated_ && have_state_ && saved_state_.active != terminal_number_) {
     if (!api_.activate(terminal_fd_, saved_state_.active)) {
       append_api_error("reactivate previous virtual terminal", error);
@@ -281,6 +302,11 @@ void DirectVirtualTerminalSession::unwind_failed_acquire(std::string &error) {
     if (!api_.set_mode(terminal_fd_, saved_mode_))
       append_api_error("cleanup VT mode", error);
     process_mode_set_ = false;
+  }
+  if (keyboard_mode_set_ && have_keyboard_mode_) {
+    if (!api_.set_keyboard_mode(terminal_fd_, saved_keyboard_mode_))
+      append_api_error("cleanup keyboard mode", error);
+    keyboard_mode_set_ = false;
   }
   if (activated_ && have_state_ && saved_state_.active != terminal_number_) {
     if (!api_.activate(terminal_fd_, saved_state_.active) ||

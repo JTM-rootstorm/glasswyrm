@@ -31,7 +31,10 @@ typedef enum gwipc_color_primaries { GWIPC_COLOR_PRIMARIES_SRGB = 1, GWIPC_COLOR
 typedef enum gwipc_tri_state { GWIPC_TRI_STATE_UNKNOWN, GWIPC_TRI_STATE_FALSE, GWIPC_TRI_STATE_TRUE } gwipc_tri_state;
 typedef enum gwipc_pixel_format { GWIPC_PIXEL_FORMAT_XRGB8888 = 1, GWIPC_PIXEL_FORMAT_ARGB8888 } gwipc_pixel_format;
 typedef enum gwipc_alpha_semantics { GWIPC_ALPHA_OPAQUE = 1, GWIPC_ALPHA_PREMULTIPLIED } gwipc_alpha_semantics;
-typedef enum gwipc_synchronization_mode { GWIPC_SYNCHRONIZATION_NONE = 0 } gwipc_synchronization_mode;
+typedef enum gwipc_synchronization_mode {
+  GWIPC_SYNCHRONIZATION_NONE = 0,
+  GWIPC_SYNCHRONIZATION_EVENTFD = 1,
+} gwipc_synchronization_mode;
 typedef enum gwipc_buffer_release_reason { GWIPC_BUFFER_RELEASE_REPLACED = 1, GWIPC_BUFFER_RELEASE_SURFACE_REMOVED, GWIPC_BUFFER_RELEASE_CONSUMER_DONE, GWIPC_BUFFER_RELEASE_INVALID } gwipc_buffer_release_reason;
 typedef enum gwipc_frame_result { GWIPC_FRAME_ACCEPTED = 1, GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA, GWIPC_FRAME_REJECTED_INVALID_BUFFER, GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE, GWIPC_FRAME_DROPPED } gwipc_frame_result;
 

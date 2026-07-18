@@ -37,12 +37,14 @@ class FakeVirtualTerminal final
   bool get_state(int, glasswyrm::session::VirtualTerminalState&) override;
   bool get_mode(int, glasswyrm::session::VirtualTerminalMode&) override;
   bool get_kd_mode(int, int&) override;
+  bool get_keyboard_mode(int, int&) override;
   bool activate(int, unsigned) override;
   bool wait_until_active(int, unsigned) override;
   bool set_process_mode(int, int, int) override;
   bool set_mode(int, const glasswyrm::session::VirtualTerminalMode&) override;
   bool set_graphics_mode(int) override;
   bool set_kd_mode(int, int) override;
+  bool set_keyboard_mode(int, int) override;
   bool acknowledge_release(int) override;
   bool acknowledge_acquire(int) override;
   void close_terminal(int) noexcept override;

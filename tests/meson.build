@@ -115,6 +115,13 @@ test(
   args: [meson.project_source_root() / 'tests/fixtures/m11'],
   timeout: 10,
 )
+m12_fixture_validate = find_program('compat/m12/validate_fixtures.py')
+test(
+  'm12-fixture-checksum',
+  m12_fixture_validate,
+  args: [meson.project_source_root() / 'tests/fixtures/m12'],
+  timeout: 10,
+)
 
 x11_lifecycle_request_test = executable(
   'x11_lifecycle_request_test',
@@ -478,6 +485,44 @@ if get_option('glasswyrmd')
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 45,
     )
+    if get_option('experimental')
+      glasswyrmd_m12_game_profile_test = executable(
+        'glasswyrmd_m12_game_profile_test',
+        files(
+          'integration/glasswyrmd_m12_game_profile_test.cpp',
+          'helpers/x11_fake_client.cpp',
+          'helpers/x11_request_builder.cpp',
+        ),
+        dependencies: [gw_x11_setup_dep],
+        include_directories: test_source_root_include,
+      )
+      test(
+        'glasswyrmd-m12-game-profile',
+        glasswyrmd_m12_game_profile_test,
+        args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+               gwcomp_program.full_path()],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+        timeout: 45,
+      )
+      glasswyrmd_integrated_property_test = executable(
+        'glasswyrmd_integrated_property_test',
+        files(
+          'integration/glasswyrmd_integrated_property_test.cpp',
+          'helpers/x11_fake_client.cpp',
+          'helpers/x11_request_builder.cpp',
+        ),
+        dependencies: [gw_x11_setup_dep],
+        include_directories: test_source_root_include,
+      )
+      test(
+        'glasswyrmd-integrated-property',
+        glasswyrmd_integrated_property_test,
+        args: [glasswyrmd_program.full_path(), gwm_program.full_path(),
+               gwcomp_program.full_path()],
+        depends: [glasswyrmd_program, gwm_program, gwcomp_program],
+        timeout: 45,
+      )
+    endif
     glasswyrmd_input_recovery_test = executable(
       'glasswyrmd_input_recovery_test',
       files(
@@ -537,6 +582,14 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('published-buffer', published_buffer_test, timeout: 10)
+  m12_extension_stress_probe = executable(
+    'm12_extension_stress_probe',
+    files('integration/m12_extension_stress_probe.cpp'),
+    dependencies: gw_server_core_dep,
+    include_directories: test_source_root_include,
+    install: false,
+  )
+  test('m12-extension-stress', m12_extension_stress_probe, timeout: 20)
   content_presenter_test = executable(
     'content_presenter_test',
     files('unit/content_presenter_test.cpp'),
@@ -682,6 +735,14 @@ gwcomp_signal_runtime_test = executable(
 )
 test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
 
+gwcomp_buffer_readiness_test = executable(
+  'gwcomp_buffer_readiness_test',
+  files('unit/gwcomp_buffer_readiness_test.cpp'),
+  dependencies: gwcomp_options_dep,
+  include_directories: test_source_root_include,
+)
+test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10)
+
 compositor_geometry_test = executable(
   'compositor_geometry_test',
   files('unit/compositor_geometry_test.cpp'),
@@ -713,6 +774,30 @@ software_renderer_test = executable(
   include_directories: test_source_root_include,
 )
 test('software-renderer', software_renderer_test, timeout: 10)
+
+software_scene_renderer_test = executable(
+  'software_scene_renderer_test',
+  files('pixel/software_scene_renderer_test.cpp'),
+  dependencies: [gw_render_software_dep, gw_output_dep],
+  include_directories: test_source_root_include,
+)
+software_scene_renderer_environment = []
+if get_option('render_gl')
+  # GLVND otherwise probes every installed EGL vendor. Keep this Mesa
+  # surfaceless renderer test deterministic and isolated from unrelated
+  # vendor plug-in initialization and process-global state.
+  software_scene_renderer_environment += [
+    '__EGL_VENDOR_LIBRARY_FILENAMES=' + (
+      meson.current_source_dir() / 'pixel/mesa_egl_vendor.json'
+    ),
+  ]
+endif
+test(
+  'software-scene-renderer',
+  software_scene_renderer_test,
+  env: software_scene_renderer_environment,
+  timeout: 10,
+)
 
 software_frame_test = executable(
   'software_frame_test',
@@ -753,6 +838,7 @@ if get_option('drm_backend')
   foreach drm_model_test : [
     ['drm-connector-name', 'connector_name_test.cpp'],
     ['drm-connector-selector', 'connector_selector_test.cpp'],
+    ['drm-damage-copy', 'damage_copy_test.cpp'],
     ['drm-mode-selector', 'mode_selector_test.cpp'],
     ['drm-pipeline-selector', 'pipeline_selector_test.cpp'],
     ['drm-property-cache', 'property_cache_test.cpp'],
@@ -848,6 +934,21 @@ if get_option('drm_backend')
 endif
 
 if get_option('libgwipc')
+  gwipc_sync_c_consumer = executable(
+    'gwipc_sync_c_consumer',
+    files('install/gwipc_sync_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.7-sync-c-consumer', gwipc_sync_c_consumer, timeout: 10)
+  gwipc_sync_cpp_consumer = executable(
+    'gwipc_sync_cpp_consumer',
+    files('install/gwipc_sync_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.7-sync-cpp-consumer', gwipc_sync_cpp_consumer, timeout: 10)
+
   gwipc_session_c_consumer = executable(
     'gwipc_session_c_consumer',
     files('install/gwipc_session_c_consumer.c'),
@@ -889,6 +990,19 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+
+  gwipc_buffer_sync_validation_test = executable(
+    'gwipc_buffer_sync_validation_test',
+    files(
+      'unit/ipc/buffer_sync_validation_test.cpp',
+      '../src/ipc/connection_validation.cpp',
+      '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-buffer-sync-validation', gwipc_buffer_sync_validation_test,
+       timeout: 10)
 
   gwipc_policy_contract_test = executable(
     'gwipc_policy_contract_test',
@@ -1031,7 +1145,6 @@ if get_option('glasswyrmd')
   foreach unit_case : [
     ['resource-id', 'resource_id_test.cpp'],
     ['resource-table', 'resource_table_test.cpp'],
-    ['window-tree', 'window_tree_test.cpp'],
     ['server-lifecycle-state', 'server_lifecycle_state_test.cpp'],
     ['local-lifecycle-dispatch', 'local_lifecycle_dispatch_test.cpp'],
     ['lifecycle-coordinator', 'lifecycle_coordinator_test.cpp'],
@@ -1039,6 +1152,25 @@ if get_option('glasswyrmd')
     ['property-store', 'property_store_test.cpp'],
     ['request-work-budget', 'request_work_budget_test.cpp'],
     ['compatibility-query-dispatch', 'compatibility_query_dispatch_test.cpp'],
+    ['set-input-focus-dispatch', 'set_input_focus_dispatch_test.cpp'],
+    ['m12-protocol-foundation', 'm12_protocol_foundation_test.cpp'],
+    ['mit-shm', 'mit_shm_test.cpp'],
+    ['xfixes-damage', 'xfixes_damage_test.cpp'],
+    ['damage-add', 'damage_add_test.cpp'],
+    ['xfixes-damage-limits', 'xfixes_damage_limits_test.cpp'],
+    ['render-ops', 'render_ops_test.cpp'],
+    ['picture-model', 'picture_model_test.cpp'],
+    ['composite-state', 'composite_state_test.cpp'],
+    ['render-dispatch', 'render_dispatch_test.cpp'],
+    ['composite-dispatch', 'composite_dispatch_test.cpp'],
+    ['randr-reporting', 'randr_reporting_test.cpp'],
+    ['randr-config', 'randr_config_test.cpp'],
+    ['randr-event-wire', 'randr_event_wire_test.cpp'],
+    ['ewmh-root', 'ewmh_root_test.cpp'],
+    ['ewmh-policy', 'ewmh_policy_test.cpp'],
+    ['ewmh-client-message', 'ewmh_client_message_test.cpp'],
+    ['ewmh-state-action', 'ewmh_state_action_test.cpp'],
+    ['ewmh-lifecycle', 'ewmh_lifecycle_test.cpp'],
   ]
     unit_program = executable(
       unit_case[0],
@@ -1046,12 +1178,19 @@ if get_option('glasswyrmd')
       dependencies: gw_server_state_dep,
       include_directories: test_source_root_include,
     )
-    unit_timeout = 10
-    if unit_case[0] == 'window-tree'
-      unit_timeout = 30
-    endif
-    test(unit_case[0], unit_program, timeout: unit_timeout)
+    test(unit_case[0], unit_program, timeout: 10)
   endforeach
+
+  window_tree_test = executable(
+    'window_tree_test',
+    files('unit/window_tree_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('window-tree', window_tree_test, args: ['basic'], timeout: 10)
+  test('window-tree-deep', window_tree_test, args: ['deep'], timeout: 30)
+  test('window-tree-wide', window_tree_test, args: ['wide'], timeout: 30)
+  test('window-tree-mixed', window_tree_test, args: ['mixed'], timeout: 10)
 
   x11_fake_client_lib = static_library(
     'x11-fake-client',
@@ -1204,6 +1343,56 @@ test(
   'm11-xterm-acceptance',
   m11_xterm_acceptance_test,
   args: [m11_xterm_acceptance],
+  timeout: 10,
+)
+
+m12_workload_environment_test = find_program(
+  'compat/m12/run_workloads_environment_test.py',
+)
+test(
+  'm12-workload-environment',
+  m12_workload_environment_test,
+  timeout: 10,
+)
+
+m12_resident_workload_test = find_program(
+  'compat/m12/run_workloads_resident_test.py',
+)
+test(
+  'm12-resident-workload',
+  m12_resident_workload_test,
+  timeout: 15,
+)
+
+m12_trace_validator_test = find_program('compat/m12/validate_trace_test.py')
+test(
+  'm12-trace-validator',
+  m12_trace_validator_test,
+  timeout: 10,
+)
+
+m12_fixture_trace_test = find_program(
+  'compat/m12/normalize_fixture_traces_test.py',
+)
+test(
+  'm12-fixture-trace-normalizer',
+  m12_fixture_trace_test,
+  timeout: 10,
+)
+
+m12_fixture_promotion_test = find_program(
+  'compat/m12/promote_fixtures_test.py',
+)
+test(
+  'm12-fixture-promotion',
+  m12_fixture_promotion_test,
+  timeout: 10,
+)
+
+m12_frame_evidence_test = find_program('compat/m12/frame_evidence_test.py')
+test(
+  'm12-frame-evidence',
+  m12_frame_evidence_test,
   timeout: 10,
 )
 

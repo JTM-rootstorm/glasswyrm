@@ -27,6 +27,10 @@ struct Options {
   std::optional<std::string> scene_manifest;
   std::optional<std::string> drm_report;
   std::optional<std::string> x11_trace;
+  std::string renderer = "software";
+  std::optional<std::string> renderer_report;
+  std::vector<std::string> disabled_extensions;
+  bool game_compat{};
   std::vector<std::string> client;
 };
 

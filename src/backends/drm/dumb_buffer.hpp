@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backends/drm/dumb_buffer_api.hpp"
+#include "compositor/rectangle.hpp"
 
 #include <array>
 #include <cstddef>
@@ -26,6 +27,10 @@ public:
                                    std::string &error);
   [[nodiscard]] bool copy_from(std::span<const std::uint32_t> pixels,
                                std::string &error);
+  [[nodiscard]] bool copy_rectangles_from(
+      std::span<const std::uint32_t> pixels,
+      std::span<const gw::compositor::Rectangle> rectangles,
+      std::string &error);
   [[nodiscard]] std::uint64_t visible_hash() const noexcept;
   [[nodiscard]] bool release(std::string &error) noexcept;
   void abandon() noexcept;
@@ -40,6 +45,18 @@ public:
   [[nodiscard]] std::uint32_t framebuffer_id() const noexcept {
     return framebuffer_id_;
   }
+  [[nodiscard]] bool content_valid() const noexcept { return content_valid_; }
+  [[nodiscard]] std::uint64_t completed_generation() const noexcept {
+    return completed_generation_;
+  }
+  void mark_completed(std::uint64_t generation) noexcept {
+    content_valid_ = true;
+    completed_generation_ = generation;
+  }
+  void invalidate_content() noexcept {
+    content_valid_ = false;
+    completed_generation_ = 0;
+  }
   [[nodiscard]] std::span<const std::byte> bytes() const noexcept {
     return {mapping_, size_};
   }
@@ -53,6 +70,8 @@ private:
   std::uint32_t pitch_{};
   std::uint32_t handle_{};
   std::uint32_t framebuffer_id_{};
+  std::uint64_t completed_generation_{};
+  bool content_valid_{};
 };
 
 class DumbBufferPair {
@@ -77,6 +96,9 @@ public:
     return buffers_[1 - front_index_];
   }
   void promote_back() noexcept { front_index_ = 1 - front_index_; }
+  void invalidate_content() noexcept {
+    for (auto &buffer : buffers_) buffer.invalidate_content();
+  }
   [[nodiscard]] bool release(std::string &error) noexcept;
   void abandon() noexcept;
 
