@@ -428,6 +428,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/peer_transport.cpp',
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_buffer_replay.cpp',
+      'glasswyrmd/compositor_output_inventory.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/compositor_peer_submission.cpp',
       'glasswyrmd/screen_geometry.cpp',
