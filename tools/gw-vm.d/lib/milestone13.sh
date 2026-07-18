@@ -125,6 +125,8 @@ for key in "${required_results[@]}"; do result[$key]=failed; done
 clang=unavailable layout_generation=unknown output_ids=unknown
 headless_aggregate_hash=unknown drm_mode=1024x768
 service_checks=0
+randr_pid=0 legacy_pid=0 scale_pid=0
+gles_legacy_pid=0 drm_legacy_pid=0
 getty_state_captured=false logind_state_captured=false original_vt=
 getty_unit='' getty_active_before='' getty_enabled_before=''
 logind_unit=systemd-logind.service logind_socket=systemd-logind-varlink.socket
@@ -160,6 +162,14 @@ write_facts() {
 cleanup() {
   local saved_status=$?
   set +e
+  local pid
+  for pid in "$randr_pid" "$legacy_pid" "$scale_pid" "$gles_legacy_pid" \
+    "$drm_legacy_pid"; do
+    if ((pid > 0)); then
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+    fi
+  done
   systemctl stop glasswyrmd-m13.service gwm-m13.service gwcomp-m13.service \
     glasswyrmd-m13-compare.service gwm-m13-compare.service \
     gwcomp-m13-compare.service \
@@ -439,6 +449,7 @@ for order in little big; do
     --scale 6/5 --json >>"$artifact_dir/milestone13-gwout.log"
   : >"$trigger"
   wait "$randr_pid"
+  randr_pid=0
   "$software/tools/gwout" --socket "$runtime/control.sock" set RIGHT \
     --scale 5/4 --json >>"$artifact_dir/milestone13-gwout.log"
   "$source_dir/tests/compat/m13/m13_raw_output_probe.py" --display 99 \
@@ -697,6 +708,7 @@ PY
 wait_frames_after "$before_frames"
 copy_latest_output "$right_id" "$control_data/milestone13-aware-right.ppm"
 wait "$scale_pid"
+scale_pid=0
 python3 - "$artifact_dir/milestone13-scale-client.json" <<'PY'
 import json,sys
 d=json.load(open(sys.argv[1]))
@@ -775,6 +787,7 @@ for left,right in ((sys.argv[4],sys.argv[5]),(sys.argv[6],sys.argv[7])):
 PY
 legacy_command stop
 wait "$legacy_pid"
+legacy_pid=0
 "$software/tools/gwinfo" --socket "$runtime/control.sock" all --json \
   >"$control_data/post-legacy-cleanup.json"
 result[gwm_replay]=passed result[compositor_replay]=passed result[stable_id_replay]=passed
@@ -837,6 +850,7 @@ PY
 find "$runtime/frames" -type f -name '*.ppm' -exec cp -t "$headless/compare-gles" -- {} +
 legacy_command stop
 wait "$gles_legacy_pid"
+gles_legacy_pid=0
 "$source_dir/tests/compat/m13/compare_output_frames.py" \
   --software-dir "$headless/compare-software" \
   --gles-dir "$headless/compare-gles" \
@@ -996,6 +1010,7 @@ cmp "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame"
 result[vt_replay]=passed
 legacy_command stop
 wait "$drm_legacy_pid"
+drm_legacy_pid=0
 "$software/tools/gwout" --socket "$runtime/control.sock" set "$connector" \
   --scale 1/1 --transform normal --json >>"$artifact_dir/milestone13-gwout.log"
 "$software/tools/gwinfo" --socket "$runtime/control.sock" outputs --json \
