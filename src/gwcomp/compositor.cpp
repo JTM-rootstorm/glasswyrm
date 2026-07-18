@@ -62,10 +62,12 @@ Compositor::Compositor(
     std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
     std::optional<std::filesystem::path> scene_manifest,
     PresentationTiming timing,
-    std::unique_ptr<gw::render::SceneRenderer> renderer)
+    std::unique_ptr<gw::render::SceneRenderer> renderer,
+    std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer)
     : renderer_(renderer ? std::move(renderer)
                          : std::make_unique<
                                gw::render::software::SoftwareSceneRenderer>()),
+      output_renderer_(std::move(output_renderer)),
       presenter_(std::move(presenter)), timing_(std::move(timing)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
@@ -77,21 +79,26 @@ Compositor::~Compositor() {
 }
 
 bool Compositor::configure_scene_profile(
-    const SceneProfile profile, const std::uint64_t primary_output_id) noexcept {
+    const SceneProfile profile, const std::uint64_t primary_output_id,
+    const std::uint64_t output_layout_generation) noexcept {
   if (presentation_pending() || snapshot_active_ ||
       scene_.initial_snapshot_received() ||
-      (profile == SceneProfile::OutputModel && primary_output_id == 0) ||
-      (profile == SceneProfile::Historical && primary_output_id != 0))
+      (profile == SceneProfile::OutputModel &&
+       (primary_output_id == 0 || output_layout_generation == 0)) ||
+      (profile == SceneProfile::Historical &&
+       (primary_output_id != 0 || output_layout_generation != 0)))
     return false;
   scene_ = SceneModel(profile);
   primary_output_id_ = primary_output_id;
+  output_layout_generation_ = output_layout_generation;
   return true;
 }
 
 bool Compositor::begin_snapshot(const std::uint64_t generation) {
   if (presentation_pending() || snapshot_active_ ||
       !(scene_.profile() == SceneProfile::OutputModel
-            ? scene_.begin_complete_snapshot(primary_output_id_, generation)
+            ? scene_.begin_complete_snapshot(primary_output_id_,
+                                             generation)
             : scene_.begin_complete_snapshot()))
     return false;
   pre_snapshot_attachments_ = pending_attachments_;
@@ -145,10 +152,18 @@ void Compositor::abort_snapshot() {
 
 bool Compositor::apply(const gwipc_output_upsert& value) {
   if (presentation_pending()) return false;
-  if (scene_.profile() == SceneProfile::OutputModel && snapshot_active_ &&
-      !snapshot_output_ids_.insert(value.output_id).second) {
-    snapshot_invalid_ = true;
-    return false;
+  if (scene_.profile() == SceneProfile::OutputModel && snapshot_active_) {
+    const bool first = snapshot_output_ids_.empty();
+    if (!snapshot_output_ids_.insert(value.output_id).second ||
+        (first && !scene_.set_snapshot_output_configuration(
+                      value.output_id, scene_.pending().configuration_generation))) {
+      snapshot_invalid_ = true;
+      return false;
+    }
+    if (first) {
+      primary_output_id_ = value.output_id;
+      output_layout_generation_ = scene_.pending().configuration_generation;
+    }
   }
   return scene_.apply(value);
 }
@@ -281,10 +296,13 @@ bool Compositor::resume_presentation(std::string& error) {
   const glasswyrm::output::SoftwareFrameView committed{
       output_.spec(), output_.pixels(), {}, 0, last_generation_,
       frame_ordinal_};
-  const auto resumed = presenter_->resume(committed);
+  const auto resumed = output_set_ ? presenter_->resume(output_set_->view())
+                                   : presenter_->resume(committed);
+  const auto expected_hash = output_set_ ? output_set_->aggregate_hash()
+                                         : output_.visible_hash();
   if (resumed.disposition !=
           glasswyrm::output::PresentDisposition::Complete ||
-      resumed.visible_hash != output_.visible_hash()) {
+      resumed.visible_hash != expected_hash) {
     error = resumed.error.empty()
                 ? "presentation backend did not restore the committed frame"
                 : resumed.error;
@@ -313,6 +331,8 @@ void Compositor::disconnect() {
   PresentationTransaction::abort(*this);
   pending_buffer_readiness_.reset();
   renderer_->disconnect();
+  if (output_renderer_)
+    output_renderer_->disconnect();
   scene_.disconnect();
   mappings_.clear();
   pending_attachments_.clear();
@@ -320,6 +340,7 @@ void Compositor::disconnect() {
   pre_snapshot_attachments_.clear();
   releases_.clear();
   output_.disable();
+  output_set_.reset();
   last_commit_id_ = 0;
   last_generation_ = 0;
   snapshot_active_ = false;

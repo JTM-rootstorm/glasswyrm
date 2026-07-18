@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/scene_renderer.hpp"
+#include "render/output_scene_renderer.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -19,6 +20,10 @@ struct RendererCreateOptions {
 [[nodiscard]] bool create_scene_renderer(
     const RendererCreateOptions& options,
     std::unique_ptr<SceneRenderer>& renderer, std::string& error);
+
+[[nodiscard]] bool create_output_scene_renderer(
+    const RendererCreateOptions& options,
+    std::unique_ptr<OutputSceneRenderer>& renderer, std::string& error);
 
 [[nodiscard]] bool create_scene_renderer(
     RendererRequest requested,

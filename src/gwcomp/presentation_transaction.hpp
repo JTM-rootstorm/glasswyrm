@@ -39,12 +39,14 @@ private:
   struct ValidatedCommit {
     SceneModel candidate;
     CommitResult result;
+    std::vector<std::uint64_t> content_changed;
     bool metadata_only_peer{};
     bool protocol_server{};
   };
 
   struct PreparedOutputFrame {
     glasswyrm::output::SoftwareFrame frame;
+    std::optional<glasswyrm::output::SoftwareFrameSet> frame_set;
     std::vector<Rectangle> damage;
     std::uint64_t canonical_hash{};
     ReleaseMap releases;
@@ -54,6 +56,8 @@ private:
   PresentationTransaction(SceneModel candidate, AttachmentMap attachments,
                           ReleaseMap releases,
                           glasswyrm::output::SoftwareFrame frame,
+                          std::optional<glasswyrm::output::SoftwareFrameSet>
+                              frame_set,
                           gwipc_frame_commit commit, PresentedFrame presented,
                           std::optional<PreparedSceneManifest> manifest,
                           std::uint64_t token,
@@ -83,6 +87,10 @@ private:
   prepare_output_frame(Compositor& compositor, ValidatedCommit& validated,
                        const gwipc_frame_commit& value,
                        PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static std::optional<PreparedOutputFrame>
+  prepare_output_frame_set(Compositor& compositor, ValidatedCommit& validated,
+                           const gwipc_frame_commit& value,
+                           PresentedFrame& presented, std::string& error);
   [[nodiscard]] static PresentedFrame
   stage_presentation(Compositor& compositor, ValidatedCommit&& validated,
                      PreparedOutputFrame&& prepared,
@@ -105,6 +113,7 @@ private:
   AttachmentMap attachments_;
   ReleaseMap releases_;
   glasswyrm::output::SoftwareFrame frame_;
+  std::optional<glasswyrm::output::SoftwareFrameSet> frame_set_;
   gwipc_frame_commit commit_{};
   PresentedFrame presented_;
   std::optional<PreparedSceneManifest> manifest_;

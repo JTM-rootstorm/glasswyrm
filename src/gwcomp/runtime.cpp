@@ -93,6 +93,14 @@ int run(const Options& options) {
                  renderer_error.c_str());
     return 1;
   }
+  auto output_renderer =
+      create_runtime_output_renderer(options, renderer_error);
+  if (!output_renderer) {
+    std::fprintf(stderr,
+                 "gwcomp: output renderer initialization failed: %s\n",
+                 renderer_error.c_str());
+    return 1;
+  }
   SignalRuntime signals;
   std::string signal_error;
   if (!signals.install(options.backend == Backend::Drm &&
@@ -172,7 +180,8 @@ int run(const Options& options) {
   std::fprintf(stderr, "gwcomp: listening socket=%s\n", options.ipc_socket.c_str());
 
   gw::compositor::Compositor compositor(std::move(presenter), manifest_path,
-                                        {}, std::move(renderer));
+                                        {}, std::move(renderer),
+                                        std::move(output_renderer));
   RuntimeReactor reactor(options, listener.get(), signals, compositor,
                          output_layout);
   int exit_status = reactor.run();

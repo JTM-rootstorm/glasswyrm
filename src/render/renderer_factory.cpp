@@ -4,6 +4,7 @@
 #include "render/software/scene_renderer.hpp"
 #include "config.hpp"
 #if GW_HAS_GLES_RENDERER
+#include "render/gles/multi_output_scene_renderer.hpp"
 #include "render/gles/scene_renderer.hpp"
 #endif
 
@@ -68,6 +69,71 @@ public:
 private:
   std::unique_ptr<SceneRenderer> gles_;
   std::unique_ptr<SceneRenderer> software_;
+};
+
+class GlesOutputSceneRenderer final : public OutputSceneRenderer {
+public:
+  explicit GlesOutputSceneRenderer(
+      std::unique_ptr<gles::MultiOutputGlesSceneRenderer> renderer)
+      : renderer_(std::move(renderer)) {}
+
+  OutputSceneRenderResult render(
+      const software::SoftwareFrameSetRenderRequest& request) override {
+    auto rendered = renderer_->render(request);
+    return {rendered.disposition, std::move(rendered.frames), "gles", {},
+            std::move(rendered.error)};
+  }
+
+  void disconnect() noexcept override { renderer_->disconnect(); }
+
+private:
+  std::unique_ptr<gles::MultiOutputGlesSceneRenderer> renderer_;
+};
+#endif
+
+class SoftwareOutputSceneRenderer final : public OutputSceneRenderer {
+public:
+  OutputSceneRenderResult render(
+      const software::SoftwareFrameSetRenderRequest& request) override {
+    auto rendered = renderer_.render(request);
+    return {rendered.disposition, std::move(rendered.frames), "software", {},
+            std::move(rendered.error)};
+  }
+
+  void disconnect() noexcept override {}
+
+private:
+  software::MultiOutputSoftwareSceneRenderer renderer_;
+};
+
+#if GW_HAS_GLES_RENDERER
+class AutoOutputSceneRenderer final : public OutputSceneRenderer {
+public:
+  explicit AutoOutputSceneRenderer(
+      std::unique_ptr<OutputSceneRenderer> accelerated)
+      : accelerated_(std::move(accelerated)) {}
+
+  OutputSceneRenderResult render(
+      const software::SoftwareFrameSetRenderRequest& request) override {
+    auto rendered = accelerated_->render(request);
+    if (rendered.disposition != RenderDisposition::InvalidFrame)
+      return rendered;
+    auto reason = std::move(rendered.error);
+    if (reason.size() > 240)
+      reason.resize(240);
+    rendered = software_.render(request);
+    rendered.fallback_reason = std::move(reason);
+    return rendered;
+  }
+
+  void disconnect() noexcept override {
+    accelerated_->disconnect();
+    software_.disconnect();
+  }
+
+private:
+  std::unique_ptr<OutputSceneRenderer> accelerated_;
+  SoftwareOutputSceneRenderer software_;
 };
 #endif
 
@@ -155,6 +221,39 @@ bool create_scene_renderer(
   if (!report->initialize(selection, error)) return false;
   renderer = std::make_unique<ReportingSceneRenderer>(
       std::move(selected), std::move(report), selected_name);
+  return true;
+}
+
+bool create_output_scene_renderer(
+    const RendererCreateOptions& options,
+    std::unique_ptr<OutputSceneRenderer>& renderer, std::string& error) {
+  renderer.reset();
+  error.clear();
+#if GW_HAS_GLES_RENDERER
+  if (options.requested != RendererRequest::Software) {
+    gles::ContextInfo context_info;
+    auto gles_renderer = gles::MultiOutputGlesSceneRenderer::create(
+        {options.render_node}, context_info, options.maximum_texture_bytes,
+        error);
+    if (gles_renderer) {
+      renderer = std::make_unique<GlesOutputSceneRenderer>(
+          std::move(gles_renderer));
+      if (options.requested == RendererRequest::Auto)
+        renderer =
+            std::make_unique<AutoOutputSceneRenderer>(std::move(renderer));
+      return true;
+    }
+    if (options.requested == RendererRequest::Gles)
+      return false;
+    error.clear();
+  }
+#else
+  if (options.requested == RendererRequest::Gles) {
+    error = "GLES renderer was not enabled at build time";
+    return false;
+  }
+#endif
+  renderer = std::make_unique<SoftwareOutputSceneRenderer>();
   return true;
 }
 
