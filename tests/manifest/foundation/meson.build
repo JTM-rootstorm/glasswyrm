@@ -221,6 +221,13 @@ if get_option('gwm')
     include_directories: test_source_root_include,
   )
   test('wm-policy', wm_policy_test, timeout: 10)
+  multi_output_policy_test = executable(
+    'multi_output_policy_test',
+    files(tests_source_dir / 'wm/multi_output_policy_test.cpp'),
+    dependencies: gw_wm_policy_dep,
+    include_directories: test_source_root_include,
+  )
+  test('multi-output-policy', multi_output_policy_test, timeout: 10)
   interactive_policy_test = executable(
     'interactive_policy_test',
     files(tests_source_dir / 'wm/interactive_policy_test.cpp'),

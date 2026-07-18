@@ -18,6 +18,7 @@ inline constexpr std::uint32_t kKnownWindowFlags =
 void assign_outputs(const RawState& raw, PolicyState& policy);
 void apply_placement_and_fullscreen_geometry(const RawState& raw,
                                              PolicyState& policy);
+void apply_multi_output_geometry(const RawState& raw, PolicyState& policy);
 [[nodiscard]] std::vector<std::uint32_t> transient_parent_first(
     const RawState& raw);
 void apply_stacking_and_transient_ordering(const RawState& raw,

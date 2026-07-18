@@ -34,12 +34,33 @@ void write_little(std::array<std::uint8_t, 64>& bytes, std::size_t& offset,
   }
 }
 
+void hash_context(std::uint64_t& hash, const Context& context) noexcept {
+  hash_little(hash, context.root_window_id);
+  hash_little(hash, context.workspace_id);
+  hash_little(hash, context.output_id);
+  hash_little(hash, context.work_x);
+  hash_little(hash, context.work_y);
+  hash_little(hash, context.work_width);
+  hash_little(hash, context.work_height);
+  hash_little(hash, context.flags);
+}
+
+void hash_rectangle(std::uint64_t& hash,
+                    const Rectangle& rectangle) noexcept {
+  hash_little(hash, rectangle.x);
+  hash_little(hash, rectangle.y);
+  hash_little(hash, rectangle.width);
+  hash_little(hash, rectangle.height);
+}
+
 }  // namespace
 
 std::uint64_t interactive_policy_hash(
     const PolicyState& policy, const InteractiveBindings& bindings) noexcept {
   std::uint64_t hash = UINT64_C(14695981039346656037);
-  constexpr std::string_view tag = "glasswyrm-policy-v2";
+  const std::string_view tag = policy.outputs.empty()
+                                   ? "glasswyrm-policy-v2"
+                                   : "glasswyrm-policy-v3";
   for (const char byte : tag) hash_byte(hash, static_cast<std::uint8_t>(byte));
   hash_little(hash, policy.hash);
   hash_little(hash, bindings.move_modifiers);
@@ -89,18 +110,35 @@ namespace detail {
 
 std::uint64_t policy_hash(const PolicyState& policy) noexcept {
   std::uint64_t hash = UINT64_C(14695981039346656037);
-  constexpr std::string_view tag = "glasswyrm-policy-v1";
+  const std::string_view tag = policy.outputs.empty()
+                                   ? "glasswyrm-policy-v1"
+                                   : "glasswyrm-policy-v3";
   for (const char byte : tag) hash_byte(hash, static_cast<std::uint8_t>(byte));
   hash_little(hash, policy.generation);
-  const auto& context = policy.context;
-  hash_little(hash, context.root_window_id);
-  hash_little(hash, context.workspace_id);
-  hash_little(hash, context.output_id);
-  hash_little(hash, context.work_x);
-  hash_little(hash, context.work_y);
-  hash_little(hash, context.work_width);
-  hash_little(hash, context.work_height);
-  hash_little(hash, context.flags);
+  hash_context(hash, policy.context);
+  if (!policy.outputs.empty()) {
+    hash_little(hash, static_cast<std::uint32_t>(policy.outputs.size()));
+    for (const auto& [id, output] : policy.outputs) {
+      (void)id;
+      hash_little(hash, output.output_id);
+      hash_rectangle(hash, output.logical);
+      hash_rectangle(hash, output.work);
+      hash_little(hash, output.scale_numerator);
+      hash_little(hash, output.scale_denominator);
+      hash_little(hash, static_cast<std::uint8_t>(output.transform));
+      hash_little(hash, static_cast<std::uint8_t>(output.enabled));
+      hash_little(hash, static_cast<std::uint8_t>(output.primary));
+      hash_little(hash, output.flags);
+    }
+    hash_little(hash, static_cast<std::uint32_t>(policy.output_hints.size()));
+    for (const auto& [id, hint] : policy.output_hints) {
+      (void)id;
+      hash_little(hash, hint.window_id);
+      hash_little(hash, hint.previous_output_id);
+      hash_little(hash, hint.preferred_output_id);
+      hash_little(hash, hint.flags);
+    }
+  }
   for (const auto id : policy.output_order) {
     for (const auto byte : encode_policy_window_state(policy.windows.at(id)))
       hash_byte(hash, byte);
