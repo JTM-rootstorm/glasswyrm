@@ -522,6 +522,47 @@ void test_integrated_scale_staging(const x11::ByteOrder order) {
           "integrated scale mutation is staged until compositor acceptance");
 }
 
+void test_maximum_buffer_scale_presentation(const x11::ByteOrder order) {
+  ServerState state;
+  constexpr std::uint32_t window = 0x400001;
+  constexpr std::uint32_t pixmap = 0x400002;
+  constexpr std::uint32_t damage = 0x400003;
+  create_window(state, 1, 0x400000, window, state.screen().root_window);
+  const ExtensionRegistry enabled(ExtensionCapability::ScaleProtocol, {});
+  DispatchContext context{1, 0x400000, 0x1fffff, 11, order, false, {},
+                          &enabled};
+
+  auto result = dispatch_request(
+      state, context, pair_request(order, 4, window, 4));
+  require(result.output.size() == 32 && u32(result.output, order, 8) == 4 &&
+              state.resources()
+                      .find_window(window)
+                      ->scale.accepted_buffer_scale == 4,
+          "SetWindowBufferScale accepts the M13 maximum scale");
+  require(state.resources().create_pixmap(
+              context.client_id, context.resource_base, context.resource_mask,
+              pixmap, window, 24, 800, 400) == CreatePixmapStatus::Success,
+          "create scale-4 presentation pixmap");
+  const std::array rectangles{
+      glasswyrm::geometry::Rectangle{12, 8, 16, 20}};
+  require(state.resources().create_xfixes_region(
+              context.client_id, context.resource_base, context.resource_mask,
+              damage, rectangles) == RegionStatus::Success,
+          "create scale-4 pixel damage region");
+
+  result = dispatch_request(
+      state, context, present_request(order, window, pixmap, damage, 99));
+  require(result.output.size() == 32 && u32(result.output, order, 8) == 99 &&
+              u32(result.output, order, 12) == 4 &&
+              result.drawable_damage.size() == 1 &&
+              result.drawable_damage[0].rectangle ==
+                  glasswyrm::geometry::Rectangle{3, 2, 4, 5} &&
+              result.drawable_damage[0].buffer_rectangle == rectangles[0] &&
+              state.resources().find_window(window)->scale.presentation ==
+                  WindowScalePresentationState::ScaleAwareActive,
+          "PresentScaledPixmap accepts scale 4 and maps pixel damage");
+}
+
 }  // namespace
 
 int main() {
@@ -531,6 +572,7 @@ int main() {
     test_profile_absence(order);
     test_child_mapping_invalidation(order);
     test_integrated_scale_staging(order);
+    test_maximum_buffer_scale_presentation(order);
   }
   return 0;
 }
