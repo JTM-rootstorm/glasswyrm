@@ -430,6 +430,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/compositor_peer_submission.cpp',
+      'glasswyrmd/screen_geometry.cpp',
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
@@ -439,7 +440,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/lifecycle_runtime.cpp',
       'glasswyrmd/input_runtime.cpp',
     )
-    gw_server_core_dependencies += gwipc_dep
+    gw_server_core_dependencies += [gwipc_dep, gw_output_model_dep]
   endif
   if get_option('libinput_backend')
     gw_server_core_sources += files(

@@ -145,6 +145,15 @@ if get_option('glasswyrmd')
     include_directories: test_source_root_include,
   )
   test('glasswyrmd-options', glasswyrmd_options_test, timeout: 10)
+  if get_option('libgwipc')
+    screen_geometry_test = executable(
+      'screen_geometry_test',
+      files(tests_source_dir / 'unit/screen_geometry_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('screen-geometry', screen_geometry_test, timeout: 10)
+  endif
   compatibility_trace_test = executable(
     'compatibility_trace_test',
     files(tests_source_dir / 'unit/compatibility_trace_test.cpp'),

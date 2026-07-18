@@ -90,9 +90,40 @@ int main() {
     }
   }
   options = {};
+  const auto output_model_result =
+      parse({"glasswyrmd", "--wm-socket", "/tmp/wm", "--compositor-socket",
+             "/tmp/comp", "--output-model"},
+            options, output, error);
+#if GW_HAS_LIBGWIPC
+  if (output_model_result != ParseOptionsResult::Run ||
+      !options.output_model || !options.integrated()) {
+    return 16;
+  }
+#else
+  if (output_model_result != ParseOptionsResult::ExitFailure ||
+      error.find("does not include libgwipc") == std::string::npos) {
+    return 16;
+  }
+#endif
+
+  for (const auto &values : {
+           std::vector<std::string>{"glasswyrmd", "--output-model"},
+           std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/wm",
+                                    "--compositor-socket", "/tmp/comp",
+                                    "--output-model", "--output-model"},
+       }) {
+    options = {};
+    if (parse(values, options, output, error) !=
+        ParseOptionsResult::ExitFailure) {
+      return 17;
+    }
+  }
+
+  options = {};
   if (parse({"glasswyrmd"}, options, output, error) !=
           ParseOptionsResult::Run ||
       options.integrated() || options.real_input_enabled() ||
+      options.output_model ||
       options.xkb_rules != "evdev" || options.xkb_model != "pc105" ||
       options.xkb_layout != "us" || !options.xkb_variant.empty() ||
       !options.xkb_options.empty() || options.repeat_delay_ms != 500 ||
@@ -106,6 +137,9 @@ int main() {
           std::string::npos ||
       output.find("--software-content") == std::string::npos) {
     return 4;
+  }
+  if (output.find("--output-model") == std::string::npos) {
+    return 18;
   }
   if (output.find("--synthetic-input-socket PATH") == std::string::npos) {
     return 5;
