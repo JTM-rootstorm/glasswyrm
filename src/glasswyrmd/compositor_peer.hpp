@@ -4,17 +4,15 @@
 #include "glasswyrmd/peer_transport.hpp"
 #include "protocol/x11/screen_model.hpp"
 
+#include <optional>
 #include <memory>
 #include <string>
-#include <optional>
+#include <utility>
 #include <vector>
 
 namespace glasswyrm::server {
 
 struct CompositorSnapshotSubmission {
-  std::uint64_t commit_id{}, generation{};
-  std::vector<gwipc_surface_upsert> surfaces;
-  std::vector<gwipc_surface_policy_upsert> policies;
   struct Buffer {
     gwipc_buffer_attach attach{};
     int fd{-1};
@@ -24,8 +22,29 @@ struct CompositorSnapshotSubmission {
     std::uint64_t surface_id{};
     std::vector<gwipc_damage_rectangle> rectangles;
   };
+  struct SurfaceOutput {
+    gwipc_surface_output_state state{};
+    std::vector<std::uint64_t> output_ids;
+  };
+
+  CompositorSnapshotSubmission() = default;
+  CompositorSnapshotSubmission(
+      const std::uint64_t commit, const std::uint64_t producer_generation,
+      std::vector<gwipc_surface_upsert> surface_records,
+      std::vector<gwipc_surface_policy_upsert> policy_records,
+      std::vector<Buffer> buffer_records, std::vector<Damage> damage_records)
+      : commit_id(commit), generation(producer_generation),
+        surfaces(std::move(surface_records)),
+        policies(std::move(policy_records)),
+        buffers(std::move(buffer_records)), damages(std::move(damage_records)) {}
+
+  std::uint64_t commit_id{}, generation{};
+  std::vector<gwipc_surface_upsert> surfaces;
+  std::vector<gwipc_surface_policy_upsert> policies;
   std::vector<Buffer> buffers;
   std::vector<Damage> damages;
+  std::vector<gwipc_output_upsert> outputs;
+  std::vector<SurfaceOutput> surface_outputs;
 };
 
 struct CompositorContentSubmission {

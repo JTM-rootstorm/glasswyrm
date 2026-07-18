@@ -76,13 +76,16 @@ public:
   void set_cpu_buffer_synchronization(const bool enabled) noexcept {
     cpu_buffer_synchronization_ = enabled;
   }
+  [[nodiscard]] bool configure_scene_profile(
+      SceneProfile profile, std::uint64_t primary_output_id = 0) noexcept;
   [[nodiscard]] PeerProfile peer_profile() const noexcept { return profile_; }
-  [[nodiscard]] bool begin_snapshot();
+  [[nodiscard]] bool begin_snapshot(std::uint64_t generation = 0);
   [[nodiscard]] bool end_snapshot();
   void abort_snapshot();
   [[nodiscard]] bool apply(const gwipc_output_upsert& value);
   [[nodiscard]] bool apply(const gwipc_output_remove& value);
   [[nodiscard]] bool apply(const gwipc_surface_upsert& value);
+  [[nodiscard]] bool apply(const gwipc_surface_output_state& value);
   [[nodiscard]] bool apply(const gwipc_surface_policy_upsert& value);
   [[nodiscard]] bool apply(const gwipc_surface_remove& value);
   [[nodiscard]] bool apply(const gwipc_surface_damage& value);
@@ -150,6 +153,9 @@ private:
   bool snapshot_invalid_{};
   std::set<std::uint64_t> snapshot_surface_ids_;
   std::set<std::uint64_t> snapshot_policy_ids_;
+  std::set<std::uint64_t> snapshot_output_ids_;
+  std::set<std::uint64_t> snapshot_surface_output_ids_;
+  std::uint64_t primary_output_id_{};
   PeerProfile profile_{PeerProfile::M4TestProducer};
   bool cpu_buffer_synchronization_{};
 };

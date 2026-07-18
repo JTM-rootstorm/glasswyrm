@@ -50,6 +50,12 @@ struct ContractPayloadDeleter {
   }
 };
 
+struct ControlPayloadDeleter {
+  void operator()(gwipc_control_payload *value) const {
+    gwipc_control_payload_destroy(value);
+  }
+};
+
 struct DecodedContractDeleter {
   void operator()(gwipc_decoded_contract *value) const {
     gwipc_decoded_contract_destroy(value);
@@ -66,6 +72,8 @@ using Connection = std::unique_ptr<gwipc_connection, ConnectionDeleter>;
 using Message = std::unique_ptr<gwipc_message, MessageDeleter>;
 using ContractPayload =
     std::unique_ptr<gwipc_contract_payload, ContractPayloadDeleter>;
+using ControlPayload =
+    std::unique_ptr<gwipc_control_payload, ControlPayloadDeleter>;
 using DecodedContract =
     std::unique_ptr<gwipc_decoded_contract, DecodedContractDeleter>;
 using DecodedControl =
@@ -344,6 +352,111 @@ void validate_inventory(const InventoryReply &reply) {
           "inventory primary output identifies an enabled layout record");
 }
 
+template <typename Value>
+void enqueue_contract(gwipc_connection *connection, const std::uint16_t type,
+                      const std::uint32_t flags, const Value &value,
+                      gwipc_status (*encode)(const Value *,
+                                             gwipc_contract_payload **),
+                      std::uint64_t *sequence = nullptr) {
+  gwipc_contract_payload *raw = nullptr;
+  require(encode(&value, &raw) == GWIPC_STATUS_OK,
+          "encode scene contract record");
+  ContractPayload payload(raw);
+  std::size_t size = 0;
+  const auto *bytes = gwipc_contract_payload_data(payload.get(), &size);
+  gwipc_outgoing_message message{};
+  message.struct_size = sizeof(message);
+  message.type = type;
+  message.flags = flags;
+  message.payload = bytes;
+  message.payload_size = size;
+  const auto status = sequence
+                          ? gwipc_connection_enqueue_with_sequence(
+                                connection, &message, sequence)
+                          : gwipc_connection_enqueue(connection, &message);
+  require(status == GWIPC_STATUS_OK, "enqueue scene contract record");
+}
+
+template <typename Value>
+void enqueue_control(gwipc_connection *connection, const std::uint16_t type,
+                     const Value &value,
+                     gwipc_status (*encode)(const Value *,
+                                            gwipc_control_payload **)) {
+  gwipc_control_payload *raw = nullptr;
+  require(encode(&value, &raw) == GWIPC_STATUS_OK,
+          "encode scene control record");
+  ControlPayload payload(raw);
+  std::size_t size = 0;
+  const auto *bytes = gwipc_control_payload_data(payload.get(), &size);
+  gwipc_outgoing_message message{};
+  message.struct_size = sizeof(message);
+  message.type = type;
+  message.payload = bytes;
+  message.payload_size = size;
+  require(gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK,
+          "enqueue scene control record");
+}
+
+void submit_zero_surface_scene(gwipc_connection *connection,
+                               const InventoryReply &inventory,
+                               const std::uint64_t commit_id) {
+  const auto item_count =
+      static_cast<std::uint32_t>(inventory.states.size());
+  gwipc_snapshot_begin begin{sizeof(begin),
+                             commit_id,
+                             GWIPC_SNAPSHOT_COMPLETE_SESSION,
+                             0,
+                             inventory.generation,
+                             item_count,
+                             {}};
+  enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
+                  gwipc_control_encode_snapshot_begin);
+  for (const auto &state : inventory.states)
+    enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
+                     GWIPC_FLAG_SNAPSHOT_ITEM, state,
+                     gwipc_contract_encode_output_upsert);
+  gwipc_snapshot_end end{sizeof(end), commit_id, inventory.generation,
+                         item_count, {}};
+  enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
+                  gwipc_control_encode_snapshot_end);
+  gwipc_frame_commit commit{};
+  commit.struct_size = sizeof(commit);
+  commit.commit_id = commit_id;
+  commit.output_id = 0;
+  commit.producer_generation = inventory.generation;
+  std::uint64_t commit_sequence = 0;
+  enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
+                   GWIPC_FLAG_ACK_REQUIRED, commit,
+                   gwipc_contract_encode_frame_commit, &commit_sequence);
+  require(commit_sequence != 0, "scene commit receives a wire sequence");
+
+  bool accepted = false;
+  for (int attempt = 0; attempt < 300 && !accepted; ++attempt) {
+    require(pump(connection), "drive zero-surface scene acceptance");
+    for (;;) {
+      gwipc_message *raw = nullptr;
+      if (gwipc_connection_receive(connection, &raw) != GWIPC_STATUS_OK)
+        break;
+      Message message(raw);
+      require(gwipc_message_type(message.get()) ==
+                  GWIPC_MESSAGE_FRAME_ACKNOWLEDGED,
+              "zero-surface scene receives only frame acknowledgement");
+      auto decoded = decode_contract(message.get());
+      const auto *acknowledged =
+          gwipc_decoded_frame_acknowledged(decoded.get());
+      require(acknowledged && acknowledged->commit_id == commit_id &&
+                  acknowledged->output_id == 0 &&
+                  acknowledged->presented_generation == inventory.generation &&
+                  acknowledged->result == GWIPC_FRAME_ACCEPTED &&
+                  gwipc_message_flags(message.get()) == GWIPC_FLAG_REPLY &&
+                  gwipc_message_reply_to(message.get()) == commit_sequence,
+              "zero-surface multi-output FrameCommit is accepted exactly");
+      accepted = true;
+    }
+  }
+  require(accepted, "zero-surface scene acceptance arrives before timeout");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -384,6 +497,7 @@ int main(int argc, char **argv) {
   const auto first =
       receive_inventory(first_connection.get(), first_sequence);
   validate_inventory(first);
+  submit_zero_surface_scene(first_connection.get(), first, 101);
   first_connection.reset();
 
   auto second_connection = connect_to(socket);
@@ -398,6 +512,7 @@ int main(int argc, char **argv) {
               second.root_width == first.root_width &&
               second.root_height == first.root_height,
           "reconnect reproduces byte-identical inventory data records");
+  submit_zero_surface_scene(second_connection.get(), second, 102);
   second_connection.reset();
 
   require(::kill(child_process, SIGTERM) == 0, "signal gwcomp");

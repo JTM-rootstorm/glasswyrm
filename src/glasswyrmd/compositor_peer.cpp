@@ -65,6 +65,9 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   std::erase_if(submission.damages, [&](const auto& damage) {
     return cursor_surfaces.contains(damage.surface_id);
   });
+  std::erase_if(submission.surface_outputs, [&](const auto& state) {
+    return cursor_surfaces.contains(state.state.surface_id);
+  });
 }
 
 bool same_mode_identity(const output::OutputMode &left,
@@ -284,7 +287,9 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
                                                      : pending_.commit_id;
     const auto expected_generation =
         content_submission_ ? pending_content_.generation : pending_.generation;
-    if (ack && ack->commit_id == expected_commit && ack->output_id == 1 &&
+    const auto expected_output = output_model_ ? UINT64_C(0) : UINT64_C(1);
+    if (ack && ack->commit_id == expected_commit &&
+        ack->output_id == expected_output &&
         ack->presented_generation == expected_generation &&
         ack->result >= GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA &&
         ack->result <= GWIPC_FRAME_DROPPED &&
@@ -293,7 +298,8 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       state_ = PeerBootstrapState::Synchronized;
       return PeerProcessOutcome::SemanticRejected;
     }
-    if (!ack || ack->commit_id != expected_commit || ack->output_id != 1 ||
+    if (!ack || ack->commit_id != expected_commit ||
+        ack->output_id != expected_output ||
         ack->presented_generation != expected_generation ||
         ack->result != GWIPC_FRAME_ACCEPTED ||
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||

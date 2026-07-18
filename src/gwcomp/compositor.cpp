@@ -76,9 +76,23 @@ Compositor::~Compositor() {
   (void)shutdown_presentation(ignored);
 }
 
-bool Compositor::begin_snapshot() {
+bool Compositor::configure_scene_profile(
+    const SceneProfile profile, const std::uint64_t primary_output_id) noexcept {
   if (presentation_pending() || snapshot_active_ ||
-      !scene_.begin_complete_snapshot())
+      scene_.initial_snapshot_received() ||
+      (profile == SceneProfile::OutputModel && primary_output_id == 0) ||
+      (profile == SceneProfile::Historical && primary_output_id != 0))
+    return false;
+  scene_ = SceneModel(profile);
+  primary_output_id_ = primary_output_id;
+  return true;
+}
+
+bool Compositor::begin_snapshot(const std::uint64_t generation) {
+  if (presentation_pending() || snapshot_active_ ||
+      !(scene_.profile() == SceneProfile::OutputModel
+            ? scene_.begin_complete_snapshot(primary_output_id_, generation)
+            : scene_.begin_complete_snapshot()))
     return false;
   pre_snapshot_attachments_ = pending_attachments_;
   if (profile_ == PeerProfile::M7BufferedProtocolServer)
@@ -87,6 +101,8 @@ bool Compositor::begin_snapshot() {
     pending_attachments_.clear();
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   snapshot_invalid_ = false;
   snapshot_active_ = true;
   return true;
@@ -109,6 +125,8 @@ bool Compositor::end_snapshot() {
   snapshot_active_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   return true;
 }
 
@@ -120,11 +138,19 @@ void Compositor::abort_snapshot() {
   snapshot_active_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   snapshot_invalid_ = false;
 }
 
 bool Compositor::apply(const gwipc_output_upsert& value) {
-  return !presentation_pending() && scene_.apply(value);
+  if (presentation_pending()) return false;
+  if (scene_.profile() == SceneProfile::OutputModel && snapshot_active_ &&
+      !snapshot_output_ids_.insert(value.output_id).second) {
+    snapshot_invalid_ = true;
+    return false;
+  }
+  return scene_.apply(value);
 }
 bool Compositor::apply(const gwipc_output_remove& value) {
   return !presentation_pending() && scene_.apply(value);
@@ -132,6 +158,16 @@ bool Compositor::apply(const gwipc_output_remove& value) {
 bool Compositor::apply(const gwipc_surface_upsert& value) {
   if (presentation_pending()) return false;
   if (snapshot_active_ && !snapshot_surface_ids_.insert(value.surface_id).second) {
+    snapshot_invalid_ = true;
+    return false;
+  }
+  return scene_.apply(value);
+}
+
+bool Compositor::apply(const gwipc_surface_output_state& value) {
+  if (presentation_pending()) return false;
+  if (snapshot_active_ &&
+      !snapshot_surface_output_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
   }
@@ -290,6 +326,8 @@ void Compositor::disconnect() {
   snapshot_invalid_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
 }
 
 } // namespace gw::compositor

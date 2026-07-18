@@ -30,6 +30,9 @@ class OutputInventoryService final {
   [[nodiscard]] OutputInventoryServiceResult
   service(gwipc_connection& connection, gwipc_role peer_role,
           const gwipc_message& message);
+  [[nodiscard]] const output::OutputLayout& layout() const noexcept {
+    return layout_;
+  }
 
  private:
   [[nodiscard]] std::uint64_t allocate_snapshot_id() noexcept;

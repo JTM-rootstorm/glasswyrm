@@ -29,6 +29,9 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   std::erase_if(submission.damages, [&](const auto& damage) {
     return is_cursor(damage.surface_id);
   });
+  std::erase_if(submission.surface_outputs, [&](const auto& state) {
+    return is_cursor(state.state.surface_id);
+  });
 }
 
 PolicySnapshotSubmission
@@ -59,6 +62,44 @@ initial_output_policy(const output::OutputLayout &layout) {
   }
   return submission;
 }
+
+gwipc_sdr_color_metadata color_record(const output::SdrMetadata& color) {
+  return {static_cast<gwipc_sdr_color_space>(color.color_space),
+          static_cast<gwipc_transfer_function>(color.transfer_function),
+          static_cast<gwipc_color_primaries>(color.primaries),
+          static_cast<std::uint8_t>(color.luminance_available),
+          color.minimum_luminance_millinit,
+          color.maximum_luminance_millinit,
+          color.max_frame_average_luminance_millinit};
+}
+
+CompositorSnapshotSubmission
+initial_compositor_scene(const output::OutputLayout& layout) {
+  CompositorSnapshotSubmission submission;
+  submission.commit_id = 1;
+  submission.generation = layout.generation;
+  submission.outputs.reserve(layout.output_order.size());
+  for (const auto id : layout.output_order) {
+    const auto& state = layout.states.at(id);
+    gwipc_output_upsert record{};
+    record.struct_size = sizeof(record);
+    record.output_id = id.value;
+    record.enabled = state.enabled;
+    record.logical_x = state.logical_x;
+    record.logical_y = state.logical_y;
+    record.logical_width = state.logical_width;
+    record.logical_height = state.logical_height;
+    record.physical_pixel_width = state.physical_width;
+    record.physical_pixel_height = state.physical_height;
+    record.refresh_millihertz = state.refresh_millihertz;
+    record.scale_numerator = state.scale.numerator;
+    record.scale_denominator = state.scale.denominator;
+    record.transform = static_cast<gwipc_transform>(state.transform);
+    record.color = color_record(state.color);
+    submission.outputs.push_back(record);
+  }
+  return submission;
+}
 }
 
 RuntimeBridge::RuntimeBridge(std::string policy_path,
@@ -85,6 +126,7 @@ void RuntimeBridge::start(const Clock::time_point now) noexcept {
   resume_transaction_stage_ = TransactionStage::None;
   recovering_ = false;
   compositor_reset_ = false;
+  output_scene_submitted_ = false;
 }
 
 void RuntimeBridge::schedule_retry(const Clock::time_point now) noexcept {
@@ -128,6 +170,7 @@ bool RuntimeBridge::service(const short policy_revents,
       recovering_ = true;
       if (policy_disconnected) policy_.disconnect();
       if (compositor_disconnected) compositor_.disconnect();
+      if (compositor_disconnected) output_scene_submitted_ = false;
 
       // Preserve an unaffected peer across an idle peer restart.  An in-flight
       // transaction still uses the conservative paired reconnect so its reply
@@ -244,6 +287,26 @@ bool RuntimeBridge::service(const short policy_revents,
         stage_ = Stage::Policy;
         retry_at_ = now;
         retry_index_ = 0;
+        return true;
+      }
+      if (output_model_ && !output_scene_submitted_) {
+        const auto* layout = compositor_.output_layout();
+        if (layout == nullptr) {
+          stage_ = Stage::Failed;
+          error = "output-model scene bootstrap has no compositor inventory";
+          return false;
+        }
+        const auto& replay = compositor_.replay_input();
+        const auto submission = replay.commit_id != 0
+                                    ? replay
+                                    : initial_compositor_scene(*layout);
+        if (!compositor_.submit(submission, error)) {
+          stage_ = Stage::Failed;
+          if (error.empty())
+            error = "could not submit output-model scene bootstrap";
+          return false;
+        }
+        output_scene_submitted_ = true;
         return true;
       }
       stage_ = Stage::Ready;
