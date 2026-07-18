@@ -21,6 +21,10 @@ These documents define the implemented reference boundary:
 - [Milestone 12 EGL/GLES renderer](M12_EGL_GLES.md): the opt-in GLES 2.0
   profile, GBM and surfaceless context order, bounded texture cache,
   damage-aware upload/readback, fallback rules, and equivalence boundary.
+- [Milestone 13 scale and transform](M13_SCALE_AND_TRANSFORM.md): rational
+  output scale, integer client scale, sampling, damage, and all transforms.
+- [Milestone 13 multi-output rendering](M13_MULTI_OUTPUT_RENDERING.md): atomic
+  native frame sets, software/GLES paths, and aggregate identity.
 
 The compositor-facing profile is documented separately in
 [M7 buffered ProtocolServer surfaces](../compositor/M7_BUFFERED_PROTOCOL_SURFACES.md).

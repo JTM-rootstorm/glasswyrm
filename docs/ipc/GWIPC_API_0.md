@@ -41,6 +41,13 @@ matrix. The consumer sources intentionally use only the API surface available
 in their named generation; no source-tree include path or build-tree library
 path is accepted by the staged runner.
 
+The runner also reads the selected build's `tools` option. A tools-enabled
+build must install `gwinfo` and `gwout`, and their installed copies must
+complete both `--help` and `--version` using the staged `libgwipc`. A
+tools-disabled build must install neither executable. This keeps the smoke
+test on the installed boundary rather than accidentally exercising build-tree
+binaries.
+
 | API | C consumer | C++ consumer | Additive surface exercised |
 |---:|---|---|---|
 | 0.1 | `gwipc_transport_c_consumer.c` | `gwipc_transport_cpp_consumer.cpp` | transport and opaque handles |
