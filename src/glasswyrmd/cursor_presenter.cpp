@@ -226,6 +226,15 @@ void CursorPresenter::reject() noexcept {
 bool CursorPresenter::release(
     const std::uint64_t buffer_id,
     const gwipc_buffer_release_reason reason) noexcept {
+  if (reason == GWIPC_BUFFER_RELEASE_SURFACE_REMOVED && current_ &&
+      current_->id == buffer_id) {
+    current_.reset();
+    accepted_image_.reset();
+    accepted_ = {};
+    accepted_buffer_scale_ = 1;
+    accepted_valid_ = false;
+    return true;
+  }
   if (reason != GWIPC_BUFFER_RELEASE_REPLACED &&
       reason != GWIPC_BUFFER_RELEASE_CONSUMER_DONE)
     return false;

@@ -144,6 +144,18 @@ int main() {
                              GWIPC_BUFFER_RELEASE_REPLACED),
           "disconnect drops buffers that the departed peer cannot release");
   presenter.accept();
+  const auto reconnected_buffer = reconnected.buffer->attach.buffer_id;
+  require(presenter.release(reconnected_buffer,
+                            GWIPC_BUFFER_RELEASE_SURFACE_REMOVED) &&
+              presenter.needs_update(resize, 40, 50, true),
+          "layout snapshot removal retires the active cursor publication");
+  CompositorCursorSubmission layout_republished;
+  require(presenter.prepare(resize, 40, 50, true, layout_republished, error) &&
+              layout_republished.buffer && layout_republished.damage &&
+              layout_republished.buffer->attach.buffer_id !=
+                  reconnected_buffer,
+          "removed cursor surface republishes a fresh immutable buffer");
+  presenter.accept();
 
   const auto layout = output_layout();
   CursorPresenter scaled_presenter;
