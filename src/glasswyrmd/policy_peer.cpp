@@ -1,5 +1,7 @@
 #include "glasswyrmd/policy_peer.hpp"
 
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
 #include <string_view>
@@ -10,6 +12,8 @@ namespace {
 constexpr gwipc_capabilities kCapabilities =
     GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_WINDOW_POLICY | GWIPC_CAP_WINDOW_LIFECYCLE |
     GWIPC_CAP_INTERACTIVE_POLICY;
+constexpr gwipc_capabilities kOutputModelCapabilities =
+    GWIPC_CAP_MULTI_OUTPUT_POLICY | GWIPC_CAP_SCALE_METADATA;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -41,21 +45,92 @@ template <class T> void hash_little(std::uint64_t &hash, T value) {
     bits >>= 8U;
   }
 }
+
+gwipc_policy_context_upsert
+policy_context(const PolicySnapshotSubmission &submission,
+               const gw::protocol::x11::ScreenModel &screen) {
+  gwipc_policy_context_upsert context{};
+  context.struct_size = sizeof(context);
+  context.root_window_id = screen.root_window;
+  context.workspace_id = 1;
+  context.output_id = 1;
+  context.work_width = screen.width_pixels;
+  context.work_height = screen.height_pixels;
+  if (submission.outputs.empty())
+    return context;
+  std::int64_t maximum_x = 0;
+  std::int64_t maximum_y = 0;
+  for (const auto &output : submission.outputs) {
+    if (output.enabled) {
+      maximum_x = std::max(
+          maximum_x, static_cast<std::int64_t>(output.logical_x) +
+                         output.logical_width);
+      maximum_y = std::max(
+          maximum_y, static_cast<std::int64_t>(output.logical_y) +
+                         output.logical_height);
+    }
+    if (output.enabled && output.primary)
+      context.output_id = output.output_id;
+  }
+  context.work_width = static_cast<std::uint32_t>(maximum_x);
+  context.work_height = static_cast<std::uint32_t>(maximum_y);
+  return context;
+}
+
 std::uint64_t
 canonical_policy_hash(const PolicySnapshotResult &result,
+                      const PolicySnapshotSubmission &submission,
                       const gw::protocol::x11::ScreenModel &screen) {
   std::uint64_t hash = UINT64_C(14695981039346656037);
-  for (char byte : std::string_view("glasswyrm-policy-v1"))
+  const bool output_model = !submission.outputs.empty();
+  for (char byte : output_model ? std::string_view("glasswyrm-policy-v3")
+                                : std::string_view("glasswyrm-policy-v1"))
     hash_byte(hash, static_cast<std::uint8_t>(byte));
+  const auto context = policy_context(submission, screen);
   hash_little(hash, result.generation);
-  hash_little(hash, screen.root_window);
-  hash_little(hash, UINT32_C(1));
-  hash_little(hash, UINT64_C(1));
-  hash_little(hash, INT32_C(0));
-  hash_little(hash, INT32_C(0));
-  hash_little(hash, static_cast<std::uint32_t>(screen.width_pixels));
-  hash_little(hash, static_cast<std::uint32_t>(screen.height_pixels));
-  hash_little(hash, UINT32_C(0));
+  hash_little(hash, context.root_window_id);
+  hash_little(hash, context.workspace_id);
+  hash_little(hash, context.output_id);
+  hash_little(hash, context.work_x);
+  hash_little(hash, context.work_y);
+  hash_little(hash, context.work_width);
+  hash_little(hash, context.work_height);
+  hash_little(hash, context.flags);
+  if (output_model) {
+    std::map<std::uint64_t, const gwipc_policy_output_upsert *> outputs;
+    for (const auto &output : submission.outputs)
+      outputs.emplace(output.output_id, &output);
+    hash_little(hash, static_cast<std::uint32_t>(outputs.size()));
+    for (const auto &[id, output] : outputs) {
+      (void)id;
+      hash_little(hash, output->output_id);
+      hash_little(hash, output->logical_x);
+      hash_little(hash, output->logical_y);
+      hash_little(hash, output->logical_width);
+      hash_little(hash, output->logical_height);
+      hash_little(hash, output->work_x);
+      hash_little(hash, output->work_y);
+      hash_little(hash, output->work_width);
+      hash_little(hash, output->work_height);
+      hash_little(hash, output->scale_numerator);
+      hash_little(hash, output->scale_denominator);
+      hash_little(hash, static_cast<std::uint8_t>(output->transform));
+      hash_little(hash, output->enabled);
+      hash_little(hash, output->primary);
+      hash_little(hash, output->flags);
+    }
+    std::map<std::uint32_t, const gwipc_policy_window_output_hint *> hints;
+    for (const auto &hint : submission.output_hints)
+      hints.emplace(hint.window_id, &hint);
+    hash_little(hash, static_cast<std::uint32_t>(hints.size()));
+    for (const auto &[id, hint] : hints) {
+      (void)id;
+      hash_little(hash, hint->window_id);
+      hash_little(hash, hint->previous_output_id);
+      hash_little(hash, hint->preferred_output_id);
+      hash_little(hash, hint->flags);
+    }
+  }
   for (const auto &s : result.windows) {
     hash_little(hash, s.window_id);
     hash_little(hash, s.transient_for);
@@ -83,7 +158,8 @@ canonical_policy_hash(const PolicySnapshotResult &result,
   if (result.bindings) {
     const auto v1 = hash;
     hash = UINT64_C(14695981039346656037);
-    for (char byte : std::string_view("glasswyrm-policy-v2"))
+    for (char byte : output_model ? std::string_view("glasswyrm-policy-v3")
+                                  : std::string_view("glasswyrm-policy-v2"))
       hash_byte(hash, static_cast<std::uint8_t>(byte));
     hash_little(hash, v1);
     const auto &bindings = *result.bindings;
@@ -102,7 +178,7 @@ canonical_policy_hash(const PolicySnapshotResult &result,
 }
 bool valid_policy_result(const PolicySnapshotSubmission &input,
                          const PolicySnapshotResult &result,
-                         const bool interactive) {
+                         const bool interactive, const bool output_model) {
   if (result.bindings.has_value() != interactive)
     return false;
   std::set<std::uint32_t> expected;
@@ -111,11 +187,17 @@ bool valid_policy_result(const PolicySnapshotSubmission &input,
       return false;
   std::set<std::uint32_t> actual;
   std::set<std::int32_t> stacks;
+  std::set<std::uint64_t> enabled_outputs;
+  for (const auto &output : input.outputs)
+    if (output.enabled)
+      enabled_outputs.insert(output.output_id);
   unsigned focused = 0;
   for (const auto &state : result.windows) {
     if (!actual.insert(state.window_id).second ||
         !expected.contains(state.window_id) || state.workspace_id != 1 ||
-        state.output_id != 1 || state.final_width == 0 ||
+        (output_model ? !enabled_outputs.contains(state.output_id)
+                      : state.output_id != 1) ||
+        state.final_width == 0 ||
         state.final_height == 0 ||
         (state.visible &&
          (state.stacking < 0 || !stacks.insert(state.stacking).second)) ||
@@ -128,6 +210,38 @@ bool valid_policy_result(const PolicySnapshotSubmission &input,
   for (std::size_t index = 0; index < stacks.size(); ++index)
     if (!stacks.contains(static_cast<std::int32_t>(index)))
       return false;
+  return true;
+}
+
+bool valid_submission_profile(const PolicySnapshotSubmission &submission,
+                              const bool output_model) {
+  if (!output_model)
+    return submission.outputs.empty() && submission.output_hints.empty();
+  if (submission.outputs.empty() || submission.outputs.size() > 8 ||
+      submission.output_hints.size() > submission.windows.size())
+    return false;
+  std::set<std::uint64_t> output_ids;
+  std::set<std::uint32_t> window_ids;
+  std::set<std::uint32_t> hint_ids;
+  unsigned primary_count = 0;
+  for (const auto &window : submission.windows)
+    window_ids.insert(window.window.window_id);
+  for (const auto &output : submission.outputs) {
+    if (output.output_id == 0 || !output_ids.insert(output.output_id).second)
+      return false;
+    primary_count += output.enabled && output.primary;
+  }
+  if (primary_count != 1)
+    return false;
+  for (const auto &hint : submission.output_hints) {
+    if (hint.window_id == 0 || !hint_ids.insert(hint.window_id).second ||
+        !window_ids.contains(hint.window_id) ||
+        (hint.previous_output_id != 0 &&
+         !output_ids.contains(hint.previous_output_id)) ||
+        (hint.preferred_output_id != 0 &&
+         !output_ids.contains(hint.preferred_output_id)))
+      return false;
+  }
   return true;
 }
 
@@ -172,13 +286,15 @@ bool enqueue_control(gwipc_connection *connection, std::uint16_t type,
 
 PolicyPeer::PolicyPeer(std::string path,
                        const gw::protocol::x11::ScreenModel screen,
-                       const bool interactive_policy)
+                       const bool interactive_policy,
+                       const bool output_model)
     : transport_(std::move(path), GWIPC_ROLE_WINDOW_MANAGER,
-                 interactive_policy
-                     ? kCapabilities
-                     : kCapabilities & ~GWIPC_CAP_INTERACTIVE_POLICY,
+                 (interactive_policy
+                      ? kCapabilities
+                      : kCapabilities & ~GWIPC_CAP_INTERACTIVE_POLICY) |
+                     (output_model ? kOutputModelCapabilities : 0),
                  "glasswyrmd-policy"),
-      screen_(screen) {}
+      screen_(screen), output_model_profile_(output_model) {}
 
 bool PolicyPeer::connect(std::string &error) {
   disconnect();
@@ -192,10 +308,15 @@ bool PolicyPeer::send_bootstrap(std::string &error) {
   interactive_profile_ =
       (gwipc_connection_peer_info(transport_.connection()).capabilities &
        GWIPC_CAP_INTERACTIVE_POLICY) != 0;
-  return submit(replay_input_.commit_id != 0
-                    ? replay_input_
-                    : PolicySnapshotSubmission{1, 1, {}},
-                error);
+  if (output_model_profile_ && replay_input_.commit_id == 0)
+    return true;
+  const bool replay = replay_input_.commit_id != 0;
+  if (!submit(replay ? replay_input_
+                     : PolicySnapshotSubmission{1, 1, {}, {}, {}},
+              error))
+    return false;
+  replaying_ = replay;
+  return true;
 }
 
 bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
@@ -207,8 +328,14 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
     error = "policy peer is not ready for a snapshot";
     return false;
   }
+  if (!valid_submission_profile(submission, output_model_profile_)) {
+    error = "policy snapshot does not match the negotiated output profile";
+    return false;
+  }
   auto *connection = transport_.connection();
-  const auto count = static_cast<std::uint32_t>(submission.windows.size() + 1);
+  const auto count = static_cast<std::uint32_t>(
+      submission.windows.size() + submission.outputs.size() +
+      submission.output_hints.size() + 1);
   gwipc_snapshot_begin begin{sizeof(begin),
                              submission.commit_id,
                              GWIPC_SNAPSHOT_WINDOW_POLICY,
@@ -216,13 +343,7 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
                              submission.generation,
                              count,
                              {}};
-  gwipc_policy_context_upsert context{};
-  context.struct_size = sizeof(context);
-  context.root_window_id = screen_.root_window;
-  context.workspace_id = 1;
-  context.output_id = 1;
-  context.work_width = screen_.width_pixels;
-  context.work_height = screen_.height_pixels;
+  const auto context = policy_context(submission, screen_);
   gwipc_snapshot_end end{
       sizeof(end), submission.commit_id, submission.generation, count, {}};
   gwipc_policy_commit commit{};
@@ -237,12 +358,29 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
     error = "could not queue policy snapshot header";
     return false;
   }
+  for (const auto &output : submission.outputs) {
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, output,
+                          gwipc_contract_encode_policy_output_upsert)) {
+      error = "could not queue policy output";
+      return false;
+    }
+  }
   for (const auto &window : submission.windows) {
     if (!enqueue_contract(
             connection, GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT,
             GWIPC_FLAG_SNAPSHOT_ITEM, window,
             gwipc_contract_encode_policy_lifecycle_window_upsert)) {
       error = "could not queue lifecycle policy window";
+      return false;
+    }
+  }
+  for (const auto &hint : submission.output_hints) {
+    if (!enqueue_contract(connection,
+                          GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, hint,
+                          gwipc_contract_encode_policy_window_output_hint)) {
+      error = "could not queue policy window output hint";
       return false;
     }
   }
@@ -258,6 +396,7 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
   result_ = {};
   reply_snapshot_active_ = false;
   reply_snapshot_complete_ = false;
+  replaying_ = false;
   state_ = PeerBootstrapState::AwaitingReply;
   return true;
 }
@@ -366,8 +505,10 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
     }
     result_.generation = ack->applied_generation;
     result_.hash = ack->policy_hash;
-    if (!valid_policy_result(pending_, result_, interactive_profile_) ||
-        canonical_policy_hash(result_, screen_) != ack->policy_hash) {
+    if (!valid_policy_result(pending_, result_, interactive_profile_,
+                             output_model_profile_) ||
+        canonical_policy_hash(result_, pending_, screen_) != ack->policy_hash ||
+        (replaying_ && policy_hash_ != 0 && policy_hash_ != ack->policy_hash)) {
       error = "policy acknowledgement hash does not match returned snapshot";
       return PeerProcessOutcome::Fatal;
     }
@@ -403,5 +544,6 @@ void PolicyPeer::disconnect() noexcept {
   reply_snapshot_active_ = false;
   reply_snapshot_complete_ = false;
   interactive_profile_ = false;
+  replaying_ = false;
 }
 } // namespace glasswyrm::server

@@ -19,7 +19,7 @@ std::uint32_t bounded_extent(const std::uint32_t requested,
 PolicySnapshotSubmission project_policy(const LifecycleSnapshot& snapshot,
                                         std::uint64_t commit,
                                         std::uint64_t generation) {
-  PolicySnapshotSubmission output{commit, generation, {}};
+  PolicySnapshotSubmission output{commit, generation, {}, {}, {}};
   for (const auto& [id, value] : snapshot.windows) {
     (void)id;
     gwipc_policy_lifecycle_window_upsert item{}; item.struct_size=sizeof(item);
