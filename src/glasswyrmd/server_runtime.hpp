@@ -86,6 +86,17 @@ class ServerRuntime {
                                std::uint32_t resource_base);
   [[nodiscard]] bool service_integrated(short policy_events,
                                         short compositor_events);
+  [[nodiscard]] bool service_peer_readiness(short policy_events,
+                                            short compositor_events,
+                                            bool& compositor_reset);
+  [[nodiscard]] bool service_input_session_work(
+      bool compositor_reset,
+      std::vector<CompositorBufferRelease>& compositor_releases);
+  [[nodiscard]] bool service_peer_replay(std::string& error);
+  [[nodiscard]] bool service_lifecycle_work(
+      const std::vector<CompositorBufferRelease>& compositor_releases);
+  [[nodiscard]] bool service_output_control_work();
+  void submit_pending_content(std::string& error);
   void service_input(short listener_events, short connection_events);
   [[nodiscard]] bool warp_pointer(std::int32_t x, std::int32_t y);
 #if GW_HAS_LIBINPUT_BACKEND

@@ -82,6 +82,26 @@ public:
 
 private:
   [[nodiscard]] bool send_bootstrap(std::string &error);
+  void retain_cursor_records(CompositorSnapshotSubmission& submission) const;
+  [[nodiscard]] bool validate_surface_membership_records(
+      const CompositorSnapshotSubmission& submission,
+      std::string& error) const;
+  [[nodiscard]] bool validate_buffer_damage_records(
+      const CompositorSnapshotSubmission& submission,
+      std::string& error) const;
+  [[nodiscard]] bool validate_surface_policy_links(
+      const CompositorSnapshotSubmission& submission,
+      std::string& error) const;
+  [[nodiscard]] bool enqueue_output_records(
+      const CompositorSnapshotSubmission& submission,
+      std::uint32_t item_count, std::string& error);
+  [[nodiscard]] bool enqueue_surface_membership_records(
+      const CompositorSnapshotSubmission& submission, std::string& error);
+  [[nodiscard]] bool enqueue_buffer_damage_records(
+      const CompositorSnapshotSubmission& submission, std::string& error);
+  [[nodiscard]] bool enqueue_snapshot_completion_records(
+      const CompositorSnapshotSubmission& submission,
+      std::uint32_t item_count, std::string& error);
   [[nodiscard]] PeerProcessOutcome drain(std::string &error);
 
   PeerTransport transport_;
