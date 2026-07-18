@@ -227,3 +227,12 @@ It remains part of Glasswyrm's documented local same-UID security model.
 Legacy clients continue to publish scale 1 buffers and require no protocol
 changes. No claim is made that SDL, Xlib, XCB, or existing toolkits natively
 negotiate this extension.
+
+The noninstalled `m13_scale_client` target is the canonical raw-wire proof. It
+negotiates version 0.1, selects notifications, publishes a deterministic
+depth-24 scale-2 pixmap, moves the logical window across outputs, verifies
+`ScaleNotify` and logical geometry, and resets the window to legacy mode. Its
+`--result` output follows
+`tests/fixtures/m13/scale-client-result.schema.json`; `--self-test` exercises
+the request and event wire goldens in both byte orders without a running
+server.
