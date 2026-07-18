@@ -1,10 +1,11 @@
 #include "helpers/x11_fake_client.hpp"
 #include "helpers/x11_request_builder.hpp"
+#include "m13_scale_client_hold.hpp"
+#include "m13_scale_client_options.hpp"
 #include "protocol/x11/byte_cursor.hpp"
 
 #include <array>
 #include <algorithm>
-#include <climits>
 #include <cstdint>
 #include <exception>
 #include <fstream>
@@ -20,77 +21,17 @@
 
 namespace {
 namespace x11 = gw::protocol::x11;
+using Options = gw::test::m13::ClientOptions;
 
 constexpr std::uint16_t kWindowWidth = 320;
 constexpr std::uint16_t kWindowHeight = 240;
 constexpr std::uint32_t kClientScale = 2;
+constexpr auto kUsage = gw::test::m13::kUsage;
 
 void require(const bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
-struct Options {
-  std::string socket_dir{"/tmp/.X11-unix"};
-  std::string display;
-  std::string result_path;
-  std::int16_t move_x{700};
-  int timeout_ms{5000};
-  x11::ByteOrder order{x11::ByteOrder::LittleEndian};
-  bool self_test{};
-  bool help{};
-};
-
-bool parse_number(const std::string_view text, int& value) {
-  try {
-    std::size_t consumed = 0;
-    const auto parsed = std::stoi(std::string(text), &consumed);
-    if (consumed != text.size()) return false;
-    value = parsed;
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
-bool parse_options(const int argc, char** argv, Options& options) {
-  for (int index = 1; index < argc; ++index) {
-    const std::string_view argument(argv[index]);
-    if (argument == "--help") {
-      options.help = true;
-    } else if (argument == "--self-test") {
-      options.self_test = true;
-    } else if (argument == "--display" && index + 1 < argc) {
-      options.display = argv[++index];
-      if (!options.display.empty() && options.display.front() == ':')
-        options.display.erase(0, 1);
-    } else if (argument == "--socket-dir" && index + 1 < argc) {
-      options.socket_dir = argv[++index];
-    } else if (argument == "--result" && index + 1 < argc) {
-      options.result_path = argv[++index];
-    } else if (argument == "--byte-order" && index + 1 < argc) {
-      const std::string_view value(argv[++index]);
-      if (value == "little")
-        options.order = x11::ByteOrder::LittleEndian;
-      else if (value == "big")
-        options.order = x11::ByteOrder::BigEndian;
-      else
-        return false;
-    } else if (argument == "--move-x" && index + 1 < argc) {
-      int value = 0;
-      if (!parse_number(argv[++index], value) || value < INT16_MIN ||
-          value > INT16_MAX)
-        return false;
-      options.move_x = static_cast<std::int16_t>(value);
-    } else if (argument == "--timeout-ms" && index + 1 < argc) {
-      if (!parse_number(argv[++index], options.timeout_ms) ||
-          options.timeout_ms <= 0)
-        return false;
-    } else {
-      return false;
-    }
-  }
-  return options.help || options.self_test || !options.display.empty();
-}
 
 std::vector<std::uint8_t> request(
     const x11::ByteOrder order, const std::uint8_t opcode,
@@ -301,6 +242,12 @@ std::string memberships_json(const std::vector<std::uint32_t>& values) {
 }
 
 int self_test() {
+  require(kUsage.find("--initial-hold-ms 1..60000 --initial-ready-file PATH") !=
+                  std::string_view::npos &&
+              kUsage.find("--hold-ms 1..60000 --ready-file PATH") !=
+                  std::string_view::npos,
+          "evidence hold options are missing from help");
+  gw::test::m13::self_test_options();
   for (const auto order : {x11::ByteOrder::LittleEndian,
                            x11::ByteOrder::BigEndian}) {
     const auto present = request(order, 135, 5, [](auto& writer) {
@@ -338,6 +285,7 @@ int self_test() {
                 parsed.generation == UINT64_C(0x0102030405060708),
             "ScaleNotify parser golden mismatch");
   }
+  gw::test::m13::self_test_evidence_hold();
   return 0;
 }
 
@@ -472,6 +420,9 @@ int run(const Options& options) {
   require(u16(geometry, 16, options.order) == kWindowWidth &&
               u16(geometry, 18, options.order) == kWindowHeight,
           "scaled presentation changed logical window geometry");
+  if (options.initial_hold.valid())
+    gw::test::m13::hold_for_evidence(
+        options.initial_hold, window, gw::test::m13::EvidenceStage::Initial);
 
   (void)session.send(request(options.order, 12, 0, [&](auto& writer) {
     writer.write_u32(window);
@@ -500,7 +451,9 @@ int run(const Options& options) {
   require(u16(moved_geometry, 16, options.order) == kWindowWidth &&
               u16(moved_geometry, 18, options.order) == kWindowHeight,
           "movement changed logical scaled-window geometry");
-
+  if (options.moved_hold.valid())
+    gw::test::m13::hold_for_evidence(
+        options.moved_hold, window, gw::test::m13::EvidenceStage::Moved);
   (void)session.send(request(options.order, major_opcode, 6,
                              [&](auto& writer) { writer.write_u32(window); }));
   session.sync(event_base);
@@ -562,16 +515,12 @@ int run(const Options& options) {
 
 int main(const int argc, char** argv) try {
   Options options;
-  if (!parse_options(argc, argv, options)) {
-    std::cerr << "Usage: m13_scale_client --display :N "
-                 "[--socket-dir DIR] [--byte-order little|big] "
-                 "[--move-x X] [--timeout-ms MS] [--result PATH]\n";
+  if (!gw::test::m13::parse_options(argc, argv, options)) {
+    std::cerr << kUsage;
     return 2;
   }
   if (options.help) {
-    std::cout << "Usage: m13_scale_client --display :N "
-                 "[--socket-dir DIR] [--byte-order little|big] "
-                 "[--move-x X] [--timeout-ms MS] [--result PATH]\n";
+    std::cout << kUsage;
     return 0;
   }
   if (options.self_test) return self_test();
