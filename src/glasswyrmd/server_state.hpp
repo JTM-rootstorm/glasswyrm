@@ -51,6 +51,7 @@ class ServerState {
                        bool game_compat = false);
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
+  [[nodiscard]] bool update_screen_geometry(ScreenModel screen);
   [[nodiscard]] bool game_compat() const noexcept { return game_compat_; }
   [[nodiscard]] ResourceTable& resources() noexcept { return resources_; }
   [[nodiscard]] const ResourceTable& resources() const noexcept {
