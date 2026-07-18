@@ -158,6 +158,7 @@ output::SoftwareFrameSet frame_set(
     gw::test::require(item.frame.configure(id, 2, 2, error), error);
     std::ranges::copy(pixels, item.frame.pixels().begin());
     item.output = item.frame.spec(60'000);
+    item.logical = {static_cast<std::int32_t>((id - 1U) * 2U), 0, 2, 2};
     item.damage = {{0, 0, 2, 2}};
     gw::test::require(result.append(std::move(item), error), error);
   }

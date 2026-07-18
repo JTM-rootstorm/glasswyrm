@@ -12,12 +12,18 @@ namespace glasswyrm::output {
 
 struct OutputFrameResult {
   OutputSpec output;
+  LogicalRectangle logical;
   RationalScale scale;
   OutputTransform transform{OutputTransform::Normal};
   SoftwareFrame frame;
   std::vector<gw::compositor::Rectangle> damage;
   std::uint64_t visible_hash{};
 };
+
+[[nodiscard]] std::uint64_t calculate_frame_set_aggregate_hash(
+    const std::map<std::uint64_t, OutputFrameResult>& outputs,
+    std::uint64_t layout_generation,
+    std::uint64_t primary_output_id) noexcept;
 
 struct SoftwareFrameSetView {
   const std::map<std::uint64_t, OutputFrameResult> *outputs{};

@@ -39,7 +39,9 @@ bool valid_damage(const gw::compositor::Rectangle rectangle,
   return right <= output.width && bottom <= output.height;
 }
 
-std::uint64_t compute_aggregate_hash(
+} // namespace
+
+std::uint64_t calculate_frame_set_aggregate_hash(
     const std::map<std::uint64_t, OutputFrameResult> &outputs,
     const std::uint64_t layout_generation,
     const std::uint64_t primary_output_id) noexcept {
@@ -61,8 +63,6 @@ std::uint64_t compute_aggregate_hash(
   return hash;
 }
 
-} // namespace
-
 bool SoftwareFrameSet::append(OutputFrameResult output, std::string &error) {
   if (finalized()) {
     error = "software frame set is already finalized";
@@ -77,6 +77,8 @@ bool SoftwareFrameSet::append(OutputFrameResult output, std::string &error) {
       output.frame.width() != output.output.width ||
       output.frame.height() != output.output.height ||
       output.output.width == 0 || output.output.height == 0 ||
+      output.logical.x < 0 || output.logical.y < 0 ||
+      output.logical.width == 0 || output.logical.height == 0 ||
       !valid_output_scale(output.scale) ||
       !valid_output_transform(output.transform)) {
     error = "software output frame metadata is inconsistent";
@@ -130,8 +132,8 @@ bool SoftwareFrameSet::finalize(const std::uint64_t layout_generation,
   commit_id_ = commit_id;
   generation_ = generation;
   ordinal_ = ordinal;
-  aggregate_hash_ =
-      compute_aggregate_hash(outputs_, layout_generation_, primary_output_id_);
+  aggregate_hash_ = calculate_frame_set_aggregate_hash(
+      outputs_, layout_generation_, primary_output_id_);
   finalized_ = true;
   error.clear();
   return true;

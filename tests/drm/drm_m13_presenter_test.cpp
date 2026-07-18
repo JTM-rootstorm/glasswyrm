@@ -97,6 +97,7 @@ output::SoftwareFrameSet frame_set(
   gw::test::require(item.frame.configure(1, 2, 2, error), error);
   std::ranges::copy(pixels, item.frame.pixels().begin());
   item.output = item.frame.spec(60'000);
+  item.logical = {0, 0, 2, 2};
   item.scale = scale;
   item.transform = transform;
   item.damage = {{0, 0, 2, 2}};
@@ -194,6 +195,7 @@ int main() {
   gw::test::require(wrong_item.frame.configure(1, 1, 1, error), error);
   std::ranges::copy(wrong_pixels, wrong_item.frame.pixels().begin());
   wrong_item.output = wrong_item.frame.spec(60'000);
+  wrong_item.logical = {0, 0, 1, 1};
   wrong_item.scale = {4, 3};
   wrong_item.transform = output::OutputTransform::Rotate180;
   wrong_item.damage = {{0, 0, 1, 1}};

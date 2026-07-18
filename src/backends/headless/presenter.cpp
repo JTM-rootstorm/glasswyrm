@@ -48,6 +48,12 @@ output::PresentResult Presenter::present(
 
 output::PresentResult Presenter::present(
     const output::SoftwareFrameSetView &frames) {
+  return present_frame_set(frames, true);
+}
+
+output::PresentResult Presenter::present_frame_set(
+    const output::SoftwareFrameSetView &frames,
+    const bool record_frame_set) {
   output::PresentResult present;
   if (!frames.valid() || frames.outputs->empty() ||
       frames.outputs->size() > output::SoftwareFrameSet::kMaximumOutputs) {
@@ -78,7 +84,8 @@ output::PresentResult Presenter::present(
     ++index;
   }
   std::vector<FrameDumpResult> committed;
-  if (!dumper_.commit_all(staged, committed, present.error)) {
+  if (!dumper_.commit_all(staged, frames, committed, present.error,
+                          record_frame_set)) {
     for (auto &frame : staged)
       dumper_.abort(frame);
     return present;
@@ -106,7 +113,7 @@ output::PresentResult Presenter::resume(
 
 output::PresentResult Presenter::resume(
     const output::SoftwareFrameSetView &committed) {
-  return present(committed);
+  return present_frame_set(committed, false);
 }
 
 }  // namespace glasswyrm::headless

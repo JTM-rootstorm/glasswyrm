@@ -312,6 +312,8 @@ bool MultiOutputGlesSceneRenderer::render_output(
     OutputGlesRenderMetrics &metrics, std::string &error) {
   frame.output = {output.output_id, output.physical_pixel_width,
                   output.physical_pixel_height, output.refresh_millihertz};
+  frame.logical = {output.logical_x, output.logical_y, output.logical_width,
+                   output.logical_height};
   frame.scale = {output.scale_numerator, output.scale_denominator};
   frame.transform =
       static_cast<glasswyrm::output::OutputTransform>(output.transform);

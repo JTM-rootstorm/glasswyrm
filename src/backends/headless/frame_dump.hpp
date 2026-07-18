@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backends/output/software_frame_set.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <span>
@@ -42,6 +44,9 @@ class StagedFrameDump {
     return final_path_;
   }
   [[nodiscard]] std::uint64_t fnv1a64() const noexcept { return hash_; }
+  [[nodiscard]] const FrameDumpMetadata& metadata() const noexcept {
+    return metadata_;
+  }
 
  private:
   friend class FrameDumper;
@@ -68,8 +73,10 @@ class FrameDumper {
   [[nodiscard]] bool commit(StagedFrameDump& staged, FrameDumpResult& result,
                             std::string& error) const;
   [[nodiscard]] bool commit_all(std::span<StagedFrameDump> staged,
+                                const output::SoftwareFrameSetView& frames,
                                 std::vector<FrameDumpResult>& results,
-                                std::string& error) const;
+                                std::string& error,
+                                bool record_frame_set = true) const;
   void abort(StagedFrameDump& staged) const noexcept;
 
   [[nodiscard]] bool dump(const FrameDumpMetadata& metadata,
