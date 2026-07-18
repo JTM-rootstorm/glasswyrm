@@ -43,6 +43,18 @@ if get_option('gwcomp') and get_option('headless_backend')
   )
   test('gwcomp-cursor-surface', gwcomp_cursor_surface_test, timeout: 10)
 
+  gwcomp_output_model_presentation_test = executable(
+    'gwcomp_output_model_presentation_test',
+    files(tests_source_dir / 'unit/gwcomp_output_model_presentation_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test(
+    'gwcomp-output-model-presentation',
+    gwcomp_output_model_presentation_test,
+    timeout: 10,
+  )
+
   gwcomp_metadata_process_test = executable(
     'gwcomp_metadata_process_test',
     files(tests_source_dir / 'integration/gwcomp_metadata_process_test.cpp'),

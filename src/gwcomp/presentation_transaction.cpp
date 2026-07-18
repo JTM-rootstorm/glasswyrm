@@ -290,9 +290,15 @@ PresentedFrame PresentationTransaction::promote_metadata_only(
     const gwipc_frame_commit& value, PresentedFrame presented,
     std::string& error) {
   PreparedSceneManifest manifest;
-  if (!SceneManifest::prepare(value.commit_id, value.producer_generation,
-                              validated.candidate.committed(), manifest,
-                              error)) {
+  const auto prepared =
+      validated.candidate.profile() == SceneProfile::OutputModel
+          ? SceneManifest::prepare_output_model(
+                value.commit_id, value.producer_generation,
+                validated.candidate.committed(), manifest, error)
+          : SceneManifest::prepare(value.commit_id, value.producer_generation,
+                                   validated.candidate.committed(), manifest,
+                                   error);
+  if (!prepared) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     return presented;
   }
@@ -472,7 +478,8 @@ PresentedFrame PresentationTransaction::commit(Compositor& compositor,
   const auto& staged = validated->candidate.committed();
   if (!validate_attachments(compositor, staged, *validated, presented, error))
     return presented;
-  if (!staged.output || !staged.output->enabled)
+  if (validated->candidate.profile() == SceneProfile::Historical &&
+      (!staged.output || !staged.output->enabled))
     return promote_disabled_output(compositor, std::move(*validated), value,
                                    presented);
   if (validated->metadata_only_peer)
