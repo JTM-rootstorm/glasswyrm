@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly BASE_COMMIT='ae6b6c93a29a1fb985dcea8455650d15c0fec364'
+readonly BASE_COMMIT='d3440d3b8df1533410a9a2c4be46f2eea0cfb88d'
 readonly DEFAULT_LIMIT=1000
 readonly MATERIAL_LIMIT=600
 readonly COORDINATOR_LIMIT=500

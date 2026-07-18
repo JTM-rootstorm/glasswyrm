@@ -397,6 +397,7 @@ if get_option('glasswyrmd')
     'glasswyrmd/server_reactor.cpp',
     'glasswyrmd/server_shutdown.cpp',
     'glasswyrmd/integrated_runtime.cpp',
+    'glasswyrmd/integrated_runtime_work.cpp',
   )
   gw_server_core_dependencies = [gw_server_state_dep]
   if get_option('libgwipc')
@@ -405,6 +406,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/policy_peer.cpp',
       'glasswyrmd/compositor_buffer_replay.cpp',
       'glasswyrmd/compositor_peer.cpp',
+      'glasswyrmd/compositor_peer_submission.cpp',
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
@@ -451,6 +453,12 @@ if get_option('gwm')
     files(
       'wm/interactive_policy.cpp',
       'wm/policy_engine.cpp',
+      'wm/policy_focus.cpp',
+      'wm/policy_geometry.cpp',
+      'wm/policy_hash.cpp',
+      'wm/policy_ordering.cpp',
+      'wm/policy_output.cpp',
+      'wm/policy_validation.cpp',
       'wm/transaction.cpp',
     ),
     include_directories: include_directories('.'),
@@ -502,6 +510,7 @@ if get_option('gwcomp')
     'gwcomp/buffer_readiness.cpp',
     'gwcomp/scene_manifest.cpp',
     'gwcomp/runtime.cpp',
+    'gwcomp/runtime_reactor.cpp',
     'gwcomp/signal_runtime.cpp',
     'gwcomp/session_state_coordinator.cpp',
     'gwcomp/contract_dispatch.cpp',

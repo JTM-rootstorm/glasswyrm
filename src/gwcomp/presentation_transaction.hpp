@@ -14,6 +14,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace gw::compositor {
 
@@ -35,6 +36,21 @@ private:
   using ReleaseMap =
       std::map<std::uint64_t, gwipc_buffer_release_reason>;
 
+  struct ValidatedCommit {
+    SceneModel candidate;
+    CommitResult result;
+    bool metadata_only_peer{};
+    bool protocol_server{};
+  };
+
+  struct PreparedOutputFrame {
+    glasswyrm::output::SoftwareFrame frame;
+    std::vector<Rectangle> damage;
+    std::uint64_t canonical_hash{};
+    ReleaseMap releases;
+    std::optional<PreparedSceneManifest> manifest;
+  };
+
   PresentationTransaction(SceneModel candidate, AttachmentMap attachments,
                           ReleaseMap releases,
                           glasswyrm::output::SoftwareFrame frame,
@@ -46,6 +62,40 @@ private:
       const Compositor& compositor, const Scene& staged);
   static void release_retired_buffers(Compositor& compositor,
                                       const Scene& staged);
+  [[nodiscard]] static std::optional<ValidatedCommit>
+  validate_scene(Compositor& compositor, const gwipc_frame_commit& value,
+                 PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static bool validate_scene_surface(
+      const Compositor& compositor, const Scene& staged,
+      std::uint64_t surface_id, const gwipc_surface_upsert& surface,
+      const ValidatedCommit& validated, std::size_t& policy_surface_count,
+      PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static bool
+  validate_surface_attachment(const Compositor& compositor,
+                              std::uint64_t surface_id,
+                              const gwipc_surface_upsert& surface,
+                              PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static bool
+  validate_attachments(const Compositor& compositor, const Scene& staged,
+                       const ValidatedCommit& validated,
+                       PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static std::optional<PreparedOutputFrame>
+  prepare_output_frame(Compositor& compositor, ValidatedCommit& validated,
+                       const gwipc_frame_commit& value,
+                       PresentedFrame& presented, std::string& error);
+  [[nodiscard]] static PresentedFrame
+  stage_presentation(Compositor& compositor, ValidatedCommit&& validated,
+                     PreparedOutputFrame&& prepared,
+                     const gwipc_frame_commit& value, PresentedFrame presented,
+                     std::string& error);
+  [[nodiscard]] static PresentedFrame
+  promote_disabled_output(Compositor& compositor, ValidatedCommit&& validated,
+                          const gwipc_frame_commit& value,
+                          PresentedFrame presented);
+  [[nodiscard]] static PresentedFrame
+  promote_metadata_only(Compositor& compositor, ValidatedCommit&& validated,
+                        const gwipc_frame_commit& value,
+                        PresentedFrame presented, std::string& error);
   [[nodiscard]] PresentedFrame promote(Compositor& compositor,
                                        std::uint64_t visible_hash);
   [[nodiscard]] bool publish_manifest(Compositor& compositor,
