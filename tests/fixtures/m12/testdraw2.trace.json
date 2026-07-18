@@ -1,0 +1,111 @@
+{
+  "core_request_classes": [
+    "QueryExtension",
+    "Unknown",
+    "CreateGC",
+    "GetProperty",
+    "InternAtom",
+    "GetInputFocus",
+    "GetKeyboardMapping",
+    "GetModifierMapping",
+    "QueryKeymap",
+    "QueryPointer",
+    "CreateColormap",
+    "CreateWindow",
+    "ChangeProperty",
+    "DeleteProperty",
+    "GetWindowAttributes",
+    "GetGeometry",
+    "ChangeWindowAttributes",
+    "ConfigureWindow",
+    "MapWindow",
+    "ForceScreenSaver",
+    "QueryTree",
+    "TranslateCoordinates",
+    "UngrabPointer",
+    "UngrabKeyboard",
+    "FreeGC",
+    "UnmapWindow",
+    "SendEvent",
+    "DestroyWindow"
+  ],
+  "ewmh_request_classes": [
+    "ChangeProperty",
+    "GetProperty",
+    "SendEvent"
+  ],
+  "extension_discovery_order": [
+    "BIG-REQUESTS",
+    "OTHER",
+    "RANDR",
+    "MIT-SHM"
+  ],
+  "extension_requests": [
+    {
+      "extension": "BIG-REQUESTS",
+      "minor": 0
+    },
+    {
+      "extension": "RANDR",
+      "minor": 0
+    },
+    {
+      "extension": "RANDR",
+      "minor": 31
+    },
+    {
+      "extension": "RANDR",
+      "minor": 25
+    },
+    {
+      "extension": "RANDR",
+      "minor": 9
+    },
+    {
+      "extension": "RANDR",
+      "minor": 20
+    },
+    {
+      "extension": "RANDR",
+      "minor": 10
+    },
+    {
+      "extension": "RANDR",
+      "minor": 4
+    },
+    {
+      "extension": "MIT-SHM",
+      "minor": 1
+    },
+    {
+      "extension": "MIT-SHM",
+      "minor": 3
+    },
+    {
+      "extension": "MIT-SHM",
+      "minor": 2
+    }
+  ],
+  "passed": true,
+  "randr_minors": [
+    null,
+    0,
+    31,
+    25,
+    9,
+    20,
+    10,
+    4
+  ],
+  "recurring_image_classes": [
+    {
+      "minor": 3,
+      "request_length": 40,
+      "transport": "MIT-SHM"
+    }
+  ],
+  "schema": 1,
+  "selection": "penultimate eligible SDL client",
+  "unexpected_errors": [],
+  "workload": "testdraw2"
+}
