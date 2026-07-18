@@ -11,3 +11,4 @@ extension compatibility.
 - [Milestone 12 RENDER and COMPOSITE profile](M12_RENDER_COMPOSITE.md)
 - [Milestone 12 RANDR subset](M12_RANDR.md)
 - [Milestone 13 RANDR multi-output subset](M13_RANDR.md)
+- [Milestone 13 GW_SCALE 0.1 prototype](M13_GW_SCALE.md)

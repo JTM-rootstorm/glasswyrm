@@ -968,7 +968,7 @@ M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients        complete
-M13 Output model and per-output scaling
+M13 Output model and per-output scaling          acceptance pending
 M14 Variable refresh rate
 M15 Color management and HDR
 M16 Toolkit and daily-driver expansion
@@ -1073,6 +1073,43 @@ tests and evidence validators do not accept that target by themselves. The
 accepted profile is proved by the clean M11-to-M12 Gentoo VM sequence,
 software/GLES and DRM image evidence, real interaction, restart/VT recovery,
 restoration, cleanup, and archive gates.
+
+Milestone 13 implementation adds an opt-in compositor-authoritative output
+model with stable output and mode identities, several bounded logical headless
+outputs, one physical DRM output, atomic generation-guarded layout changes,
+rational compositor scaling, all eight output transforms, surface membership,
+and one-workspace multi-output GWM policy. GWIPC API 0.8 retains SOVERSION 0
+and wire 1.0 while adding output inventory, policy, membership, and same-UID
+control contracts. RANDR 1.3 remains read-mostly; experimental `GW_SCALE` 0.1
+is proven only by the repository client. Software remains the canonical
+renderer. Final milestone acceptance requires the historical M12 gate followed
+by the clean M13 Gentoo VM sequence and is not established by host
+implementation tests alone.
+
+The exact M13 compatibility boundary is:
+
+Supported:
+
+- several logical headless outputs
+- one physical DRM output
+- stable output inventory and capabilities
+- integer and fractional compositor scaling
+- all output transforms
+- legacy client fallback scaling
+- repository GW_SCALE v0.1 client
+- multi-output RANDR reporting
+- gwout/gwinfo control and diagnostics
+- one workspace
+
+Unsupported:
+
+- several physical DRM connectors
+- hotplug recovery
+- physical mode setting through gwout/RANDR
+- toolkit GW_SCALE integration
+- Xft DPI integration
+- output persistence
+- VRR/HDR/color management
 
 ## 26. Definition of done
 

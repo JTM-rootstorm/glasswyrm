@@ -21,6 +21,8 @@ same-UID output-control contracts.
   record its additive output descriptors, modes, surface membership, policy
   records, query/configuration transaction, role directions, correlation, and
   zero-descriptor rules.
+- [Milestone 13 output management](M13_OUTPUT_MANAGEMENT.md) summarizes the
+  capability profiles, complete snapshots, control results, and role bounds.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records
