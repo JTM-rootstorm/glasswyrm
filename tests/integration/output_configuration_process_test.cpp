@@ -179,7 +179,7 @@ bool pump(gwipc_connection* connection) {
   return gwipc_connection_get_state(connection) != GWIPC_CONNECTION_CLOSED;
 }
 
-Connection connect_tool(const std::string& path) {
+Connection connect_tool(const std::string& path, const bool vrr = false) {
   gwipc_connection_options options{};
   options.struct_size = sizeof(options);
   options.path = path.c_str();
@@ -187,6 +187,10 @@ Connection connect_tool(const std::string& path) {
   options.acceptable_server_roles = GWIPC_ROLE_BIT(GWIPC_ROLE_PROTOCOL_SERVER);
   options.offered_capabilities =
       GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_OUTPUT_CONTROL;
+  if (vrr)
+    options.offered_capabilities |= GWIPC_CAP_VRR_METADATA |
+                                    GWIPC_CAP_VRR_POLICY |
+                                    GWIPC_CAP_PRESENTATION_TIMING;
   options.required_peer_capabilities = GWIPC_CAP_OUTPUT_CONTROL;
   options.maximum_payload = 4096;
   options.maximum_fd_count = 0;
@@ -262,6 +266,9 @@ struct Reply {
   gwipc_output_configuration_result result{
       GWIPC_OUTPUT_CONFIGURATION_INTERNAL_ERROR};
   std::vector<gwipc_output_upsert> outputs;
+  std::vector<std::uint64_t> vrr_capabilities;
+  std::vector<std::uint64_t> vrr_policies;
+  std::vector<std::uint64_t> vrr_states;
 };
 
 Reply receive_reply(gwipc_connection* connection,
@@ -290,6 +297,48 @@ Reply receive_reply(gwipc_connection* connection,
         require(output != nullptr, "queried output state is typed");
         reply.outputs.push_back(*output);
       }
+      if (gwipc_message_type(message.get()) ==
+          GWIPC_MESSAGE_OUTPUT_VRR_CAPABILITY_UPSERT) {
+        gwipc_decoded_contract* decoded_raw = nullptr;
+        require(gwipc_contract_decode_message(message.get(), &decoded_raw) ==
+                    GWIPC_STATUS_OK,
+                "decode queried VRR capability");
+        std::unique_ptr<gwipc_decoded_contract,
+                        decltype(&gwipc_decoded_contract_destroy)>
+            decoded(decoded_raw, gwipc_decoded_contract_destroy);
+        const auto* value =
+            gwipc_decoded_output_vrr_capability_upsert(decoded.get());
+        require(value != nullptr, "queried VRR capability is typed");
+        reply.vrr_capabilities.push_back(value->output_id);
+      }
+      if (gwipc_message_type(message.get()) ==
+          GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT) {
+        gwipc_decoded_contract* decoded_raw = nullptr;
+        require(gwipc_contract_decode_message(message.get(), &decoded_raw) ==
+                    GWIPC_STATUS_OK,
+                "decode queried VRR policy");
+        std::unique_ptr<gwipc_decoded_contract,
+                        decltype(&gwipc_decoded_contract_destroy)>
+            decoded(decoded_raw, gwipc_decoded_contract_destroy);
+        const auto* value =
+            gwipc_decoded_output_vrr_policy_upsert(decoded.get());
+        require(value != nullptr, "queried VRR policy is typed");
+        reply.vrr_policies.push_back(value->output_id);
+      }
+      if (gwipc_message_type(message.get()) ==
+          GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT) {
+        gwipc_decoded_contract* decoded_raw = nullptr;
+        require(gwipc_contract_decode_message(message.get(), &decoded_raw) ==
+                    GWIPC_STATUS_OK,
+                "decode queried VRR state");
+        std::unique_ptr<gwipc_decoded_contract,
+                        decltype(&gwipc_decoded_contract_destroy)>
+            decoded(decoded_raw, gwipc_decoded_contract_destroy);
+        const auto* value =
+            gwipc_decoded_output_vrr_state_upsert(decoded.get());
+        require(value != nullptr, "queried VRR state is typed");
+        reply.vrr_states.push_back(value->output_id);
+      }
       if (gwipc_message_type(message.get()) !=
           GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED)
         continue;
@@ -316,11 +365,14 @@ Reply receive_reply(gwipc_connection* connection,
   return {};
 }
 
-Reply query(gwipc_connection* connection, const std::uint64_t id) {
+Reply query(gwipc_connection* connection, const std::uint64_t id,
+            const bool vrr = false) {
   gwipc_output_state_query query{};
   query.struct_size = sizeof(query);
   query.query_id = id;
   query.flags = GWIPC_OUTPUT_QUERY_LAYOUT;
+  if (vrr)
+    query.flags |= GWIPC_OUTPUT_QUERY_VRR;
   send_contract(connection, GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
                 GWIPC_FLAG_ACK_REQUIRED, query,
                 gwipc_contract_encode_output_state_query);
@@ -469,6 +521,55 @@ int main(int argc, char** argv) {
   compositor_process.stop();
   wm_process.stop();
   std::filesystem::remove_all(directory);
+
+  std::string vrr_directory = "/tmp/glasswyrm-output-vrr-repeat-XXXXXX";
+  require(::mkdtemp(vrr_directory.data()) != nullptr,
+          "create VRR repetition directory");
+  const auto vrr_wm = vrr_directory + "/gwm.sock";
+  const auto vrr_compositor = vrr_directory + "/gwcomp.sock";
+  const auto vrr_control = vrr_directory + "/control.sock";
+  const auto vrr_x11 = vrr_directory + "/x11";
+  const auto vrr_dumps = vrr_directory + "/dumps";
+  std::filesystem::create_directories(vrr_x11);
+  std::filesystem::create_directories(vrr_dumps);
+  auto vrr_wm_process = launch(argv[2], {"--ipc-socket", vrr_wm});
+  auto vrr_compositor_process = launch(
+      argv[3], {"--backend", "headless", "--ipc-socket", vrr_compositor,
+                "--dump-dir", vrr_dumps, "--headless-output",
+                "LEFT:640x480@60000", "--headless-output",
+                "RIGHT:640x480@60000", "--headless-vrr",
+                "LEFT=40000-60000", "--headless-vrr",
+                "RIGHT=40000-60000"});
+  wait_for_socket(vrr_wm);
+  wait_for_socket(vrr_compositor);
+  auto vrr_server = launch(
+      argv[1], {"--display", "93", "--socket-dir", vrr_x11,
+                "--wm-socket", vrr_wm, "--compositor-socket", vrr_compositor,
+                "--output-model", "--control-socket", vrr_control,
+                "--software-content", "--vrr-protocol"});
+  wait_for_socket(vrr_control);
+  const auto vrr_descriptor_baseline = descriptor_count(vrr_server.pid);
+  for (std::uint64_t repetition = 0; repetition < 32; ++repetition) {
+    auto repeated = connect_tool(vrr_control, true);
+    const auto snapshot = query(repeated.get(), 500 + repetition, true);
+    require(snapshot.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+                snapshot.generation == 1 && snapshot.outputs.size() == 2 &&
+                snapshot.vrr_capabilities.size() == 2 &&
+                snapshot.vrr_policies.size() == 2 &&
+                snapshot.vrr_states.size() == 2,
+            "repeated M14 control peer receives complete VRR state");
+  }
+  wait_for_descriptor_bound(vrr_server.pid, vrr_descriptor_baseline);
+  auto vrr_tool = connect_tool(vrr_control, true);
+  const auto vrr_after_repetition = query(vrr_tool.get(), 600, true);
+  require(vrr_after_repetition.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              vrr_after_repetition.vrr_states.size() == 2,
+          "M14 control remains usable after negotiated disconnect repetition");
+  vrr_tool.reset();
+  vrr_server.stop();
+  vrr_compositor_process.stop();
+  vrr_wm_process.stop();
+  std::filesystem::remove_all(vrr_directory);
 
   std::string rollback_directory =
       "/tmp/glasswyrm-output-rollback-XXXXXX";

@@ -99,6 +99,8 @@ void print_outputs_json_array(const Snapshot &snapshot, std::ostream &output) {
            << ",\"capabilities\":"
            << (metadata ? metadata->capabilities : 0) << ",\"modes\":";
     print_modes_json(snapshot, id, output);
+    if (snapshot.vrr_queried)
+      append_vrr_output_json(snapshot, id, output);
     output << '}';
   }
   output << ']';
@@ -129,7 +131,10 @@ void print_windows_json_array(const Snapshot &snapshot, std::ostream &output) {
                               ? "scaled-pixmap" : "legacy")
            << ",\"visible\":" << boolean(window.visible)
            << ",\"focused\":" << boolean(window.focused)
-           << ",\"fullscreen\":" << boolean(window.fullscreen) << '}';
+           << ",\"fullscreen\":" << boolean(window.fullscreen);
+    if (snapshot.vrr_queried)
+      append_vrr_window_json(snapshot, id, output);
+    output << '}';
   }
   output << ']';
 }
@@ -156,8 +161,10 @@ void print_outputs_text(const Snapshot &snapshot, std::ostream &output) {
            << state.logical_width << 'x' << state.logical_height << " scale="
            << state.scale_numerator << '/' << state.scale_denominator
            << " transform=" << transform_name(state.transform)
-           << " capabilities=" << (metadata ? metadata->capabilities : 0)
-           << '\n';
+           << " capabilities=" << (metadata ? metadata->capabilities : 0);
+    if (snapshot.vrr_queried)
+      append_vrr_output_text(snapshot, id, output);
+    output << '\n';
     for (const auto &mode : snapshot.modes)
       if (mode.output_id == id)
         output << "  mode " << output_id(mode.id) << ' ' << mode.width << 'x'
@@ -183,7 +190,10 @@ void print_windows_text(const Snapshot &snapshot, std::ostream &output) {
                    ? "scaled-pixmap" : "legacy")
            << " visible=" << boolean(window.visible)
            << " focused=" << boolean(window.focused)
-           << " fullscreen=" << boolean(window.fullscreen) << '\n';
+           << " fullscreen=" << boolean(window.fullscreen);
+    if (snapshot.vrr_queried)
+      append_vrr_window_text(snapshot, id, output);
+    output << '\n';
   }
 }
 

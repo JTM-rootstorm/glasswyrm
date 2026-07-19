@@ -46,6 +46,37 @@ windows=$(${gwinfo} --socket "${socket}" windows --json)
 finish_server
 [[ ${windows} == "${expected_windows}" ]]
 
+start_server gwinfo-outputs-vrr vrr-query
+outputs_vrr=$(${gwinfo} --socket "${socket}" outputs --vrr --json)
+finish_server
+[[ ${outputs_vrr} == *'"name":"LEFT"'* ]]
+[[ ${outputs_vrr} == *'"vrr":{"policy":"off","property_present":false,"hardware_capable":false,"kms_controllable":false,"simulated":false'* ]]
+[[ ${outputs_vrr} == *'"name":"RIGHT"'*'"vrr":{"policy":"off","property_present":false,"hardware_capable":false,"kms_controllable":true,"simulated":true'* ]]
+
+start_server gwinfo-windows-vrr vrr-query
+windows_vrr=$(${gwinfo} --socket "${socket}" windows --vrr --json)
+finish_server
+[[ ${windows_vrr} == *'"window_id":41'* ]]
+[[ ${windows_vrr} == *'"vrr":{"preference":"prefer","policy_eligible":false,"selected":false,"borderless_fullscreen":false,"exclusive_output_membership":false,"policy_generation":1,"reasons":["window-spans-outputs"]}'* ]]
+
+start_server gwinfo-all-vrr vrr-query
+all_vrr=$(${gwinfo} --socket "${socket}" all --vrr --json)
+finish_server
+[[ ${all_vrr} == *'"outputs":['*'"vrr":{"policy":"off"'* ]]
+[[ ${all_vrr} == *'"windows":['*'"vrr":{"preference":"prefer"'* ]]
+
+start_server gwinfo-vrr-invalid-modifier vrr-query
+if ${gwinfo} --socket "${socket}" vrr --vrr --json \
+    >"${directory}/invalid-vrr.out" 2>"${directory}/invalid-vrr.err"; then
+  echo 'gwinfo accepted --vrr on the dedicated vrr command' >&2
+  exit 1
+fi
+kill "${server_pid}" 2>/dev/null || true
+wait "${server_pid}" 2>/dev/null || true
+server_pid=
+grep -q -- '--vrr modifies outputs, windows, or all' \
+  "${directory}/invalid-vrr.err"
+
 start_server gwout-list query
 listed=$(${gwout} --socket "${socket}" list --json)
 finish_server
