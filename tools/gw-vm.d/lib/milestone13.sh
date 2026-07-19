@@ -1428,8 +1428,12 @@ milestone13_capture_screen() {
   local guest_pid=$1 raw
   milestone13_poll_marker drm-screen-ready "$guest_pid" || return
   raw=$(mktemp "$ARTIFACTS_PATH_ABS/.milestone13-screen.XXXXXX") || return
-  virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw" || return
-  magick "$raw" -depth 8 "ppm:$ARTIFACTS_PATH_ABS/milestone13-drm-screen.ppm" || return
+  if ! virsh --connect "$LIBVIRT_URI" screenshot "$VM_DOMAIN" "$raw" ||
+    ! magick "$raw" -depth 8 \
+      "ppm:$ARTIFACTS_PATH_ABS/milestone13-drm-screen.ppm"; then
+    rm -f "$raw"
+    return 1
+  fi
   rm -f "$raw"
   scp -P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=10 \
     "$ARTIFACTS_PATH_ABS/milestone13-drm-screen.ppm" \
@@ -1517,6 +1521,8 @@ milestone13_runtime_test() {
         if wait "$guest_pid"; then guest_status=1; else guest_status=$?; fi
         guest_pid=0; status=$guest_status; failure=guest-runtime
       else
+        guest_run_script 'set -euo pipefail; printf "screen-capture-failed\n" >"$1"' \
+          "$M13_GUEST_CONTROL_DIR/drm-screen-captured" >/dev/null 2>&1 || true
         status=$capture_status; failure=drm-screenshot
       fi
     fi
