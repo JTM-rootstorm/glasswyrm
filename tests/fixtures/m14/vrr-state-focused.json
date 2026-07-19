@@ -1,0 +1,8 @@
+{
+  "schema": "glasswyrm.m14-vrr-state.v1",
+  "scenario": "focused",
+  "policy": 3,
+  "candidate_transitions": [41,42],
+  "desired_enabled": true,
+  "reasons": ["SimulatedHeadless"]
+}

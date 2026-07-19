@@ -1,0 +1,7 @@
+{
+  "schema": "glasswyrm.m14-vrr-state.v1",
+  "scenario": "fullscreen",
+  "policy": 2,
+  "transitions": [{"classification":"fullscreen","desired_enabled":true,"candidate_window":41},{"classification":"borderless-fullscreen","desired_enabled":true,"candidate_window":41}],
+  "reasons": ["SimulatedHeadless"]
+}

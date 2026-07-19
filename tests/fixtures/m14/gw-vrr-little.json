@@ -1,0 +1,7 @@
+{
+  "schema": "glasswyrm.m14-gw-vrr-wire.v1",
+  "byte_order": "little",
+  "extension": {"major_opcode": 136, "event_base": 70, "major": 0, "minor": 1},
+  "selected_event_mask": 7,
+  "preference_transitions": [{"requested":"default","reply":0,"event_detail":7},{"requested":"allow","reply":2,"event_detail":7},{"requested":"prefer","reply":3,"event_detail":135},{"requested":"disable","reply":1,"event_detail":7}]
+}
