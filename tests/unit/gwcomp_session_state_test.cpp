@@ -2,6 +2,7 @@
 #include "gwcomp/runtime_session_gate.hpp"
 #include "tests/helpers/test_support.hpp"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <string>
@@ -42,6 +43,54 @@ gwipc_session_state_acknowledged ack(std::uint64_t generation,
   return value;
 }
 
+enum class PendingSessionMessage {
+  FrameCommit,
+  Acknowledgement,
+};
+
+void require_fifo_prefix_before_acknowledgement() {
+  using gw::test::require;
+  compositor::SessionStateCoordinator coordinator;
+  FakeSink sink;
+  std::string error;
+  coordinator.configure(true);
+  require(coordinator.request_inactive(sink, error) && coordinator.waiting(),
+          "inactive request starts the FIFO regression wait");
+
+  // A producer can have committed this message to the socket before it reads
+  // the compositor's session request. The correlated acknowledgement must
+  // therefore remain valid after the ordinary FIFO prefix is drained.
+  constexpr std::array queued{
+      PendingSessionMessage::FrameCommit,
+      PendingSessionMessage::Acknowledgement,
+  };
+  require(compositor::session_wait_message_route(GWIPC_MESSAGE_FRAME_COMMIT) ==
+                  compositor::SessionWaitMessageRoute::DrainContract &&
+              compositor::session_wait_message_route(
+                  GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) ==
+                  compositor::SessionWaitMessageRoute::Acknowledgement,
+          "session wait routes the FIFO prefix before its acknowledgement");
+  std::size_t drained_contracts = 0;
+  for (const auto message : queued) {
+    if (message == PendingSessionMessage::FrameCommit) {
+      require(coordinator.waiting(),
+              "queued frame is drained while session reply remains pending");
+      ++drained_contracts;
+      continue;
+    }
+    require(coordinator.acknowledge(
+                41,
+                ack(1, GWIPC_SESSION_INACTIVE,
+                    GWIPC_SESSION_STATE_ACCEPTED),
+                error),
+            "correlated acknowledgement survives the queued frame prefix");
+  }
+  require(drained_contracts == 1 &&
+              coordinator.state() ==
+                  compositor::CoordinatedSessionState::Inactive,
+          "FIFO frame prefix is bounded and session coordination completes");
+}
+
 }  // namespace
 
 int main() {
@@ -54,6 +103,8 @@ int main() {
   compositor::SessionStateCoordinator coordinator(timing);
   FakeSink sink;
   std::string error;
+
+  require_fifo_prefix_before_acknowledgement();
 
   require(!compositor::may_begin_vt_release(true, true, true, false, false,
                                             false) &&
@@ -68,14 +119,6 @@ int main() {
                                             false) &&
               !compositor::vt_release_blocks_contract_service(true, false),
           "a pre-connection VT signal cannot suspend compositor bootstrap");
-
-  require(compositor::session_wait_message_allowed(
-              GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) &&
-              !compositor::session_wait_message_allowed(
-                  GWIPC_MESSAGE_FRAME_COMMIT) &&
-              !compositor::session_wait_message_allowed(
-                  GWIPC_MESSAGE_OUTPUT_STATE_QUERY),
-          "only the session acknowledgement may pass the coordination gate");
 
   coordinator.configure(false);
   require(!coordinator.enabled() && coordinator.timeout_ms() == -1 &&
