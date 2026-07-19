@@ -50,10 +50,14 @@ TimingStatistics::observe(const std::uint32_t sequence,
     previous_timestamp_nanoseconds_ = timestamp_nanoseconds;
     return TimingObservation::BaselineAccepted;
   }
-  if (!sequence_follows(previous_sequence_, sequence))
+  if (!sequence_follows(previous_sequence_, sequence)) {
+    has_previous_ = false;
     return TimingObservation::SequenceRegression;
-  if (timestamp_nanoseconds <= previous_timestamp_nanoseconds_)
+  }
+  if (timestamp_nanoseconds <= previous_timestamp_nanoseconds_) {
+    has_previous_ = false;
     return TimingObservation::TimestampRegression;
+  }
 
   append(timestamp_nanoseconds - previous_timestamp_nanoseconds_);
   previous_sequence_ = sequence;

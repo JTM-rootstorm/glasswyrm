@@ -18,16 +18,29 @@ void test_observation_validation_and_wrap() {
           "consecutive valid events produce an interval");
   require(statistics.observe(10, 3'000'000) ==
                   TimingObservation::SequenceRegression &&
-              statistics.observe(12, 1'500'000) ==
+              statistics.observe(12, 4'000'000) ==
+                  TimingObservation::BaselineAccepted &&
+              statistics.observe(13, 5'000'000) ==
+                  TimingObservation::IntervalAccepted &&
+              statistics.observe(14, 4'500'000) ==
                   TimingObservation::TimestampRegression &&
-              statistics.summary().count == 1,
-          "sequence and timestamp regression do not mutate statistics");
+              statistics.observe(15, 6'000'000) ==
+                  TimingObservation::BaselineAccepted &&
+              statistics.observe(16, 7'000'000) ==
+                  TimingObservation::IntervalAccepted &&
+              statistics.summary().count == 3,
+          "chronology faults break the interval baseline before recovery");
+
+  require(statistics.observe(12, 1'500'000) ==
+                  TimingObservation::SequenceRegression &&
+              statistics.summary().count == 3,
+          "rejected chronology never appends a sample");
 
   require(statistics.observe(12, 0, false) ==
                   TimingObservation::TimestampUnavailable &&
               statistics.observe(20, 9'000'000) ==
                   TimingObservation::BaselineAccepted &&
-              statistics.summary().count == 1,
+              statistics.summary().count == 3,
           "unavailable timestamps break the consecutive-event baseline");
 
   statistics.reset();
