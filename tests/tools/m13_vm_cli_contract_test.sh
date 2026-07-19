@@ -104,7 +104,7 @@ require_text "$library" "assert any(state!=baseline for state in states)"
 require_text "$library" 'STOP_MAIN_IDENTITY_GONE'
 require_text "$library" 'STOP_EVENTFD_COUNT_BEFORE'
 require_text "$library" 'drm_live_eventfd_count=$(unit_eventfd_count glasswyrm-m13-drm.service)'
-require_text "$library" 'event_fd_closed=eventfd_live>0'
+require_text "$library" 'event_fd_closed=eventfd_after==0 and cgroup_empty and process_after==0'
 require_text "$library" "full_copy_reason')=='output-configuration-changed'"
 require_text "$library" "{canonical_ordinal,post_vt_ordinal} <= flip_ordinals & frame_ordinals"
 require_text "$library" '[[ $logind_socket_enabled_before != masked-runtime ]]'

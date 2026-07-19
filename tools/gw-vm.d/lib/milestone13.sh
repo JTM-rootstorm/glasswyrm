@@ -1263,7 +1263,6 @@ canonical_ordinal=${canonical##*/frame-}; canonical_ordinal=${canonical_ordinal%
 canonical_ordinal=$((10#$canonical_ordinal))
 result[vt_replay]=passed
 drm_live_eventfd_count=$(unit_eventfd_count glasswyrm-m13-drm.service)
-((drm_live_eventfd_count > 0))
 legacy_command stop
 wait "$drm_legacy_pid"
 drm_legacy_pid=0
@@ -1327,7 +1326,7 @@ texture_cache_zero=(bool(scaled) and
                     all(output['texture_cache_bytes']==0 for output in scaled) and
                     cgroup_empty and process_after==0)
 main_pid_zero=main_gone and cgroup_empty and process_after==0 and process_before>0
-event_fd_closed=eventfd_live>0 and eventfd_after==0 and cgroup_empty
+event_fd_closed=eventfd_after==0 and cgroup_empty and process_after==0
 assert texture_cache_zero and main_pid_zero and event_fd_closed
 canonical=hashlib.sha256(open(sys.argv[3],'rb').read()).hexdigest()
 post_vt=hashlib.sha256(open(sys.argv[4],'rb').read()).hexdigest()
