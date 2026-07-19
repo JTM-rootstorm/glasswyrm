@@ -1,5 +1,6 @@
 #include <glasswyrm/ipc.h>
 
+#include "config.hpp"
 #include "protocol/x11/core.hpp"
 #include "tests/helpers/x11_fake_client.hpp"
 #include "tests/helpers/x11_request_builder.hpp"
@@ -522,6 +523,7 @@ int main(int argc, char** argv) {
   wm_process.stop();
   std::filesystem::remove_all(directory);
 
+#if GW_HAS_EXPERIMENTAL
   std::string vrr_directory = "/tmp/glasswyrm-output-vrr-repeat-XXXXXX";
   require(::mkdtemp(vrr_directory.data()) != nullptr,
           "create VRR repetition directory");
@@ -570,6 +572,7 @@ int main(int argc, char** argv) {
   vrr_compositor_process.stop();
   vrr_wm_process.stop();
   std::filesystem::remove_all(vrr_directory);
+#endif
 
   std::string rollback_directory =
       "/tmp/glasswyrm-output-rollback-XXXXXX";
