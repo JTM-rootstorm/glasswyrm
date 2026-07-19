@@ -15,14 +15,12 @@ constexpr gwipc_capabilities kMetadataCapabilities =
 constexpr gwipc_capabilities kContentCapabilities =
     kMetadataCapabilities | GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
     GWIPC_CAP_DAMAGE_REGIONS | GWIPC_CAP_CURSOR_SURFACE;
+constexpr gwipc_capabilities kOutputModelCapabilities =
+    GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+    GWIPC_CAP_SCALE_METADATA;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
-  }
-};
-struct ControlDelete {
-  void operator()(gwipc_control_payload *p) const {
-    gwipc_control_payload_destroy(p);
   }
 };
 struct DecodedDelete {
@@ -53,44 +51,6 @@ bool enqueue_contract(gwipc_connection *connection, std::uint16_t type,
                connection, &message, out_sequence) == GWIPC_STATUS_OK;
   return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
 }
-template <class T, class Encoder>
-bool enqueue_control(gwipc_connection *connection, std::uint16_t type,
-                     const T &value, Encoder encoder) {
-  gwipc_control_payload *raw = nullptr;
-  if (encoder(&value, &raw) != GWIPC_STATUS_OK)
-    return false;
-  std::unique_ptr<gwipc_control_payload, ControlDelete> payload(raw);
-  std::size_t size = 0;
-  const auto *data = gwipc_control_payload_data(payload.get(), &size);
-  gwipc_outgoing_message message{};
-  message.struct_size = sizeof(message);
-  message.type = type;
-  message.payload = data;
-  message.payload_size = size;
-  return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
-}
-bool enqueue_buffer(gwipc_connection* connection,
-                    const CompositorSnapshotSubmission::Buffer& buffer) {
-  gwipc_contract_payload* raw = nullptr;
-  if (buffer.fd < 0 ||
-      gwipc_contract_encode_buffer_attach(&buffer.attach, &raw) !=
-          GWIPC_STATUS_OK)
-    return false;
-  std::unique_ptr<gwipc_contract_payload, ContractDelete> payload(raw);
-  std::size_t size = 0;
-  const auto* data = gwipc_contract_payload_data(payload.get(), &size);
-  gwipc_outgoing_message message{};
-  message.struct_size = sizeof(message);
-  message.type = GWIPC_MESSAGE_BUFFER_ATTACH;
-  message.flags = GWIPC_FLAG_SNAPSHOT_ITEM;
-  message.payload = data;
-  message.payload_size = size;
-  const int fds[2] = {buffer.fd, buffer.synchronization_fd};
-  message.fds = fds;
-  message.fd_count =
-      buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD ? 2 : 1;
-  return gwipc_connection_enqueue(connection, &message) == GWIPC_STATUS_OK;
-}
 void forget_cursor(CompositorSnapshotSubmission& submission) {
   std::set<std::uint64_t> cursor_surfaces;
   for (const auto& surface : submission.surfaces)
@@ -105,6 +65,54 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   std::erase_if(submission.damages, [&](const auto& damage) {
     return cursor_surfaces.contains(damage.surface_id);
   });
+  std::erase_if(submission.surface_outputs, [&](const auto& state) {
+    return cursor_surfaces.contains(state.state.surface_id);
+  });
+}
+
+bool same_mode_identity(const output::OutputMode &left,
+                        const output::OutputMode &right) noexcept {
+  return left.id == right.id && left.output_id == right.output_id &&
+         left.physical_width == right.physical_width &&
+         left.physical_height == right.physical_height &&
+         left.refresh_millihertz == right.refresh_millihertz &&
+         left.flags == right.flags && left.name == right.name &&
+         left.preferred == right.preferred;
+}
+
+bool same_descriptor_identity(const output::OutputDescriptor &left,
+                              const output::OutputDescriptor &right) noexcept {
+  if (left.id != right.id || left.name != right.name ||
+      left.kind != right.kind || left.connected != right.connected ||
+      left.physical_width_mm != right.physical_width_mm ||
+      left.physical_height_mm != right.physical_height_mm ||
+      left.supported_transform_mask != right.supported_transform_mask ||
+      left.minimum_scale != right.minimum_scale ||
+      left.maximum_scale != right.maximum_scale ||
+      left.maximum_scale_denominator != right.maximum_scale_denominator ||
+      left.mode_configurable != right.mode_configurable ||
+      left.scale_configurable != right.scale_configurable ||
+      left.transform_configurable != right.transform_configurable ||
+      left.primary_eligible != right.primary_eligible ||
+      left.arbitrary_headless_mode != right.arbitrary_headless_mode ||
+      left.maximum_physical_width != right.maximum_physical_width ||
+      left.maximum_physical_height != right.maximum_physical_height ||
+      left.maximum_physical_pixels != right.maximum_physical_pixels ||
+      left.modes.size() != right.modes.size())
+    return false;
+  return std::ranges::equal(left.modes, right.modes, same_mode_identity);
+}
+
+bool same_inventory_identity(const output::OutputLayout &left,
+                             const output::OutputLayout &right) noexcept {
+  if (left.descriptors.size() != right.descriptors.size()) return false;
+  for (const auto &[id, descriptor] : left.descriptors) {
+    const auto found = right.descriptors.find(id);
+    if (found == right.descriptors.end() ||
+        !same_descriptor_identity(descriptor, found->second))
+      return false;
+  }
+  return true;
 }
 
 } // namespace
@@ -113,17 +121,19 @@ CompositorPeer::CompositorPeer(std::string path,
                                const gw::protocol::x11::ScreenModel screen,
                                const bool software_content,
                                const bool session_state,
-                               const bool cpu_buffer_synchronization)
+                               const bool cpu_buffer_synchronization,
+                               const bool output_model)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
                  (software_content ? kContentCapabilities
                                    : kMetadataCapabilities) |
                      (session_state ? GWIPC_CAP_SESSION_STATE : 0) |
                      (cpu_buffer_synchronization
                           ? GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION
-                          : 0),
+                          : 0) |
+                     (output_model ? kOutputModelCapabilities : 0),
                  "glasswyrmd-compositor"),
       screen_(screen), software_content_(software_content),
-      session_state_(session_state) {}
+      session_state_(session_state), output_model_(output_model) {}
 
 bool CompositorPeer::connect(std::string &error) {
   disconnect();
@@ -133,274 +143,66 @@ bool CompositorPeer::connect(std::string &error) {
   return true;
 }
 
-bool CompositorPeer::send_bootstrap(std::string &error) {
-  if (replay_input_.commit_id != 0 &&
-      !compositor_buffer_replay::prepare(replay_input_, error))
+bool CompositorPeer::can_adopt_output_layout(
+    const output::OutputLayout& layout) const noexcept {
+  if (!output_model_ || !output_layout_ || !output::validate_layout(layout) ||
+      output_layout_->descriptors.size() != layout.descriptors.size())
     return false;
-  return submit(replay_input_.commit_id != 0
-                    ? replay_input_
-                    : CompositorSnapshotSubmission{1, 1, {}, {}, {}, {}},
-                error);
+  for (const auto &[id, descriptor] : output_layout_->descriptors) {
+    const auto found = layout.descriptors.find(id);
+    if (found == layout.descriptors.end() ||
+        found->second.name != descriptor.name ||
+        found->second.kind != descriptor.kind)
+      return false;
+  }
+  return true;
 }
 
-bool CompositorPeer::submit(const CompositorSnapshotSubmission &submission,
-                            std::string &error) {
-  auto complete = submission;
-  const auto has_submitted_cursor = std::ranges::any_of(
-      complete.surfaces, [](const auto& surface) {
-        return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
-      });
-  if (!has_submitted_cursor) {
-    const auto retained = std::ranges::find_if(
-        replay_input_.surfaces, [](const auto& surface) {
-          return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
-        });
-    if (retained != replay_input_.surfaces.end())
-      complete.surfaces.push_back(*retained);
-  }
-  if (!transport_.established() ||
-      (state_ != PeerBootstrapState::Connecting &&
-       state_ != PeerBootstrapState::Synchronized) ||
-      complete.commit_id == 0 || complete.generation == 0) {
-    error = "compositor peer is not ready for a complete metadata snapshot";
+bool CompositorPeer::adopt_output_layout(output::OutputLayout layout) {
+  if (!can_adopt_output_layout(layout))
+    return false;
+  output_layout_ = std::move(layout);
+  return true;
+}
+
+bool CompositorPeer::begin_output_inventory(std::string &error) {
+  if (next_output_query_id_ == 0) {
+    error = "compositor output inventory query identity was exhausted";
     return false;
   }
-  std::set<std::uint64_t> surface_ids;
-  std::set<std::uint64_t> normal_surface_ids;
-  std::set<std::uint64_t> policy_ids;
-  std::size_t cursor_count = 0;
-  for (const auto &surface : complete.surfaces) {
-    const bool cursor =
-        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
-    const bool valid_cursor =
-        cursor && software_content_ && surface.x11_window_id == 0 &&
-        surface.parent_surface_id == 0 && surface.output_id == 1 &&
-        surface.logical_width > 0 && surface.logical_width <= 64 &&
-        surface.logical_height > 0 && surface.logical_height <= 64 &&
-        surface.transform == GWIPC_TRANSFORM_NORMAL &&
-        surface.opacity == GWIPC_OPACITY_ONE &&
-        surface.scale_numerator == 1 && surface.scale_denominator == 1 &&
-        surface.fullscreen_eligible == GWIPC_TRI_STATE_UNKNOWN &&
-        surface.direct_scanout_eligible == GWIPC_TRI_STATE_UNKNOWN;
-    const bool valid_normal =
-        !cursor &&
-        surface.presentation_flags ==
-            (software_content_ ? 0U
-                               : GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) &&
-        surface.x11_window_id != 0;
-    if ((!valid_cursor && !valid_normal) ||
-        !surface_ids.insert(surface.surface_id).second ||
-        (cursor && ++cursor_count > 1)) {
-      error = "invalid metadata-only surface submission";
-      return false;
-    }
-    if (!cursor) normal_surface_ids.insert(surface.surface_id);
-  }
-  for (const auto &policy : complete.policies)
-    if (policy.surface_id == 0 || policy.x11_window_id == 0 ||
-        !policy_ids.insert(policy.surface_id).second) {
-      error = "invalid surface policy submission";
-      return false;
-    }
-  if (normal_surface_ids != policy_ids) {
-    error = "surface and policy IDs do not match";
+  pending_output_inventory_ = std::make_unique<CompositorOutputInventory>();
+  const auto query_id = next_output_query_id_++;
+  if (!pending_output_inventory_->start(transport_.connection(), query_id,
+                                        error)) {
+    pending_output_inventory_.reset();
     return false;
   }
-  if (!software_content_ &&
-      (!complete.buffers.empty() || !complete.damages.empty())) {
-    error = "metadata-only compositor submission contains pixel content";
-    return false;
-  }
-  std::set<std::uint64_t> buffer_ids;
-  for (const auto& buffer : complete.buffers) {
-    const bool synchronized =
-        buffer.attach.synchronization == GWIPC_SYNCHRONIZATION_EVENTFD;
-    if (buffer.fd < 0 || synchronized != (buffer.synchronization_fd >= 0) ||
-        buffer.attach.buffer_id == 0 ||
-        !buffer_ids.insert(buffer.attach.buffer_id).second ||
-        !surface_ids.contains(buffer.attach.surface_id)) {
-      error = "invalid buffered compositor attachment";
-      return false;
-    }
-  }
-  for (const auto& damage : complete.damages)
-    if (!surface_ids.contains(damage.surface_id) || damage.rectangles.empty()) {
-      error = "invalid buffered compositor damage";
-      return false;
-    }
-  if (!compositor_buffer_replay::rearm_snapshot(complete, replay_input_,
-                                                error))
-    return false;
-  for (const auto &surface : complete.surfaces) {
-    if (surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR)
-      continue;
-    const auto policy =
-        std::find_if(complete.policies.begin(), complete.policies.end(),
-                     [&](const auto &item) {
-                       return item.surface_id == surface.surface_id;
-                     });
-    if (policy == complete.policies.end() ||
-        policy->x11_window_id != surface.x11_window_id) {
-      error = "surface and policy X11 IDs do not match";
-      return false;
-    }
-  }
-  auto *connection = transport_.connection();
-  const auto count = static_cast<std::uint32_t>(
-      1 + complete.surfaces.size() + complete.policies.size() +
-      complete.buffers.size() + complete.damages.size());
-  gwipc_snapshot_begin begin{sizeof(begin),
-                             complete.commit_id,
-                             GWIPC_SNAPSHOT_COMPLETE_SESSION,
-                             0,
-                             complete.generation,
-                             count,
-                             {}};
-  gwipc_output_upsert output{};
-  output.struct_size = sizeof(output);
-  output.output_id = 1;
-  output.enabled = 1;
-  output.logical_width = screen_.width_pixels;
-  output.logical_height = screen_.height_pixels;
-  output.physical_pixel_width = screen_.width_pixels;
-  output.physical_pixel_height = screen_.height_pixels;
-  output.refresh_millihertz = 60000;
-  output.scale_numerator = 1;
-  output.scale_denominator = 1;
-  output.transform = GWIPC_TRANSFORM_NORMAL;
-  output.color.color_space = GWIPC_SDR_COLOR_SPACE_SRGB;
-  output.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
-  output.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
-  gwipc_snapshot_end end{
-      sizeof(end), complete.commit_id, complete.generation, count, {}};
-  gwipc_frame_commit commit{};
-  commit.struct_size = sizeof(commit);
-  commit.commit_id = complete.commit_id;
-  commit.output_id = 1;
-  commit.producer_generation = complete.generation;
-  if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
-                       gwipc_control_encode_snapshot_begin) ||
-      !enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
-                        GWIPC_FLAG_SNAPSHOT_ITEM, output,
-                        gwipc_contract_encode_output_upsert)) {
-    error = "could not queue compositor snapshot header";
-    return false;
-  }
-  for (const auto &surface : complete.surfaces) {
-    if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_UPSERT,
-                          GWIPC_FLAG_SNAPSHOT_ITEM, surface,
-                          gwipc_contract_encode_surface_upsert)) {
-      error = "invalid metadata-only surface submission";
-      return false;
-    }
-  }
-  for (const auto &policy : complete.policies) {
-    if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_POLICY_UPSERT,
-                          GWIPC_FLAG_SNAPSHOT_ITEM, policy,
-                          gwipc_contract_encode_surface_policy_upsert)) {
-      error = "could not queue surface policy submission";
-      return false;
-    }
-  }
-  for (const auto& buffer : complete.buffers) {
-    if (!enqueue_buffer(connection, buffer)) {
-      error = "could not queue buffered compositor attachment";
-      return false;
-    }
-  }
-  for (const auto& damage : complete.damages) {
-    gwipc_surface_damage value{};
-    value.struct_size = sizeof(value);
-    value.surface_id = damage.surface_id;
-    value.rectangle_count =
-        static_cast<std::uint32_t>(damage.rectangles.size());
-    value.rectangles = damage.rectangles.data();
-    if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_DAMAGE,
-                          GWIPC_FLAG_SNAPSHOT_ITEM, value,
-                          gwipc_contract_encode_surface_damage)) {
-      error = "could not queue buffered compositor damage";
-      return false;
-    }
-  }
-  if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
-                       gwipc_control_encode_snapshot_end) ||
-      !enqueue_contract(
-          connection, GWIPC_MESSAGE_FRAME_COMMIT, GWIPC_FLAG_ACK_REQUIRED,
-          commit, gwipc_contract_encode_frame_commit, &commit_sequence_)) {
-    error = "could not queue compositor bootstrap";
-    return false;
-  }
-  pending_ = std::move(complete);
-  content_submission_ = false;
   state_ = PeerBootstrapState::AwaitingReply;
   return true;
 }
 
-bool CompositorPeer::submit_cursor(
-    const CompositorCursorSubmission& submission,
-    const std::uint64_t commit_id, const std::uint64_t generation,
-    std::string& error) {
-  if (!software_content_ || commit_id == 0 || generation == 0 ||
-      submission.surface.presentation_flags !=
-          GWIPC_SURFACE_PRESENTATION_CURSOR) {
-    error = "invalid cursor compositor submission";
+bool CompositorPeer::accept_output_inventory(std::string &error) {
+  const auto *layout = pending_output_inventory_
+                           ? pending_output_inventory_->layout()
+                           : nullptr;
+  if (layout == nullptr) {
+    error = "compositor output inventory completed without a layout";
     return false;
   }
-  auto complete = replay_input_;
-  complete.commit_id = commit_id;
-  complete.generation = generation;
-  std::erase_if(complete.surfaces, [](const auto& surface) {
-    return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
-  });
-  complete.surfaces.push_back(submission.surface);
-  complete.buffers.clear();
-  complete.damages.clear();
-  if (submission.buffer) complete.buffers.push_back(*submission.buffer);
-  if (submission.damage) complete.damages.push_back(*submission.damage);
-  return submit(complete, error);
-}
-
-bool CompositorPeer::submit_content(
-    const CompositorContentSubmission& submission, std::string& error) {
-  if (!software_content_ || !transport_.established() ||
-      state_ != PeerBootstrapState::Synchronized || submission.commit_id == 0 ||
-      submission.generation == 0 || submission.damages.empty()) {
-    error = "compositor peer is not ready for incremental content";
+  if (reference_output_inventory_ &&
+      !same_inventory_identity(*reference_output_inventory_, *layout)) {
+    error = "compositor output inventory changed across reconnect";
     return false;
   }
-  if (!compositor_buffer_replay::rearm_content(submission.damages,
-                                               replay_input_, error))
-    return false;
-  auto* connection = transport_.connection();
-  for (const auto& damage : submission.damages) {
-    gwipc_surface_damage value{};
-    value.struct_size = sizeof(value);
-    value.surface_id = damage.surface_id;
-    value.rectangle_count =
-        static_cast<std::uint32_t>(damage.rectangles.size());
-    value.rectangles = damage.rectangles.data();
-    if (damage.surface_id == 0 || damage.rectangles.empty() ||
-        !enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_DAMAGE, 0, value,
-                          gwipc_contract_encode_surface_damage)) {
-      error = "could not queue incremental compositor damage";
-      return false;
-    }
-  }
-  gwipc_frame_commit commit{};
-  commit.struct_size = sizeof(commit);
-  commit.commit_id = submission.commit_id;
-  commit.output_id = 1;
-  commit.producer_generation = submission.generation;
-  if (!enqueue_contract(connection, GWIPC_MESSAGE_FRAME_COMMIT,
-                        GWIPC_FLAG_ACK_REQUIRED, commit,
-                        gwipc_contract_encode_frame_commit,
-                        &commit_sequence_)) {
-    error = "could not queue incremental compositor frame";
-    return false;
-  }
-  pending_content_ = submission;
-  content_submission_ = true;
-  state_ = PeerBootstrapState::AwaitingReply;
+  if (!reference_output_inventory_) reference_output_inventory_ = *layout;
+  // A reconnect inventory proves that the compositor still exposes the same
+  // immutable outputs; it does not supersede an accepted server-side layout.
+  // Preserve the committed configuration so bootstrap replays it into the
+  // fresh compositor instead of silently reverting to backend defaults.
+  if (!output_layout_) output_layout_ = *layout;
+  pending_output_inventory_.reset();
+  state_ = PeerBootstrapState::Synchronized;
+  error.clear();
   return true;
 }
 
@@ -450,6 +252,16 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     if (status != GWIPC_STATUS_OK) {
       error = "compositor peer receive failed";
       return PeerProcessOutcome::Fatal;
+    }
+    if (pending_output_inventory_) {
+      if (!pending_output_inventory_->consume(message.get(), error))
+        return PeerProcessOutcome::Fatal;
+      if (pending_output_inventory_->state() ==
+          CompositorInventoryState::Complete) {
+        if (!accept_output_inventory(error)) return PeerProcessOutcome::Fatal;
+        return PeerProcessOutcome::Progress;
+      }
+      continue;
     }
     if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
         session_state_) {
@@ -501,7 +313,9 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
                                                      : pending_.commit_id;
     const auto expected_generation =
         content_submission_ ? pending_content_.generation : pending_.generation;
-    if (ack && ack->commit_id == expected_commit && ack->output_id == 1 &&
+    const auto expected_output = output_model_ ? UINT64_C(0) : UINT64_C(1);
+    if (ack && ack->commit_id == expected_commit &&
+        ack->output_id == expected_output &&
         ack->presented_generation == expected_generation &&
         ack->result >= GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA &&
         ack->result <= GWIPC_FRAME_DROPPED &&
@@ -510,7 +324,8 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       state_ = PeerBootstrapState::Synchronized;
       return PeerProcessOutcome::SemanticRejected;
     }
-    if (!ack || ack->commit_id != expected_commit || ack->output_id != 1 ||
+    if (!ack || ack->commit_id != expected_commit ||
+        ack->output_id != expected_output ||
         ack->presented_generation != expected_generation ||
         ack->result != GWIPC_FRAME_ACCEPTED ||
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) == 0 ||
@@ -520,6 +335,9 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     }
     if (!content_submission_)
       compositor_buffer_replay::promote(pending_, replay_input_);
+    else
+      compositor_buffer_replay::promote_content(pending_content_,
+                                                replay_input_);
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }
@@ -530,10 +348,13 @@ PeerProcessOutcome CompositorPeer::process(const short revents, std::string &err
     state_ = PeerBootstrapState::Failed;
     return PeerProcessOutcome::Disconnected;
   }
-  if (state_ == PeerBootstrapState::Connecting && transport_.established() &&
-      !send_bootstrap(error)) {
-    state_ = PeerBootstrapState::Failed;
-    return PeerProcessOutcome::Fatal;
+  if (state_ == PeerBootstrapState::Connecting && transport_.established()) {
+    const bool started = output_model_ ? begin_output_inventory(error)
+                                       : send_bootstrap(error);
+    if (!started) {
+      state_ = PeerBootstrapState::Failed;
+      return PeerProcessOutcome::Fatal;
+    }
   }
   if (state_ == PeerBootstrapState::AwaitingReply) {
     const auto outcome = drain(error);
@@ -559,5 +380,6 @@ void CompositorPeer::disconnect() noexcept {
   content_submission_ = false;
   releases_.clear();
   session_state_changes_.clear();
+  pending_output_inventory_.reset();
 }
 } // namespace glasswyrm::server

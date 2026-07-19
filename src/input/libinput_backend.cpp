@@ -197,6 +197,16 @@ void LibinputBackend::warp_pointer(const std::int32_t x,
   relative_y_ = 0;
 }
 
+bool LibinputBackend::update_root_bounds(const std::uint32_t width,
+                                         const std::uint32_t height) noexcept {
+  if (!can_update_root_bounds(width, height))
+    return false;
+  root_width_ = width;
+  root_height_ = height;
+  warp_pointer(pointer_x_, pointer_y_);
+  return true;
+}
+
 void LibinputBackend::convert(const LibinputEvent &event,
                               InputServiceResult &result,
                               const bool publish_records) {

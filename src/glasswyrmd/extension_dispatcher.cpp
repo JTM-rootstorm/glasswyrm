@@ -6,6 +6,7 @@
 #include "glasswyrmd/extensions/xfixes.hpp"
 #include "glasswyrmd/extensions/damage.hpp"
 #include "glasswyrmd/extensions/randr.hpp"
+#include "glasswyrmd/extensions/gw_scale.hpp"
 #include "glasswyrmd/extensions/render.hpp"
 #include "glasswyrmd/extensions/composite.hpp"
 #include "protocol/x11/reply.hpp"
@@ -48,6 +49,8 @@ DispatchResult dispatch_extension_request(
       return extensions::dispatch_composite(state, context, request);
     case ExtensionKind::RandR:
       return extensions::dispatch_randr(state, context, request);
+    case ExtensionKind::GwScale:
+      return extensions::dispatch_gw_scale(state, context, request);
   }
 
   return request_handlers::error(context, request,

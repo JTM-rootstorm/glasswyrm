@@ -20,8 +20,12 @@ select_peer_profile(const gwipc_role role,
   constexpr std::uint64_t buffered =
       GWIPC_CAP_FD_PASSING | GWIPC_CAP_MEMFD_BUFFERS |
       GWIPC_CAP_DAMAGE_REGIONS;
+  constexpr std::uint64_t output_model =
+      GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
+      GWIPC_CAP_SCALE_METADATA;
   if (role == GWIPC_ROLE_TEST_PRODUCER) {
-    if ((capabilities & GWIPC_CAP_CURSOR_SURFACE) != 0) return std::nullopt;
+    if ((capabilities & (GWIPC_CAP_CURSOR_SURFACE | output_model)) != 0)
+      return std::nullopt;
     return (capabilities & (common | buffered)) == (common | buffered)
                ? std::optional{PeerProfile::M4TestProducer}
                : std::nullopt;
@@ -29,6 +33,10 @@ select_peer_profile(const gwipc_role role,
   if (role != GWIPC_ROLE_PROTOCOL_SERVER ||
       (capabilities & (common | GWIPC_CAP_WINDOW_LIFECYCLE)) !=
           (common | GWIPC_CAP_WINDOW_LIFECYCLE))
+    return std::nullopt;
+  const auto negotiated_output_model = capabilities & output_model;
+  if (negotiated_output_model != 0 &&
+      negotiated_output_model != output_model)
     return std::nullopt;
   const auto negotiated_buffered = capabilities & buffered;
   if ((capabilities & GWIPC_CAP_CURSOR_SURFACE) != 0 &&
@@ -54,10 +62,12 @@ Compositor::Compositor(
     std::unique_ptr<glasswyrm::output::PresentationBackend> presenter,
     std::optional<std::filesystem::path> scene_manifest,
     PresentationTiming timing,
-    std::unique_ptr<gw::render::SceneRenderer> renderer)
+    std::unique_ptr<gw::render::SceneRenderer> renderer,
+    std::unique_ptr<gw::render::OutputSceneRenderer> output_renderer)
     : renderer_(renderer ? std::move(renderer)
                          : std::make_unique<
                                gw::render::software::SoftwareSceneRenderer>()),
+      output_renderer_(std::move(output_renderer)),
       presenter_(std::move(presenter)), timing_(std::move(timing)) {
   if (scene_manifest) scene_manifest_.emplace(std::move(*scene_manifest));
 }
@@ -68,9 +78,28 @@ Compositor::~Compositor() {
   (void)shutdown_presentation(ignored);
 }
 
-bool Compositor::begin_snapshot() {
+bool Compositor::configure_scene_profile(
+    const SceneProfile profile, const std::uint64_t primary_output_id,
+    const std::uint64_t output_layout_generation) noexcept {
   if (presentation_pending() || snapshot_active_ ||
-      !scene_.begin_complete_snapshot())
+      scene_.initial_snapshot_received() ||
+      (profile == SceneProfile::OutputModel &&
+       (primary_output_id == 0 || output_layout_generation == 0)) ||
+      (profile == SceneProfile::Historical &&
+       (primary_output_id != 0 || output_layout_generation != 0)))
+    return false;
+  scene_ = SceneModel(profile);
+  primary_output_id_ = primary_output_id;
+  output_layout_generation_ = output_layout_generation;
+  return true;
+}
+
+bool Compositor::begin_snapshot(const std::uint64_t generation) {
+  if (presentation_pending() || snapshot_active_ ||
+      !(scene_.profile() == SceneProfile::OutputModel
+            ? scene_.begin_complete_snapshot(primary_output_id_,
+                                             generation)
+            : scene_.begin_complete_snapshot()))
     return false;
   pre_snapshot_attachments_ = pending_attachments_;
   if (profile_ == PeerProfile::M7BufferedProtocolServer)
@@ -79,6 +108,8 @@ bool Compositor::begin_snapshot() {
     pending_attachments_.clear();
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   snapshot_invalid_ = false;
   snapshot_active_ = true;
   return true;
@@ -101,6 +132,8 @@ bool Compositor::end_snapshot() {
   snapshot_active_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   return true;
 }
 
@@ -112,11 +145,27 @@ void Compositor::abort_snapshot() {
   snapshot_active_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
   snapshot_invalid_ = false;
 }
 
 bool Compositor::apply(const gwipc_output_upsert& value) {
-  return !presentation_pending() && scene_.apply(value);
+  if (presentation_pending()) return false;
+  if (scene_.profile() == SceneProfile::OutputModel && snapshot_active_) {
+    const bool first = snapshot_output_ids_.empty();
+    if (!snapshot_output_ids_.insert(value.output_id).second ||
+        (first && !scene_.set_snapshot_output_configuration(
+                      value.output_id, scene_.pending().configuration_generation))) {
+      snapshot_invalid_ = true;
+      return false;
+    }
+    if (first) {
+      primary_output_id_ = value.output_id;
+      output_layout_generation_ = scene_.pending().configuration_generation;
+    }
+  }
+  return scene_.apply(value);
 }
 bool Compositor::apply(const gwipc_output_remove& value) {
   return !presentation_pending() && scene_.apply(value);
@@ -124,6 +173,16 @@ bool Compositor::apply(const gwipc_output_remove& value) {
 bool Compositor::apply(const gwipc_surface_upsert& value) {
   if (presentation_pending()) return false;
   if (snapshot_active_ && !snapshot_surface_ids_.insert(value.surface_id).second) {
+    snapshot_invalid_ = true;
+    return false;
+  }
+  return scene_.apply(value);
+}
+
+bool Compositor::apply(const gwipc_surface_output_state& value) {
+  if (presentation_pending()) return false;
+  if (snapshot_active_ &&
+      !snapshot_surface_output_ids_.insert(value.surface_id).second) {
     snapshot_invalid_ = true;
     return false;
   }
@@ -237,10 +296,13 @@ bool Compositor::resume_presentation(std::string& error) {
   const glasswyrm::output::SoftwareFrameView committed{
       output_.spec(), output_.pixels(), {}, 0, last_generation_,
       frame_ordinal_};
-  const auto resumed = presenter_->resume(committed);
+  const auto resumed = output_set_ ? presenter_->resume(output_set_->view())
+                                   : presenter_->resume(committed);
+  const auto expected_hash = output_set_ ? output_set_->aggregate_hash()
+                                         : output_.visible_hash();
   if (resumed.disposition !=
           glasswyrm::output::PresentDisposition::Complete ||
-      resumed.visible_hash != output_.visible_hash()) {
+      resumed.visible_hash != expected_hash) {
     error = resumed.error.empty()
                 ? "presentation backend did not restore the committed frame"
                 : resumed.error;
@@ -269,6 +331,8 @@ void Compositor::disconnect() {
   PresentationTransaction::abort(*this);
   pending_buffer_readiness_.reset();
   renderer_->disconnect();
+  if (output_renderer_)
+    output_renderer_->disconnect();
   scene_.disconnect();
   mappings_.clear();
   pending_attachments_.clear();
@@ -276,12 +340,15 @@ void Compositor::disconnect() {
   pre_snapshot_attachments_.clear();
   releases_.clear();
   output_.disable();
+  output_set_.reset();
   last_commit_id_ = 0;
   last_generation_ = 0;
   snapshot_active_ = false;
   snapshot_invalid_ = false;
   snapshot_surface_ids_.clear();
   snapshot_policy_ids_.clear();
+  snapshot_output_ids_.clear();
+  snapshot_surface_output_ids_.clear();
 }
 
 } // namespace gw::compositor

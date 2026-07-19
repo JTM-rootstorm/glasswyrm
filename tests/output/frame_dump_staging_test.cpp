@@ -75,6 +75,53 @@ int main() {
   gw::test::require(std::string(manifest.begin(), manifest.end()) ==
                         expected_manifest,
                     "committed manifest bytes remain stable");
+  gw::test::require(
+      !std::filesystem::exists(directory / "frame-sets.jsonl"),
+      "historical single-output commits do not create an M13 manifest");
+
+  glasswyrm::output::SoftwareFrameSet frames;
+  std::vector<StagedFrameDump> staged_set(2);
+  std::size_t staged_index = 0;
+  for (const auto id : {UINT64_C(30), UINT64_C(31)}) {
+    glasswyrm::output::OutputFrameResult output;
+    gw::test::require(output.frame.configure(id, 1, 1, error), error);
+    output.frame.pixels()[0] =
+        id == 30 ? UINT32_C(0xff102030) : UINT32_C(0xff405060);
+    output.output = output.frame.spec(60'000);
+    output.logical = {static_cast<std::int32_t>(id - 30), 0, 1, 1};
+    output.damage = {{0, 0, 1, 1}};
+    const FrameDumpMetadata set_metadata{2, 200, 9, id, 1, 1, 1};
+    gw::test::require(
+        dumper.stage(set_metadata, output.frame.pixels(),
+                     staged_set[staged_index++], error),
+        error);
+    gw::test::require(frames.append(std::move(output), error), error);
+  }
+  gw::test::require(frames.finalize(8, 30, 200, 9, 2, error), error);
+  const auto first_final = staged_set[0].final_path();
+  const std::string old_output = "previous-output";
+  {
+    std::ofstream previous(first_final, std::ios::binary);
+    previous << old_output;
+  }
+  const std::string old_sets = "{\"old\":true}\n";
+  {
+    std::ofstream previous(directory / "frame-sets.jsonl", std::ios::binary);
+    previous << old_sets;
+  }
+  std::filesystem::remove(staged_set[1].temporary_path());
+  std::vector<FrameDumpResult> rejected_results;
+  gw::test::require(
+      !dumper.commit_all(staged_set, frames.view(), rejected_results, error) &&
+          rejected_results.empty(),
+      "mid-publication failure rejects the complete frame set");
+  const auto restored_output = read_bytes(first_final);
+  const auto restored_sets = read_bytes(directory / "frame-sets.jsonl");
+  gw::test::require(
+      std::string(restored_output.begin(), restored_output.end()) == old_output &&
+          read_bytes(directory / "frames.jsonl") == manifest &&
+          std::string(restored_sets.begin(), restored_sets.end()) == old_sets,
+      "frame-set rollback restores output and both manifests");
 
   {
     StagedFrameDump abandoned;

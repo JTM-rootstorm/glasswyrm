@@ -20,14 +20,17 @@ struct PayloadDeleter {
   }
 };
 
-bool is_complete_session_snapshot(const gwipc_message* message) {
+const gwipc_snapshot_begin* decode_complete_session_snapshot(
+    const gwipc_message* message,
+    std::unique_ptr<gwipc_decoded_control,
+                    decltype(&gwipc_decoded_control_destroy)>& control) {
   gwipc_decoded_control* raw = nullptr;
   if (gwipc_control_decode_message(message, &raw) != GWIPC_STATUS_OK)
-    return false;
-  std::unique_ptr<gwipc_decoded_control, decltype(&gwipc_decoded_control_destroy)>
-      control(raw, gwipc_decoded_control_destroy);
+    return nullptr;
+  control.reset(raw);
   const auto* begin = gwipc_decoded_snapshot_begin(control.get());
-  return begin && begin->domain == GWIPC_SNAPSHOT_COMPLETE_SESSION;
+  return begin && begin->domain == GWIPC_SNAPSHOT_COMPLETE_SESSION ? begin
+                                                                   : nullptr;
 }
 
 bool enqueue_ack(gwipc_connection* connection, const std::uint64_t reply_sequence,
@@ -122,8 +125,11 @@ ContractDispatchResult dispatch_contract_message(
   ContractDispatchResult result;
   const auto type = gwipc_message_type(message);
   if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN) {
-    if (!is_complete_session_snapshot(message) ||
-        !compositor.begin_snapshot()) {
+    std::unique_ptr<gwipc_decoded_control,
+                    decltype(&gwipc_decoded_control_destroy)>
+        control(nullptr, gwipc_decoded_control_destroy);
+    const auto* begin = decode_complete_session_snapshot(message, control);
+    if (!begin || !compositor.begin_snapshot(begin->generation)) {
       std::fprintf(stderr, "gwcomp: rejected invalid snapshot begin\n");
     }
     return result;
@@ -157,6 +163,10 @@ ContractDispatchResult dispatch_contract_message(
       break;
     case GWIPC_MESSAGE_SURFACE_UPSERT:
       applied = compositor.apply(*gwipc_decoded_surface_upsert(contract.get()));
+      break;
+    case GWIPC_MESSAGE_SURFACE_OUTPUT_STATE:
+      applied = compositor.apply(
+          *gwipc_decoded_surface_output_state(contract.get()));
       break;
     case GWIPC_MESSAGE_SURFACE_POLICY_UPSERT:
       applied = peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&

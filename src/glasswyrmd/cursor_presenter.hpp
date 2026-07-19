@@ -24,12 +24,12 @@ class CursorPresenter {
   [[nodiscard]] bool needs_update(
       const std::shared_ptr<const input::CursorImage>& image,
       std::int32_t pointer_x, std::int32_t pointer_y,
-      bool visible) const noexcept;
+      bool visible, std::uint32_t buffer_scale = 1) const noexcept;
   [[nodiscard]] bool prepare(
       std::shared_ptr<const input::CursorImage> image,
       std::int32_t pointer_x, std::int32_t pointer_y, bool visible,
       CompositorCursorSubmission& submission, std::string& error,
-      bool force_buffer = false);
+      bool force_buffer = false, std::uint32_t buffer_scale = 1);
   void accept() noexcept;
   void reject() noexcept;
   [[nodiscard]] bool release(std::uint64_t buffer_id,
@@ -41,7 +41,8 @@ class CursorPresenter {
   struct Buffer;
 
   [[nodiscard]] static gwipc_surface_upsert project_surface(
-      const input::CursorSurfacePublication& publication) noexcept;
+      const input::CursorSurfacePublication& publication,
+      std::uint32_t buffer_scale) noexcept;
   [[nodiscard]] static CompositorSnapshotSubmission::Buffer project_buffer(
       const Buffer& buffer) noexcept;
   [[nodiscard]] static CompositorSnapshotSubmission::Damage project_damage(
@@ -55,6 +56,8 @@ class CursorPresenter {
   input::CursorSurfacePublication accepted_;
   input::CursorSurfacePublication staged_publication_;
   std::uint64_t next_buffer_id_{kFirstBufferId};
+  std::uint32_t accepted_buffer_scale_{1};
+  std::uint32_t staged_buffer_scale_{1};
   bool accepted_valid_{};
   bool in_flight_{};
 };

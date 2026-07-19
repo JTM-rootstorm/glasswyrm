@@ -34,6 +34,24 @@ bool Transaction::upsert(const Context& context) {
   return true;
 }
 
+bool Transaction::upsert(const OutputContext& output) {
+  if (!snapshot_active_ && !committed_raw_.complete) return false;
+  if (!pending_.outputs.contains(output.output_id) &&
+      pending_.outputs.size() >= maximum_outputs)
+    return false;
+  pending_.outputs[output.output_id] = output;
+  return true;
+}
+
+bool Transaction::upsert(const WindowOutputHint& hint) {
+  if (!snapshot_active_ && !committed_raw_.complete) return false;
+  if (!pending_.output_hints.contains(hint.window_id) &&
+      pending_.output_hints.size() >= maximum_windows)
+    return false;
+  pending_.output_hints[hint.window_id] = hint;
+  return true;
+}
+
 bool Transaction::upsert(const RawWindow& window) {
   if (!snapshot_active_ && !committed_raw_.complete) return false;
   if (!pending_.windows.contains(window.window_id) &&
@@ -43,8 +61,11 @@ bool Transaction::upsert(const RawWindow& window) {
 }
 
 bool Transaction::remove(const std::uint32_t window_id) {
-  return !snapshot_active_ && committed_raw_.complete && window_id != 0 &&
-         pending_.windows.erase(window_id) == 1;
+  if (snapshot_active_ || !committed_raw_.complete || window_id == 0 ||
+      pending_.windows.erase(window_id) != 1)
+    return false;
+  pending_.output_hints.erase(window_id);
+  return true;
 }
 
 Evaluation Transaction::commit(const std::uint64_t generation,

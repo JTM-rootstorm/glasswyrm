@@ -80,15 +80,67 @@ validated_render_node(const glasswyrm::compositor::Options& options) {
 
 namespace glasswyrm::compositor {
 
+bool create_runtime_renderers(
+    const Options& options, std::unique_ptr<gw::render::SceneRenderer>& renderer,
+    std::unique_ptr<gw::render::OutputSceneRenderer>& output_renderer,
+    std::string& error) {
+  renderer.reset();
+  output_renderer.reset();
+  std::shared_ptr<gw::render::RendererReport> report;
+  if (options.renderer_report)
+    report =
+        std::make_shared<gw::render::RendererReport>(*options.renderer_report);
+  renderer = create_runtime_renderer(options, report, error);
+  if (!renderer) {
+    error = "renderer initialization failed: " + error;
+    return false;
+  }
+  output_renderer = create_runtime_output_renderer(options, report, error);
+  if (output_renderer) return true;
+  error = "output renderer initialization failed: " + error;
+  renderer.reset();
+  return false;
+}
+
 std::unique_ptr<gw::render::SceneRenderer>
 create_runtime_renderer(const Options& options, std::string& error) {
+  return create_runtime_renderer(options, {}, error);
+}
+
+std::unique_ptr<gw::render::SceneRenderer>
+create_runtime_renderer(
+    const Options& options, std::shared_ptr<gw::render::RendererReport> report,
+    std::string& error) {
   std::optional<std::filesystem::path> report_path;
-  if (options.renderer_report) report_path = *options.renderer_report;
+  if (options.renderer_report && !report)
+    report_path = *options.renderer_report;
   std::unique_ptr<gw::render::SceneRenderer> renderer;
   const gw::render::RendererCreateOptions create_options{
       options.renderer, report_path, validated_render_node(options),
-      gw::render::kMaximumGlTextureCacheBytes};
+      gw::render::kMaximumGlTextureCacheBytes, std::move(report)};
   if (!gw::render::create_scene_renderer(create_options, renderer, error))
+    return {};
+  return renderer;
+}
+
+std::unique_ptr<gw::render::OutputSceneRenderer>
+create_runtime_output_renderer(const Options& options, std::string& error) {
+  return create_runtime_output_renderer(options, {}, error);
+}
+
+std::unique_ptr<gw::render::OutputSceneRenderer>
+create_runtime_output_renderer(
+    const Options& options, std::shared_ptr<gw::render::RendererReport> report,
+    std::string& error) {
+  std::optional<std::filesystem::path> report_path;
+  if (options.renderer_report && !report)
+    report_path = *options.renderer_report;
+  std::unique_ptr<gw::render::OutputSceneRenderer> renderer;
+  const gw::render::RendererCreateOptions create_options{
+      options.renderer, report_path, validated_render_node(options),
+      gw::render::kMaximumGlTextureCacheBytes, std::move(report)};
+  if (!gw::render::create_output_scene_renderer(create_options, renderer,
+                                                error))
     return {};
   return renderer;
 }

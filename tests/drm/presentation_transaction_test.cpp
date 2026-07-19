@@ -86,6 +86,23 @@ class FakePresenter final
     return {disposition, 0, 0, "injected presentation rejection"};
   }
 
+  PresentResult present(
+      const glasswyrm::output::SoftwareFrameSetView& frames) override {
+    if (!frames.valid() || frames.outputs->size() != 1)
+      return {PresentDisposition::Rejected, 0, 0,
+              "fake presenter requires one output frame"};
+    const auto &output = frames.outputs->begin()->second;
+    const glasswyrm::output::SoftwareFrameView frame{
+        output.output, output.frame.pixels(), output.damage, frames.commit_id,
+        frames.generation, frames.ordinal};
+    auto result = present(frame);
+    if (result.disposition == PresentDisposition::Complete)
+      result.visible_hash = frames.aggregate_hash;
+    else if (result.disposition == PresentDisposition::Pending)
+      state_->pending_hash = frames.aggregate_hash;
+    return result;
+  }
+
   int poll_fd() const noexcept override { return state_->pipe_fds[0]; }
   short poll_events() const noexcept override { return POLLIN; }
   BackendEvent service(const short revents) override {
@@ -122,6 +139,10 @@ class FakePresenter final
   PresentResult resume(
       const glasswyrm::output::SoftwareFrameView& frame) override {
     return present(frame);
+  }
+  PresentResult resume(
+      const glasswyrm::output::SoftwareFrameSetView& frames) override {
+    return present(frames);
   }
   glasswyrm::output::BackendStateResult shutdown(
       std::string& error) noexcept override {

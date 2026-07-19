@@ -78,6 +78,34 @@ glasswyrm::wm::RawWindow window_from(
   return window;
 }
 
+glasswyrm::wm::OutputContext output_from(
+    const gwipc_policy_output_upsert& value) {
+  using glasswyrm::wm::OutputTransform;
+  return {value.output_id,
+          {value.logical_x, value.logical_y, value.logical_width,
+           value.logical_height},
+          {value.work_x, value.work_y, value.work_width, value.work_height},
+          value.scale_numerator,
+          value.scale_denominator,
+          static_cast<OutputTransform>(value.transform),
+          value.enabled != 0,
+          value.primary != 0,
+          value.flags};
+}
+
+glasswyrm::wm::WindowOutputHint hint_from(
+    const gwipc_policy_window_output_hint& value) {
+  return {value.window_id, value.previous_output_id, value.preferred_output_id,
+          value.flags};
+}
+
+bool multi_output_profile(const gwipc_connection* connection) {
+  constexpr auto required =
+      GWIPC_CAP_MULTI_OUTPUT_POLICY | GWIPC_CAP_SCALE_METADATA;
+  return (gwipc_connection_peer_info(connection).capabilities & required) ==
+         required;
+}
+
 gwipc_policy_result result_from(glasswyrm::wm::EvaluationError error) {
   using glasswyrm::wm::EvaluationError;
   switch (error) {
@@ -366,6 +394,27 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
                    static_cast<unsigned long long>(value->stack_serial));
       return true;
     }
+    case GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT: {
+      const auto* value = gwipc_decoded_policy_output_upsert(contract.get());
+      if (!multi_output_profile(connection) || !value ||
+          !peer.transaction.upsert(output_from(*value)))
+        return false;
+      std::fprintf(stderr,
+                   "gwm: output upsert id=%llu logical=%ux%u+%d+%d "
+                   "scale=%u/%u primary=%u\n",
+                   static_cast<unsigned long long>(value->output_id),
+                   value->logical_width, value->logical_height,
+                   value->logical_x, value->logical_y,
+                   value->scale_numerator, value->scale_denominator,
+                   static_cast<unsigned>(value->primary));
+      return true;
+    }
+    case GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT: {
+      const auto* value =
+          gwipc_decoded_policy_window_output_hint(contract.get());
+      return multi_output_profile(connection) && value &&
+             peer.transaction.upsert(hint_from(*value));
+    }
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE: {
       const auto* value = gwipc_decoded_policy_window_remove(contract.get());
       return value && peer.transaction.remove(value->window_id);
@@ -384,6 +433,12 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
       const bool interactive =
           (gwipc_connection_peer_info(connection).capabilities &
            GWIPC_CAP_INTERACTIVE_POLICY) != 0;
+      if (multi_output_profile(connection) &&
+          peer.transaction.pending().outputs.empty()) {
+        return enqueue_rejection(connection, message, *value,
+                                 peer.transaction.committed_policy(),
+                                 GWIPC_POLICY_REJECTED_INCOMPLETE_SNAPSHOT);
+      }
       auto evaluation = peer.transaction.commit(
           value->producer_generation,
           interactive ? preflight_interactive_policy : preflight_policy);

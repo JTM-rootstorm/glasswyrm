@@ -54,7 +54,7 @@ int main() {
                  GWIPC_STATUS_INVALID_ARGUMENT;
 
   const auto api = gwipc_get_api_version();
-  ok = ok && api.major == 0 && api.minor == 7 && api.patch == 0;
+  ok = ok && api.major == 0 && api.minor == 8 && api.patch == 0;
 
   gwipc_policy_bindings_upsert bindings{};
   bindings.struct_size = sizeof(bindings);

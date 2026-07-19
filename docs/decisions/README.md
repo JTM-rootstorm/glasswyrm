@@ -21,3 +21,4 @@ Current decisions:
 - [0012: Present the Canonical Software Frame Through DRM/KMS](0012-drm-kms-software-scanout.md)
 - [0013: Keep Interactive Input in the Server and Display Authority in the Compositor](0013-interactive-input-and-session.md)
 - [0014: Bound the Efficient SDL Buffer Path](0014-efficient-x11-buffer-path.md)
+- [0015: Make Output Layout and Scaling Explicit](0015-output-model-and-scaling.md)

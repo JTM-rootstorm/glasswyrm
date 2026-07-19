@@ -22,6 +22,9 @@ class ContentPresenter {
       : synchronization_(synchronization) {}
 
   void damage(std::uint32_t window, geometry::Rectangle rectangle);
+  void damage_scaled(std::uint32_t window,
+                     geometry::Rectangle logical_rectangle,
+                     geometry::Rectangle buffer_rectangle);
 
   [[nodiscard]] bool prepare_lifecycle(
       const LifecycleSnapshot& snapshot, ResourceTable& resources,
@@ -58,6 +61,8 @@ class ContentPresenter {
     std::unique_ptr<PublishedWindowBuffer> staged_buffer;
     std::vector<geometry::Rectangle> pending;
     std::vector<geometry::Rectangle> inflight;
+    std::vector<geometry::Rectangle> pending_buffer;
+    std::vector<geometry::Rectangle> inflight_buffer;
   };
 
   [[nodiscard]] static std::vector<geometry::Rectangle> normalize(

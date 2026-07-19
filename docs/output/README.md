@@ -17,6 +17,17 @@ or GWIPC authority.
   procedures, evidence, recovery, and current acceptance status.
 - [Milestone 12 damage-aware scanout](M12_DAMAGE_SCANOUT.md): completed-buffer
   generations, bounded damage history, full-copy fallbacks, and copy evidence.
+- [Milestone 13 output model](M13_OUTPUT_MODEL.md): authority, bounded
+  descriptors and layouts, startup, reconnect, and compatibility boundaries.
+- [Milestone 13 output identities](M13_OUTPUT_IDENTITIES.md): stable headless,
+  DRM, mode, and RANDR identity rules.
+- [Milestone 13 layout transactions](M13_LAYOUT_TRANSACTIONS.md): complete
+  generation-guarded staging, promotion, rejection, and rollback.
+- [Milestone 13 headless multi-output](M13_HEADLESS_MULTI_OUTPUT.md): repeated
+  output specifications and atomic per-output artifacts.
+- [Milestone 13 single-output scaling](M13_DRM_SCALING.md): fixed physical
+  mode and origin, compositor scale/transform, native renderer frames, and
+  output-configuration full-copy evidence.
 
 The VT lifecycle also documents the capability-gated M11 coordination which
 suspends server-owned libinput before display release and resumes it after

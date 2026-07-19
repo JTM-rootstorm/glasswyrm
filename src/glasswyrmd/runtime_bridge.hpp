@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <string>
+#include <utility>
 
 namespace glasswyrm::server {
 
@@ -17,7 +18,8 @@ public:
                 std::chrono::milliseconds deadline = std::chrono::seconds(10),
                 bool software_content = false,
                 bool session_state = false,
-                bool cpu_buffer_synchronization = false);
+                bool cpu_buffer_synchronization = false,
+                bool output_model = false);
 
   void start(Clock::time_point now = Clock::now()) noexcept;
   [[nodiscard]] bool service(short policy_revents, short compositor_revents,
@@ -42,6 +44,16 @@ public:
   }
   [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
     return policy_.result();
+  }
+  [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
+    return compositor_.output_layout();
+  }
+  [[nodiscard]] bool can_adopt_output_layout(
+      const output::OutputLayout& layout) const noexcept {
+    return compositor_.can_adopt_output_layout(layout);
+  }
+  [[nodiscard]] bool adopt_output_layout(output::OutputLayout layout) {
+    return compositor_.adopt_output_layout(std::move(layout));
   }
   [[nodiscard]] bool submit_compositor(
       const CompositorSnapshotSubmission& submission, std::string& error);
@@ -104,6 +116,8 @@ private:
   PolicySnapshotSubmission pending_policy_;
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
+  bool output_model_{};
+  bool output_scene_submitted_{};
   bool recovering_{};
   bool compositor_reset_{};
 };

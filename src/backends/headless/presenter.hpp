@@ -15,12 +15,16 @@ class Presenter final : public output::PresentationBackend {
 
   [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameView& frame) override;
+  [[nodiscard]] output::PresentResult present(
+      const output::SoftwareFrameSetView& frames) override;
   [[nodiscard]] int poll_fd() const noexcept override { return -1; }
   [[nodiscard]] short poll_events() const noexcept override { return 0; }
   [[nodiscard]] output::BackendEvent service(short revents) override;
   [[nodiscard]] output::BackendStateResult suspend(std::string& error) override;
   [[nodiscard]] output::PresentResult resume(
       const output::SoftwareFrameView& committed) override;
+  [[nodiscard]] output::PresentResult resume(
+      const output::SoftwareFrameSetView& committed) override;
   [[nodiscard]] output::BackendStateResult shutdown(
       std::string& error) noexcept override {
     error.clear();
@@ -28,6 +32,8 @@ class Presenter final : public output::PresentationBackend {
   }
 
  private:
+  [[nodiscard]] output::PresentResult present_frame_set(
+      const output::SoftwareFrameSetView& frames, bool record_frame_set);
   FrameDumper dumper_;
 };
 

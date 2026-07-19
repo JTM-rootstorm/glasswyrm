@@ -58,6 +58,14 @@ std::uint32_t mode_dot_clock(const x11::ScreenModel& screen) {
       clock, std::numeric_limits<std::uint32_t>::max()));
 }
 
+std::uint32_t mode_dot_clock(const RandRModeObject& mode) {
+  const std::uint64_t clock =
+      static_cast<std::uint64_t>(mode.width) * mode.height *
+      mode.refresh_millihertz / 1000U;
+  return static_cast<std::uint32_t>(std::min<std::uint64_t>(
+      clock, std::numeric_limits<std::uint32_t>::max()));
+}
+
 }  // namespace
 
 DispatchResult randr_bad_output(const DispatchContext& context,
@@ -122,8 +130,8 @@ DispatchResult randr_get_screen_info(ServerState& state,
   const auto rate = refresh_hertz(screen);
   x11::ReplyBuilder reply(context.byte_order, context.sequence, kRandRRotate0);
   reply.write_u32(screen.root_window);
-  reply.write_u32(kRandRConfigurationTimestamp);
-  reply.write_u32(kRandRConfigurationTimestamp);
+  reply.write_u32(state.randr().configuration_timestamp());
+  reply.write_u32(state.randr().configuration_timestamp());
   reply.write_u16(1);
   reply.write_u16(0);
   reply.write_u16(kRandRRotate0);
@@ -149,6 +157,15 @@ DispatchResult randr_get_screen_size_range(
   (void)reader.read_u32(window);
   if (!valid_window(state, window))
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
+  if (state.randr().output_model_enabled()) {
+    x11::ReplyBuilder reply(context.byte_order, context.sequence);
+    reply.write_u16(1);
+    reply.write_u16(1);
+    reply.write_u16(glasswyrm::output::kMaximumRootLogicalWidth);
+    reply.write_u16(glasswyrm::output::kMaximumRootLogicalHeight);
+    reply.write_padding(16);
+    return {std::move(reply).finish()};
+  }
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
   reply.write_u16(state.screen().width_pixels);
   reply.write_u16(state.screen().height_pixels);
@@ -168,6 +185,61 @@ DispatchResult randr_get_screen_resources(
   (void)reader.read_u32(window);
   if (!valid_window(state, window))
     return error(context, request, x11::CoreErrorCode::BadWindow, window);
+  if (state.randr().output_model_enabled()) {
+    const auto& randr = state.randr();
+    const auto& outputs = randr.outputs();
+    std::size_t crtc_count = 0;
+    std::size_t mode_count = 0;
+    std::size_t names_size = 0;
+    for (const auto& output : outputs) {
+      crtc_count += output.enabled ? 1U : 0U;
+      mode_count += output.modes.size();
+      for (const auto& mode : output.modes) names_size += mode.name.size();
+    }
+    if (crtc_count > std::numeric_limits<std::uint16_t>::max() ||
+        outputs.size() > std::numeric_limits<std::uint16_t>::max() ||
+        mode_count > std::numeric_limits<std::uint16_t>::max() ||
+        names_size > std::numeric_limits<std::uint16_t>::max())
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
+    const auto timestamp = randr.configuration_timestamp();
+    x11::ReplyBuilder reply(context.byte_order, context.sequence);
+    reply.write_u32(timestamp);
+    reply.write_u32(timestamp);
+    reply.write_u16(static_cast<std::uint16_t>(crtc_count));
+    reply.write_u16(static_cast<std::uint16_t>(outputs.size()));
+    reply.write_u16(static_cast<std::uint16_t>(mode_count));
+    reply.write_u16(static_cast<std::uint16_t>(names_size));
+    reply.write_padding(8);
+    for (const auto& output : outputs)
+      if (output.enabled) reply.write_payload_u32(output.crtc_xid);
+    for (const auto& output : outputs) reply.write_payload_u32(output.xid);
+    for (const auto& output : outputs) {
+      for (const auto& mode : output.modes) {
+        reply.write_payload_u32(mode.xid);
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.width));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.height));
+        reply.write_payload_u32(mode_dot_clock(mode));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.width));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.width));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.width));
+        reply.write_payload_u16(0);
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.height));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.height));
+        reply.write_payload_u16(static_cast<std::uint16_t>(mode.height));
+        reply.write_payload_u16(
+            static_cast<std::uint16_t>(mode.name.size()));
+        reply.write_payload_u32(mode.flags);
+      }
+    }
+    for (const auto& output : outputs) {
+      for (const auto& mode : output.modes) {
+        reply.write_payload(std::span<const std::uint8_t>(
+            reinterpret_cast<const std::uint8_t*>(mode.name.data()),
+            mode.name.size()));
+      }
+    }
+    return {std::move(reply).finish()};
+  }
   const auto& screen = state.screen();
   const auto name = mode_name(screen);
   x11::ReplyBuilder reply(context.byte_order, context.sequence);
@@ -207,6 +279,38 @@ DispatchResult randr_get_output_info(ServerState& state,
   std::uint32_t output{}, config_timestamp{};
   (void)reader.read_u32(output);
   (void)reader.read_u32(config_timestamp);
+  if (state.randr().output_model_enabled()) {
+    const auto* object = state.randr().find_output(output);
+    if (!object) return randr_bad_output(context, request, output);
+    static_cast<void>(config_timestamp);
+    const auto timestamp = state.randr().configuration_timestamp();
+    x11::ByteWriter writer(context.byte_order);
+    writer.write_u8(1);
+    writer.write_u8(0);
+    writer.write_u16(x11::wire_sequence(context.sequence));
+    const auto payload_size = 4U + (object->enabled ? 4U : 0U) +
+                              object->modes.size() * 4U + object->name.size();
+    writer.write_u32(static_cast<std::uint32_t>((payload_size + 3U) / 4U));
+    writer.write_u32(timestamp);
+    writer.write_u32(object->enabled ? object->crtc_xid : 0);
+    writer.write_u32(object->physical_width_mm);
+    writer.write_u32(object->physical_height_mm);
+    writer.write_u8(object->connected ? 0 : 1);
+    writer.write_u8(0);
+    writer.write_u16(object->enabled ? 1 : 0);
+    writer.write_u16(static_cast<std::uint16_t>(object->modes.size()));
+    writer.write_u16(static_cast<std::uint16_t>(std::ranges::count(
+        object->modes, true, &RandRModeObject::preferred)));
+    writer.write_u16(0);
+    writer.write_u16(static_cast<std::uint16_t>(object->name.size()));
+    if (object->enabled) writer.write_u32(object->crtc_xid);
+    for (const auto& mode : object->modes) writer.write_u32(mode.xid);
+    writer.write_bytes(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t*>(object->name.data()),
+        object->name.size()));
+    writer.write_padding((4U - object->name.size() % 4U) % 4U);
+    return {std::move(writer).take()};
+  }
   if (output != kRandROutputId)
     return randr_bad_output(context, request, output);
   static_cast<void>(config_timestamp);

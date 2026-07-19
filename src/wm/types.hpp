@@ -9,7 +9,9 @@
 namespace glasswyrm::wm {
 
 inline constexpr std::size_t maximum_windows = 4096;
+inline constexpr std::size_t maximum_outputs = 8;
 inline constexpr std::uint32_t maximum_work_extent = 16384;
+inline constexpr std::uint32_t maximum_root_extent = 32767;
 inline constexpr std::uint32_t maximum_window_extent = 16384;
 inline constexpr std::uint32_t maximum_border_width = 65535;
 
@@ -18,6 +20,16 @@ enum class DecorationPreference : std::uint8_t { Unknown, False, True };
 enum class AppliedState : std::uint8_t { Normal = 1, Maximized, Fullscreen, Minimized };
 enum class TriState : std::uint8_t { Unknown, False, True };
 enum class StackMode : std::uint8_t { None, Above, Below };
+enum class OutputTransform : std::uint8_t {
+  Normal,
+  Rotate90,
+  Rotate180,
+  Rotate270,
+  Flipped,
+  Flipped90,
+  Flipped180,
+  Flipped270,
+};
 enum class EvaluationError : std::uint8_t {
   None,
   IncompleteSnapshot,
@@ -37,6 +49,32 @@ struct Context {
   std::int32_t work_y{};
   std::uint32_t work_width{};
   std::uint32_t work_height{};
+  std::uint32_t flags{};
+};
+
+struct Rectangle {
+  std::int32_t x{};
+  std::int32_t y{};
+  std::uint32_t width{};
+  std::uint32_t height{};
+};
+
+struct OutputContext {
+  std::uint64_t output_id{};
+  Rectangle logical;
+  Rectangle work;
+  std::uint32_t scale_numerator{1};
+  std::uint32_t scale_denominator{1};
+  OutputTransform transform{OutputTransform::Normal};
+  bool enabled{};
+  bool primary{};
+  std::uint32_t flags{};
+};
+
+struct WindowOutputHint {
+  std::uint32_t window_id{};
+  std::uint64_t previous_output_id{};
+  std::uint64_t preferred_output_id{};
   std::uint32_t flags{};
 };
 
@@ -73,6 +111,8 @@ struct RawState {
   std::uint64_t producer_generation{};
   Context context{};
   bool has_context{};
+  std::map<std::uint64_t, OutputContext> outputs;
+  std::map<std::uint32_t, WindowOutputHint> output_hints;
   std::map<std::uint32_t, RawWindow> windows;
 };
 
@@ -102,6 +142,8 @@ struct PolicyState {
   std::uint64_t generation{};
   std::uint64_t hash{};
   Context context{};
+  std::map<std::uint64_t, OutputContext> outputs;
+  std::map<std::uint32_t, WindowOutputHint> output_hints;
   std::map<std::uint32_t, WindowState> windows;
   std::vector<std::uint32_t> output_order;
 };

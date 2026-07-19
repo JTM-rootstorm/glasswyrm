@@ -88,6 +88,7 @@ actions:
 ./tools/gw-vm milestone4-runtime-test --yes
 ./tools/gw-vm milestone11-runtime-test --yes
 ./tools/gw-vm milestone12-runtime-test --yes
+./tools/gw-vm milestone13-runtime-test --yes
 ./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
@@ -306,3 +307,25 @@ client startup scheduling cannot choose which overlapping window is visible.
 The accepted result is
 `milestone12-summary.json`; its checksum-protected evidence archive and logs
 are collected beneath the configured `artifacts/vm/` path.
+
+Milestone 13 preserves that historical gate and then validates the
+experimental output model with the fixed sequence:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone12-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone13-runtime-test --yes
+```
+
+The M13 command requires committed source descending from
+`d3440d3b8df1533410a9a2c4be46f2eea0cfb88d` and the configured internal
+`base` snapshot. It runs the default, software, GLES, sanitizer, Clang,
+component, source-layout, and API-consumer gates before starting a two-output
+headless session. Fixed `gwinfo`, `gwout`, raw RANDR/GW_SCALE, pinned SDL
+2.32.10 display discovery, pointer crossing, scale-client, output enable/disable,
+restart, and transform steps produce checksum-protected atomic frame-set
+evidence. A final QXL
+DRM stage applies scale 4/3 and Rotate180, compares the canonical mirror with a
+host graphical-console capture, exercises VT replay, restores scale 1/1 and
+Normal, and verifies resource cleanup. No arbitrary guest command is exposed.

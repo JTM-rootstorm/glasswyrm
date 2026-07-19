@@ -13,6 +13,16 @@ void ContentPresenter::damage(const std::uint32_t window,
   if (!rectangle.empty()) windows_[window].pending.push_back(rectangle);
 }
 
+void ContentPresenter::damage_scaled(
+    const std::uint32_t window,
+    const geometry::Rectangle logical_rectangle,
+    const geometry::Rectangle buffer_rectangle) {
+  if (logical_rectangle.empty() || buffer_rectangle.empty()) return;
+  auto& content = windows_[window];
+  content.pending.push_back(logical_rectangle);
+  content.pending_buffer.push_back(buffer_rectangle);
+}
+
 std::vector<geometry::Rectangle> ContentPresenter::normalize(
     const std::span<const geometry::Rectangle> rectangles,
     const geometry::Rectangle bounds) {
@@ -103,10 +113,17 @@ bool ContentPresenter::prepare_lifecycle(
     CompositorSnapshotSubmission& submission) {
   if (in_flight_) return false;
   for (const auto& [xid, projected] : snapshot.windows) {
-    auto storage = stage_storage(xid, projected.applied_width,
-                                 projected.applied_height, resources);
+    const bool scaled =
+        projected.scale.presentation ==
+            WindowScalePresentationState::ScaleAwareActive &&
+        projected.scale.scaled_pixmap_storage;
+    auto storage = scaled
+                       ? projected.scale.scaled_pixmap_storage
+                       : stage_storage(xid, projected.applied_width,
+                                       projected.applied_height, resources);
     if (!storage) return false;
-    auto composed = compose_top_level_subtree(resources, xid);
+    auto composed = scaled ? std::optional<PixelStorage>{}
+                           : compose_top_level_subtree(resources, xid);
     const PixelStorage* presentation = storage.get();
     if (composed && composed->width() == storage->width() &&
         composed->height() == storage->height())
@@ -115,11 +132,22 @@ bool ContentPresenter::prepare_lifecycle(
     auto* buffer = ensure_buffer(xid, *storage, replaced);
     if (!buffer) return false;
     auto& content = windows_[xid];
-    auto dirty = normalize(content.pending,
-                           {0, 0, storage->width(), storage->height()});
-    if (!buffer->announced() || replaced)
-      dirty = {{0, 0, storage->width(), storage->height()}};
-    if (!dirty.empty() && !buffer->copy_from(*presentation, dirty)) return false;
+    auto logical_dirty = normalize(
+        content.pending,
+        {0, 0, projected.applied_width, projected.applied_height});
+    auto buffer_dirty = scaled
+                            ? normalize(content.pending_buffer,
+                                        {0, 0, storage->width(),
+                                         storage->height()})
+                            : logical_dirty;
+    if (!buffer->announced() || replaced) {
+      buffer_dirty = {{0, 0, storage->width(), storage->height()}};
+      logical_dirty = {{0, 0, projected.applied_width,
+                        projected.applied_height}};
+    }
+    if (!buffer_dirty.empty() &&
+        !buffer->copy_from(*presentation, buffer_dirty))
+      return false;
     if (!buffer->announced()) {
       CompositorSnapshotSubmission::Buffer attachment;
       attachment.attach.struct_size = sizeof(attachment.attach);
@@ -141,10 +169,12 @@ bool ContentPresenter::prepare_lifecycle(
     }
     if ((projected.policy_visible ||
          synchronization_ == GWIPC_SYNCHRONIZATION_EVENTFD) &&
-        !dirty.empty())
-      submission.damages.push_back(make_damage(xid, dirty));
+        !logical_dirty.empty())
+      submission.damages.push_back(make_damage(xid, logical_dirty));
     content.pending.clear();
-    content.inflight = std::move(dirty);
+    content.pending_buffer.clear();
+    content.inflight = std::move(logical_dirty);
+    content.inflight_buffer = std::move(buffer_dirty);
   }
   if (!signal_buffers(submission.damages)) {
     reject_lifecycle();
@@ -170,7 +200,12 @@ void ContentPresenter::accept_lifecycle(const LifecycleSnapshot& snapshot,
     auto found = windows_.find(xid);
     if (found == windows_.end()) continue;
     if (auto* window = resources.find_window(xid); window != nullptr) {
-      if (window->storage && found->second.staged_storage != window->storage &&
+      const bool scaled =
+          window->scale.presentation ==
+              WindowScalePresentationState::ScaleAwareActive &&
+          window->scale.scaled_pixmap_storage;
+      if (!scaled && window->storage &&
+          found->second.staged_storage != window->storage &&
           !found->second.pending.empty()) {
         auto latest = window->storage->resize_preserving_overlap(
             found->second.staged_storage->width(),
@@ -179,9 +214,10 @@ void ContentPresenter::accept_lifecycle(const LifecycleSnapshot& snapshot,
           found->second.staged_storage =
               std::make_shared<PixelStorage>(std::move(*latest));
       }
-      window->storage = found->second.staged_storage;
+      if (!scaled) window->storage = found->second.staged_storage;
     }
     found->second.inflight.clear();
+    found->second.inflight_buffer.clear();
     found->second.staged_storage.reset();
     if (found->second.staged_buffer) {
       if (buffers_.current(xid) &&
@@ -211,7 +247,11 @@ void ContentPresenter::reject_lifecycle() noexcept {
     (void)xid;
     content.pending.insert(content.pending.end(), content.inflight.begin(),
                            content.inflight.end());
+    content.pending_buffer.insert(content.pending_buffer.end(),
+                                  content.inflight_buffer.begin(),
+                                  content.inflight_buffer.end());
     content.inflight.clear();
+    content.inflight_buffer.clear();
     content.staged_storage.reset();
     if (content.staged_buffer) {
       discarded_buffers_.insert(content.staged_buffer->buffer_id());
@@ -231,24 +271,71 @@ bool ContentPresenter::prepare_content(
     const std::uint64_t commit, const std::uint64_t generation,
     CompositorContentSubmission& submission) {
   if (in_flight_ || commit == 0 || generation == 0) return false;
-  submission = {commit, generation, {}};
+  submission = {commit, generation, {}, {}};
   for (const auto& [xid, projected] : snapshot.windows) {
     auto found = windows_.find(xid);
     auto* window = resources.find_window(xid);
     auto* buffer = buffers_.current(xid);
     if (!projected.policy_visible || found == windows_.end() ||
-        found->second.pending.empty() || window == nullptr ||
-        !window->storage || buffer == nullptr)
+        found->second.pending.empty() || window == nullptr)
       continue;
+    const bool scaled =
+        window->scale.presentation ==
+            WindowScalePresentationState::ScaleAwareActive &&
+        window->scale.scaled_pixmap_storage;
+    const PixelStorage* presentation = nullptr;
+    std::optional<PixelStorage> composed;
+    std::vector<geometry::Rectangle> buffer_dirty;
+    if (scaled) {
+      if (found->second.pending_buffer.empty()) {
+        found->second.pending.clear();
+        continue;
+      }
+      presentation = window->scale.scaled_pixmap_storage.get();
+      buffer_dirty = normalize(found->second.pending_buffer,
+                               {0, 0, presentation->width(),
+                                presentation->height()});
+    } else {
+      composed = compose_top_level_subtree(resources, xid);
+      if (!composed) return false;
+      presentation = &*composed;
+    }
     auto dirty = normalize(found->second.pending,
-                           {0, 0, window->storage->width(),
-                            window->storage->height()});
+                           {0, 0, projected.applied_width,
+                            projected.applied_height});
     if (dirty.empty()) continue;
-    auto composed = compose_top_level_subtree(resources, xid);
-    if (!composed) return false;
-    if (!buffer->copy_from(*composed, dirty)) return false;
+    if (!scaled) buffer_dirty = dirty;
+    bool replaced = false;
+    buffer = ensure_buffer(xid, *presentation, replaced);
+    if (!buffer) return false;
+    if (!buffer->announced() || replaced) {
+      buffer_dirty = {{0, 0, presentation->width(), presentation->height()}};
+      dirty = {{0, 0, projected.applied_width, projected.applied_height}};
+    }
+    if (!buffer->copy_from(*presentation, buffer_dirty)) return false;
+    if (!buffer->announced()) {
+      CompositorSnapshotSubmission::Buffer attachment;
+      attachment.attach.struct_size = sizeof(attachment.attach);
+      attachment.attach.buffer_id = buffer->buffer_id();
+      attachment.attach.surface_id = (UINT64_C(1) << 32U) | xid;
+      attachment.attach.width = buffer->width();
+      attachment.attach.height = buffer->height();
+      attachment.attach.stride = buffer->stride();
+      attachment.attach.storage_size = buffer->size();
+      attachment.attach.pixel_format = GWIPC_PIXEL_FORMAT_XRGB8888;
+      attachment.attach.alpha_semantics = GWIPC_ALPHA_OPAQUE;
+      attachment.attach.color.color_space = GWIPC_SDR_COLOR_SPACE_SRGB;
+      attachment.attach.color.transfer_function = GWIPC_TRANSFER_FUNCTION_SRGB;
+      attachment.attach.color.primaries = GWIPC_COLOR_PRIMARIES_SRGB;
+      attachment.attach.synchronization = buffer->synchronization();
+      attachment.fd = buffer->fd();
+      attachment.synchronization_fd = buffer->synchronization_fd();
+      submission.buffers.push_back(attachment);
+    }
     found->second.pending.clear();
+    found->second.pending_buffer.clear();
     found->second.inflight = dirty;
+    found->second.inflight_buffer = buffer_dirty;
     submission.damages.push_back(make_damage(xid, dirty));
   }
   if (submission.damages.empty()) return false;
@@ -262,8 +349,17 @@ bool ContentPresenter::prepare_content(
 
 void ContentPresenter::accept_content() noexcept {
   for (auto& [xid, content] : windows_) {
-    (void)xid;
     content.inflight.clear();
+    content.inflight_buffer.clear();
+    if (content.staged_buffer) {
+      if (buffers_.current(xid) &&
+          !buffers_.retire(xid, PublishedBufferRetirement::Replaced))
+        continue;
+      auto replacement = std::move(content.staged_buffer);
+      replacement->set_announced(true);
+      (void)buffers_.install(xid, std::move(replacement));
+    }
+    if (auto* buffer = buffers_.current(xid)) buffer->set_announced(true);
   }
   in_flight_ = false;
 }
@@ -273,7 +369,15 @@ void ContentPresenter::reject_content() noexcept {
     (void)xid;
     content.pending.insert(content.pending.end(), content.inflight.begin(),
                            content.inflight.end());
+    content.pending_buffer.insert(content.pending_buffer.end(),
+                                  content.inflight_buffer.begin(),
+                                  content.inflight_buffer.end());
     content.inflight.clear();
+    content.inflight_buffer.clear();
+    if (content.staged_buffer) {
+      discarded_buffers_.insert(content.staged_buffer->buffer_id());
+      content.staged_buffer.reset();
+    }
   }
   in_flight_ = false;
 }

@@ -1,11 +1,13 @@
 #pragma once
 
+#include "backends/headless/inventory.hpp"
 #include "render/scene_renderer.hpp"
 
 #include <cstdint>
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace glasswyrm::compositor {
 
@@ -22,6 +24,7 @@ struct Options {
   Backend backend{Backend::Headless};
   std::string ipc_socket;
   std::string dump_dir;
+  std::vector<headless::OutputRequest> headless_outputs;
   std::optional<std::string> drm_device;
   std::optional<int> drm_fd;
   bool external_session{false};

@@ -14,6 +14,10 @@ if get_option('gwm') and not get_option('libgwipc')
   error('gwm requires -Dlibgwipc=true for the Milestone 5 policy contract')
 endif
 
+if get_option('tools') and not get_option('libgwipc')
+  error('tools requires -Dlibgwipc=true because gwinfo and gwout are real output-control clients')
+endif
+
 if get_option('gwcomp')
   if not get_option('libgwipc')
     error('gwcomp requires -Dlibgwipc=true for the Milestone 4 contract')
@@ -235,6 +239,7 @@ config_data.set10('GW_HAS_LIBINPUT_BACKEND', get_option('libinput_backend'))
 config_data.set10('GW_HAS_GLES_RENDERER', get_option('render_gl'))
 config_data.set10('GW_HAS_GBM', get_option('render_gl') and gbm_dep.found())
 config_data.set10('GW_HAS_EXPERIMENTAL', get_option('experimental'))
+config_data.set10('GW_HAS_LIBGWIPC', get_option('libgwipc'))
 
 configure_file(
   output: 'config.hpp',

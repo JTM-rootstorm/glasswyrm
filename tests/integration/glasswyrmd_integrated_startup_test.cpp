@@ -28,6 +28,21 @@ pid_t launch_server(const char *executable, const std::string &dir,
   }
   return child;
 }
+pid_t launch_output_model_server(const char *executable,
+                                 const std::string &dir,
+                                 const std::string &wm,
+                                 const std::string &comp,
+                                 const char *display) {
+  const auto child = ::fork();
+  require(child >= 0, "fork output-model glasswyrmd");
+  if (child == 0) {
+    ::execl(executable, executable, "--display", display, "--socket-dir",
+            dir.c_str(), "--wm-socket", wm.c_str(), "--compositor-socket",
+            comp.c_str(), "--output-model", nullptr);
+    _exit(127);
+  }
+  return child;
+}
 pid_t launch_peer(const char *executable, const std::string &socket,
                   const std::string &dump = {}) {
   const auto child = ::fork();
@@ -38,6 +53,20 @@ pid_t launch_peer(const char *executable, const std::string &socket,
     else
       ::execl(executable, executable, "--ipc-socket", socket.c_str(),
               "--dump-dir", dump.c_str(), nullptr);
+    _exit(127);
+  }
+  return child;
+}
+pid_t launch_output_model_compositor(const char *executable,
+                                     const std::string &socket,
+                                     const std::string &dump) {
+  const auto child = ::fork();
+  require(child >= 0, "fork output-model compositor");
+  if (child == 0) {
+    ::execl(executable, executable, "--ipc-socket", socket.c_str(),
+            "--dump-dir", dump.c_str(), "--headless-output",
+            "LEFT:800x600@60000", "--headless-output",
+            "RIGHT:640x480@75000", nullptr);
     _exit(127);
   }
   return child;
@@ -81,6 +110,25 @@ int main(int argc, char **argv) {
   stop(server);
   stop(wm);
   stop(comp);
+
+  const auto output_root = root + "/output-model";
+  std::filesystem::create_directory(output_root);
+  const auto output_wm_socket = output_root + "/gwm.sock";
+  const auto output_comp_socket = output_root + "/gwcomp.sock";
+  const auto output_x_socket = std::filesystem::path(output_root) / "X73";
+  const auto output_server = launch_output_model_server(
+      argv[1], output_root, output_wm_socket, output_comp_socket, "73");
+  const auto output_comp = launch_output_model_compositor(
+      argv[3], output_comp_socket, output_root + "/dump");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  require(!std::filesystem::exists(output_x_socket),
+          "output-model listener waits for accepted zero-window policy");
+  const auto output_wm = launch_peer(argv[2], output_wm_socket);
+  require(wait_for(output_x_socket, true, std::chrono::seconds(5)),
+          "output-model listener follows inventory and policy bootstrap");
+  stop(output_server);
+  stop(output_wm);
+  stop(output_comp);
 
   const auto timeout_root = root + "/timeout";
   std::filesystem::create_directory(timeout_root);

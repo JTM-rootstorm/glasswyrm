@@ -195,6 +195,7 @@ class ResourceTable {
                          ResourceLimits limits = {});
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
+  [[nodiscard]] bool update_screen_geometry(ScreenModel screen) noexcept;
   [[nodiscard]] const ResourceRecord* find(std::uint32_t xid) const noexcept;
   [[nodiscard]] ResourceRecord* find(std::uint32_t xid) noexcept;
   [[nodiscard]] const WindowResource* find_window(
@@ -324,6 +325,7 @@ class ResourceTable {
   [[nodiscard]] std::uint32_t all_event_selections(
       std::uint32_t window) const noexcept;
   void remove_event_selections(ClientId client) noexcept;
+  void remove_gw_scale_selections(ClientId client) noexcept;
 
   [[nodiscard]] PropertyMutationStatus change_property(
       std::uint32_t window, std::uint32_t property_atom, Property value,

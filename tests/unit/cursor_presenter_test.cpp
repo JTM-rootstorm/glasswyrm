@@ -1,4 +1,5 @@
 #include "glasswyrmd/cursor_presenter.hpp"
+#include "glasswyrmd/output_scene_projection.hpp"
 #include "helpers/test_support.hpp"
 
 #include <fcntl.h>
@@ -18,6 +19,42 @@ std::shared_ptr<const glasswyrm::input::CursorImage> cursor(
       error);
   gw::test::require(image != nullptr, error.c_str());
   return image;
+}
+
+glasswyrm::output::OutputLayout output_layout() {
+  using namespace glasswyrm::output;
+  constexpr OutputId left{10};
+  constexpr OutputId right{20};
+  OutputLayout layout;
+  layout.primary_output_id = left;
+  layout.root_logical_width = 180;
+  layout.root_logical_height = 100;
+  layout.generation = 7;
+  layout.enabled_output_count = 2;
+  layout.output_order = {left, right};
+  OutputState left_state;
+  left_state.output_id = left;
+  left_state.enabled = true;
+  left_state.logical_width = 100;
+  left_state.logical_height = 100;
+  left_state.physical_width = 100;
+  left_state.physical_height = 100;
+  left_state.scale = {1, 1};
+  left_state.primary = true;
+  left_state.generation = layout.generation;
+  layout.states.emplace(left, left_state);
+  OutputState right_state;
+  right_state.output_id = right;
+  right_state.enabled = true;
+  right_state.logical_x = 100;
+  right_state.logical_width = 80;
+  right_state.logical_height = 100;
+  right_state.physical_width = 100;
+  right_state.physical_height = 125;
+  right_state.scale = {5, 4};
+  right_state.generation = layout.generation;
+  layout.states.emplace(right, right_state);
+  return layout;
 }
 
 }  // namespace
@@ -107,5 +144,47 @@ int main() {
                              GWIPC_BUFFER_RELEASE_REPLACED),
           "disconnect drops buffers that the departed peer cannot release");
   presenter.accept();
+  const auto reconnected_buffer = reconnected.buffer->attach.buffer_id;
+  require(presenter.release(reconnected_buffer,
+                            GWIPC_BUFFER_RELEASE_SURFACE_REMOVED) &&
+              presenter.needs_update(resize, 40, 50, true),
+          "layout snapshot removal retires the active cursor publication");
+  CompositorCursorSubmission layout_republished;
+  require(presenter.prepare(resize, 40, 50, true, layout_republished, error) &&
+              layout_republished.buffer && layout_republished.damage &&
+              layout_republished.buffer->attach.buffer_id !=
+                  reconnected_buffer,
+          "removed cursor surface republishes a fresh immutable buffer");
+  presenter.accept();
+
+  const auto layout = output_layout();
+  CursorPresenter scaled_presenter;
+  CompositorCursorSubmission scaled;
+  const auto scale = cursor_buffer_scale(layout, 120, 30);
+  require(scale == 2 &&
+              scaled_presenter.prepare(pointer, 120, 30, true, scaled, error,
+                                       false, scale) &&
+              scaled.surface.logical_width == pointer->width &&
+              scaled.surface.logical_height == pointer->height &&
+              scaled.surface.scale_numerator == 2 && scaled.buffer &&
+              scaled.buffer->attach.width == pointer->width * 2 &&
+              scaled.buffer->attach.height == pointer->height * 2 &&
+              scaled.pointer_x == 120 && scaled.pointer_y == 30,
+          "fractional output scale selects a scaled immutable cursor buffer");
+  require(populate_cursor_output_state(scaled, layout) &&
+              scaled.surface.output_id == 20 &&
+              scaled.surface_output.state.surface_id ==
+                  CursorPresenter::kSurfaceId &&
+              scaled.surface_output.state.primary_output_id == 20 &&
+              scaled.surface_output.state.preferred_scale_numerator == 5 &&
+              scaled.surface_output.state.preferred_scale_denominator == 4 &&
+              scaled.surface_output.state.client_buffer_scale == 2 &&
+              scaled.surface_output.state.scale_mode ==
+                  GWIPC_SURFACE_SCALE_SCALED_PIXMAP &&
+              scaled.surface_output.state.layout_generation == 7 &&
+              scaled.surface_output.output_ids ==
+                  std::vector<std::uint64_t>({20}),
+          "cursor output state follows the pointer and owns exact membership");
+  scaled_presenter.accept();
   return 0;
 }

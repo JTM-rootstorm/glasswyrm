@@ -25,6 +25,14 @@ namespace glasswyrm::server {
 [[nodiscard]] std::vector<std::uint8_t> encode_randr_output_property_notify(
     gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
     const RandROutputPropertyNotifyEvent& event);
+[[nodiscard]] std::vector<std::uint8_t> encode_gw_scale_notify(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const GwScaleNotifyEvent& event);
+
+void append_gw_scale_notifications(DispatchResult& result,
+                                   const WindowResource& window,
+                                   std::uint32_t xid,
+                                   std::uint8_t reason_mask);
 
 inline void append_xfixes_notifications(
     DispatchResult& result,

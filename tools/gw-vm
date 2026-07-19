@@ -36,6 +36,8 @@ source "$GW_VM_DIR/lib/milestone10.sh"
 source "$GW_VM_DIR/lib/milestone11.sh"
 # shellcheck source=gw-vm.d/lib/milestone12.sh
 source "$GW_VM_DIR/lib/milestone12.sh"
+# shellcheck source=gw-vm.d/lib/milestone13.sh
+source "$GW_VM_DIR/lib/milestone13.sh"
 # shellcheck source=gw-vm.d/lib/report.sh
 source "$GW_VM_DIR/lib/report.sh"
 
@@ -74,6 +76,7 @@ Commands:
   milestone10-runtime-test --yes    Validate M10 DRM/KMS presentation in the VM.
   milestone11-runtime-test --yes    Validate the M11 interactive desktop in the VM.
   milestone12-runtime-test --yes    Validate the M12 efficient SDL profile in the VM.
+  milestone13-runtime-test --yes    Validate the M13 output and scaling profile in the VM.
   milestone11-interactive-rerun --yes
                                     Rerun only M11 live interaction diagnostics.
   scenario NAME [ARGS]              Run a fixed named scenario.
@@ -95,6 +98,7 @@ Examples:
   ./tools/gw-vm milestone10-runtime-test --yes
   ./tools/gw-vm milestone11-runtime-test --yes
   ./tools/gw-vm milestone12-runtime-test --yes
+  ./tools/gw-vm milestone13-runtime-test --yes
   ./tools/gw-vm milestone11-interactive-rerun --yes
 
 Generated output is written beneath artifacts/vm/.
@@ -303,6 +307,7 @@ run_named_scenario() {
     milestone10-runtime-test) action_milestone10 "$@" ;;
     milestone11-runtime-test) action_milestone11 "$@" ;;
     milestone12-runtime-test) action_milestone12 "$@" ;;
+    milestone13-runtime-test) action_milestone13 "$@" ;;
     milestone11-interactive-rerun) action_milestone11_interactive_rerun "$@" ;;
     *) die "Unknown scenario '$name'. Scenario names are fixed and cannot be paths." ;;
   esac
@@ -406,6 +411,12 @@ action_milestone12() {
   milestone12_runtime_test "$approved"
 }
 
+action_milestone13() {
+  local approved
+  approved="$(parse_yes_only "$@")"
+  milestone13_runtime_test "$approved"
+}
+
 action_milestone11_interactive_rerun() {
   local approved
   approved="$(parse_yes_only "$@")"
@@ -480,6 +491,7 @@ main() {
     milestone10-runtime-test) action_milestone10 "$@" ;;
     milestone11-runtime-test) action_milestone11 "$@" ;;
     milestone12-runtime-test) action_milestone12 "$@" ;;
+    milestone13-runtime-test) action_milestone13 "$@" ;;
     milestone11-interactive-rerun) action_milestone11_interactive_rerun "$@" ;;
     scenario) run_named_scenario "$@" ;;
     *) die "Unknown command '$command'. Run './tools/gw-vm help'." ;;

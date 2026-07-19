@@ -2,9 +2,12 @@
 #include "helpers/x11_request_builder.hpp"
 
 #include <chrono>
+#include <charconv>
 #include <cstdint>
 #include <exception>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -13,12 +16,39 @@
 namespace {
 namespace x11 = gw::protocol::x11;
 
+struct RootDimensions {
+  std::uint16_t width{};
+  std::uint16_t height{};
+};
+
 struct Options {
   std::string socket_dir = "/tmp/.X11-unix";
   std::string display = "0";
   x11::ByteOrder order = x11::ByteOrder::LittleEndian;
   enum class Mode { Basic, Errors, Cleanup, CrossEndian } mode = Mode::Basic;
+  std::optional<RootDimensions> expected_root;
 };
+
+bool parse_dimension(std::string_view text, std::uint16_t& result) {
+  unsigned value = 0;
+  const auto [end, error] =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (error != std::errc{} || end != text.data() + text.size() || value == 0 ||
+      value > std::numeric_limits<std::uint16_t>::max()) {
+    return false;
+  }
+  result = static_cast<std::uint16_t>(value);
+  return true;
+}
+
+bool parse_root_dimensions(std::string_view text, RootDimensions& result) {
+  const auto separator = text.find('x');
+  return separator != std::string_view::npos && separator != 0 &&
+         separator + 1 < text.size() &&
+         text.find('x', separator + 1) == std::string_view::npos &&
+         parse_dimension(text.substr(0, separator), result.width) &&
+         parse_dimension(text.substr(separator + 1), result.height);
+}
 
 bool parse(int argc, char** argv, Options& options) {
   bool mode_seen = false;
@@ -36,6 +66,11 @@ bool parse(int argc, char** argv, Options& options) {
       if (value == "little") options.order = x11::ByteOrder::LittleEndian;
       else if (value == "big") options.order = x11::ByteOrder::BigEndian;
       else return false;
+    } else if (argument == "--expect-root" && index + 1 < argc &&
+               !options.expected_root.has_value()) {
+      RootDimensions expected;
+      if (!parse_root_dimensions(argv[++index], expected)) return false;
+      options.expected_root = expected;
     } else if (!mode_seen && argument == "--basic") {
       options.mode = Options::Mode::Basic;
       mode_seen = true;
@@ -53,7 +88,26 @@ bool parse(int argc, char** argv, Options& options) {
     }
   }
   return !options.display.empty() &&
-         options.display.find_first_not_of("0123456789") == std::string::npos;
+         options.display.find_first_not_of("0123456789") == std::string::npos &&
+         (!options.expected_root.has_value() ||
+          options.mode == Options::Mode::Basic);
+}
+
+RootDimensions setup_root_dimensions(const std::vector<std::uint8_t>& reply,
+                                     x11::ByteOrder order) {
+  if (reply.size() < 40 || reply[28] == 0) {
+    throw std::runtime_error("setup reply has no complete screen metadata");
+  }
+  const auto vendor_size = gw::test::read_wire_u16(reply.data() + 24, order);
+  const auto padded_vendor_size =
+      (static_cast<std::size_t>(vendor_size) + 3U) & ~std::size_t{3U};
+  const auto screen_offset =
+      40U + padded_vendor_size + static_cast<std::size_t>(reply[29]) * 8U;
+  if (screen_offset > reply.size() || reply.size() - screen_offset < 24) {
+    throw std::runtime_error("setup reply screen metadata is truncated");
+  }
+  return {gw::test::read_wire_u16(reply.data() + screen_offset + 20, order),
+          gw::test::read_wire_u16(reply.data() + screen_offset + 22, order)};
 }
 
 struct Session {
@@ -61,13 +115,15 @@ struct Session {
   gw::test::X11RequestBuilder wire;
   x11::ByteOrder order;
   std::uint32_t base{0};
+  std::vector<std::uint8_t> setup_reply;
 
   Session(const std::string& socket, x11::ByteOrder byte_order)
       : client(socket), wire(byte_order), order(byte_order) {
     client.send_all(gw::test::make_setup_request(order));
-    const auto reply = client.receive_setup_reply(order);
-    if (reply.empty() || reply[0] != 1) throw std::runtime_error("setup failed");
-    base = gw::test::read_wire_u32(reply.data() + 12, order);
+    setup_reply = client.receive_setup_reply(order);
+    if (setup_reply.empty() || setup_reply[0] != 1)
+      throw std::runtime_error("setup failed");
+    base = gw::test::read_wire_u32(setup_reply.data() + 12, order);
   }
 
   void sync() {
@@ -89,8 +145,20 @@ void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
-void basic(const std::string& socket, x11::ByteOrder order) {
+void basic(const std::string& socket, x11::ByteOrder order,
+           const std::optional<RootDimensions>& expected_root) {
   Session session(socket, order);
+  if (expected_root.has_value()) {
+    const auto actual = setup_root_dimensions(session.setup_reply, order);
+    if (actual.width != expected_root->width ||
+        actual.height != expected_root->height) {
+      throw std::runtime_error(
+          "root dimensions mismatch: expected " +
+          std::to_string(expected_root->width) + "x" +
+          std::to_string(expected_root->height) + ", got " +
+          std::to_string(actual.width) + "x" + std::to_string(actual.height));
+    }
+  }
   const auto window = session.base + 1;
   session.client.send_all(
       session.wire.create_window(window, 1, 2, 3, 80, 60));
@@ -179,13 +247,16 @@ int main(int argc, char** argv) {
   if (!parse(argc, argv, options)) {
     std::cerr << "Usage: x11_milestone2_probe [--socket-dir PATH] "
                  "[--display :N] [--byte-order little|big] "
+                 "[--expect-root WIDTHxHEIGHT] "
                  "[--basic|--errors|--cleanup|--cross-endian]\n";
     return 2;
   }
   try {
     const std::string socket = options.socket_dir + "/X" + options.display;
     switch (options.mode) {
-      case Options::Mode::Basic: basic(socket, options.order); break;
+      case Options::Mode::Basic:
+        basic(socket, options.order, options.expected_root);
+        break;
       case Options::Mode::Errors: errors(socket); break;
       case Options::Mode::Cleanup: cleanup(socket); break;
       case Options::Mode::CrossEndian: cross_endian(socket); break;

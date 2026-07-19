@@ -8,10 +8,22 @@
 #include <utility>
 
 namespace glasswyrm::server {
+namespace {
+
+ExtensionCapability extension_capabilities(const Options& options) noexcept {
+  auto result = options.game_compat ? ExtensionCapability::GameCompat
+                                    : ExtensionCapability::None;
+  if (options.scale_protocol)
+    result = result | ExtensionCapability::ScaleProtocol;
+  return result;
+}
+
+}  // namespace
 
 Server::Server(Options options)
     : options_(std::move(options)),
-      extensions_(options_.game_compat, options_.disabled_extensions),
+      extensions_(extension_capabilities(options_),
+                  options_.disabled_extensions),
       state_(kScreenModel, options_.game_compat) {
   socket_path_ = options_.socket_dir + "/X" +
                  std::to_string(static_cast<unsigned int>(options_.display));

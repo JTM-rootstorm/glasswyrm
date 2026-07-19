@@ -9,8 +9,9 @@
 #include "glasswyrmd/lifecycle_snapshot.hpp"
 #include "glasswyrmd/selection_store.hpp"
 
-#include <limits>
+#include <algorithm>
 #include <array>
+#include <limits>
 #include <optional>
 
 namespace glasswyrm::server {
@@ -51,6 +52,7 @@ class ServerState {
                        bool game_compat = false);
 
   [[nodiscard]] const ScreenModel& screen() const noexcept { return screen_; }
+  [[nodiscard]] bool update_screen_geometry(ScreenModel screen);
   [[nodiscard]] bool game_compat() const noexcept { return game_compat_; }
   [[nodiscard]] ResourceTable& resources() noexcept { return resources_; }
   [[nodiscard]] const ResourceTable& resources() const noexcept {
@@ -134,6 +136,37 @@ class ServerState {
       window->maximum_height = intent.maximum_height;
       window->saved_normal_geometry = intent.saved_normal_geometry;
       window->attributes.override_redirect = intent.override_redirect;
+      window->policy_applied_state = intent.applied_state;
+      window->policy_managed = intent.managed;
+      window->policy_decoration_eligible = intent.decoration_eligible;
+      window->policy_fullscreen_eligible = intent.fullscreen_eligible;
+      window->policy_direct_scanout_eligible = intent.direct_scanout_eligible;
+      if (intent.scale.has_output_state) {
+        auto projected_scale = window->scale;
+        projected_scale.has_output_state = true;
+        projected_scale.preferred_scale_numerator =
+            intent.scale.preferred_scale_numerator;
+        projected_scale.preferred_scale_denominator =
+            intent.scale.preferred_scale_denominator;
+        projected_scale.layout_generation = intent.scale.layout_generation;
+        projected_scale.primary_output = 0;
+        projected_scale.output_memberships.clear();
+        for (const auto& output : staged.randr_.outputs()) {
+          if (output.internal_id == intent.assigned_output_id)
+            projected_scale.primary_output = output.xid;
+          if (std::ranges::find(intent.output_memberships,
+                                output.internal_id) !=
+              intent.output_memberships.end())
+            projected_scale.output_memberships.push_back(output.xid);
+        }
+        if (projected_scale.primary_output == 0 ||
+            projected_scale.output_memberships.size() !=
+                intent.output_memberships.size())
+          return false;
+        window->assigned_output_id = intent.assigned_output_id;
+        window->output_memberships = intent.output_memberships;
+        window->scale = std::move(projected_scale);
+      }
       policy.push_back({xid, intent.applied_x, intent.applied_y,
                         intent.applied_width, intent.applied_height,
                         intent.stacking, intent.policy_visible,
