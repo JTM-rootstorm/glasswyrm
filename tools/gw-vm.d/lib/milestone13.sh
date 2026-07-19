@@ -585,6 +585,21 @@ PY
   [[ -n $path ]] || { printf 'No frame found for output %s.\n' "$id" >&2; return 1; }
   cp "$path" "$target"
 }
+wait_outputs_match() {
+  local left_output=$1 right_output=$2 left_expected=$3 right_expected=$4
+  local left_target=$5 right_target=$6
+  for _ in {1..400}; do
+    copy_latest_output "$left_output" "$left_target"
+    copy_latest_output "$right_output" "$right_target"
+    if cmp -s "$left_expected" "$left_target" &&
+       cmp -s "$right_expected" "$right_target"; then
+      return
+    fi
+    sleep .05
+  done
+  printf '%s\n' 'Timed out waiting for the expected M13 output pair.' >&2
+  return 1
+}
 legacy_command() {
   python3 - "$control/legacy.sock" "$@" <<'PY'
 import socket,sys
@@ -862,11 +877,10 @@ before_frames=$(frame_count); legacy_command configure 480 80 320 240
 wait_frames_after "$before_frames"
 assert_window_memberships "$left_id,$right_id" \
   "$control_data/legacy-spanning-restored.json"
-copy_latest_output "$left_id" "$control_data/legacy-spanning-restored-left.ppm"
-copy_latest_output "$right_id" "$control_data/legacy-spanning-restored-right.ppm"
-cmp "$control_data/milestone13-legacy-spanning-left.ppm" \
-  "$control_data/legacy-spanning-restored-left.ppm"
-cmp "$control_data/milestone13-legacy-spanning-right.ppm" \
+wait_outputs_match "$left_id" "$right_id" \
+  "$control_data/milestone13-legacy-spanning-left.ppm" \
+  "$control_data/milestone13-legacy-spanning-right.ppm" \
+  "$control_data/legacy-spanning-restored-left.ppm" \
   "$control_data/legacy-spanning-restored-right.ppm"
 
 before_frames=$(frame_count)
@@ -898,9 +912,10 @@ result[transforms]=passed
   >"$control_data/restart-before.json"
 copy_latest_output "$left_id" "$control_data/restart-left-before.ppm"
 copy_latest_output "$right_id" "$control_data/restart-right-before.ppm"
-cmp "$control_data/milestone13-legacy-spanning-left.ppm" \
-  "$control_data/restart-left-before.ppm"
-cmp "$control_data/milestone13-flipped.ppm" \
+wait_outputs_match "$left_id" "$right_id" \
+  "$control_data/milestone13-legacy-spanning-left.ppm" \
+  "$control_data/milestone13-flipped.ppm" \
+  "$control_data/restart-left-before.ppm" \
   "$control_data/restart-right-before.ppm"
 systemctl restart gwm-m13.service
 wait_socket "$runtime/gwm.sock"
