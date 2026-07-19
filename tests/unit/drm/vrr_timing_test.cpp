@@ -64,9 +64,12 @@ int main() {
   gw::test::require(api.arm_page_flip(opened.handle, regressed, error),
                     "second timed fake page flip arms");
   api.queue_page_flip(10, 40, 8, 1'999'999'999ULL, true);
-  gw::test::require(api.service_events(opened.handle, POLLIN).kind ==
-                        DrmEventKind::Error,
-                    "fake DRM rejects regressing timed events");
+  const auto regressed_event = api.service_events(opened.handle, POLLIN);
+  gw::test::require(regressed_event.kind == DrmEventKind::PageFlip &&
+                        regressed_event.token == 2 &&
+                        !regressed_event.timestamp_available &&
+                        regressed->completed && regressed->timestamp_invalid,
+                    "timestamp regression preserves completed page-flip truth");
   auto abandoned = std::make_shared<PageFlipCookie>(3);
   gw::test::require(api.arm_page_flip(opened.handle, abandoned, error),
                     "abandoned timed fake page flip arms");

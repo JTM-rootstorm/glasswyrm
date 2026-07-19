@@ -166,12 +166,9 @@ DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
   if (event.kind == DrmEventKind::PageFlip && event_cookie_) {
     if (event.timestamp_available && last_page_flip_timestamp_ &&
         event.kernel_timestamp_nanoseconds < *last_page_flip_timestamp_) {
-      const bool armed = event_cookie_armed_;
-      event_cookie_.reset();
-      event_cookie_armed_ = false;
-      return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
-                              "fake DRM page-flip timestamp regressed"}
-                   : DrmEvent{};
+      event.timestamp_available = false;
+      event.kernel_timestamp_nanoseconds = 0;
+      event_cookie_->timestamp_invalid = true;
     }
     event_cookie_->completed_crtc_id = event.crtc_id;
     event_cookie_->completed_sequence = event.sequence;

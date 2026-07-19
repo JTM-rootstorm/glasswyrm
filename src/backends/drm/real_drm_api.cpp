@@ -611,25 +611,20 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
             std::string("DRM event handling failed: ") + std::strerror(errno)};
   if (cookie && cookie->completed) {
     const bool armed = registered->second.armed;
-    if (cookie->timestamp_invalid) {
-      event_cookies_.erase(registered);
-      return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
-                              "DRM page-flip timestamp is malformed"}
-                   : DrmEvent{};
-    }
     cookie->timestamp_available =
-        cookie->timestamp_available && timestamp_monotonic_[handle];
+        cookie->timestamp_available && !cookie->timestamp_invalid &&
+        timestamp_monotonic_[handle];
     if (cookie->timestamp_available) {
       const auto previous = last_page_flip_timestamps_.find(handle);
       if (previous != last_page_flip_timestamps_.end() &&
           cookie->kernel_timestamp_nanoseconds < previous->second) {
-        event_cookies_.erase(registered);
-        return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
-                                "DRM page-flip timestamp regressed"}
-                     : DrmEvent{};
+        cookie->timestamp_available = false;
+        cookie->timestamp_invalid = true;
+        cookie->kernel_timestamp_nanoseconds = 0;
       }
-      last_page_flip_timestamps_[handle] =
-          cookie->kernel_timestamp_nanoseconds;
+      if (cookie->timestamp_available)
+        last_page_flip_timestamps_[handle] =
+            cookie->kernel_timestamp_nanoseconds;
     }
     const DrmEvent event{DrmEventKind::PageFlip,
                          cookie->token,
