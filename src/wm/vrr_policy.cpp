@@ -69,11 +69,11 @@ void apply_mode(VrrWindowState& window, const VrrPolicyMode mode) noexcept {
       window.eligible = false;
       break;
     case VrrPolicyMode::Fullscreen:
-      if (!window.fullscreen)
+      if (!window.fullscreen && !window.borderless_fullscreen) {
         window.reason_flags |= vrr_reason::window_not_fullscreen;
-      if (!window.fullscreen && !window.borderless_fullscreen)
         window.reason_flags |=
             vrr_reason::window_not_borderless_fullscreen;
+      }
       window.eligible = common &&
                         (window.fullscreen || window.borderless_fullscreen) &&
                         window.preference != VrrWindowPreference::Disable;
