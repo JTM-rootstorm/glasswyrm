@@ -3,7 +3,7 @@ set -euo pipefail
 
 library=${1:?usage: gwipc_symbols_test.sh LIBGWIPC}
 symbols="$(nm -D --defined-only "$library" | awk '{ print $3 }' | sed '/^$/d')"
-unexpected="$(printf '%s\n' "$symbols" | grep -v -E '^gwipc_|^GWIPC_' || true)"
+unexpected="$(grep -v -E '^gwipc_|^GWIPC_' <<<"$symbols" || true)"
 
 if [[ -n $unexpected ]]; then
   printf 'unexpected exported symbols:\n%s\n' "$unexpected" >&2
@@ -12,7 +12,7 @@ fi
 
 for symbol in gwipc_get_api_version gwipc_listener_create \
   gwipc_connection_connect gwipc_connection_enqueue gwipc_message_destroy; do
-  printf '%s\n' "$symbols" | grep -Eq "^${symbol}(@@GWIPC_0\\.1)?$" || {
+  grep -Eq "^${symbol}(@@GWIPC_0\\.1)?$" <<<"$symbols" || {
     printf 'missing public symbol: %s\n' "$symbol" >&2
     exit 1
   }
@@ -20,7 +20,7 @@ done
 
 for symbol in gwipc_contract_encode_synthetic_motion \
   gwipc_decoded_synthetic_input_acknowledged; do
-  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.5$" || {
+  grep -Eq "^${symbol}@@GWIPC_0\\.5$" <<<"$symbols" || {
     printf 'missing API 0.5 symbol version: %s\n' "$symbol" >&2
     exit 1
   }
@@ -32,7 +32,7 @@ for symbol in gwipc_contract_encode_policy_bindings_upsert \
   gwipc_decoded_session_state_change \
   gwipc_contract_encode_session_state_acknowledged \
   gwipc_decoded_session_state_acknowledged; do
-  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.6$" || {
+  grep -Eq "^${symbol}@@GWIPC_0\\.6$" <<<"$symbols" || {
     printf 'missing API 0.6 symbol version: %s\n' "$symbol" >&2
     exit 1
   }
@@ -43,7 +43,7 @@ for symbol in gwipc_contract_encode_policy_lifecycle_window_upsert \
   gwipc_decoded_policy_lifecycle_window_upsert \
   gwipc_decoded_surface_policy_upsert \
   gwipc_connection_enqueue_with_sequence; do
-  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.4$" || {
+  grep -Eq "^${symbol}@@GWIPC_0\\.4$" <<<"$symbols" || {
     printf 'missing API 0.4 symbol version: %s\n' "$symbol" >&2
     exit 1
   }
@@ -65,8 +65,32 @@ for symbol in gwipc_contract_encode_output_descriptor_upsert \
   gwipc_decoded_output_configuration_commit \
   gwipc_contract_encode_output_configuration_acknowledged \
   gwipc_decoded_output_configuration_acknowledged; do
-  printf '%s\n' "$symbols" | grep -Eq "^${symbol}@@GWIPC_0\\.8$" || {
+  grep -Eq "^${symbol}@@GWIPC_0\\.8$" <<<"$symbols" || {
     printf 'missing API 0.8 symbol version: %s\n' "$symbol" >&2
+    exit 1
+  }
+done
+
+for symbol in gwipc_contract_encode_output_vrr_capability_upsert \
+  gwipc_decoded_output_vrr_capability_upsert \
+  gwipc_contract_encode_output_vrr_policy_upsert \
+  gwipc_decoded_output_vrr_policy_upsert \
+  gwipc_contract_encode_output_vrr_state_upsert \
+  gwipc_decoded_output_vrr_state_upsert \
+  gwipc_contract_encode_surface_vrr_state \
+  gwipc_decoded_surface_vrr_state \
+  gwipc_contract_encode_policy_window_vrr_upsert \
+  gwipc_decoded_policy_window_vrr_upsert \
+  gwipc_contract_encode_policy_output_vrr_upsert \
+  gwipc_decoded_policy_output_vrr_upsert \
+  gwipc_contract_encode_policy_window_vrr_state \
+  gwipc_decoded_policy_window_vrr_state \
+  gwipc_contract_encode_policy_output_vrr_state \
+  gwipc_decoded_policy_output_vrr_state \
+  gwipc_contract_encode_presentation_timing \
+  gwipc_decoded_presentation_timing; do
+  grep -Eq "^${symbol}@@GWIPC_0\\.9$" <<<"$symbols" || {
+    printf 'missing API 0.9 symbol version: %s\n' "$symbol" >&2
     exit 1
   }
 done
