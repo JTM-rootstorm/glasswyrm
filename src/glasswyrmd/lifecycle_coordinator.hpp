@@ -70,6 +70,16 @@ class LifecycleCoordinator {
   [[nodiscard]] const LifecycleSnapshot& committed() const noexcept {
     return committed_;
   }
+  [[nodiscard]] const LifecycleSnapshot* pending_policy_snapshot() const
+      noexcept {
+    if (!active_)
+      return nullptr;
+    if (phase_ == CoordinatorPhase::AwaitingPolicy)
+      return &active_->proposed;
+    if (phase_ == CoordinatorPhase::RollingBackPolicy)
+      return &committed_;
+    return nullptr;
+  }
   [[nodiscard]] bool can_replace_committed() const noexcept {
     return phase_ == CoordinatorPhase::Idle && !active_;
   }
