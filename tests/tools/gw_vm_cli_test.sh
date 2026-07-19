@@ -1971,6 +1971,18 @@ run_failure "$work_dir/milestone12-wrapper-gate.out" \
 assert_contains "$work_dir/milestone12-wrapper-gate.out" \
   "Action 'milestone12-runtime-test' requires --yes"
 
+(
+  unset GW_VM_MILESTONE12_LOADED
+  # shellcheck source=/dev/null
+  source "$repo_root/tools/gw-vm.d/lib/milestone12.sh"
+  milestone12_source_status_ignored \
+    '?? tests/compat/m12/__pycache__/validate_result.cpython-314.pyc' ||
+    fail 'Python bytecode cache should not invalidate M12 source identity'
+  if milestone12_source_status_ignored '?? tests/compat/m12/random_probe.cpp'; then
+    fail 'untracked implementation source must invalidate M12 source identity'
+  fi
+)
+
 : >"$command_log"
 run_failure "$work_dir/milestone12-dirty.out" \
   env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone12-runtime-test --yes
