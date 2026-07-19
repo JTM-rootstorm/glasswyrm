@@ -289,11 +289,40 @@ void rejection_boundaries() {
           "incoming direction swaps sender and receiver roles");
 }
 
+void diagnostic_snapshot_enqueue_skips_frame_correlation() {
+  constexpr auto capabilities = GWIPC_CAP_OUTPUT_CONTROL |
+                                GWIPC_CAP_VRR_METADATA |
+                                GWIPC_CAP_VRR_POLICY;
+  gwipc_connection connection;
+  connection.state = GWIPC_CONNECTION_ESTABLISHED;
+  connection.config.local_role = GWIPC_ROLE_PROTOCOL_SERVER;
+  connection.peer.role = GWIPC_ROLE_DIAGNOSTIC_TOOL;
+  connection.peer.capabilities = capabilities;
+  connection.peer.maximum_payload = GWIPC_DEFAULT_MAXIMUM_PAYLOAD;
+  connection.peer.maximum_fd_count = GWIPC_DEFAULT_MAXIMUM_FDS;
+  connection.outgoing_snapshot = snapshot(SnapshotDomain::Outputs);
+
+  const auto payload = encode(output_state());
+  gwipc_outgoing_message message{};
+  message.struct_size = sizeof(message);
+  message.type = GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT;
+  message.flags = GWIPC_FLAG_SNAPSHOT_ITEM;
+  message.payload = payload.data();
+  message.payload_size = payload.size();
+  std::uint64_t sequence = 0;
+  require(gwipc_connection_enqueue_with_sequence(&connection, &message,
+                                                  &sequence) ==
+              GWIPC_STATUS_OK &&
+              sequence == 1 && connection.outgoing.size() == 1,
+          "diagnostic VRR state snapshot does not require frame correlation");
+}
+
 }  // namespace
 
 int main() {
   compositor_and_diagnostic_records();
   window_policy_records();
   rejection_boundaries();
+  diagnostic_snapshot_enqueue_skips_frame_correlation();
   return 0;
 }
