@@ -189,6 +189,10 @@ cleanup() {
       systemctl stop "$logind_socket" >/dev/null 2>&1
     [[ $logind_active_before == active ]] || \
       systemctl stop "$logind_unit" >/dev/null 2>&1
+    [[ $logind_socket_enabled_before != masked-runtime ]] || \
+      systemctl mask --runtime "$logind_socket" >/dev/null 2>&1
+    [[ $logind_enabled_before != masked-runtime ]] || \
+      systemctl mask --runtime "$logind_unit" >/dev/null 2>&1
   fi
   if [[ $getty_state_captured == true ]]; then
     [[ $getty_active_before != active ]] || \
@@ -1217,6 +1221,10 @@ done
    $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before ))
 post_vt_frame=$(find "$drm" -type f -name '*.ppm' -print | sort -V | tail -n1)
 cmp "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame"
+canonical_ordinal=${canonical##*/frame-}; canonical_ordinal=${canonical_ordinal%%-*}
+post_vt_ordinal=${post_vt_frame##*/frame-}; post_vt_ordinal=${post_vt_ordinal%%-*}
+canonical_ordinal=$((10#$canonical_ordinal))
+post_vt_ordinal=$((10#$post_vt_ordinal))
 result[vt_replay]=passed
 legacy_command stop
 wait "$drm_legacy_pid"
@@ -1244,12 +1252,14 @@ python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
   "$artifact_dir/milestone13-drm-representation.json" \
   "$drm_process_count_before" "$drm_eventfd_count_before" \
   "$drm_process_count_after" "$drm_eventfd_count_after" \
-  "$drm_main_identity_gone" "$drm_cgroup_empty" <<'PY'
+  "$drm_main_identity_gone" "$drm_cgroup_empty" \
+  "$canonical_ordinal" "$post_vt_ordinal" <<'PY'
 import hashlib,json,sys
 drm=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 renderer=[json.loads(line) for line in open(sys.argv[2]) if line.strip()]
 process_before,eventfd_before,process_after,eventfd_after=map(int,sys.argv[6:10])
 main_gone=sys.argv[10]=='true'; cgroup_empty=sys.argv[11]=='true'
+canonical_ordinal,post_vt_ordinal=map(int,sys.argv[12:14])
 no_fatal=(not any(item.get('record')=='fatal' for item in drm) and
           not any(item.get('disposition')=='fatal' or item.get('error') is not None
                   for item in renderer))
@@ -1264,6 +1274,13 @@ assert all(restore[key] is True for key in ('kms','vt','master_drop','framebuffe
 frames=[item for item in renderer if item['record']=='output-frame']
 assert frames and all(item['selected']=='software' and item['error'] is None
                       for item in frames)
+flip_ordinals={item['ordinal'] for item in drm if item.get('record') in ('modeset','flip')}
+frame_ordinals={item['ordinal'] for item in frames}
+assert {canonical_ordinal,post_vt_ordinal} <= flip_ordinals & frame_ordinals
+configuration_copies=[item for item in drm if item.get('record')=='damage-copy'
+                      and item.get('full_copy_reason')=='output-configuration-changed']
+assert configuration_copies and all(item['copied_bytes']==item['full_frame_bytes']
+                                    for item in configuration_copies)
 scaled=[output for frame in frames for output in frame['outputs']
         if output['scale_numerator']==4 and output['scale_denominator']==3
         and output['transform']=='rotate-180']
@@ -1278,6 +1295,8 @@ post_vt=hashlib.sha256(open(sys.argv[4],'rb').read()).hexdigest()
 assert canonical==post_vt
 json.dump({'schema':1,'passed':True,'scale':[4,3],'transform':'rotate-180',
  'canonical_sha256':canonical,'post_vt_sha256':post_vt,
+ 'canonical_ordinal':canonical_ordinal,'post_vt_ordinal':post_vt_ordinal,
+ 'configuration_full_copy_count':len(configuration_copies),
  'vt_release_count':len(releases),'vt_acquire_count':len(acquires),
  'resource_release':{'main_pid_zero':main_pid_zero,'event_fd_closed':event_fd_closed,
   'framebuffer_cleanup':restore['framebuffer_cleanup'],
@@ -1299,6 +1318,10 @@ systemctl unmask --runtime "$logind_unit" "$logind_socket"
 [[ $logind_active_before != active ]] || systemctl start "$logind_unit"
 [[ $logind_socket_active_before == active ]] || systemctl stop "$logind_socket"
 [[ $logind_active_before == active ]] || systemctl stop "$logind_unit"
+[[ $logind_socket_enabled_before != masked-runtime ]] || \
+  systemctl mask --runtime "$logind_socket"
+[[ $logind_enabled_before != masked-runtime ]] || \
+  systemctl mask --runtime "$logind_unit"
 logind_active_after=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
 logind_socket_active_after=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
 logind_enabled_after=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
