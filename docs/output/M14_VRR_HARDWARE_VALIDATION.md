@@ -18,7 +18,8 @@ remote execution fields.
 The live command requires an explicit confirmation token:
 
 ```sh
-./tools/gw-hw milestone14-vrr-test --config PATH --yes
+./tools/gw-hw milestone14-vrr-test \
+  --config PATH --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
 Before using it, arrange console access and recovery independent of the tested
@@ -50,3 +51,7 @@ canonical and screen images, before/after KMS and session state, restoration
 results, and `SHA256SUMS`. Validators reject missing fields, wall-clock data,
 an unconfirmed hardware path, insufficient samples, failed thresholds, or an
 incomplete restore.
+
+The implementation and deterministic dry-run coverage do not constitute a
+positive result. Until a reviewed live archive passes these checks, Milestone
+14 must be described as hardware-acceptance pending.

@@ -28,6 +28,13 @@ clients. Software remains canonical and the DRM boundary remains exactly one
 physical connector. The bounded M13 profile is accepted by the clean
 M12-to-M13 Gentoo VM sequence with validated headless, single-QXL DRM,
 VT/input recovery, restoration, cleanup, and archive evidence.
+Milestone 14 implementation adds capability-gated variable refresh state,
+atomic `VRR_ENABLED` control, deterministic GWM candidate policies, headless
+simulation, GWIPC API 0.9, experimental `GW_VRR` 0.1, and `gwinfo`/`gwout`
+policy diagnostics. Host, fake-DRM, protocol, and simulated-output tests cover
+the implementation. The clean QXL negative-capability gate and the separate
+reviewed physical-display positive gate have not yet accepted the milestone,
+so this is not a hardware-acceptance claim.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -116,9 +123,9 @@ meson test -C build-drm --print-errorlogs
 The default `drm_backend=false` build does not discover or link libdrm. The
 headless and DRM backends may be built together, or a DRM-only compositor may
 be configured with `-Dheadless_backend=false -Ddrm_backend=true`. IPC tracing
-applies only to `libgwipc`; the remaining reserved renderer, policy, assembly,
-and experimental switches do not enable runtime behavior until their
-milestones land.
+applies only to `libgwipc`. Experimental extensions must be built with
+`-Dexperimental=true` and still require their explicit runtime protocol flags;
+enabling the build option alone does not advertise them.
 
 The real-input backend is likewise Linux-only and opt-in:
 
@@ -444,6 +451,77 @@ transform path with VT/input recovery, restoration, cleanup, and validated
 evidence. This is the bounded profile described below, not a broader toolkit
 scaling or physical multi-connector compatibility claim.
 
+## Milestone 14 variable-refresh implementation
+
+M14 preserves the existing authority split. `glasswyrmd` owns application
+preference, committed per-output policy, and the experimental `GW_VRR` 0.1
+client view. `gwm` deterministically selects at most one eligible window per
+output from fullscreen, exact borderless-fullscreen, focus, membership, and
+preference facts. `gwcomp` remains final display authority: it validates the
+selected surface, applies simulated or atomic-KMS state, reads effective state
+back, and publishes presentation timing. GWIPC API 0.9 adds independently
+negotiated VRR metadata, policy, and timing records while retaining SOVERSION
+0, wire version 1.0, and every API 0.1-through-0.8 record.
+
+The headless profile is explicit and does not use a GPU or VT:
+
+```sh
+./build/src/gwm --ipc-socket /tmp/glasswyrm-gwm.sock
+./build/src/gwcomp --backend headless \
+  --ipc-socket /tmp/glasswyrm-gwcomp.sock \
+  --dump-dir /tmp/glasswyrm-frames \
+  --headless-output HEADLESS-1:1920x1080@60000 \
+  --headless-vrr HEADLESS-1=40000-60000 \
+  --vrr-report /tmp/glasswyrm-vrr.jsonl
+./build/src/glasswyrmd --display 99 \
+  --wm-socket /tmp/glasswyrm-gwm.sock \
+  --compositor-socket /tmp/glasswyrm-gwcomp.sock \
+  --software-content --output-model \
+  --control-socket /tmp/glasswyrm-control.sock --vrr-protocol
+./build/tools/gwout --socket /tmp/glasswyrm-control.sock \
+  set HEADLESS-1 --vrr fullscreen --json
+./build/tools/gwinfo --socket /tmp/glasswyrm-control.sock vrr --json
+```
+
+Policies are `off`, `fullscreen`, `focused`, `app-requested`, and
+`always-eligible`. Application preferences are Default, Disable, Allow, and
+Prefer; only Prefer requests `app-requested`, while Disable opts out of
+candidate-based policies. `always-eligible` is an administrative override and
+does not require a window candidate. See the
+[VRR tools](docs/tools/M14_VRR_TOOLS.md),
+[policy contract](docs/wm/M14_VRR_POLICY.md),
+[GWIPC API 0.9 contract](docs/ipc/M14_VRR_CONTRACT.md), and
+[`GW_VRR` wire profile](docs/extensions/M14_GW_VRR.md). The
+[M14 source-layout audit](docs/maintenance/M14_SOURCE_LAYOUT_AUDIT.md) records
+the current file budgets and empty exception list; it is not runtime evidence.
+
+The mandatory QXL negative-capability gate must follow the accepted M13 gate
+from the single internal `base` snapshot:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone13-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone14-runtime-test --yes
+```
+
+The positive physical gate is separate and has not been accepted yet. It may
+take DRM master, switch VTs, stop the selected getty, and reconfigure the
+display. Run it only from the reviewed spare text VT with independent recovery
+access and no active display manager:
+
+```sh
+./tools/gw-hw doctor --config /path/to/reviewed.toml
+./tools/gw-hw milestone14-vrr-test \
+  --config /path/to/reviewed.toml \
+  --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
+```
+
+Do not run the physical command from the current graphical session or a TTY
+whose interruption would be noticeable. Host, headless, fake-DRM, QXL, or
+property-readback results cannot substitute for positive cadence evidence and
+exact restoration on the reviewed physical target.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:
@@ -689,6 +767,9 @@ accepted by the clean Gentoo VM evidence gate.
 The [Milestone 13 profile](docs/protocols/x11-milestone-13.md) records the
 opt-in output and scale protocol boundary without widening those external
 client claims.
+The [Milestone 14 profile](docs/protocols/x11-milestone-14.md) records the
+implemented variable-refresh protocol and policy boundary. Its host and
+simulated evidence is not a physical-display acceptance result.
 
 The exact Milestone 13 compatibility statement is:
 
@@ -714,3 +795,32 @@ Unsupported:
 - Xft DPI integration
 - output persistence
 - VRR/HDR/color management
+
+The implemented Milestone 14 compatibility boundary is below. It remains a
+candidate release claim until both the clean QXL negative-capability gate and
+the separately reviewed physical positive gate pass.
+
+Supported by the implementation:
+
+- DRM connector `vrr_capable` discovery
+- atomic CRTC `VRR_ENABLED` control
+- one physical VRR output
+- composited primary-plane page flips
+- off/fullscreen/focused/app-requested/always-eligible policies
+- borderless fullscreen
+- `gwout` manual policy
+- `gwinfo` reasons and timing
+- experimental `GW_VRR` 0.1 client preference
+- simulated headless VRR policy
+- VT and peer restart recovery
+
+Unsupported:
+
+- VRR on legacy KMS
+- several physical VRR outputs
+- mixed-refresh optimization
+- direct scanout
+- PRESENT/DRI3 timing
+- vendor-specific VRR APIs
+- VRR with HDR/color management
+- toolkit integration

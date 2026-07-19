@@ -15,6 +15,10 @@ The default backend remains DRM, so an invocation that omits all M13 options
 produces the historical DRM child command lines. The launcher still resolves
 executables through `PATH`, calls them directly, and never invokes a shell.
 
+Milestone 14 adds explicit VRR forwarding without changing device ownership or
+supervision. Historical invocations omit all VRR arguments and produce the
+same child command lines.
+
 The launcher is installed only when all three runtime components are enabled.
 It does not acquire devices, change ownership or permissions, or act as a
 session broker. Its caller must already be able to open the selected DRM
@@ -30,9 +34,11 @@ glasswyrm-session
   [--output-model]
   [--control-socket PATH]
   [--scale-protocol]
+  [--vrr-protocol]
   drm: --drm-device PATH --tty PATH --connector NAME
        --mode WIDTHxHEIGHT[@MILLIHZ] --input-device PATH ...
   headless: [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]] ...
+            [--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ] ...
   [--xkb-layout NAME]
   [--xkb-model NAME]
   [--xkb-variant NAME]
@@ -41,6 +47,7 @@ glasswyrm-session
   [--mirror-dump-dir PATH]
   [--scene-manifest PATH]
   [--drm-report PATH]
+  [--vrr-report PATH]
   [--x11-trace PATH]
   [--game-compat]
   [--disable-extension NAME] ...
@@ -76,6 +83,13 @@ path, the launcher uses `PATH/control.sock` inside its private runtime
 directory. `--control-socket` and `--scale-protocol` both require
 `--output-model`; the scale protocol additionally requires an experimental
 build. `--game-compat` may be combined with the M13 options.
+
+`--vrr-protocol` also requires `--output-model` and an experimental build.
+Repeatable `--headless-vrr` values require the headless backend and a matching
+named `--headless-output`; they configure simulation only and never imply a
+physical capability. `--vrr-report` is forwarded to `gwcomp` for either
+backend and must differ from `--drm-report`. Both reports use secure new-file
+semantics.
 
 For example:
 
@@ -133,6 +147,21 @@ glasswyrm-session \
   --scale-protocol \
   --renderer software \
   --client /path/to/x11-client
+```
+
+An M14 simulated session adds only explicit options and remains GPU/VT-free:
+
+```sh
+glasswyrm-session \
+  --runtime-dir /run/glasswyrm-headless-vrr \
+  --display 99 \
+  --backend headless \
+  --headless-output HEADLESS-1:1920x1080@60000 \
+  --headless-vrr HEADLESS-1=40000-60000 \
+  --output-model --vrr-protocol \
+  --vrr-report /var/tmp/glasswyrm-headless-vrr.jsonl \
+  --renderer software \
+  --client /path/to/m14_vrr_client
 ```
 
 ## Runtime and readiness
