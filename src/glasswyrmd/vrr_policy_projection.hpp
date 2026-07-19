@@ -21,6 +21,9 @@ void synchronize_vrr_windows(const LifecycleSnapshot& snapshot,
                              const VrrWindowStateStore& published,
                              VrrStateCache& cache);
 
+void restore_vrr_lifecycle_checkpoint(
+    VrrStateCache& current, const VrrStateCache& checkpoint) noexcept;
+
 [[nodiscard]] VrrPolicyProjection project_vrr_policy(
     const LifecycleSnapshot& snapshot, const output::OutputLayout& layout,
     const VrrStateCache& cache);

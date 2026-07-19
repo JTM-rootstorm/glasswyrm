@@ -55,16 +55,27 @@ VrrEventBatch prepare_vrr_event_batch(
     WindowVrrState after = before;
     after.preference = preference(value.preference);
     OutputVrrPolicyMode mode = OutputVrrPolicyMode::Off;
-    if (value.policy_result) {
-      const auto& policy = *value.policy_result;
-      const auto output = output_xids.find(policy.output_id);
-      const auto cached_output = cache.outputs().find(policy.output_id);
+    const auto output_id = value.policy_result
+                               ? value.policy_result->output_id
+                               : value.compositor_state
+                                     ? value.compositor_state->output_id
+                                     : UINT64_C(0);
+    if (output_id != 0) {
+      const auto output = output_xids.find(output_id);
+      const auto cached_output = cache.outputs().find(output_id);
       if (output == output_xids.end() || cached_output == cache.outputs().end())
         return {};
       after.primary_output = output->second;
-      after.policy_eligible = policy.eligible != 0;
-      after.selected_candidate = policy.selected != 0;
-      after.reason_flags = policy.reason_flags;
+      if (value.policy_result) {
+        after.policy_eligible = value.policy_result->eligible != 0;
+        after.selected_candidate = value.policy_result->selected != 0;
+        after.reason_flags = value.policy_result->reason_flags;
+      } else {
+        after.policy_eligible = value.compositor_state->policy_eligible != 0;
+        after.selected_candidate =
+            value.compositor_state->policy_selected != 0;
+        after.reason_flags = value.compositor_state->reason_flags;
+      }
       after.policy_generation = cache.generation();
       mode = output_policy(cached_output->second.policy.mode);
       if (cached_output->second.compositor_state) {
