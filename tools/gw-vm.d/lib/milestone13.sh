@@ -1469,7 +1469,7 @@ for target in legacy-left legacy-right legacy-spanning-left \
   legacy-spanning-right aware-left aware-right rotate90 flipped; do
   cp "$control_data/milestone13-$target.ppm" "$evidence/"
 done
-(cd "$evidence" && sha256sum ./* >SHA256SUMS && sha256sum --check --status SHA256SUMS && tar -cf "$artifact_dir/milestone13-output-scaling-evidence.tar" ./*)
+(cd "$evidence" && sha256sum -- * >SHA256SUMS && sha256sum --check --status SHA256SUMS && tar -cf "$artifact_dir/milestone13-output-scaling-evidence.tar" ./*)
 result[archive_validation]=passed
 scenario_exit=0 failure_stage=completed
 write_facts
