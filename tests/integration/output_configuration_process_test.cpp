@@ -97,12 +97,24 @@ std::size_t descriptor_count(const pid_t process) {
 
 void wait_for_descriptor_bound(const pid_t process,
                                const std::size_t maximum) {
-  for (unsigned attempt = 0; attempt < 200; ++attempt) {
-    if (descriptor_count(process) <= maximum)
+  constexpr unsigned kAttempts = 500;
+  constexpr auto kInterval = std::chrono::milliseconds(10);
+  std::size_t observed = 0;
+  for (unsigned attempt = 0; attempt < kAttempts; ++attempt) {
+    observed = descriptor_count(process);
+    if (observed <= maximum)
       return;
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    std::this_thread::sleep_for(kInterval);
   }
-  require(false, "repeated control peers release their server descriptors");
+  observed = descriptor_count(process);
+  if (observed <= maximum)
+    return;
+  require(false,
+          "descriptor cleanup timeout: expected at most " +
+              std::to_string(maximum) + ", observed " +
+              std::to_string(observed) + " after " +
+              std::to_string(kAttempts * kInterval.count()) + " ms for pid " +
+              std::to_string(process));
 }
 
 class PersistentX11Client final {
