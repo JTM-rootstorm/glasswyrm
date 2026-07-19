@@ -7,7 +7,13 @@ every placeholder with values reviewed for the target monitor and connector.
 The schema is deliberately closed. It contains no command, SSH, package,
 credential, token, or password fields. `gw-hw` rejects unknown keys, symlinked
 configuration files, unsafe device names, invalid ranges, and malformed EDID
-digests.
+digests. `keyboard_device` and `pointer_device` must name two reviewed
+`/dev/input/eventN` devices for the isolated session; the doctor verifies both
+character devices before the live runner stops the selected getty.
+
+The fixed live runner uses binaries from `/var/tmp/glasswyrm-build-m14` and
+refuses symlinked or missing executables. Configure and build that directory
+from the exact commit being accepted before moving to the target text VT.
 
 ```sh
 ./tools/gw-hw doctor --config /path/to/reviewed.toml

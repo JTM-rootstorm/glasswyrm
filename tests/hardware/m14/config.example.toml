@@ -2,10 +2,12 @@ drm_device = "/dev/dri/card0"
 connector = "DP-1"
 mode = "2560x1440@144000"
 tty = "/dev/tty2"
+keyboard_device = "/dev/input/event0"
+pointer_device = "/dev/input/event1"
 
 expected_min_refresh_hz = 48
 expected_max_refresh_hz = 144
-target_refresh_hz = 72
+target_refresh_hz = 70
 
 monitor_model = "reviewed model"
 edid_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"

@@ -10,10 +10,12 @@ session.
 
 `gw-hw doctor --config PATH` performs bounded discovery and rejects a target
 unless the exact primary node, connector, EDID hash, mode, spare VT, reviewed
-refresh range, and distinguishable target cadence match. It also rejects a
-competing DRM master or an unsafe configuration file. The configuration has a
-fixed schema and cannot contain commands, package operations, passwords, or
-remote execution fields.
+refresh range, distinguishable target cadence, and two reviewed
+`/dev/input/eventN` devices match. It also rejects a competing DRM master or an
+unsafe configuration file. The configuration has a fixed schema and cannot
+contain commands, package operations, passwords, or remote execution fields.
+The live runner accepts only nonsymlink executables from the fixed
+`/var/tmp/glasswyrm-build-m14` build.
 
 The live command requires an explicit confirmation token:
 

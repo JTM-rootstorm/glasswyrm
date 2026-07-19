@@ -16,3 +16,10 @@ test(
   ],
   timeout: 10,
 )
+
+gw_hw_test = find_program(tests_source_dir / 'hardware/m14/gw_hw_test.py')
+test(
+  'gw-hw-parser-doctor-dry-run',
+  gw_hw_test,
+  timeout: 30,
+)
