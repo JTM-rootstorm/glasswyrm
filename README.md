@@ -25,8 +25,9 @@ several logical headless outputs, rational compositor scaling and all output
 transforms, one-workspace multi-output policy, GWIPC API 0.8, read-mostly
 multi-output RANDR, experimental `GW_SCALE` 0.1, and real `gwinfo`/`gwout`
 clients. Software remains canonical and the DRM boundary remains exactly one
-physical connector. Final M13 acceptance still depends on the documented
-historical and clean Gentoo VM gates.
+physical connector. The bounded M13 profile is accepted by the clean
+M12-to-M13 Gentoo VM sequence with validated headless, single-QXL DRM,
+VT/input recovery, restoration, cleanup, and archive evidence.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -426,8 +427,8 @@ that topology without DRM, TTY, or input devices. See the
 [rendering contract](docs/rendering/M13_SCALE_AND_TRANSFORM.md), and
 [session launcher](docs/session/M11_SESSION_LAUNCHER.md).
 
-Final acceptance uses the historical gate first and does not treat host tests
-as a substitute:
+Acceptance uses the historical gate first and does not treat host tests as a
+substitute:
 
 ```sh
 ./tools/gw-vm reset --yes
@@ -436,11 +437,12 @@ as a substitute:
 ./tools/gw-vm milestone13-runtime-test --yes
 ```
 
-The final command must prove the two-output headless layout, deterministic
+The accepted sequence proves the two-output headless layout, deterministic
 `gwinfo`/`gwout`, RANDR and `GW_SCALE` wire paths, software/GLES equivalence,
 restart and accepted reconfiguration, then the fixed one-output QXL scale and
-transform path with restoration and validated evidence. No acceptance result
-is claimed until that clean sequence passes.
+transform path with VT/input recovery, restoration, cleanup, and validated
+evidence. This is the bounded profile described below, not a broader toolkit
+scaling or physical multi-connector compatibility claim.
 
 ## Setup probes
 
