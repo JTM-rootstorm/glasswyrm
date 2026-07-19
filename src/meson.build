@@ -140,6 +140,8 @@ if get_option('headless_backend')
       'backends/headless/inventory.cpp',
       'backends/headless/output.cpp',
       'backends/headless/presenter.cpp',
+      'backends/headless/vrr_report.cpp',
+      'backends/headless/vrr_simulation.cpp',
     ),
     dependencies: [gw_output_dep, gw_output_model_dep],
     include_directories: include_directories('.'),

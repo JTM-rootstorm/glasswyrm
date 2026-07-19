@@ -37,7 +37,8 @@ constexpr std::uint64_t kOfferedCapabilities =
     kM4Capabilities | GWIPC_CAP_WINDOW_LIFECYCLE | GWIPC_CAP_SESSION_STATE |
     GWIPC_CAP_CURSOR_SURFACE | GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION |
     GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
-    GWIPC_CAP_SCALE_METADATA;
+    GWIPC_CAP_SCALE_METADATA | GWIPC_CAP_VRR_METADATA |
+    GWIPC_CAP_VRR_POLICY | GWIPC_CAP_PRESENTATION_TIMING;
 struct ListenerDeleter {
   void operator()(gwipc_listener* value) const { gwipc_listener_destroy(value); }
 };
@@ -122,8 +123,34 @@ int run(const Options& options) {
       return 1;
     }
     output_layout = inventory->layout();
+    auto vrr_simulation = headless::VrrSimulation::build(
+        output_layout, options.headless_vrr, inventory_error);
+    if (!vrr_simulation) {
+      std::fprintf(stderr, "gwcomp: headless VRR setup failed: %s\n",
+                   inventory_error.c_str());
+      return 1;
+    }
+    std::optional<headless::VrrReport> vrr_report;
+    if (options.vrr_report) {
+      vrr_report =
+          headless::VrrReport::create(*options.vrr_report, inventory_error);
+      if (!vrr_report) {
+        std::fprintf(stderr, "gwcomp: headless VRR report failed: %s\n",
+                     inventory_error.c_str());
+        return 1;
+      }
+      for (const auto output_id : output_layout.output_order) {
+        const auto capability = vrr_simulation->capability(output_id);
+        if (capability &&
+            !vrr_report->record_capability(*capability, inventory_error)) {
+          std::fprintf(stderr, "gwcomp: headless VRR report failed: %s\n",
+                       inventory_error.c_str());
+          return 1;
+        }
+      }
+    }
     presenter = std::make_unique<glasswyrm::headless::Presenter>(
-        options.dump_dir);
+        options.dump_dir, std::move(vrr_simulation), std::move(vrr_report));
 #else
     std::fprintf(stderr,
                  "gwcomp: headless backend was not enabled at build time\n");

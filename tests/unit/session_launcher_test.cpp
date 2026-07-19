@@ -285,9 +285,12 @@ void test_headless_output_model_cli() {
       "glasswyrm-session", "--runtime-dir", "/run/user/0/gw-headless",
       "--display", "98", "--backend", "headless", "--headless-output",
       "LEFT:800x600@60000", "--headless-output", "RIGHT:640x480@75000",
+      "--headless-vrr", "LEFT=40000-60000", "--headless-vrr",
+      "RIGHT=48000-75000", "--vrr-report", "/tmp/vrr-report.jsonl",
       "--output-model"};
 #if GW_HAS_EXPERIMENTAL
   arguments.emplace_back("--scale-protocol");
+  arguments.emplace_back("--vrr-protocol");
 #endif
   auto argv = mutable_argv(arguments);
   Options options;
@@ -309,7 +312,10 @@ void test_headless_output_model_cli() {
                        "/run/user/0/gw-headless/gwcomp.sock", "--dump-dir",
                        "/run/user/0/gw-headless/frames", "--headless-output",
                        "LEFT:800x600@60000", "--headless-output",
-                       "RIGHT:640x480@75000", "--renderer", "software"}),
+                       "RIGHT:640x480@75000", "--headless-vrr",
+                       "LEFT=40000-60000", "--headless-vrr",
+                       "RIGHT=48000-75000", "--renderer", "software",
+                       "--vrr-report", "/tmp/vrr-report.jsonl"}),
           "headless compositor argv is deterministic and carries all outputs");
   require(std::find(plan.children[2].argv.begin(),
                     plan.children[2].argv.end(), "--output-model") !=
@@ -323,6 +329,10 @@ void test_headless_output_model_cli() {
                     plan.children[2].argv.end(), "--scale-protocol") !=
               plan.children[2].argv.end(),
           "experimental session enables GW_SCALE explicitly");
+  require(std::find(plan.children[2].argv.begin(),
+                    plan.children[2].argv.end(), "--vrr-protocol") !=
+              plan.children[2].argv.end(),
+          "experimental session enables GW_VRR explicitly");
 #endif
 
   std::vector<std::string> forbidden = {
@@ -337,6 +347,20 @@ void test_headless_output_model_cli() {
               forbidden_error.str().find("forbids DRM") != std::string::npos,
           "headless session rejects DRM-only options");
 
+  std::vector<std::string> drm_vrr_simulation = {
+      "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "90",
+      "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+      "--connector", "Virtual-1", "--mode", "1024x768", "--input-device",
+      "/dev/input/event0", "--headless-vrr", "Virtual-1=40000-60000"};
+  auto drm_vrr_argv = mutable_argv(drm_vrr_simulation);
+  Options drm_vrr_options;
+  std::ostringstream drm_vrr_error;
+  require(parse_options(static_cast<int>(drm_vrr_argv.size()),
+                        drm_vrr_argv.data(), drm_vrr_options, output,
+                        drm_vrr_error) == ParseOptionsResult::ExitFailure &&
+              drm_vrr_error.str().find("headless") != std::string::npos,
+          "DRM session rejects headless VRR simulation");
+
   std::vector<std::string> orphan_control = {
       "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "90",
       "--backend", "headless", "--control-socket", "/tmp/control.sock"};
@@ -349,6 +373,21 @@ void test_headless_output_model_cli() {
               orphan_error.str().find("requires --output-model") !=
                   std::string::npos,
           "control socket requires the output model");
+
+#if GW_HAS_EXPERIMENTAL
+  std::vector<std::string> orphan_vrr = {
+      "glasswyrm-session", "--runtime-dir", "/tmp/gw", "--display", "90",
+      "--backend", "headless", "--vrr-protocol"};
+  auto orphan_vrr_argv = mutable_argv(orphan_vrr);
+  Options orphan_vrr_options;
+  std::ostringstream orphan_vrr_error;
+  require(parse_options(static_cast<int>(orphan_vrr_argv.size()),
+                        orphan_vrr_argv.data(), orphan_vrr_options, output,
+                        orphan_vrr_error) == ParseOptionsResult::ExitFailure &&
+              orphan_vrr_error.str().find("requires --output-model") !=
+                  std::string::npos,
+          "VRR protocol requires the output model");
+#endif
 }
 
 glasswyrm::session::ChildSpec ready_child(const std::string &self,

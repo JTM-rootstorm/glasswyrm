@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <filesystem>
 #include <limits>
 #include <ostream>
 #include <string_view>
@@ -17,6 +18,7 @@ void print_usage(std::ostream& output) {
       "Usage: gwcomp [--backend headless|drm] --ipc-socket PATH\n"
       "  headless: --dump-dir PATH [--headless-output "
       "NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n"
+      "            [--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ]...\n"
       "            [--scene-manifest PATH]\n"
       "  drm direct: --drm-device PATH|auto --tty /dev/ttyN\n"
       "  drm external: --drm-fd N --external-session\n"
@@ -24,7 +26,8 @@ void print_usage(std::ostream& output) {
       "               [--drm-api auto|atomic|legacy]\n"
       "               [--mirror-dump-dir PATH] [--drm-report PATH]\n"
       "  renderer: [--renderer software|gles|auto] [--renderer-report PATH]\n"
-      "  common: [--once] [--max-frames N] [--help] [--version]\n";
+      "  common: [--vrr-report PATH] [--once] [--max-frames N]\n"
+      "          [--help] [--version]\n";
 }
 
 bool parse_positive(std::string_view text, std::uint64_t& value) {
@@ -110,6 +113,26 @@ bool parse_headless_output(std::string_view text,
   return true;
 }
 
+bool parse_headless_vrr(std::string_view text,
+                        headless::VrrSimulationRequest &request) {
+  const auto equals = text.find('=');
+  if (equals == std::string_view::npos || equals == 0 ||
+      !headless::valid_output_name(text.substr(0, equals)))
+    return false;
+  const auto range = text.substr(equals + 1);
+  const auto dash = range.find('-');
+  if (dash == std::string_view::npos || dash == 0 ||
+      range.find('-', dash + 1) != std::string_view::npos)
+    return false;
+  std::uint32_t minimum = 0;
+  std::uint32_t maximum = 0;
+  if (!parse_dimension(range.substr(0, dash), minimum) ||
+      !parse_dimension(range.substr(dash + 1), maximum) || minimum >= maximum)
+    return false;
+  request = {std::string(text.substr(0, equals)), minimum, maximum};
+  return true;
+}
+
 bool take_optional_path(int argc, char** argv, int& index,
                         std::optional<std::string>& destination,
                         std::string_view option, std::ostream& error) {
@@ -120,6 +143,36 @@ bool take_optional_path(int argc, char** argv, int& index,
 }
 
 bool validate_backend_options(const Options& options, std::ostream& error) {
+  if (options.vrr_report) {
+    std::error_code path_error;
+    const auto exists = std::filesystem::exists(*options.vrr_report, path_error);
+    if (path_error) {
+      error << "gwcomp: --vrr-report path cannot be inspected\n";
+      return false;
+    }
+    if (exists) {
+      error << "gwcomp: --vrr-report path must not already exist\n";
+      return false;
+    }
+  }
+  if (options.drm_report && options.vrr_report) {
+    std::error_code drm_path_error;
+    std::error_code vrr_path_error;
+    const auto drm_path =
+        std::filesystem::absolute(*options.drm_report, drm_path_error)
+            .lexically_normal();
+    const auto vrr_path =
+        std::filesystem::absolute(*options.vrr_report, vrr_path_error)
+            .lexically_normal();
+    if (drm_path_error || vrr_path_error) {
+      error << "gwcomp: report paths cannot be resolved\n";
+      return false;
+    }
+    if (drm_path == vrr_path) {
+      error << "gwcomp: --drm-report and --vrr-report require distinct paths\n";
+      return false;
+    }
+  }
   if (options.backend == Backend::Headless && options.ipc_socket.empty() &&
       options.dump_dir.empty()) {
     error << "gwcomp: --ipc-socket and --dump-dir are required\n";
@@ -141,10 +194,31 @@ bool validate_backend_options(const Options& options, std::ostream& error) {
       error << "gwcomp: DRM options require --backend drm\n";
       return false;
     }
+    for (const auto &vrr : options.headless_vrr) {
+      const auto configured = std::ranges::find_if(
+          options.headless_outputs, [&vrr](const auto &output) {
+            return output.name == vrr.name;
+          });
+      const auto historical = options.headless_outputs.empty() &&
+                              vrr.name == headless::kDefaultOutputName;
+      if (configured == options.headless_outputs.end() && !historical) {
+        error << "gwcomp: --headless-vrr names an unknown headless output\n";
+        return false;
+      }
+      const auto nominal = historical
+                               ? headless::kDefaultOutputRefreshMillihertz
+                               : configured->refresh_millihertz;
+      if (vrr.maximum_refresh_millihertz > nominal) {
+        error << "gwcomp: --headless-vrr maximum must not exceed nominal "
+                 "output refresh\n";
+        return false;
+      }
+    }
     return true;
   }
-  if (!options.headless_outputs.empty()) {
-    error << "gwcomp: --headless-output requires --backend headless\n";
+  if (!options.headless_outputs.empty() || !options.headless_vrr.empty()) {
+    error << "gwcomp: --headless-output and --headless-vrr require --backend "
+             "headless\n";
     return false;
   }
   if (!options.dump_dir.empty()) {
@@ -232,6 +306,26 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
       options.headless_outputs.push_back(std::move(request));
       continue;
     }
+    if (argument == "--headless-vrr") {
+      std::string value;
+      if (!take_path(argc, argv, index, value, argument, error))
+        return ParseOptionsResult::ExitFailure;
+      headless::VrrSimulationRequest request;
+      if (!parse_headless_vrr(value, request)) {
+        error << "gwcomp: --headless-vrr requires "
+                 "NAME=MIN-MILLIHZ-MAX-MILLIHZ with 0 < MIN < MAX\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      if (std::ranges::any_of(options.headless_vrr,
+                              [&request](const auto &existing) {
+                                return existing.name == request.name;
+                              })) {
+        error << "gwcomp: --headless-vrr names must be unique\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.headless_vrr.push_back(std::move(request));
+      continue;
+    }
     if (argument == "--drm-device") {
       if (!take_optional_path(argc, argv, index, options.drm_device, argument,
                               error))
@@ -292,6 +386,12 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
     }
     if (argument == "--drm-report") {
       if (!take_optional_path(argc, argv, index, options.drm_report, argument,
+                              error))
+        return ParseOptionsResult::ExitFailure;
+      continue;
+    }
+    if (argument == "--vrr-report") {
+      if (!take_optional_path(argc, argv, index, options.vrr_report, argument,
                               error))
         return ParseOptionsResult::ExitFailure;
       continue;

@@ -41,7 +41,69 @@ int main() {
       options.ipc_socket != "/run/gw.sock" ||
       options.dump_dir != "/tmp/frames" || !options.once ||
       options.max_frames != 12 || !options.headless_outputs.empty() ||
+      !options.headless_vrr.empty() || options.vrr_report ||
       !output.empty() || !error.empty())
+    return 1;
+
+  options = {};
+  const std::vector expected_headless_vrr{
+      glasswyrm::headless::VrrSimulationRequest{"LEFT", 40'000, 60'000},
+      glasswyrm::headless::VrrSimulationRequest{"RIGHT", 48'000, 75'000}};
+  const auto vrr_report_path =
+      "/tmp/glasswyrm-vrr-options-" +
+      std::to_string(static_cast<long long>(::getpid())) + ".jsonl";
+  std::filesystem::remove(vrr_report_path);
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "LEFT:800x600@60000",
+             "--headless-output", "RIGHT:640x480@75000", "--headless-vrr",
+             "LEFT=40000-60000", "--headless-vrr", "RIGHT=48000-75000",
+             "--vrr-report", vrr_report_path},
+            options, output, error) != ParseOptionsResult::Run ||
+      options.headless_vrr != expected_headless_vrr ||
+      options.vrr_report != vrr_report_path ||
+      !output.empty() || !error.empty())
+    return 1;
+  std::ofstream(vrr_report_path, std::ios::binary) << "occupied";
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--vrr-report", vrr_report_path},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("must not already exist") == std::string::npos)
+    return 1;
+  std::filesystem::remove(vrr_report_path);
+
+  for (const auto *invalid : {"", "LEFT", "=40000-60000",
+                              "-LEFT=40000-60000", "LEFT=0-60000",
+                              "LEFT=60000-60000", "LEFT=60001-60000",
+                              "LEFT=40000", "LEFT=40000-60000-70000"}) {
+    options = {};
+    if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+               "/tmp/frames", "--headless-output", "LEFT", "--headless-vrr",
+               invalid},
+              options, output, error) != ParseOptionsResult::ExitFailure)
+      return 1;
+  }
+
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "LEFT", "--headless-vrr",
+             "MISSING=40000-60000"},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("unknown") == std::string::npos)
+    return 1;
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "LEFT:800x600@60000",
+             "--headless-vrr", "LEFT=40000-60001"},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("nominal") == std::string::npos)
+    return 1;
+  options = {};
+  if (parse({"gwcomp", "--ipc-socket", "/run/gw.sock", "--dump-dir",
+             "/tmp/frames", "--headless-output", "LEFT", "--headless-vrr",
+             "LEFT=40000-60000", "--headless-vrr", "LEFT=48000-60000"},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("unique") == std::string::npos)
     return 1;
 
   options = {};
@@ -147,6 +209,8 @@ int main() {
           ParseOptionsResult::ExitSuccess ||
       output.find("Usage: gwcomp") == std::string::npos ||
       output.find("--headless-output") == std::string::npos ||
+      output.find("--headless-vrr") == std::string::npos ||
+      output.find("--vrr-report") == std::string::npos ||
       output.find("--renderer software|gles|auto") == std::string::npos ||
       output.find("--renderer-report PATH") == std::string::npos)
     return 1;
@@ -183,6 +247,17 @@ int main() {
     return 1;
 
   options = {};
+  const auto same_report_path = vrr_report_path + ".same";
+  std::filesystem::remove(same_report_path);
+  if (parse({"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+             "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+             "--drm-report", same_report_path, "--vrr-report",
+             same_report_path},
+            options, output, error) != ParseOptionsResult::ExitFailure ||
+      error.find("distinct") == std::string::npos)
+    return 1;
+
+  options = {};
   if (parse({"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
              "--drm-fd", "7", "--external-session", "--mode", "800x600"},
             options, output, error) != ParseOptionsResult::Run ||
@@ -209,6 +284,9 @@ int main() {
       {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
        "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
        "--headless-output", "HEADLESS-1"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+       "--headless-vrr", "HEADLESS-1=40000-60000"},
   };
   for (auto arguments : invalid_drm) {
     options = {};
