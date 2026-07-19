@@ -101,6 +101,7 @@ require_text "$library" '"$compare_software_pid"'
 require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]'
 require_text "$library" '--scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"'
 require_text "$library" "assert any(state!=baseline for state in states)"
+require_text "$library" 'output=int(output,16) if isinstance(output,str) else output'
 require_text "$library" 'STOP_MAIN_IDENTITY_GONE'
 require_text "$library" 'STOP_EVENTFD_COUNT_BEFORE'
 require_text "$library" 'drm_live_eventfd_count=$(unit_eventfd_count glasswyrm-m13-drm.service)'
