@@ -28,6 +28,14 @@ or GWIPC authority.
 - [Milestone 13 single-output scaling](M13_DRM_SCALING.md): fixed physical
   mode and origin, compositor scale/transform, native renderer frames, and
   output-configuration full-copy evidence.
+- [Milestone 14 VRR capabilities](M14_VRR_CAPABILITIES.md): capability,
+  controllability, effective state, inventory, and headless simulation.
+- [Milestone 14 atomic VRR control](M14_VRR_KMS_CONTROL.md): property
+  discovery, page-flip transitions, readback, VT sequencing, and restoration.
+- [Milestone 14 VRR timing](M14_VRR_TIMING.md): kernel samples, bounded
+  statistics, and frozen positive/negative cadence thresholds.
+- [Milestone 14 hardware validation](M14_VRR_HARDWARE_VALIDATION.md): safe
+  physical-target setup, fixed acceptance order, recovery, and evidence.
 
 The VT lifecycle also documents the capability-gated M11 coordination which
 suspends server-owned libinput before display release and resumes it after

@@ -27,6 +27,8 @@ timing through API 0.9.
   capability profiles, complete snapshots, control results, and role bounds.
 - [Milestone 14 variable refresh](M14_VRR_CONTRACT.md) freezes the additive
   VRR records, authority boundaries, validation rules, and response ordering.
+- [Milestone 14 VRR transactions](M14_VRR_CONTRACTS.md) documents the live
+  inventory, policy, compositor, lifecycle, rollback, and reconnect flow.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records
@@ -62,4 +64,10 @@ acceptance command:
 
 ```sh
 ./tools/gw-vm milestone13-runtime-test --yes
+```
+
+Milestone 14 retains every historical command and adds:
+
+```sh
+./tools/gw-vm milestone14-runtime-test --yes
 ```

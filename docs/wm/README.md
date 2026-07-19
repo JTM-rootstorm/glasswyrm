@@ -24,6 +24,7 @@ Documents:
 - [M11 Interactive Policy](M11_INTERACTIVE_POLICY.md)
 - [M12 Fullscreen Policy](M12_FULLSCREEN_POLICY.md)
 - [M13 Multi-Output Policy](M13_MULTI_OUTPUT_POLICY.md)
+- [M14 VRR Policy](M14_VRR_POLICY.md)
 
 M6 adds an explicit `glasswyrmd` lifecycle peer while preserving the M5
 synthetic regression boundary. Input, decoration rendering, multiple
@@ -34,3 +35,6 @@ borderless metadata explicit while continuing to defer direct scanout.
 Milestone 13 retains one workspace and global stacking while making output
 assignment, per-output work areas, spanning membership, and policy hash v3
 explicit.
+Milestone 14 adds deterministic per-output VRR modes, window preference,
+candidate selection, exact borderless classification, reason flags, and policy
+hash v4 without moving final display authority out of the compositor.
