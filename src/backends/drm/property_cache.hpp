@@ -31,10 +31,21 @@ struct ConnectorPropertyCache {
   PropertyBinding crtc_id;
 };
 
+enum class OptionalVrrPropertyStatus {
+  Absent,
+  Valid,
+  Duplicate,
+  InvalidId,
+  InvalidWidth,
+  InvalidRange,
+  InvalidValue,
+};
+
 struct CrtcPropertyCache {
   PropertyBinding mode_id;
   PropertyBinding active;
   std::optional<PropertyBinding> vrr_enabled;
+  OptionalVrrPropertyStatus vrr_status{OptionalVrrPropertyStatus::Absent};
 };
 
 struct PlanePropertyCache {
@@ -80,4 +91,4 @@ struct PropertyCacheResult {
     std::span<const ObjectProperty> crtc_properties,
     std::span<const ObjectProperty> primary_plane_properties);
 
-}  // namespace glasswyrm::drm
+} // namespace glasswyrm::drm

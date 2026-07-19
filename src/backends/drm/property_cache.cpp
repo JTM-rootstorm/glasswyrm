@@ -8,17 +8,18 @@ namespace {
 
 struct RequiredProperty {
   std::string_view name;
-  PropertyBinding* destination;
+  PropertyBinding *destination;
 };
 
-PropertyCacheStatus cache_required(
-    const std::span<const ObjectProperty> properties,
-    const std::span<const RequiredProperty> required,
-    std::string& failed_name) {
-  for (const auto& requirement : required) {
-    const ObjectProperty* found = nullptr;
-    for (const auto& property : properties) {
-      if (property.name != requirement.name) continue;
+PropertyCacheStatus
+cache_required(const std::span<const ObjectProperty> properties,
+               const std::span<const RequiredProperty> required,
+               std::string &failed_name) {
+  for (const auto &requirement : required) {
+    const ObjectProperty *found = nullptr;
+    for (const auto &property : properties) {
+      if (property.name != requirement.name)
+        continue;
       if (found != nullptr) {
         failed_name = requirement.name;
         return PropertyCacheStatus::DuplicateProperty;
@@ -48,7 +49,7 @@ PropertyCacheStatus cache_required(
   return PropertyCacheStatus::Success;
 }
 
-}  // namespace
+} // namespace
 
 PropertyCacheResult build_atomic_property_cache(
     const std::span<const ObjectProperty> connector_properties,
@@ -57,10 +58,10 @@ PropertyCacheResult build_atomic_property_cache(
   PropertyCacheResult result;
   const std::array connector_required{
       RequiredProperty{"CRTC_ID", &result.cache.connector.crtc_id}};
-  result.status =
-      cache_required(connector_properties, connector_required,
-                     result.property_name);
-  if (result.status != PropertyCacheStatus::Success) return result;
+  result.status = cache_required(connector_properties, connector_required,
+                                 result.property_name);
+  if (result.status != PropertyCacheStatus::Success)
+    return result;
 
   result.object_type = PropertyObjectType::Crtc;
   const std::array crtc_required{
@@ -68,26 +69,39 @@ PropertyCacheResult build_atomic_property_cache(
       RequiredProperty{"ACTIVE", &result.cache.crtc.active}};
   result.status =
       cache_required(crtc_properties, crtc_required, result.property_name);
-  if (result.status != PropertyCacheStatus::Success) return result;
+  if (result.status != PropertyCacheStatus::Success)
+    return result;
 
-  const ObjectProperty* vrr_enabled = nullptr;
+  const ObjectProperty *vrr_enabled = nullptr;
   bool duplicate_vrr_enabled = false;
-  for (const auto& property : crtc_properties) {
-    if (property.name != "VRR_ENABLED") continue;
+  for (const auto &property : crtc_properties) {
+    if (property.name != "VRR_ENABLED")
+      continue;
     if (vrr_enabled != nullptr) {
       duplicate_vrr_enabled = true;
       break;
     }
     vrr_enabled = &property;
   }
-  if (!duplicate_vrr_enabled && vrr_enabled != nullptr &&
-      vrr_enabled->id != 0 && vrr_enabled->value_width_bits != 0 &&
-      vrr_enabled->value_width_bits <= 64 && vrr_enabled->range &&
-      vrr_enabled->range->minimum == 0 &&
-      vrr_enabled->range->maximum == 1 && vrr_enabled->value <= 1) {
+  if (duplicate_vrr_enabled) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::Duplicate;
+  } else if (vrr_enabled == nullptr) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::Absent;
+  } else if (vrr_enabled->id == 0) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::InvalidId;
+  } else if (vrr_enabled->value_width_bits == 0 ||
+             vrr_enabled->value_width_bits > 64) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::InvalidWidth;
+  } else if (!vrr_enabled->range || vrr_enabled->range->minimum != 0 ||
+             vrr_enabled->range->maximum != 1) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::InvalidRange;
+  } else if (vrr_enabled->value > 1) {
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::InvalidValue;
+  } else {
     result.cache.crtc.vrr_enabled =
         PropertyBinding{vrr_enabled->id, vrr_enabled->value,
                         vrr_enabled->value_width_bits, vrr_enabled->range};
+    result.cache.crtc.vrr_status = OptionalVrrPropertyStatus::Valid;
   }
 
   result.object_type = PropertyObjectType::PrimaryPlane;
@@ -107,4 +121,4 @@ PropertyCacheResult build_atomic_property_cache(
   return result;
 }
 
-}  // namespace glasswyrm::drm
+} // namespace glasswyrm::drm

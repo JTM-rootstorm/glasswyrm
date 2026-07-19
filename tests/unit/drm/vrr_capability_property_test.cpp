@@ -38,6 +38,23 @@ int main() {
   gw::test::require(discover_vrr_enabled_property(crtc).status ==
                         VrrPropertyStatus::Absent,
                     "ordinary atomic CRTC may omit VRR_ENABLED");
+  const auto absent_cache = build_atomic_property_cache(
+      std::array{ObjectProperty{10, "CRTC_ID", 0, 64}}, crtc,
+      std::array{ObjectProperty{30, "FB_ID", 0, 64},
+                 ObjectProperty{31, "CRTC_ID", 0, 64},
+                 ObjectProperty{32, "SRC_X", 0, 64},
+                 ObjectProperty{33, "SRC_Y", 0, 64},
+                 ObjectProperty{34, "SRC_W", 0, 64},
+                 ObjectProperty{35, "SRC_H", 0, 64},
+                 ObjectProperty{36, "CRTC_X", 0, 64},
+                 ObjectProperty{37, "CRTC_Y", 0, 64},
+                 ObjectProperty{38, "CRTC_W", 0, 64},
+                 ObjectProperty{39, "CRTC_H", 0, 64}});
+  gw::test::require(
+      absent_cache.status == PropertyCacheStatus::Success &&
+          absent_cache.cache.crtc.vrr_status ==
+              OptionalVrrPropertyStatus::Absent,
+      "optional VRR property absence remains diagnostic, not fatal");
   crtc.push_back({22, "VRR_ENABLED", 0, 1});
   gw::test::require(discover_vrr_enabled_property(crtc).status ==
                         VrrPropertyStatus::InvalidRange,
@@ -49,6 +66,26 @@ int main() {
                         property.binding.value_width_bits == 1 &&
                         property.binding.range->maximum == 1,
                     "VRR_ENABLED ID, value width, and range are retained");
+  crtc.push_back(crtc.back());
+  const auto duplicate_cache = build_atomic_property_cache(
+      std::array{ObjectProperty{10, "CRTC_ID", 0, 64}}, crtc,
+      std::array{ObjectProperty{30, "FB_ID", 0, 64},
+                 ObjectProperty{31, "CRTC_ID", 0, 64},
+                 ObjectProperty{32, "SRC_X", 0, 64},
+                 ObjectProperty{33, "SRC_Y", 0, 64},
+                 ObjectProperty{34, "SRC_W", 0, 64},
+                 ObjectProperty{35, "SRC_H", 0, 64},
+                 ObjectProperty{36, "CRTC_X", 0, 64},
+                 ObjectProperty{37, "CRTC_Y", 0, 64},
+                 ObjectProperty{38, "CRTC_W", 0, 64},
+                 ObjectProperty{39, "CRTC_H", 0, 64}});
+  gw::test::require(duplicate_cache.status == PropertyCacheStatus::Success &&
+                        duplicate_cache.cache.crtc.vrr_status ==
+                            OptionalVrrPropertyStatus::Duplicate &&
+                        !duplicate_cache.cache.crtc.vrr_enabled,
+                    "malformed optional VRR metadata remains observable "
+                    "without rejecting KMS");
+  crtc.pop_back();
   crtc.back().value = 2;
   gw::test::require(discover_vrr_enabled_property(crtc).status ==
                         VrrPropertyStatus::InvalidValue,
