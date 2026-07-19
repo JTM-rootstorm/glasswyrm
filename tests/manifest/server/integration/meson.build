@@ -32,7 +32,8 @@ if get_option('glasswyrmd')
           tests_source_dir / 'helpers/x11_request_builder.cpp',
         ),
         dependencies: [gwipc_dep, gw_x11_setup_dep],
-        include_directories: test_source_root_include,
+        include_directories: [test_source_root_include,
+                              gw_generated_include_dir],
       )
       test(
         'output-configuration-process',
