@@ -939,7 +939,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone13-runtime-test milestone11-interactive-rerun; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone13-runtime-test milestone14-runtime-test milestone11-interactive-rerun; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -994,8 +994,10 @@ run_failure "$work_dir/scenario-m6-injection.out" "$gw_vm" scenario 'milestone6-
 run_failure "$work_dir/scenario-m7-injection.out" "$gw_vm" scenario 'milestone7-runtime-test;touch'
 run_failure "$work_dir/scenario-m11-injection.out" "$gw_vm" scenario 'milestone11-runtime-test;touch'
 run_failure "$work_dir/scenario-m12-injection.out" "$gw_vm" scenario 'milestone12-runtime-test;touch'
+run_failure "$work_dir/scenario-m14-injection.out" "$gw_vm" scenario 'milestone14-runtime-test;touch'
 assert_contains "$work_dir/scenario-m6-injection.out" 'Scenario names are fixed'
 assert_contains "$work_dir/scenario-m12-injection.out" 'Scenario names are fixed'
+assert_contains "$work_dir/scenario-m14-injection.out" 'Scenario names are fixed'
 
 : >"$command_log"
 run_failure "$work_dir/reset-gate.out" "$gw_vm" reset

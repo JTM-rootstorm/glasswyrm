@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glasswyrm.invalid/schemas/m14-vm-evidence-v1.json",
+  "title": "Glasswyrm Milestone 14 QXL VM evidence summary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "required_base_commit",
+    "tested_commit",
+    "profile",
+    "passed",
+    "failure_stage",
+    "results",
+    "evidence_errors"
+  ],
+  "properties": {
+    "schema": {"const": "glasswyrm.m14-vm-evidence.v1"},
+    "required_base_commit": {
+      "const": "6864ea631d61636289a21c7d2d6655a17be0c004"
+    },
+    "tested_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "profile": {"const": "qxl-unsupported"},
+    "passed": {"type": "boolean"},
+    "failure_stage": {"type": "string"},
+    "results": {
+      "type": "object",
+      "additionalProperties": {"enum": ["passed", "failed", "missing"]}
+    },
+    "evidence_errors": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
