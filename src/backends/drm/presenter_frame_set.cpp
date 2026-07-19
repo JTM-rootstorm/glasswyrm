@@ -8,7 +8,8 @@ output::PresentResult DrmPresenter::present_validated(
     const output::SoftwareFrameView &frame,
     const FullCopyReason forced_reason,
     const std::uint64_t layout_generation,
-    const output::VrrPresentationRequest* const vrr_request) {
+    const output::VrrPresentationRequest* const vrr_request,
+    const bool require_output_identity) {
   if (!initialized_ || shutdown_ || fatal_)
     return {output::PresentDisposition::Fatal, 0, 0,
             "DRM presenter is not operational"};
@@ -27,7 +28,7 @@ output::PresentResult DrmPresenter::present_validated(
   if (frame.output.width != config_.output.width ||
       frame.output.height != config_.output.height ||
       frame.output.output_id == 0 ||
-      (config_.output.output_id != 0 &&
+      (require_output_identity && config_.output.output_id != 0 &&
        frame.output.output_id != config_.output.output_id) ||
       refresh_distance > kDefaultRefreshToleranceMillihz ||
       frame.commit_id == 0 || frame.generation == 0 || frame.ordinal == 0 ||
@@ -69,7 +70,7 @@ DrmPresenter::present(const output::SoftwareFrameSetView &frames) {
           ? FullCopyReason::OutputConfigurationChanged
           : FullCopyReason::None;
   auto result = present_validated(frame, reason, frames.layout_generation,
-                                  &output_frame.vrr);
+                                  &output_frame.vrr, true);
   if (result.disposition == output::PresentDisposition::Complete)
     result.visible_hash = frames.aggregate_hash;
   else if (result.disposition == output::PresentDisposition::Pending)

@@ -175,7 +175,7 @@ void DrmPresenter::recover_vrr_divergence(std::string& error) noexcept {
 
 output::PresentResult DrmPresenter::present(
     const output::SoftwareFrameView& frame) {
-  return present_validated(frame, FullCopyReason::None, 0);
+  return present_validated(frame, FullCopyReason::None, 0, nullptr, false);
 }
 
 output::PresentResult DrmPresenter::present_initial(

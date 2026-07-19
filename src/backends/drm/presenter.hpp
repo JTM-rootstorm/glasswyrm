@@ -145,7 +145,8 @@ class DrmPresenter final : public output::PresentationBackend,
   [[nodiscard]] output::PresentResult present_validated(
       const output::SoftwareFrameView& frame, FullCopyReason forced_reason,
       std::uint64_t layout_generation,
-      const output::VrrPresentationRequest* vrr_request = nullptr);
+      const output::VrrPresentationRequest* vrr_request,
+      bool require_output_identity);
   [[nodiscard]] output::BackendEvent fatal_event(std::string stage,
                                                  std::string reason);
   void record_fatal(std::string stage, std::string reason) noexcept;
