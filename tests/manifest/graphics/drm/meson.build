@@ -61,6 +61,19 @@ if get_option('drm_backend')
   )
   test('drm-presenter', drm_presenter_test, timeout: 10)
 
+  foreach presenter_vrr_test : [
+    ['drm-presenter-vrr-state', 'presenter_vrr_state_test.cpp'],
+    ['drm-presenter-vrr-integration', 'presenter_vrr_integration_test.cpp'],
+  ]
+    presenter_vrr_executable = executable(
+      presenter_vrr_test[0].underscorify(),
+      files(tests_source_dir / 'drm' / presenter_vrr_test[1]),
+      dependencies: gw_drm_presenter_dep,
+      include_directories: test_source_root_include,
+    )
+    test(presenter_vrr_test[0], presenter_vrr_executable, timeout: 10)
+  endforeach
+
   drm_m13_presenter_test = executable(
     'drm_m13_presenter_test',
     files(tests_source_dir / 'drm/drm_m13_presenter_test.cpp'),

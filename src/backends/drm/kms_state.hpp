@@ -50,7 +50,8 @@ capture_saved_state(KmsApi &, int fd, PipelineIds,
 [[nodiscard]] std::vector<AtomicPropertyValue>
 atomic_initial_request(PipelineIds, const AtomicPropertyCache &,
                        std::uint32_t mode_blob, std::uint32_t framebuffer,
-                       std::uint32_t width, std::uint32_t height);
+                       std::uint32_t width, std::uint32_t height,
+                       bool include_vrr = true);
 [[nodiscard]] std::vector<AtomicPropertyValue>
 atomic_flip_request(PipelineIds, const AtomicPropertyCache &,
                     std::uint32_t framebuffer);

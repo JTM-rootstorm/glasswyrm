@@ -97,7 +97,8 @@ bool capture_saved_state(KmsApi &api, int fd, PipelineIds ids,
 std::vector<AtomicPropertyValue>
 atomic_initial_request(PipelineIds ids, const AtomicPropertyCache &p,
                        std::uint32_t blob, std::uint32_t fb,
-                       std::uint32_t width, std::uint32_t height) {
+                       std::uint32_t width, std::uint32_t height,
+                       const bool include_vrr) {
   std::vector<AtomicPropertyValue> request{
       {ids.connector, p.connector.crtc_id.id, ids.crtc},
           {ids.crtc, p.crtc.mode_id.id, blob},
@@ -114,7 +115,7 @@ atomic_initial_request(PipelineIds ids, const AtomicPropertyCache &p,
           {ids.primary_plane, p.primary_plane.crtc_y.id, 0},
           {ids.primary_plane, p.primary_plane.crtc_w.id, width},
       {ids.primary_plane, p.primary_plane.crtc_h.id, height}};
-  if (p.crtc.vrr_enabled)
+  if (include_vrr && p.crtc.vrr_enabled)
     request.push_back({ids.crtc, p.crtc.vrr_enabled->id, 0});
   return request;
 }

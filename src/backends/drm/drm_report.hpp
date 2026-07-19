@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backends/drm/damage_copy.hpp"
+#include "backends/drm/drm_vrr_report.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -101,7 +102,8 @@ struct FatalReport {
 
 using DrmReportRecord =
     std::variant<DiscoveryReport, SelectionReport, ModesetReport, FlipReport,
-                 VtReport, DamageCopyReport, RestoreReport, FatalReport>;
+                 VtReport, DamageCopyReport, RestoreReport, FatalReport,
+                 DrmVrrReportRecord>;
 
 [[nodiscard]] std::string serialize_report_record(
     const DrmReportRecord& record);

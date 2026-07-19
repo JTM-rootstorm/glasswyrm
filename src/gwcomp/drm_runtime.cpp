@@ -163,14 +163,19 @@ bool create_drm_presenter_impl(
   const auto selected_mode = device->snapshot()
                                  .connectors[selection->connector_index]
                                  .modes[selection->mode_index];
+  std::uint64_t selected_output_id{};
   if (inventory) {
     auto built_inventory =
         drm::build_drm_output_inventory(device->snapshot(), *selection, error);
     if (!built_inventory) return false;
+    selected_output_id = built_inventory->layout.primary_output_id.value;
     *inventory = std::move(*built_inventory);
   }
   if (options.drm_report)
     resources.report = std::make_unique<drm::DrmReport>(*options.drm_report);
+  if (options.vrr_report)
+    resources.vrr_report =
+        std::make_unique<drm::DrmReport>(*options.vrr_report);
   if (options.mirror_dump_dir)
     resources.mirror =
         std::make_unique<headless::FrameDumper>(*options.mirror_dump_dir);
@@ -179,9 +184,9 @@ bool create_drm_presenter_impl(
 
   auto backend = std::make_unique<drm::DrmPresenter>(
       std::move(*device), *resources.kms_api, resources.report.get(),
-      resources.mirror.get());
+      resources.mirror.get(), resources.vrr_report.get());
   drm::DrmPresenterConfig config;
-  config.output = {0, selected_mode.width, selected_mode.height,
+  config.output = {selected_output_id, selected_mode.width, selected_mode.height,
                    selected_mode.refresh_millihz};
   config.connector = options.connector;
   config.refresh_millihz =
@@ -190,6 +195,7 @@ bool create_drm_presenter_impl(
   config.tty_path = options.tty.value_or("");
   config.vt_signals = {SIGUSR1, SIGUSR2};
   config.damage_aware_copy = true;
+  config.vrr_reporting = resources.vrr_report != nullptr;
   if (!backend->initialize(config, resources.vt_api.get(), error)) return false;
   if (!backend->fallback_reason().empty())
     std::fprintf(stderr, "gwcomp: atomic DRM fallback: %s\n",

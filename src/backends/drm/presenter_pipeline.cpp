@@ -97,12 +97,26 @@ bool DrmPresenter::try_atomic(std::string& error) {
   const auto request = atomic_initial_request(
       pipeline_, saved_.properties, mode_blob_.id(),
       buffers_.front().framebuffer_id(), config_.output.width,
-      config_.output.height);
+      config_.output.height, false);
   if (!kms_.atomic_commit(device_.borrowed_kms_fd(), request,
                           AtomicTestOnly | AtomicAllowModeset, nullptr, error)) {
     mode_blob_.reset();
     return false;
   }
+  const auto connector = std::ranges::find_if(
+      snapshot.connectors,
+      [&](const Connector &value) { return value.id == pipeline_.connector; });
+  if (connector == snapshot.connectors.end()) {
+    error = "selected DRM connector disappeared during VRR discovery";
+    mode_blob_.reset();
+    return false;
+  }
+  auto vrr = probe_kms_vrr_state(kms_, device_.borrowed_kms_fd(), *connector,
+                                 pipeline_, saved_, request);
+  vrr_state_.initialize(config_.output.output_id, std::move(vrr),
+                        snapshot.timestamp_monotonic,
+                        selected_mode_.refresh_millihz);
+  vrr_state_initialized_ = true;
   selected_api_ = ReportApiPath::Atomic;
   return true;
 }
@@ -112,12 +126,25 @@ bool DrmPresenter::capture_legacy(std::string& error) {
   if (!live_connector_ids(connectors, error) ||
       !capture_saved_state(kms_, device_.borrowed_kms_fd(), pipeline_,
                            connectors, false, saved_, error)) return false;
+  const auto &snapshot = device_.snapshot();
+  const auto connector = std::ranges::find_if(
+      snapshot.connectors,
+      [&](const Connector &value) { return value.id == pipeline_.connector; });
+  if (connector == snapshot.connectors.end()) {
+    error = "selected DRM connector disappeared during VRR discovery";
+    return false;
+  }
+  auto vrr = probe_kms_vrr_state(kms_, device_.borrowed_kms_fd(), *connector,
+                                 pipeline_, saved_, {});
+  vrr_state_.initialize(config_.output.output_id, std::move(vrr),
+                        snapshot.timestamp_monotonic,
+                        selected_mode_.refresh_millihz);
+  vrr_state_initialized_ = true;
   selected_api_ = ReportApiPath::Legacy;
   return true;
 }
 
 bool DrmPresenter::initialize_report(std::string& error) {
-  if (!report_) return true;
   const auto& snapshot = device_.snapshot();
   const auto connector = std::ranges::find_if(snapshot.connectors,
       [&](const Connector& value) { return value.id == pipeline_.connector; });
@@ -125,25 +152,61 @@ bool DrmPresenter::initialize_report(std::string& error) {
     error = "selected DRM connector disappeared";
     return false;
   }
-  const DiscoveryReport discovery{snapshot.canonical_path, snapshot.driver.name,
-      snapshot.primary_node, snapshot.dumb_buffer, snapshot.atomic};
-  SelectionReport selection;
-  selection.connector_name = connector_name(connector->type, connector->type_id);
-  selection.connector_id = pipeline_.connector;
-  selection.crtc_id = pipeline_.crtc;
-  selection.primary_plane_id = pipeline_.primary_plane;
-  selection.mode_name = selected_mode_.name;
-  selection.width = selected_mode_.width;
-  selection.height = selected_mode_.height;
-  selection.refresh_millihz = selected_mode_.refresh_millihz;
-  selection.api = selected_api_;
-  selection.framebuffer_format = "XRGB8888";
-  selection.pitches = {buffers_.front().pitch(), buffers_.back().pitch()};
-  selection.sizes = {buffers_.front().size(), buffers_.back().size()};
-  selection.vt_path = config_.tty_path.empty() ? "external" : config_.tty_path;
-  selection.vt_owned = device_.session() == DeviceSession::Standalone;
-  const std::array<DrmReportRecord, 2> records{discovery, selection};
-  StagedDrmReport staged;
-  return report_->stage(records, staged, error) && report_->commit(staged, error);
+  if (report_) {
+    const DiscoveryReport discovery{snapshot.canonical_path,
+                                    snapshot.driver.name,
+                                    snapshot.primary_node,
+                                    snapshot.dumb_buffer, snapshot.atomic};
+    SelectionReport selection;
+    selection.connector_name =
+        connector_name(connector->type, connector->type_id);
+    selection.connector_id = pipeline_.connector;
+    selection.crtc_id = pipeline_.crtc;
+    selection.primary_plane_id = pipeline_.primary_plane;
+    selection.mode_name = selected_mode_.name;
+    selection.width = selected_mode_.width;
+    selection.height = selected_mode_.height;
+    selection.refresh_millihz = selected_mode_.refresh_millihz;
+    selection.api = selected_api_;
+    selection.framebuffer_format = "XRGB8888";
+    selection.pitches = {buffers_.front().pitch(), buffers_.back().pitch()};
+    selection.sizes = {buffers_.front().size(), buffers_.back().size()};
+    selection.vt_path =
+        config_.tty_path.empty() ? "external" : config_.tty_path;
+    selection.vt_owned = device_.session() == DeviceSession::Standalone;
+    const std::array<DrmReportRecord, 2> records{discovery, selection};
+    StagedDrmReport staged;
+    if (!report_->stage(records, staged, error) ||
+        !report_->commit(staged, error))
+      return false;
+  }
+  return !vrr_report_ || append_vrr_capability_report(error);
+}
+
+bool DrmPresenter::append_vrr_capability_report(std::string& error) {
+  const auto& snapshot = device_.snapshot();
+  const auto connector = std::ranges::find_if(
+      snapshot.connectors,
+      [&](const Connector& value) { return value.id == pipeline_.connector; });
+  if (connector == snapshot.connectors.end() || !vrr_state_initialized_) {
+    error = "selected DRM connector disappeared from VRR report";
+    return false;
+  }
+  const auto& state = vrr_state_.kms_state();
+  DrmVrrCapabilityReport value;
+  value.device = snapshot.canonical_path;
+  value.driver = snapshot.driver.name;
+  value.connector = connector_name(connector->type, connector->type_id);
+  value.crtc_id = pipeline_.crtc;
+  value.mode = selected_mode_.name;
+  value.connector_property_present = state.connector_property_present;
+  value.connector_property_value = state.hardware_capable;
+  value.crtc_property_present = state.crtc_property_present;
+  value.crtc_property_id = state.crtc_property_id;
+  value.original_enabled = state.original_enabled;
+  value.atomic_test_off_passed = state.test_off_passed;
+  value.atomic_test_on_passed = state.test_on_passed;
+  value.controllable = state.controllable;
+  return append_vrr_report(DrmVrrReportRecord{std::move(value)}, error);
 }
 }  // namespace glasswyrm::drm
