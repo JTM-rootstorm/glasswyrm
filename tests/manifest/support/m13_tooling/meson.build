@@ -8,15 +8,12 @@ test(
   args: [m13_fixture_root],
   timeout: 10,
 )
-m13_fixture_fs = import('fs')
-if m13_fixture_fs.is_file(m13_fixture_root / 'frame-sets.jsonl')
-  test(
-    'm13-fixture-complete',
-    m13_fixture_validator,
-    args: [m13_fixture_root, '--require-complete'],
-    timeout: 10,
-  )
-endif
+test(
+  'm13-fixture-complete',
+  m13_fixture_validator,
+  args: [m13_fixture_root, '--require-complete'],
+  timeout: 10,
+)
 
 m13_fixture_validator_test = find_program(
   tests_source_dir / 'compat/m13/validate_fixtures_test.py',

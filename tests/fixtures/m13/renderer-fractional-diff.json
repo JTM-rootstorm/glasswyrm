@@ -1,0 +1,19 @@
+{
+  "maximum_channel_difference": 0,
+  "outputs": [
+    {
+      "height": 480,
+      "maximum_channel_difference": 0,
+      "output": "14600366843002893318",
+      "width": 640
+    },
+    {
+      "height": 600,
+      "maximum_channel_difference": 0,
+      "output": "15584038454218348411",
+      "width": 800
+    }
+  ],
+  "passed": true,
+  "schema": 1
+}
