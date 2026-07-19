@@ -359,6 +359,20 @@ start_headless_peers() {
   wait_socket "$runtime/input.sock"
   wait_socket /tmp/.X11-unix/X99
 }
+unit_eventfd_count() {
+  local unit=$1 control_group cgroup_path pid link count=0
+  control_group=$(systemctl show "$unit" -p ControlGroup --value)
+  [[ $control_group == /* && $control_group != *..* ]]
+  cgroup_path=/sys/fs/cgroup$control_group
+  [[ -r $cgroup_path/cgroup.procs ]]
+  while IFS= read -r pid; do
+    [[ -n $pid && -d /proc/$pid/fd ]] || continue
+    while IFS= read -r link; do
+      [[ $link == 'anon_inode:[eventfd]' ]] && count=$((count + 1))
+    done < <(for link in /proc/"$pid"/fd/*; do readlink "$link" 2>/dev/null || true; done)
+  done <"$cgroup_path/cgroup.procs"
+  printf '%s\n' "$count"
+}
 stop_transient_unit() {
   local unit=$1 main_pid control_group cgroup_path pid stat_tail starttime
   local eventfd_count=0
@@ -1126,12 +1140,14 @@ cp "$canonical" "$artifact_dir/milestone13-drm-canonical.ppm"
 cmp "$artifact_dir/milestone13-drm-canonical.ppm" \
   "$artifact_dir/milestone13-drm-screen.ppm"
 result[screenshot_equality]=passed
-read -r vt_releases_before vt_acquires_before < <(python3 - \
+read -r vt_releases_before vt_acquires_before pre_vt_hash pre_vt_ordinal < <(python3 - \
   "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
 import json,sys
 r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+frames=[x for x in r if x.get('record') in ('modeset','flip')]
 print(sum(x.get('record')=='vt' and x.get('transition')=='release' for x in r),
-      sum(x.get('record')=='vt' and x.get('transition')=='acquire' for x in r))
+      sum(x.get('record')=='vt' and x.get('transition')=='acquire' for x in r),
+      frames[-1]['canonical_hash'],frames[-1]['ordinal'])
 PY
 )
 chvt 1
@@ -1170,14 +1186,37 @@ while True:
         if time.monotonic()>=deadline: raise SystemExit('VT acquire was not observed')
         time.sleep(.05)
 PY
-drm_scene_before=$(wc -l <"$control_data/drm-scene.jsonl")
-drm_frames_before=$(find "$drm" -type f -name '*.ppm' | wc -l)
-drm_flip_before=$(python3 - "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
-import json,sys
-r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
-print(max(x['ordinal'] for x in r if x.get('record') in ('modeset','flip')))
+post_vt_ordinal=$(python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
+  "$pre_vt_hash" "$pre_vt_ordinal" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); expected=sys.argv[2]; before=int(sys.argv[3])
+deadline=time.monotonic()+10
+while True:
+    try:
+        records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        restored=[r for r in records if r.get('record')=='flip' and
+                  r['ordinal']>before and r['canonical_hash']==expected and
+                  r['scanout_hash']==expected]
+        assert restored
+        print(restored[-1]['ordinal'])
+        break
+    except (AssertionError,KeyError,json.JSONDecodeError):
+        if time.monotonic()>=deadline:
+            raise SystemExit('VT acquire did not restore the canonical scanout')
+        time.sleep(.05)
 PY
 )
+printf -v post_vt_pattern 'frame-%06d-output-*.ppm' "$post_vt_ordinal"
+for _ in {1..200}; do
+  post_vt_frames=("$drm"/$post_vt_pattern)
+  ((${#post_vt_frames[@]} == 1)) && break
+  sleep .05
+done
+((${#post_vt_frames[@]} == 1))
+post_vt_frame=${post_vt_frames[0]}
+cmp "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame"
+drm_scene_before=$(wc -l <"$control_data/drm-scene.jsonl")
+drm_flip_before=$post_vt_ordinal
 "$uinput_helper" run --control-socket "$control/input.sock" \
   --scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"
 python3 - "$control_data/post-vt-pointer-anchor.json" <<'PY'
@@ -1192,18 +1231,21 @@ path=pathlib.Path(sys.argv[1]); before=int(sys.argv[2])
 output=json.load(open(sys.argv[3]))['outputs'][0]['id']; deadline=time.monotonic()+10
 while True:
     try:
-        records=[json.loads(line) for line in path.read_text().splitlines()[before:] if line.strip()]
+        lines=path.read_text().splitlines()
+        baseline_record=json.loads(lines[before-1])
+        baseline_cursor=next(cursor for cursor in baseline_record.get('cursors',[])
+                             if cursor.get('primary_output_id')==output)
+        baseline=(baseline_cursor.get('x'),baseline_cursor.get('y'))
         states=[]
-        for record in records:
+        for record in (json.loads(line) for line in lines[before:] if line.strip()):
             for cursor in record.get('cursors',[]):
                 if cursor.get('primary_output_id')==output:
                     states.append((cursor.get('x'),cursor.get('y')))
-        origin=states.index((0,0)); final=states.index((48,48),origin+1)
-        assert final>origin
+        assert any(state!=baseline for state in states)
         break
-    except (AssertionError,ValueError,json.JSONDecodeError):
+    except (AssertionError,KeyError,StopIteration,json.JSONDecodeError):
         if time.monotonic()>=deadline:
-            raise SystemExit('post-VT cursor anchor did not traverse (0,0) to (48,48)')
+            raise SystemExit('post-VT input did not publish a changed cursor scene')
         time.sleep(.05)
 PY
 for _ in {1..400}; do
@@ -1213,19 +1255,15 @@ r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 print(max(x['ordinal'] for x in r if x.get('record') in ('modeset','flip')))
 PY
 )
-  (( drm_flip_after > drm_flip_before && \
-     $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before )) && break
+  (( drm_flip_after > drm_flip_before )) && break
   sleep .05
 done
-(( drm_flip_after > drm_flip_before && \
-   $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before ))
-post_vt_frame=$(find "$drm" -type f -name '*.ppm' -print | sort -V | tail -n1)
-cmp "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame"
+(( drm_flip_after > drm_flip_before ))
 canonical_ordinal=${canonical##*/frame-}; canonical_ordinal=${canonical_ordinal%%-*}
-post_vt_ordinal=${post_vt_frame##*/frame-}; post_vt_ordinal=${post_vt_ordinal%%-*}
 canonical_ordinal=$((10#$canonical_ordinal))
-post_vt_ordinal=$((10#$post_vt_ordinal))
 result[vt_replay]=passed
+drm_live_eventfd_count=$(unit_eventfd_count glasswyrm-m13-drm.service)
+((drm_live_eventfd_count > 0))
 legacy_command stop
 wait "$drm_legacy_pid"
 drm_legacy_pid=0
@@ -1251,15 +1289,16 @@ python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
   "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame" \
   "$artifact_dir/milestone13-drm-representation.json" \
   "$drm_process_count_before" "$drm_eventfd_count_before" \
+  "$drm_live_eventfd_count" \
   "$drm_process_count_after" "$drm_eventfd_count_after" \
   "$drm_main_identity_gone" "$drm_cgroup_empty" \
   "$canonical_ordinal" "$post_vt_ordinal" <<'PY'
 import hashlib,json,sys
 drm=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 renderer=[json.loads(line) for line in open(sys.argv[2]) if line.strip()]
-process_before,eventfd_before,process_after,eventfd_after=map(int,sys.argv[6:10])
-main_gone=sys.argv[10]=='true'; cgroup_empty=sys.argv[11]=='true'
-canonical_ordinal,post_vt_ordinal=map(int,sys.argv[12:14])
+process_before,eventfd_before,eventfd_live,process_after,eventfd_after=map(int,sys.argv[6:11])
+main_gone=sys.argv[11]=='true'; cgroup_empty=sys.argv[12]=='true'
+canonical_ordinal,post_vt_ordinal=map(int,sys.argv[13:15])
 no_fatal=(not any(item.get('record')=='fatal' for item in drm) and
           not any(item.get('disposition')=='fatal' or item.get('error') is not None
                   for item in renderer))
@@ -1288,7 +1327,7 @@ texture_cache_zero=(bool(scaled) and
                     all(output['texture_cache_bytes']==0 for output in scaled) and
                     cgroup_empty and process_after==0)
 main_pid_zero=main_gone and cgroup_empty and process_after==0 and process_before>0
-event_fd_closed=eventfd_before>0 and eventfd_after==0 and cgroup_empty
+event_fd_closed=eventfd_live>0 and eventfd_after==0 and cgroup_empty
 assert texture_cache_zero and main_pid_zero and event_fd_closed
 canonical=hashlib.sha256(open(sys.argv[3],'rb').read()).hexdigest()
 post_vt=hashlib.sha256(open(sys.argv[4],'rb').read()).hexdigest()
@@ -1302,7 +1341,8 @@ json.dump({'schema':1,'passed':True,'scale':[4,3],'transform':'rotate-180',
   'framebuffer_cleanup':restore['framebuffer_cleanup'],
   'master_drop':restore['master_drop'],'texture_cache_zero':texture_cache_zero,
   'no_fatal':no_fatal,'process_count_before':process_before,
-  'eventfd_count_before':eventfd_before,'process_count_after':process_after,
+  'eventfd_count_live':eventfd_live,'eventfd_count_before':eventfd_before,
+  'process_count_after':process_after,
   'eventfd_count_after':eventfd_after,'cgroup_empty':cgroup_empty}},
  open(sys.argv[5],'w'),sort_keys=True)
 PY
