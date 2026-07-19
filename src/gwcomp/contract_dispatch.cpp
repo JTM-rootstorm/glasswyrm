@@ -92,6 +92,25 @@ void enqueue_releases(gwipc_connection* connection,
   compositor.clear_releases();
 }
 
+bool enqueue_vrr_response(
+    gwipc_connection* connection, const std::uint64_t reply_sequence,
+    const std::vector<gw::compositor::VrrResponseMessage>& messages) {
+  for (const auto& message : messages) {
+    gwipc_outgoing_message outgoing{};
+    outgoing.struct_size = sizeof(outgoing);
+    outgoing.type = message.type;
+    outgoing.flags = message.flags;
+    outgoing.reply_to = (message.flags & GWIPC_FLAG_REPLY) != 0
+                            ? reply_sequence
+                            : 0;
+    outgoing.payload = message.payload.data();
+    outgoing.payload_size = message.payload.size();
+    if (gwipc_connection_enqueue(connection, &outgoing) != GWIPC_STATUS_OK)
+      return false;
+  }
+  return true;
+}
+
 ContractDispatchResult finish_frame(
     gwipc_connection* connection, const std::uint64_t reply_sequence,
     const gwipc_frame_commit& commit,
@@ -99,7 +118,17 @@ ContractDispatchResult finish_frame(
     const std::optional<std::uint64_t> maximum_frames,
     gw::compositor::Compositor& compositor) {
   ContractDispatchResult result;
-  (void)enqueue_ack(connection, reply_sequence, commit, frame);
+  if (frame.vrr_response.empty()) {
+    (void)enqueue_ack(connection, reply_sequence, commit, frame);
+  } else if (!enqueue_vrr_response(connection, reply_sequence,
+                                   frame.vrr_response)) {
+    std::fprintf(stderr,
+                 "gwcomp: preflighted VRR response enqueue failed; closing peer\n");
+    result.fatal = true;
+    return result;
+  } else {
+    compositor.clear_releases();
+  }
   if (frame.result == GWIPC_FRAME_ACCEPTED) {
     result.accepted_frame = true;
     std::fprintf(stderr,
@@ -110,7 +139,8 @@ ContractDispatchResult finish_frame(
     if (maximum_frames && compositor.accepted_frames() == *maximum_frames)
       result.stop_after_flush = true;
   }
-  enqueue_releases(connection, compositor);
+  if (frame.vrr_response.empty())
+    enqueue_releases(connection, compositor);
   return result;
 }
 
@@ -172,6 +202,16 @@ ContractDispatchResult dispatch_contract_message(
       applied = peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&
                 compositor.apply(
                     *gwipc_decoded_surface_policy_upsert(contract.get()));
+      break;
+    case GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT:
+      applied = peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&
+                compositor.apply(
+                    *gwipc_decoded_output_vrr_policy_upsert(contract.get()));
+      break;
+    case GWIPC_MESSAGE_SURFACE_VRR_STATE:
+      applied = peer_role == GWIPC_ROLE_PROTOCOL_SERVER &&
+                compositor.apply(
+                    *gwipc_decoded_surface_vrr_state(contract.get()));
       break;
     case GWIPC_MESSAGE_SURFACE_REMOVE:
       applied = compositor.apply(*gwipc_decoded_surface_remove(contract.get()));

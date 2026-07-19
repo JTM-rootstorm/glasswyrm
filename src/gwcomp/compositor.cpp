@@ -1,6 +1,7 @@
 #include "gwcomp/compositor.hpp"
 
 #include "gwcomp/presentation_transaction.hpp"
+#include "compositor/scene_vrr_validation.hpp"
 #include "render/software/scene_renderer.hpp"
 
 #if GW_HAS_HEADLESS_BACKEND
@@ -23,8 +24,11 @@ select_peer_profile(const gwipc_role role,
   constexpr std::uint64_t output_model =
       GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
       GWIPC_CAP_SCALE_METADATA;
+  constexpr std::uint64_t vrr = GWIPC_CAP_VRR_METADATA |
+                                GWIPC_CAP_VRR_POLICY |
+                                GWIPC_CAP_PRESENTATION_TIMING;
   if (role == GWIPC_ROLE_TEST_PRODUCER) {
-    if ((capabilities & (GWIPC_CAP_CURSOR_SURFACE | output_model)) != 0)
+    if ((capabilities & (GWIPC_CAP_CURSOR_SURFACE | output_model | vrr)) != 0)
       return std::nullopt;
     return (capabilities & (common | buffered)) == (common | buffered)
                ? std::optional{PeerProfile::M4TestProducer}
@@ -37,6 +41,10 @@ select_peer_profile(const gwipc_role role,
   const auto negotiated_output_model = capabilities & output_model;
   if (negotiated_output_model != 0 &&
       negotiated_output_model != output_model)
+    return std::nullopt;
+  const auto negotiated_vrr = capabilities & vrr;
+  if (negotiated_vrr != 0 &&
+      (negotiated_vrr != vrr || negotiated_output_model != output_model))
     return std::nullopt;
   const auto negotiated_buffered = capabilities & buffered;
   if ((capabilities & GWIPC_CAP_CURSOR_SURFACE) != 0 &&
@@ -117,6 +125,7 @@ bool Compositor::begin_snapshot(const std::uint64_t generation) {
 
 bool Compositor::end_snapshot() {
   if (presentation_pending() || !snapshot_active_ ||
+      !validate_scene_vrr(scene_.pending(), vrr_contract_enabled_).accepted() ||
       !scene_.end_complete_snapshot())
     return false;
   if (profile_ == PeerProfile::M7BufferedProtocolServer) {
@@ -196,6 +205,20 @@ bool Compositor::apply(const gwipc_surface_policy_upsert& value) {
     return false;
   }
   return scene_.apply(value);
+}
+
+bool Compositor::apply(const gwipc_output_vrr_policy_upsert& value) {
+  if (presentation_pending() || !snapshot_active_) return false;
+  const bool applied = scene_.apply(value);
+  if (!applied) snapshot_invalid_ = true;
+  return applied;
+}
+
+bool Compositor::apply(const gwipc_surface_vrr_state& value) {
+  if (presentation_pending() || !snapshot_active_) return false;
+  const bool applied = scene_.apply(value);
+  if (!applied) snapshot_invalid_ = true;
+  return applied;
 }
 
 bool Compositor::apply(const gwipc_surface_remove& value) {
@@ -339,6 +362,7 @@ void Compositor::disconnect() {
   committed_attachments_.clear();
   pre_snapshot_attachments_.clear();
   releases_.clear();
+  committed_vrr_.clear();
   output_.disable();
   output_set_.reset();
   last_commit_id_ = 0;
@@ -349,6 +373,7 @@ void Compositor::disconnect() {
   snapshot_policy_ids_.clear();
   snapshot_output_ids_.clear();
   snapshot_surface_output_ids_.clear();
+  vrr_contract_enabled_ = false;
 }
 
 } // namespace gw::compositor

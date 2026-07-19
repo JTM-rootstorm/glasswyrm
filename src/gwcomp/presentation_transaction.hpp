@@ -51,6 +51,8 @@ private:
     std::uint64_t canonical_hash{};
     ReleaseMap releases;
     std::optional<PreparedSceneManifest> manifest;
+    std::optional<PreparedVrrFrame> vrr;
+    std::optional<VrrResponseBatch> vrr_response;
   };
 
   PresentationTransaction(SceneModel candidate, AttachmentMap attachments,
@@ -60,6 +62,8 @@ private:
                               frame_set,
                           gwipc_frame_commit commit, PresentedFrame presented,
                           std::optional<PreparedSceneManifest> manifest,
+                          std::optional<PreparedVrrFrame> vrr,
+                          std::optional<VrrResponseBatch> vrr_response,
                           std::uint64_t token,
                           std::chrono::steady_clock::time_point deadline);
   [[nodiscard]] static ReleaseMap calculate_retired_buffers(
@@ -108,6 +112,9 @@ private:
                                        std::uint64_t visible_hash);
   [[nodiscard]] bool publish_manifest(Compositor& compositor,
                                       std::string& error);
+  [[nodiscard]] bool finalize_vrr(
+      const glasswyrm::output::VrrPresentationFeedbackMap& feedback,
+      std::string& error);
 
   SceneModel candidate_;
   AttachmentMap attachments_;
@@ -117,6 +124,9 @@ private:
   gwipc_frame_commit commit_{};
   PresentedFrame presented_;
   std::optional<PreparedSceneManifest> manifest_;
+  std::optional<PreparedVrrFrame> vrr_;
+  std::optional<VrrResponseBatch> vrr_response_;
+  std::optional<CompletedVrrFrame> completed_vrr_;
   std::uint64_t token_{};
   std::chrono::steady_clock::time_point deadline_;
 };

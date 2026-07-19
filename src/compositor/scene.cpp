@@ -141,8 +141,10 @@ bool SceneModel::apply(const OutputUpsert &output) {
 bool SceneModel::apply(const gwipc_output_remove &output) {
   if (!mutations_allowed() || output.output_id == 0)
     return false;
-  if (profile_ == SceneProfile::OutputModel)
+  if (profile_ == SceneProfile::OutputModel) {
+    pending_.vrr.output_policies.erase(output.output_id);
     return pending_.outputs.erase(output.output_id) == 1;
+  }
   if (!pending_.output || pending_.output->output_id != output.output_id)
     return false;
   pending_.output.reset();
@@ -195,12 +197,35 @@ bool SceneModel::apply(const gwipc_surface_policy_upsert &policy) {
   return true;
 }
 
+bool SceneModel::apply(const gwipc_output_vrr_policy_upsert &policy) {
+  if (!mutations_allowed() || profile_ != SceneProfile::OutputModel ||
+      !valid_output_vrr_policy(policy))
+    return false;
+  if (snapshot_active_ && pending_.vrr.output_policies.contains(policy.output_id))
+    return false;
+  pending_.vrr.output_policies[policy.output_id] = policy;
+  return true;
+}
+
+bool SceneModel::apply(const gwipc_surface_vrr_state &state) {
+  if (!mutations_allowed() || profile_ != SceneProfile::OutputModel ||
+      !valid_surface_vrr_state(state))
+    return false;
+  if (snapshot_active_ && pending_.vrr.surfaces.contains(state.surface_id))
+    return false;
+  pending_.vrr.surfaces[state.surface_id] = state;
+  if (pending_.vrr.policy_generation == 0)
+    pending_.vrr.policy_generation = state.policy_generation;
+  return true;
+}
+
 bool SceneModel::apply(const gwipc_surface_remove &surface) {
   if (!mutations_allowed() || surface.surface_id == 0 ||
       pending_.surfaces.erase(surface.surface_id) != 1)
     return false;
   pending_.surface_policies.erase(surface.surface_id);
   pending_.surface_outputs.erase(surface.surface_id);
+  pending_.vrr.surfaces.erase(surface.surface_id);
   return true;
 }
 

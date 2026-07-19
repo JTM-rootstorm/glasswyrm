@@ -13,6 +13,15 @@ PresentationTransaction::prepare_output_frame_set(
     const gwipc_frame_commit& value, PresentedFrame& presented,
     std::string& error) {
   const auto& staged = validated.candidate.committed();
+  std::optional<PreparedVrrFrame> prepared_vrr;
+  if (compositor.vrr_contract_enabled_) {
+    prepared_vrr = VrrRuntime::prepare(staged, *compositor.presenter_,
+                                       compositor.committed_vrr_, error);
+    if (!prepared_vrr) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return std::nullopt;
+    }
+  }
   for (const auto& [surface_id, buffer_id] :
        compositor.pending_attachments_) {
     const auto previous = compositor.committed_attachments_.find(surface_id);
@@ -57,7 +66,21 @@ PresentationTransaction::prepare_output_frame_set(
   PreparedOutputFrame prepared;
   prepared.canonical_hash = rendered.frames.aggregate_hash();
   prepared.frame_set.emplace(std::move(rendered.frames));
+  if (prepared_vrr &&
+      !prepared.frame_set->set_vrr_requests(prepared_vrr->requests, error)) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    return std::nullopt;
+  }
   prepared.releases = calculate_retired_buffers(compositor, staged);
+  if (prepared_vrr) {
+    prepared.vrr_response = VrrResponseBatch::preflight(
+        *prepared_vrr, value, presented.result, prepared.releases, error);
+    if (!prepared.vrr_response) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return std::nullopt;
+    }
+    prepared.vrr = std::move(prepared_vrr);
+  }
   if (validated.protocol_server && compositor.scene_manifest_) {
     prepared.manifest.emplace();
     if (!SceneManifest::prepare_output_model(

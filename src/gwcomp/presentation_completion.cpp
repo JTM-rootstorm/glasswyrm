@@ -66,6 +66,9 @@ PresentationCompletion PresentationTransaction::service(
         return fatal(finalize_error.empty()
                          ? "could not finalize pending presentation diagnostics"
                          : finalize_error);
+      if (!compositor.pending_presentation_->finalize_vrr(event.vrr_feedback,
+                                                          error))
+        return fatal(error);
       if (!compositor.pending_presentation_->publish_manifest(compositor,
                                                               error))
         return fatal(error);

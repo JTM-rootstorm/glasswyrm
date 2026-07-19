@@ -139,6 +139,31 @@ bool SoftwareFrameSet::finalize(const std::uint64_t layout_generation,
   return true;
 }
 
+bool SoftwareFrameSet::set_vrr_requests(
+    const std::map<std::uint64_t, VrrPresentationRequest>& requests,
+    std::string& error) {
+  if (!finalized() || requests.size() != outputs_.size()) {
+    error = "VRR presentation metadata does not cover the finalized frame set";
+    return false;
+  }
+  for (const auto& [output_id, request] : requests) {
+    const auto output = outputs_.find(output_id);
+    if (output == outputs_.end() || !request.valid ||
+        !vrr::valid_policy_mode(request.requested_mode) ||
+        (request.reason_flags & ~vrr::kKnownReasonMask) != 0 ||
+        request.state_generation == 0 || request.transition_serial == 0 ||
+        (request.desired_enabled !=
+         (request.decision == vrr::Decision::Enabled))) {
+      error = "VRR presentation metadata is invalid";
+      return false;
+    }
+  }
+  for (const auto& [output_id, request] : requests)
+    outputs_.at(output_id).vrr = request;
+  error.clear();
+  return true;
+}
+
 SoftwareFrameSetView SoftwareFrameSet::view() const noexcept {
   return {&outputs_,         aggregate_hash_, layout_generation_,
           primary_output_id_, commit_id_,      generation_,

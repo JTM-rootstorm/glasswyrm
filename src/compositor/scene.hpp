@@ -1,6 +1,7 @@
 #pragma once
 
 #include "compositor/damage_region.hpp"
+#include "compositor/vrr_state.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -38,6 +39,7 @@ struct Scene {
   std::map<std::uint64_t, gwipc_surface_upsert> surfaces;
   std::map<std::uint64_t, gwipc_surface_policy_upsert> surface_policies;
   std::map<std::uint64_t, SurfaceOutputMembership> surface_outputs;
+  SceneVrrState vrr;
   std::uint64_t primary_output_id{};
   std::uint64_t configuration_generation{};
 };
@@ -72,6 +74,8 @@ public:
   [[nodiscard]] bool apply(const gwipc_surface_upsert &surface);
   [[nodiscard]] bool apply(const gwipc_surface_output_state &state);
   [[nodiscard]] bool apply(const gwipc_surface_policy_upsert &policy);
+  [[nodiscard]] bool apply(const gwipc_output_vrr_policy_upsert &policy);
+  [[nodiscard]] bool apply(const gwipc_surface_vrr_state &state);
   [[nodiscard]] bool apply(const gwipc_surface_remove &surface);
   [[nodiscard]] bool apply(const gwipc_surface_damage &damage);
 

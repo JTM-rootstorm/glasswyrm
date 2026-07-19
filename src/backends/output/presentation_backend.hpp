@@ -2,12 +2,54 @@
 
 #include "backends/output/software_frame.hpp"
 #include "backends/output/software_frame_set.hpp"
+#include "output/vrr/reasons.hpp"
 
 #include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace glasswyrm::output {
+
+struct VrrPresentationCapability {
+  bool output_enabled{};
+  bool connected{};
+  bool drm{};
+  bool connector_property_present{};
+  bool hardware_capable{};
+  bool atomic_kms_available{};
+  bool atomic_test_passed{};
+  bool kms_controllable{};
+  bool simulated{};
+  bool range_available{};
+  bool atomic_required{};
+  bool session_active{true};
+  bool suspended{};
+  bool timing_available{};
+  std::uint32_t minimum_refresh_millihertz{};
+  std::uint32_t maximum_refresh_millihertz{};
+  vrr::ReasonMask reason_flags{};
+};
+
+struct VrrPresentationFeedback {
+  std::uint64_t output_id{};
+  bool effective_enabled{};
+  bool property_readback_valid{};
+  bool session_active{};
+  std::uint32_t flip_sequence{};
+  std::uint32_t flags{};
+  std::uint64_t kernel_timestamp_nanoseconds{};
+  std::uint64_t interval_nanoseconds{};
+  bool timestamp_available{};
+};
+
+inline constexpr std::uint32_t kVrrPresentationFeedbackSimulated =
+    UINT32_C(1) << 0U;
+
+using VrrPresentationFeedbackMap =
+    std::map<std::uint64_t, VrrPresentationFeedback>;
 
 enum class PresentDisposition { Complete, Pending, Rejected, Fatal };
 
@@ -16,6 +58,15 @@ struct PresentResult {
   std::uint64_t token{};
   std::uint64_t visible_hash{};
   std::string error;
+  VrrPresentationFeedbackMap vrr_feedback;
+
+  PresentResult() = default;
+  PresentResult(PresentDisposition disposition_value, std::uint64_t token_value,
+                std::uint64_t visible_hash_value, std::string error_value,
+                VrrPresentationFeedbackMap feedback = {})
+      : disposition(disposition_value), token(token_value),
+        visible_hash(visible_hash_value), error(std::move(error_value)),
+        vrr_feedback(std::move(feedback)) {}
 };
 
 enum class BackendEventKind { None, Complete, Fatal };
@@ -25,6 +76,15 @@ struct BackendEvent {
   std::uint64_t token{};
   std::uint64_t visible_hash{};
   std::string error;
+  VrrPresentationFeedbackMap vrr_feedback;
+
+  BackendEvent() = default;
+  BackendEvent(BackendEventKind kind_value, std::uint64_t token_value,
+               std::uint64_t visible_hash_value, std::string error_value,
+               VrrPresentationFeedbackMap feedback = {})
+      : kind(kind_value), token(token_value),
+        visible_hash(visible_hash_value), error(std::move(error_value)),
+        vrr_feedback(std::move(feedback)) {}
 };
 
 enum class BackendStateResult { Complete, Fatal };
@@ -32,6 +92,12 @@ enum class BackendStateResult { Complete, Fatal };
 class PresentationBackend {
  public:
   virtual ~PresentationBackend() = default;
+
+  [[nodiscard]] virtual std::optional<VrrPresentationCapability>
+  vrr_capability(std::uint64_t output_id) const noexcept {
+    static_cast<void>(output_id);
+    return std::nullopt;
+  }
 
   [[nodiscard]] virtual PresentResult present(const SoftwareFrameView& frame) = 0;
   // The M13 boundary is additive while historical producers still submit one
