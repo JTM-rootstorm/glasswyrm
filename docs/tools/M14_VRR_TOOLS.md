@@ -8,11 +8,11 @@ not add a second privileged control plane.
 Set an output's complete-layout VRR policy with:
 
 ```sh
-gwout --socket PATH OUTPUT --vrr off
-gwout --socket PATH OUTPUT --vrr fullscreen
-gwout --socket PATH OUTPUT --vrr focused
-gwout --socket PATH OUTPUT --vrr app-requested
-gwout --socket PATH OUTPUT --vrr always-eligible
+gwout --socket PATH set OUTPUT --vrr off
+gwout --socket PATH set OUTPUT --vrr fullscreen
+gwout --socket PATH set OUTPUT --vrr focused
+gwout --socket PATH set OUTPUT --vrr app-requested
+gwout --socket PATH set OUTPUT --vrr always-eligible
 ```
 
 `OUTPUT` is the stable name or hexadecimal/decimal stable ID. The edit starts
@@ -58,6 +58,8 @@ pixel hashes.
 
 `gw-vm milestone14-runtime-test --yes` is the fixed QXL negative-capability
 gate. `gw-hw doctor --config PATH` validates a reviewed physical target, and
-`gw-hw milestone14-vrr-test --config PATH --yes` is the fixed positive gate.
-The hardware command may take DRM master and switch VTs; follow the safety
-requirements in the M14 hardware validation document before running it.
+`gw-hw milestone14-vrr-test --config PATH --artifact-dir PATH --yes` is the
+fixed positive gate. The hardware command may take DRM master, switch VTs,
+stop the selected getty, and reconfigure the display. Never run it from the
+current graphical session or a TTY whose interruption is unacceptable; follow
+the safety requirements in the M14 hardware validation document first.

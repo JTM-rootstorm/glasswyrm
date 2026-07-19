@@ -1,4 +1,4 @@
-# Milestone 14 hardware harness skeleton
+# Milestone 14 physical hardware harness
 
 This directory defines the reviewed, local-only input schema for the positive
 VRR hardware run. Copy `config.example.toml` outside the source tree and replace
@@ -11,9 +11,20 @@ digests.
 
 ```sh
 ./tools/gw-hw doctor --config /path/to/reviewed.toml
-./tools/gw-hw milestone14-vrr-test --config /path/to/reviewed.toml --yes
+./tools/gw-hw milestone14-vrr-test \
+  --config /path/to/reviewed.toml \
+  --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
-The current command is a pre-integration skeleton. It performs bounded
-read-only checks and intentionally does not change KMS, VT, getty, or session
-state. Its output is not hardware proof and no final fixture is generated.
+`doctor` is bounded discovery. The live command is deliberately disruptive: it
+may take DRM master, stop the configured getty, switch VTs, and reconfigure the
+selected display. Invoke it only from the configured spare text VT, with the
+display manager inactive and independent recovery access available. Do not run
+it from the current graphical session or a TTY whose interruption would be
+noticeable.
+
+The implementation includes deterministic parser, doctor, failure-unwind, and
+fixture dry-run tests. Those are not positive hardware proof. Only a reviewed
+live run whose cadence, property readback, images, restoration, checksums, and
+archive validators all pass can satisfy the physical gate; no such acceptance
+is claimed by this document.

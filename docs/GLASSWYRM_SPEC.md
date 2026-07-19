@@ -623,14 +623,55 @@ Recommended policy modes:
 - `app-requested`
 - `always-eligible`
 
-Initial VRR work should target:
+Milestone 14 implements this model through three explicit authorities:
 
-- Single-output fullscreen clients.
-- Borderless fullscreen behavior.
-- Debug logging of VRR eligibility.
-- Manual override through `gwctl` or `gwout`.
+- `glasswyrmd` owns application preference, committed per-output policy,
+  client-visible `GW_VRR` state, and transaction promotion;
+- `gwm` classifies fullscreen, exact borderless fullscreen, focus, output
+  membership, and application preference and selects at most one candidate per
+  output; and
+- `gwcomp` owns final surface validation, simulated or atomic-KMS application,
+  effective-state readback, presentation timing, VT behavior, and restoration.
 
-Multi-output and composited mixed-refresh behavior should come later.
+GWIPC API 0.9 transports independently negotiated VRR metadata, policy, and
+presentation-timing records. It retains SOVERSION 0, wire version 1.0, and
+every API 0.1-through-0.8 symbol and record. Experimental `GW_VRR` 0.1 lets a
+repository-owned X11 client set Default, Disable, Allow, or Prefer on an owned
+top-level window and observe committed state. It does not give the client KMS
+authority, PRESENT timing, pacing, DRI3, DMA-BUF, or persistent configuration.
+
+The implemented output policies are `off`, `fullscreen`, `focused`,
+`app-requested`, and `always-eligible`. Candidate policies require one visible,
+focused, managed window exclusively assigned to the output and reject explicit
+Disable. Fullscreen accepts applied EWMH fullscreen or the exact complete-output
+borderless classification. AppRequested additionally requires Prefer.
+AlwaysEligible is an administrative override that does not require a window
+candidate.
+
+Headless simulation is enabled only by a repeated
+`gwcomp --headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ` declaration for a named
+headless output. `gwcomp --vrr-report PATH` publishes bounded capability,
+decision, timing, summary, and restore records without changing pixel output.
+`glasswyrmd --output-model --control-socket PATH --vrr-protocol` enables the
+server side; `--vrr-protocol` without the output model is rejected. `gwout set
+OUTPUT --vrr MODE` changes policy through the complete-layout transaction, and
+`gwinfo vrr [OUTPUT]` reports state, reasons, and timing.
+
+The physical path is deliberately narrower: one reviewed atomic-KMS connector,
+one CRTC, the composited primary-plane XRGB8888 path, scale 1, transform Normal,
+and exact readback. Connector `vrr_capable`, CRTC `VRR_ENABLED`, and successful
+TEST_ONLY off/on commits establish controllability, not positive behavior.
+Positive acceptance additionally requires enough monotonic kernel page-flip
+samples to distinguish the same in-range cadence with VRR off and on, followed
+by exact KMS/KD/VT/getty restoration.
+
+M14 host, fake-DRM, raw-protocol, and simulated-output coverage is implemented.
+The clean QXL negative-capability gate and the separate reviewed physical
+positive gate are still pending; consequently this specification does not yet
+claim M14 hardware acceptance. Multi-physical-output VRR, mixed-refresh
+optimization, legacy-KMS VRR, direct scanout, PRESENT/DRI3 timing,
+vendor-specific APIs, HDR/color interaction, and toolkit integration remain
+unsupported.
 
 ## 17. Rendering strategy
 
@@ -914,6 +955,16 @@ Configuration should eventually include:
 - Socket path.
 - Experimental extension toggles.
 
+The current M14 command-line configuration is intentionally explicit:
+
+- `glasswyrmd --output-model --control-socket PATH --vrr-protocol` enables the
+  experimental X11 view and same-UID control surface;
+- `gwcomp --headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ` enables bounded
+  per-output simulation;
+- `gwcomp --vrr-report PATH` creates a non-replacing JSONL report; and
+- `gwout set OUTPUT --vrr MODE` is the only implemented persistent-process
+  policy edit. Policy is not persisted across a new session.
+
 Environment variables may be used for developer overrides, but should not become the primary configuration interface.
 
 ## 24. Commit and branch workflow
@@ -969,7 +1020,7 @@ M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients        complete
 M13 Output model and per-output scaling          complete
-M14 Variable refresh rate
+M14 Variable refresh rate                       implementation present; acceptance pending
 M15 Color management and HDR
 M16 Toolkit and daily-driver expansion
 ```
@@ -1112,6 +1163,64 @@ Unsupported:
 - Xft DPI integration
 - output persistence
 - VRR/HDR/color management
+
+Milestone 14 implementation adds the bounded VRR model described in Section
+16. It extends GWIPC API 0 to 0.9 without changing wire 1.0 or SOVERSION 0,
+adds deterministic GWM policies and server-owned application preference,
+keeps final effective state in `gwcomp`, adds atomic `VRR_ENABLED` control and
+kernel page-flip timing, supports deterministic headless simulation, and
+exposes `gwout`, `gwinfo`, and experimental `GW_VRR` 0.1 interfaces. The
+host/fake/simulated proof is present, but neither the required clean QXL gate
+nor the separate physical-display positive gate is recorded as accepted yet.
+
+The candidate M14 release boundary is:
+
+Supported by the implementation:
+
+- DRM connector `vrr_capable` discovery
+- atomic CRTC `VRR_ENABLED` control
+- one physical VRR output
+- composited primary-plane page flips
+- off/fullscreen/focused/app-requested/always-eligible policies
+- borderless fullscreen
+- `gwout` manual policy
+- `gwinfo` reasons and timing
+- experimental `GW_VRR` 0.1 client preference
+- simulated headless VRR policy
+- VT and peer restart recovery
+
+Unsupported:
+
+- VRR on legacy KMS
+- several physical VRR outputs
+- mixed-refresh optimization
+- direct scanout
+- PRESENT/DRI3 timing
+- vendor-specific VRR APIs
+- VRR with HDR/color management
+- toolkit integration
+
+The QXL negative-capability gate is fixed to the internal snapshot named
+`base` and must run after the accepted M13 gate with a reset between them:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone13-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone14-runtime-test --yes
+```
+
+The physical gate is intentionally separate. It can take DRM master, switch
+VTs, stop the selected getty, and reconfigure the reviewed display. It must not
+be run from an active graphical session or from a TTY whose interruption is
+unacceptable:
+
+```sh
+./tools/gw-hw doctor --config /path/to/reviewed.toml
+./tools/gw-hw milestone14-vrr-test \
+  --config /path/to/reviewed.toml \
+  --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
+```
 
 ## 26. Definition of done
 
