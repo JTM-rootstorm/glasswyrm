@@ -2,6 +2,7 @@
 
 #ifdef GW_SERVER_HAS_IPC
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "glasswyrmd/vrr_policy_projection.hpp"
 
 #include <cstdio>
 #endif
@@ -170,6 +171,16 @@ bool ServerRuntime::service_lifecycle_work(
                                                    : nullptr)
                          : std::nullopt;
     if (!evaluated) {
+      if (server_.options_.vrr_protocol) {
+        auto* cache = bridge_->vrr_cache();
+        if (!cache || !lifecycle_vrr_before_) {
+          std::fprintf(stderr,
+                       "glasswyrmd: invalid policy result has no VRR "
+                       "lifecycle checkpoint\n");
+          return false;
+        }
+        restore_vrr_lifecycle_checkpoint(*cache, *lifecycle_vrr_before_);
+      }
       bridge_->clear_transaction_result();
       if (!lifecycle_->policy_rejected()) {
         std::fprintf(stderr,
@@ -183,8 +194,12 @@ bool ServerRuntime::service_lifecycle_work(
     }
   }
   if (lifecycle_ && bridge_->policy_rejected_ready()) {
-    if (server_.options_.vrr_protocol && lifecycle_vrr_before_)
-      *bridge_->vrr_cache() = *lifecycle_vrr_before_;
+    if (server_.options_.vrr_protocol) {
+      auto* cache = bridge_->vrr_cache();
+      if (!cache || !lifecycle_vrr_before_)
+        return false;
+      restore_vrr_lifecycle_checkpoint(*cache, *lifecycle_vrr_before_);
+    }
     if (!lifecycle_->policy_rejected()) {
       std::fprintf(stderr, "glasswyrmd: policy rejection transition failed\n");
       return false;

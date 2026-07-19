@@ -99,6 +99,17 @@ void VrrStateCache::set_window_preference(
   window.compositor_state.reset();
 }
 
+void VrrStateCache::set_window_policy_candidate(
+    const std::uint32_t window_id, const bool policy_candidate) {
+  if (window_id == 0) return;
+  auto [iterator, inserted] = windows_.try_emplace(window_id);
+  auto& window = iterator->second;
+  if (!inserted && window.policy_candidate == policy_candidate) return;
+  window.policy_candidate = policy_candidate;
+  window.policy_result.reset();
+  window.compositor_state.reset();
+}
+
 void VrrStateCache::erase_window(const std::uint32_t window_id) noexcept {
   windows_.erase(window_id);
 }
@@ -107,8 +118,11 @@ bool VrrStateCache::stage_policy_result(
     const std::uint64_t generation,
     const std::vector<gwipc_policy_output_vrr_state>& output_results,
     const std::vector<gwipc_policy_window_vrr_state>& window_results) {
+  std::set<std::uint32_t> expected_windows;
+  for (const auto& [window_id, window] : windows_)
+    if (window.policy_candidate) expected_windows.insert(window_id);
   if (generation == 0 || output_results.size() != outputs_.size() ||
-      window_results.size() != windows_.size())
+      window_results.size() != expected_windows.size())
     return false;
   std::set<std::uint64_t> output_ids;
   std::map<std::uint32_t, std::uint64_t> selected_windows;
@@ -129,6 +143,7 @@ bool VrrStateCache::stage_policy_result(
   for (const auto& result : window_results) {
     const auto found = windows_.find(result.window_id);
     if (result.struct_size < sizeof(result) || found == windows_.end() ||
+        !found->second.policy_candidate ||
         !window_ids.insert(result.window_id).second ||
         !outputs_.contains(result.output_id) ||
         !valid_preference(result.preference) ||
@@ -143,6 +158,7 @@ bool VrrStateCache::stage_policy_result(
           selected_windows.at(result.window_id) != result.output_id)))
       return false;
   }
+  if (window_ids != expected_windows) return false;
   for (const auto& [selected, output_id] : selected_windows) {
     static_cast<void>(output_id);
     const auto found = std::ranges::find_if(
@@ -153,6 +169,10 @@ bool VrrStateCache::stage_policy_result(
   }
   for (const auto& result : output_results)
     outputs_.at(result.output_id).policy_result = result;
+  for (auto& [window_id, window] : windows_) {
+    static_cast<void>(window_id);
+    window.policy_result.reset();
+  }
   for (const auto& result : window_results)
     windows_.at(result.window_id).policy_result = result;
   generation_ = generation;
@@ -172,7 +192,8 @@ bool VrrStateCache::stage_surface_states(
                                   ? &*found->second.policy_result
                                   : nullptr;
     if (state.struct_size < sizeof(state) || state.surface_id == 0 ||
-        found == windows_.end() || !policy ||
+        found == windows_.end() ||
+        (found->second.policy_candidate && !policy) ||
         !outputs_.contains(state.output_id) ||
         !windows.insert(state.window_id).second ||
         !surfaces.insert(state.surface_id).second ||
@@ -185,15 +206,19 @@ bool VrrStateCache::stage_surface_states(
         !valid_bool(state.exclusive_output_membership) || state.flags != 0 ||
         state.policy_generation != generation_ ||
         (state.reason_flags & ~GWIPC_VRR_KNOWN_REASON_MASK) != 0 ||
-        state.output_id != policy->output_id ||
-        state.policy_selected != policy->selected ||
-        state.policy_eligible != policy->eligible ||
-        state.focused != policy->focused ||
-        state.fullscreen != policy->fullscreen ||
-        state.borderless_fullscreen != policy->borderless_fullscreen ||
-        state.exclusive_output_membership !=
-            policy->exclusive_output_membership ||
-        state.reason_flags != policy->reason_flags)
+        (found->second.policy_candidate &&
+         (state.output_id != policy->output_id ||
+          state.policy_selected != policy->selected ||
+          state.policy_eligible != policy->eligible ||
+          state.focused != policy->focused ||
+          state.fullscreen != policy->fullscreen ||
+          state.borderless_fullscreen != policy->borderless_fullscreen ||
+          state.exclusive_output_membership !=
+              policy->exclusive_output_membership ||
+          state.reason_flags != policy->reason_flags)) ||
+        (!found->second.policy_candidate &&
+         (policy || state.policy_selected || state.policy_eligible ||
+          (state.reason_flags & GWIPC_VRR_REASON_WINDOW_UNMANAGED) == 0)))
       return false;
   }
   for (const auto& state : states)

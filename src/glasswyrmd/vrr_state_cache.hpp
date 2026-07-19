@@ -20,6 +20,7 @@ struct ServerVrrOutputState {
 
 struct ServerVrrWindowState {
   gwipc_vrr_window_preference preference{GWIPC_VRR_PREFERENCE_DEFAULT};
+  bool policy_candidate{true};
   std::optional<gwipc_policy_window_vrr_state> policy_result;
   std::optional<gwipc_surface_vrr_state> compositor_state;
 };
@@ -76,6 +77,8 @@ class VrrStateCache final {
                                 gwipc_vrr_policy_mode mode) noexcept;
   void set_window_preference(std::uint32_t window_id,
                              gwipc_vrr_window_preference preference);
+  void set_window_policy_candidate(std::uint32_t window_id,
+                                   bool policy_candidate);
   void erase_window(std::uint32_t window_id) noexcept;
 
   [[nodiscard]] bool stage_policy_result(

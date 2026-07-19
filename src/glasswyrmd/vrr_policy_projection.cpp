@@ -45,14 +45,19 @@ void synchronize_vrr_windows(const LifecycleSnapshot& snapshot,
     if (!snapshot.windows.contains(window_id)) stale.push_back(window_id);
   }
   for (const auto window_id : stale) cache.erase_window(window_id);
-  for (const auto& [window_id, unused] : snapshot.windows) {
-    static_cast<void>(unused);
+  for (const auto& [window_id, window] : snapshot.windows) {
     const auto* value = published.find_window(window_id);
     cache.set_window_preference(
         window_id,
         static_cast<gwipc_vrr_window_preference>(
             value ? value->preference : WindowVrrPreference::Default));
+    cache.set_window_policy_candidate(window_id, !window.override_redirect);
   }
+}
+
+void restore_vrr_lifecycle_checkpoint(
+    VrrStateCache& current, const VrrStateCache& checkpoint) noexcept {
+  current = checkpoint;
 }
 
 VrrPolicyProjection project_vrr_policy(const LifecycleSnapshot& snapshot,
@@ -77,6 +82,9 @@ VrrPolicyProjection project_vrr_policy(const LifecycleSnapshot& snapshot,
   for (const auto& [window_id, window] : snapshot.windows) {
     if (window.override_redirect) continue;
     const auto cached = cache.windows().find(window_id);
+    if (cached == cache.windows().end() ||
+        !cached->second.policy_candidate)
+      return {};
     gwipc_policy_window_vrr_upsert record{};
     record.struct_size = sizeof(record);
     record.window_id = window_id;
@@ -102,22 +110,53 @@ std::vector<gwipc_surface_vrr_state> project_vrr_surfaces(
   result.reserve(snapshot.windows.size());
   for (const auto& [window_id, window] : snapshot.windows) {
     const auto cached = cache.windows().find(window_id);
-    if (cached == cache.windows().end() || !cached->second.policy_result)
+    if (cached == cache.windows().end() ||
+        cached->second.policy_candidate == window.override_redirect)
       return {};
-    const auto& policy = *cached->second.policy_result;
     gwipc_surface_vrr_state record{};
     record.struct_size = sizeof(record);
     record.surface_id = (UINT64_C(1) << 32U) | window_id;
     record.window_id = window_id;
-    record.output_id = policy.output_id;
-    record.preference = policy.preference;
-    record.policy_selected = policy.selected;
-    record.policy_eligible = policy.eligible;
-    record.focused = policy.focused;
-    record.fullscreen = policy.fullscreen;
-    record.borderless_fullscreen = policy.borderless_fullscreen;
-    record.exclusive_output_membership = policy.exclusive_output_membership;
-    record.reason_flags = policy.reason_flags;
+    if (cached->second.policy_candidate) {
+      if (!cached->second.policy_result) return {};
+      const auto& policy = *cached->second.policy_result;
+      record.output_id = policy.output_id;
+      record.preference = policy.preference;
+      record.policy_selected = policy.selected;
+      record.policy_eligible = policy.eligible;
+      record.focused = policy.focused;
+      record.fullscreen = policy.fullscreen;
+      record.borderless_fullscreen = policy.borderless_fullscreen;
+      record.exclusive_output_membership =
+          policy.exclusive_output_membership;
+      record.reason_flags = policy.reason_flags;
+    } else {
+      if (window.assigned_output_id == 0 ||
+          !cache.outputs().contains(window.assigned_output_id))
+        return {};
+      const bool exclusive = window.output_memberships.size() == 1 &&
+                             window.output_memberships.front() ==
+                                 window.assigned_output_id;
+      record.output_id = window.assigned_output_id;
+      record.preference = cached->second.preference;
+      record.focused = window.focused;
+      record.fullscreen =
+          window.applied_state == GWIPC_POLICY_APPLIED_FULLSCREEN;
+      record.exclusive_output_membership = exclusive;
+      record.reason_flags = GWIPC_VRR_REASON_WINDOW_UNMANAGED;
+      if (!window.policy_visible)
+        record.reason_flags |= GWIPC_VRR_REASON_WINDOW_HIDDEN;
+      if (!window.focused)
+        record.reason_flags |= GWIPC_VRR_REASON_WINDOW_UNFOCUSED;
+      if (window.output_memberships.size() > 1)
+        record.reason_flags |= GWIPC_VRR_REASON_WINDOW_SPANS_OUTPUTS;
+      else if (!exclusive)
+        record.reason_flags |=
+            GWIPC_VRR_REASON_SURFACE_MEMBERSHIP_INVALID;
+      if (cached->second.preference == GWIPC_VRR_PREFERENCE_DISABLE)
+        record.reason_flags |=
+            GWIPC_VRR_REASON_WINDOW_PREFERENCE_DISABLED;
+    }
     record.policy_generation = policy_generation;
     result.push_back(record);
   }
