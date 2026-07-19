@@ -25,7 +25,34 @@
     "failure_stage": {"type": "string"},
     "results": {
       "type": "object",
-      "additionalProperties": {"enum": ["passed", "failed", "missing"]}
+      "additionalProperties": false,
+      "required": [
+        "historical_default",
+        "strict_m14",
+        "strict_gles",
+        "sanitizer",
+        "component_builds",
+        "api_consumers",
+        "source_layout",
+        "fake_drm_matrix",
+        "simulated_headless_matrix",
+        "raw_little_big",
+        "gwout_vrr",
+        "gwinfo_vrr",
+        "vrr_policy_matrix",
+        "sdl_vrr_reuse",
+        "qxl_unsupported",
+        "vt_replay",
+        "gwm_replay",
+        "compositor_replay",
+        "restoration",
+        "socket_cleanup",
+        "archive_validation",
+        "journal_evidence"
+      ],
+      "patternProperties": {
+        "^[a-z0-9_]+$": {"enum": ["passed", "failed", "missing"]}
+      }
     },
     "evidence_errors": {
       "type": "array",

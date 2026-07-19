@@ -97,7 +97,7 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
         "test output\n" + json.dumps({"little": True, "big": True}) + "\n")
     accepted = [{"acknowledgement": {"result": 1,
                  "applied_generation": index + 1}, "state": {}}
-                for index in range(6)]
+                for index in range(10)]
     accepted.append({"profile": "qxl-unsupported",
                      "requested_policy": "always-eligible", "accepted": False,
                      "exit_status": 1,
@@ -106,8 +106,39 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
         "".join(json.dumps(record) + "\n" for record in accepted))
     write_json(root / "milestone14-gwinfo.json", {"vrr": [
         {"simulated": True}, {"simulated": True}]})
+    write_json(root / "milestone14-policy-matrix.json", {
+        "schema": 1, "passed": True,
+        "modes": {
+            name: {"desired_enabled": enabled,
+                   "effective_enabled": enabled,
+                   "candidate_window": index + 20, "reasons": []}
+            for index, (name, enabled) in enumerate((
+                ("off", False), ("fullscreen", True), ("focused", True),
+                ("app-requested", True), ("always-eligible", True)))},
+        "app_requested_transitions": [
+            {"preference": "default", "effective_enabled": False},
+            {"preference": "prefer", "effective_enabled": True},
+            {"preference": "disable", "effective_enabled": False}],
+        "focused_candidates": [101, 102],
+        "borderless": {"effective_enabled": True, "classified": True,
+                       "candidate_window": 103},
+    })
+    write_json(root / "milestone14-sdl-vrr.json", {
+        "schema": 1, "passed": True, "sdl_version": "2.32.10",
+        "fullscreen_desktop_enabled": True,
+        "borderless_windowed_rejected": True,
+        "implicit_app_request": False, "app_requested_effective": False,
+    })
+    write_json(root / "milestone14-sdl-probe.json", {
+        "schema": 1, "probe": "m12_sdl_probe", "sdl_version": "2.32.10",
+        "video_driver": "x11", "passed": True,
+    })
     write_json(root / "milestone14-restart.json", {
-        "passed": True, "gwm_replay": True, "compositor_replay": True})
+        "passed": True, "gwm_replay": True, "compositor_replay": True,
+        "candidate_window": 101,
+        "semantic_state": {"policy": "focused", "decision": "enabled",
+                           "desired_enabled": True, "effective_enabled": True,
+                           "reasons": []}})
     write_json(root / "milestone14-restoration.json", {
         "passed": True, "checks": {name: True for name in
         ("kms", "vt", "vrr", "getty", "logind")}})
