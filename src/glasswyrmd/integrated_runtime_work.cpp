@@ -113,7 +113,8 @@ bool ServerRuntime::service_peer_replay(std::string& error) {
     auto replay = project_compositor(
         lifecycle_->committed(), next_compositor_commit_++,
         next_compositor_generation_++, true,
-        server_.options_.output_model ? bridge_->output_layout() : nullptr);
+        server_.options_.output_model ? bridge_->output_layout() : nullptr,
+        server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
     if (!content_presenter_->prepare_replay(
             lifecycle_->committed(), server_.state_.resources(), replay) ||
         !bridge_->submit_replay(replay, error)) {
@@ -163,6 +164,9 @@ bool ServerRuntime::service_lifecycle_work(
                                                bridge_->policy_result(),
                                                server_.options_.output_model
                                                    ? bridge_->output_layout()
+                                                   : nullptr,
+                                               server_.options_.vrr_protocol
+                                                   ? bridge_->vrr_cache()
                                                    : nullptr)
                          : std::nullopt;
     if (!evaluated) {
@@ -178,10 +182,13 @@ bool ServerRuntime::service_lifecycle_work(
       return false;
     }
   }
-  if (lifecycle_ && bridge_->policy_rejected_ready() &&
-      !lifecycle_->policy_rejected()) {
-    std::fprintf(stderr, "glasswyrmd: policy rejection transition failed\n");
-    return false;
+  if (lifecycle_ && bridge_->policy_rejected_ready()) {
+    if (server_.options_.vrr_protocol && lifecycle_vrr_before_)
+      *bridge_->vrr_cache() = *lifecycle_vrr_before_;
+    if (!lifecycle_->policy_rejected()) {
+      std::fprintf(stderr, "glasswyrmd: policy rejection transition failed\n");
+      return false;
+    }
   }
   if (lifecycle_ && bridge_->compositor_rejected_ready()) {
     if (content_presenter_) content_presenter_->reject_lifecycle();

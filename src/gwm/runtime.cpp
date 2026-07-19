@@ -20,7 +20,7 @@ constexpr std::uint64_t kRequiredCapabilities =
 constexpr std::uint64_t kOfferedCapabilities =
     kRequiredCapabilities | GWIPC_CAP_WINDOW_LIFECYCLE |
     GWIPC_CAP_INTERACTIVE_POLICY | GWIPC_CAP_MULTI_OUTPUT_POLICY |
-    GWIPC_CAP_SCALE_METADATA;
+    GWIPC_CAP_SCALE_METADATA | GWIPC_CAP_VRR_POLICY;
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
 constexpr std::uint32_t kMaximumQueuedBytes = GWIPC_HARD_MAXIMUM_QUEUED_BYTES;
@@ -53,7 +53,7 @@ int run(const glasswyrm::wm::Options& options) {
   listener_options.maximum_fd_count = GWIPC_DEFAULT_MAXIMUM_FDS;
   listener_options.maximum_queued_bytes = kMaximumQueuedBytes;
   listener_options.maximum_queued_messages = kMaximumQueuedMessages;
-  listener_options.instance_label = "gwm-m5";
+  listener_options.instance_label = "gwm-m14";
   gwipc_listener* raw_listener = nullptr;
   const auto status = gwipc_listener_create(&listener_options, &raw_listener);
   const std::unique_ptr<gwipc_listener, ListenerDeleter> listener(raw_listener);

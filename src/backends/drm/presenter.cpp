@@ -30,6 +30,8 @@ struct DrmPresenter::PendingPresentation {
   PresenterVrrPlan vrr_plan;
   std::optional<PresenterVrrState> completed_vrr_state;
   output::VrrPresentationFeedbackMap vrr_feedback;
+  bool promote_back{true};
+  bool report_damage_copy{true};
   bool completion_verified{};
 };
 DrmPresenter::DrmPresenter(Device device, KmsApi& kms, DrmReport* report,
@@ -43,19 +45,6 @@ DrmPresenter::DrmPresenter(Device device, KmsApi& kms, DrmReport* report,
       dumb_api_(kms, device_.borrowed_kms_fd()) {}
 DrmPresenter::~DrmPresenter() { std::string ignored; (void)shutdown(ignored); }
 
-std::optional<output::VrrPresentationCapability>
-DrmPresenter::vrr_capability(const std::uint64_t output_id) const noexcept {
-  if (!vrr_state_initialized_ || !initialized_ || output_id == 0 ||
-      (config_.output.output_id != 0 && output_id != config_.output.output_id))
-    return std::nullopt;
-  const auto connector = std::ranges::find_if(
-      device_.snapshot().connectors,
-      [&](const Connector &value) { return value.id == pipeline_.connector; });
-  const bool connected =
-      connector != device_.snapshot().connectors.end() &&
-      connector->status == ConnectionStatus::Connected;
-  return vrr_state_.capability(true, connected);
-}
 bool DrmPresenter::initialize(const DrmPresenterConfig& config,
                               session::VirtualTerminalApi* vt_api,
                               std::string& error) {
@@ -155,45 +144,33 @@ bool DrmPresenter::commit_evidence(headless::StagedFrameDump& mirror,
   return true;
 }
 
-bool DrmPresenter::blocking_modeset(DumbBuffer& buffer, std::string& error) {
-  if (selected_api_ == ReportApiPath::Atomic) {
-    const auto request = atomic_initial_request(
-        pipeline_, saved_.properties, mode_blob_.id(), buffer.framebuffer_id(),
-        config_.output.width, config_.output.height,
-        vrr_state_initialized_ && vrr_state_.kms_state().controllable);
-    return kms_.atomic_commit(device_.borrowed_kms_fd(), request,
-                              AtomicAllowModeset, nullptr, error);
+void DrmPresenter::recover_vrr_divergence(std::string& error) noexcept {
+  const auto primary = error;
+  try {
+    std::string recovery_error;
+    const auto framebuffer =
+        pending_ ? pending_->framebuffer_id : buffers_.front().framebuffer_id();
+    const bool disabled = set_vrr_off_on_frame(framebuffer, recovery_error);
+    std::string restore_error;
+    const bool restored =
+        restore_saved_state(kms_, device_.borrowed_kms_fd(), saved_,
+                            restore_error);
+    if (restored) {
+      vrr_state_.mark_restored();
+      display_taken_ = false;
+    }
+    error = primary;
+    if (!disabled) {
+      error += "; best-effort VRR-off failed";
+      if (!recovery_error.empty()) error += ": " + recovery_error;
+    }
+    if (!restored) {
+      error += "; saved KMS restore failed";
+      if (!restore_error.empty()) error += ": " + restore_error;
+    }
+  } catch (...) {
+    error = primary + "; unexpected exception during VRR recovery";
   }
-  const KmsCrtcState state{pipeline_.crtc, buffer.framebuffer_id(), 0, 0, true,
-                           kms_mode_};
-  const std::array connector{pipeline_.connector};
-  return kms_.legacy_set_crtc(device_.borrowed_kms_fd(), state, connector,
-                              error);
-}
-
-bool DrmPresenter::verify_vrr_state(const bool expected,
-                                    std::string& error) {
-  if (!vrr_state_initialized_ || !vrr_state_.kms_state().controllable) {
-    error.clear();
-    return true;
-  }
-  return verify_kms_vrr_enabled(kms_, device_.borrowed_kms_fd(), pipeline_,
-                                vrr_state_.kms_state(), expected, error);
-}
-
-bool DrmPresenter::set_vrr_off_on_current_frame(std::string& error) {
-  if (!vrr_state_initialized_ || !vrr_state_.kms_state().controllable ||
-      !vrr_state_.effective_enabled()) {
-    error.clear();
-    return true;
-  }
-  auto request = atomic_flip_request(pipeline_, saved_.properties,
-                                     buffers_.front().framebuffer_id());
-  request = make_vrr_atomic_request(request, vrr_state_.kms_state(), false);
-  if (!kms_.atomic_commit(device_.borrowed_kms_fd(), request, 0, nullptr,
-                          error))
-    return false;
-  return verify_vrr_state(false, error);
 }
 
 output::PresentResult DrmPresenter::present(
@@ -243,7 +220,8 @@ output::PresentResult DrmPresenter::present_initial(
     return {output::PresentDisposition::Fatal, 0, 0, error};
   }
   bool readback_valid{};
-  if (vrr_state_initialized_ && vrr_state_.kms_state().controllable) {
+  if (vrr_contract_enabled_ && vrr_state_initialized_ &&
+      vrr_state_.kms_state().controllable) {
     if (!verify_vrr_state(false, error)) {
       if (mirror_) mirror_->abort(mirror);
       if (report_) report_->abort(report);
@@ -254,7 +232,7 @@ output::PresentResult DrmPresenter::present_initial(
     }
     readback_valid = true;
   }
-  if (vrr_state_initialized_)
+  if (vrr_contract_enabled_ && vrr_state_initialized_)
     vrr_state_.complete_initial(false, readback_valid);
   if (vrr_report_ && vrr_request && vrr_request->valid) {
     const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
@@ -280,12 +258,53 @@ output::PresentResult DrmPresenter::present_initial(
     committed_layout_generation_ = layout_generation;
   complete_damage_copy(target, damage_copy, frame.generation);
   initial_modeset_ = true;
+  if (vrr_request && vrr_request->valid && vrr_plan.desired_enabled)
+    return present_initial_vrr_followup(frame, hash, *vrr_request, vrr_plan);
   output::PresentResult result{output::PresentDisposition::Complete, 0, hash,
                                {}};
-  if (vrr_request && vrr_request->valid && vrr_state_initialized_)
+  if (vrr_request && vrr_request->valid && vrr_contract_enabled_ &&
+      vrr_state_initialized_)
     result.vrr_feedback.emplace(frame.output.output_id, vrr_state_.feedback());
-  static_cast<void>(vrr_plan);
   return result;
+}
+
+output::PresentResult DrmPresenter::present_initial_vrr_followup(
+    const output::SoftwareFrameView& frame, const std::uint64_t hash,
+    const output::VrrPresentationRequest& vrr_request,
+    const PresenterVrrPlan& vrr_plan) {
+  PendingPresentation value;
+  value.token = next_token_++;
+  value.hash = hash;
+  value.ordinal = frame.ordinal;
+  value.commit_id = frame.commit_id;
+  value.generation = frame.generation;
+  value.framebuffer_id = buffers_.front().framebuffer_id();
+  value.next_front_index = front_index_;
+  value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
+  value.cookie = std::make_shared<PageFlipCookie>(value.token);
+  value.vrr_request = vrr_request;
+  value.vrr_plan = vrr_plan;
+  value.promote_back = false;
+  value.report_damage_copy = false;
+  std::string error;
+  if (!device_.arm_page_flip(value.cookie, error)) {
+    record_fatal("initial-vrr-followup", error);
+    fatal_ = true;
+    return {output::PresentDisposition::Fatal, 0, 0, error};
+  }
+  auto request = atomic_flip_request(
+      pipeline_, saved_.properties, value.framebuffer_id);
+  request = make_vrr_atomic_request(request, vrr_state_.kms_state(), true);
+  if (!kms_.atomic_commit(device_.borrowed_kms_fd(), request,
+                          AtomicNonblock | AtomicPageFlipEvent,
+                          value.cookie.get(), error)) {
+    device_.cancel_page_flip(value.cookie);
+    record_fatal("initial-vrr-followup", error);
+    fatal_ = true;
+    return {output::PresentDisposition::Fatal, 0, 0, error};
+  }
+  pending_ = std::make_unique<PendingPresentation>(std::move(value));
+  return {output::PresentDisposition::Pending, pending_->token, 0, {}};
 }
 
 output::PresentResult DrmPresenter::present_flip(
@@ -347,7 +366,8 @@ output::PresentResult DrmPresenter::present_flip(
   if (selected_api_ == ReportApiPath::Atomic) {
     auto request = atomic_flip_request(
         pipeline_, saved_.properties, target.framebuffer_id());
-    if (vrr_state_initialized_ && vrr_plan.include_property)
+    if (vrr_contract_enabled_ && vrr_state_initialized_ &&
+        vrr_plan.include_property)
       request = make_vrr_atomic_request(request, vrr_state_.kms_state(),
                                         vrr_plan.desired_enabled);
     submitted = kms_.atomic_commit(device_.borrowed_kms_fd(), request,
@@ -393,18 +413,29 @@ output::BackendEvent DrmPresenter::service(const short revents) {
   std::string error;
   bool readback_enabled{};
   bool readback_valid{};
-  if (vrr_state_initialized_ && vrr_state_.kms_state().controllable) {
+  if (vrr_contract_enabled_ && vrr_state_initialized_ &&
+      vrr_state_.kms_state().controllable) {
     if (!read_kms_vrr_enabled(kms_, device_.borrowed_kms_fd(), pipeline_,
                               vrr_state_.kms_state(), readback_enabled,
                               error) ||
         readback_enabled != pending_->vrr_plan.desired_enabled) {
       if (error.empty())
         error = "CRTC VRR_ENABLED readback does not match the submitted state";
+      recover_vrr_divergence(error);
       return fatal_event("page-flip-vrr-readback", std::move(error));
     }
     readback_valid = true;
   }
-  if (vrr_state_initialized_) {
+  if (vrr_contract_enabled_ && vrr_state_initialized_) {
+    if (pending_->vrr_request &&
+        (event.sequence == 0 ||
+         (device_.snapshot().timestamp_monotonic &&
+          (!event.timestamp_available ||
+           event.kernel_timestamp_nanoseconds == 0)))) {
+      error = "DRM page-flip timing is unavailable or invalid";
+      recover_vrr_divergence(error);
+      return fatal_event("page-flip-vrr-timing", std::move(error));
+    }
     auto completed = vrr_state_;
     completed.complete_flip(
         pending_->vrr_plan.desired_enabled, readback_enabled, readback_valid,
@@ -419,7 +450,7 @@ output::BackendEvent DrmPresenter::service(const short revents) {
   if (report_) {
     report_->abort(pending_->report);
     std::vector<DrmReportRecord> records{record};
-    if (config_.damage_aware_copy)
+    if (config_.damage_aware_copy && pending_->report_damage_copy)
       records.emplace_back(damage_copy_report(
           buffers_.back(), pending_->damage_copy, pending_->generation,
           static_cast<std::uint32_t>(pending_->next_front_index)));
@@ -464,10 +495,12 @@ bool DrmPresenter::finalize_pending(const std::uint64_t token,
     clear_pending();
     return false;
   }
-  complete_damage_copy(buffers_.back(), pending_->damage_copy,
-                       pending_->generation);
-  buffers_.promote_back();
-  front_index_ = pending_->next_front_index;
+  if (pending_->promote_back) {
+    complete_damage_copy(buffers_.back(), pending_->damage_copy,
+                         pending_->generation);
+    buffers_.promote_back();
+    front_index_ = pending_->next_front_index;
+  }
   committed_pixels_ = std::move(pending_->pixels);
   committed_hash_ = pending_->hash;
   committed_generation_ = pending_->generation;
@@ -529,292 +562,6 @@ bool DrmPresenter::append_report(const DrmReportRecord& record,
   StagedDrmReport staged;
   if (!report_) { error.clear(); return true; }
   return report_->stage(record, staged, error) && report_->commit(staged, error);
-}
-
-bool DrmPresenter::append_vrr_report(const DrmVrrReportRecord& record,
-                                     std::string& error) {
-  StagedDrmReport staged;
-  if (!vrr_report_) {
-    error.clear();
-    return true;
-  }
-  return vrr_report_->stage(DrmReportRecord{record}, staged, error) &&
-         vrr_report_->commit(staged, error);
-}
-
-DrmVrrDecisionReport DrmPresenter::vrr_decision_report(
-    const output::VrrPresentationRequest& request,
-    const std::uint64_t commit_id, const std::uint64_t generation,
-    const bool effective) const {
-  return {commit_id,
-          generation,
-          config_.output.output_id,
-          request.requested_mode,
-          request.candidate_window_id,
-          request.candidate_surface_id,
-          request.desired_enabled,
-          effective,
-          request.reason_flags,
-          vrr_state_.session_active(),
-          request.transition_serial};
-}
-
-DrmVrrTimingReport DrmPresenter::vrr_timing_report(
-    const std::uint64_t commit_id, const std::uint64_t generation,
-    const output::VrrPresentationRequest& request,
-    const output::VrrPresentationFeedback& feedback) const {
-  const auto target = request.target_interval_nanoseconds;
-  const auto interval = feedback.interval_nanoseconds;
-  const auto distance = interval >= target ? interval - target
-                                            : target - interval;
-  return {commit_id,
-          generation,
-          feedback.flip_sequence,
-          feedback.kernel_timestamp_nanoseconds,
-          interval,
-          target,
-          feedback.effective_enabled,
-          feedback.timestamp_available && target != 0 &&
-              distance <= output::vrr::timing_tolerance(target)};
-}
-
-output::BackendStateResult DrmPresenter::suspend(std::string& error) {
-  if (pending_) {
-    error = "cannot release the VT while a page flip remains pending";
-    record_fatal("vt-release", error);
-    fatal_ = true;
-    return output::BackendStateResult::Fatal;
-  }
-  if (!set_vrr_off_on_current_frame(error)) {
-    record_fatal("vt-release-vrr-off", error);
-    fatal_ = true;
-    return output::BackendStateResult::Fatal;
-  }
-  if (direct_session_ && !direct_session_->release(error)) {
-    record_fatal("vt-release", error);
-    fatal_ = true;
-    return output::BackendStateResult::Fatal;
-  }
-  suspended_ = true;
-  if (vrr_state_initialized_)
-    vrr_state_.mark_suspended_off();
-  if (config_.damage_aware_copy && damage_history_) {
-    damage_history_->clear();
-    buffers_.invalidate_content();
-  }
-  if (direct_session_) {
-    const VtReport record{VtTransition::Release, false, false, committed_hash_};
-    if (!append_report(record, error)) return output::BackendStateResult::Fatal;
-  }
-  return output::BackendStateResult::Complete;
-}
-
-output::PresentResult DrmPresenter::resume(
-    const output::SoftwareFrameView& committed) {
-  if (!suspended_ || committed_pixels_.empty() ||
-      output::hash_visible_xrgb8888(committed.pixels) != committed_hash_)
-    return {output::PresentDisposition::Fatal, 0, 0,
-            "DRM resume frame does not match the committed presentation"};
-  std::string error;
-  const bool success = direct_session_ ? direct_session_->reacquire(error)
-                                       : present_committed_frame(error);
-  if (!success) {
-    record_fatal("vt-acquire", error);
-    fatal_ = true;
-    return {output::PresentDisposition::Fatal, 0, 0, error};
-  }
-  suspended_ = false;
-  if (vrr_state_initialized_)
-    vrr_state_.mark_session_active();
-  return {output::PresentDisposition::Complete, 0, committed_hash_, {}};
-}
-
-bool DrmPresenter::quiesce_pending_flip(std::string& error) {
-  if (!pending_) {
-    error.clear();
-    return true;
-  }
-  error = "page flip did not quiesce within " +
-          std::to_string(kPageFlipTimeoutMilliseconds) + " milliseconds";
-  return false;
-}
-
-bool DrmPresenter::acquire_master(std::string& error) {
-  if (!device_.may_manage_master()) {
-    error = "external DRM sessions cannot acquire master";
-    return false;
-  }
-  if (master_owned_) {
-    error.clear();
-    return true;
-  }
-  if (!kms_.acquire_master(device_.borrowed_kms_fd(), error)) return false;
-  master_owned_ = true;
-  return true;
-}
-
-bool DrmPresenter::drop_master(std::string& error) {
-  if (!device_.may_manage_master()) {
-    error = "external DRM sessions cannot drop master";
-    return false;
-  }
-  if (!master_owned_) {
-    error.clear();
-    return true;
-  }
-  if (!kms_.drop_master(device_.borrowed_kms_fd(), error)) return false;
-  master_owned_ = false;
-  return true;
-}
-
-bool DrmPresenter::present_committed_frame(std::string& error) {
-  if (committed_pixels_.empty()) {
-    error = "no committed DRM frame is available for re-modeset";
-    return false;
-  }
-  auto& target = buffers_.back();
-  const output::SoftwareFrameView frame{
-      config_.output, committed_pixels_, {}, 0, committed_generation_, 0};
-  DamageCopyPlan damage_copy;
-  if (!copy_frame_to(target, frame, committed_hash_, FullCopyReason::VirtualTerminalResume,
-                     damage_copy, error) ||
-      target.visible_hash() != committed_hash_) {
-    if (error.empty()) error = "re-modeset scanout hash differs from committed frame";
-    return false;
-  }
-  const auto next_front_index = static_cast<std::uint32_t>(1U - front_index_);
-  const auto damage_report = damage_copy_report(
-      target, damage_copy, committed_generation_, next_front_index);
-  if (!blocking_modeset(target, error)) return false;
-  if (!verify_vrr_state(false, error)) return false;
-  if (vrr_state_initialized_)
-    vrr_state_.mark_acquired_off();
-  complete_damage_copy(target, damage_copy, committed_generation_);
-  buffers_.promote_back();
-  front_index_ = 1U - front_index_;
-  display_taken_ = true;
-  if (direct_session_) {
-    if (config_.damage_aware_copy &&
-        !append_report(damage_report, error))
-      return false;
-    const VtReport record{VtTransition::Acquire, true, true, committed_hash_};
-    return append_report(record, error);
-  }
-  return true;
-}
-
-bool DrmPresenter::restore_original_display(std::string& error) {
-  if (!display_taken_) {
-    error.clear();
-    return true;
-  }
-  if (!restore_saved_state(kms_, device_.borrowed_kms_fd(), saved_, error))
-    return false;
-  if (vrr_state_initialized_)
-    vrr_state_.mark_restored();
-  display_taken_ = false;
-  return true;
-}
-
-bool DrmPresenter::release_scanout_resources(std::string& error) {
-  if (scanout_released_) {
-    error.clear();
-    return scanout_cleanup_success_;
-  }
-  mode_blob_.reset();
-  scanout_cleanup_success_ = buffers_.release(error);
-  scanout_released_ = true;
-  return scanout_cleanup_success_;
-}
-
-output::BackendStateResult DrmPresenter::shutdown(std::string& error) noexcept {
-  if (shutdown_) { error = shutdown_error_; return shutdown_result_; }
-  shutdown_ = true;
-  clear_pending();
-  bool kms_restore = !display_taken_;
-  bool vt_restore = !direct_session_;
-  bool master_drop = !device_.may_manage_master() || !master_owned_;
-  bool framebuffer_cleanup = scanout_released_ && scanout_cleanup_success_;
-  try {
-    std::string operation_error;
-    if (direct_session_) {
-      vt_restore = direct_session_->restore(operation_error);
-      kms_restore = !display_taken_;
-      master_drop = !master_owned_;
-      direct_session_.reset();
-    } else {
-      kms_restore = restore_original_display(operation_error);
-      if (kms_restore) {
-        std::string cleanup_error;
-        framebuffer_cleanup = release_scanout_resources(cleanup_error);
-        if (!cleanup_error.empty()) {
-          if (!operation_error.empty()) operation_error += "; ";
-          operation_error += cleanup_error;
-        }
-      }
-    }
-    framebuffer_cleanup = scanout_released_ && scanout_cleanup_success_;
-    const RestoreReport restore{kms_restore, vt_restore, master_drop,
-                                framebuffer_cleanup};
-    std::string report_error;
-    bool vrr_report_ok = true;
-    if (vrr_report_ && vrr_state_initialized_) {
-      const auto timing = vrr_state_.timing_summary();
-      const DrmVrrSummaryReport summary{
-          timing.count,
-          timing.within_threshold_count,
-          timing.pass_basis_points,
-          timing.minimum_nanoseconds,
-          timing.maximum_nanoseconds,
-          timing.mean_nanoseconds,
-          timing.median_nanoseconds,
-          timing.p95_absolute_error_nanoseconds,
-          vrr_state_.enabled_period_count(),
-          vrr_state_.disabled_period_count()};
-      vrr_report_ok =
-          append_vrr_report(DrmVrrReportRecord{summary}, report_error);
-      if (vrr_report_ok) {
-        const auto& state = vrr_state_.kms_state();
-        const DrmVrrRestoreReport vrr_restore{
-            state.original_enabled,
-            vrr_state_.effective_enabled(),
-            kms_restore &&
-                (!state.crtc_property_present ||
-                 vrr_state_.effective_enabled() == state.original_enabled),
-            kms_restore,
-            vt_restore,
-            false};
-        vrr_report_ok = append_vrr_report(DrmVrrReportRecord{vrr_restore},
-                                          report_error);
-      }
-    }
-    std::string standard_report_error;
-    const bool report_ok = append_report(restore, standard_report_error);
-    if (!operation_error.empty()) shutdown_error_ = operation_error;
-    if (!vrr_report_ok) {
-      if (!shutdown_error_.empty()) shutdown_error_ += "; ";
-      shutdown_error_ += report_error;
-    }
-    if (!report_ok) {
-      if (!shutdown_error_.empty()) shutdown_error_ += "; ";
-      shutdown_error_ += standard_report_error;
-    }
-    if (!kms_restore || !vt_restore ||
-        (device_.session() == DeviceSession::Standalone && !master_drop) ||
-        !framebuffer_cleanup || !vrr_report_ok || !report_ok)
-      shutdown_result_ = output::BackendStateResult::Fatal;
-  } catch (...) {
-    shutdown_error_ = "unexpected exception during DRM shutdown";
-    shutdown_result_ = output::BackendStateResult::Fatal;
-  }
-  if (!scanout_released_) {
-    mode_blob_.abandon();
-    buffers_.abandon();
-  }
-  device_.reset();
-  initialized_ = false;
-  error = shutdown_error_;
-  return shutdown_result_;
 }
 
 }  // namespace glasswyrm::drm

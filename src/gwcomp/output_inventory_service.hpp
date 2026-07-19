@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gwcomp/compositor.hpp"
 #include "output/model/layout.hpp"
 
 #include <glasswyrm/ipc.h>
@@ -24,8 +25,10 @@ struct OutputInventoryServiceResult {
 
 class OutputInventoryService final {
  public:
-  explicit OutputInventoryService(const output::OutputLayout& layout)
-      : layout_(layout) {}
+  explicit OutputInventoryService(
+      const output::OutputLayout& layout,
+      const gw::compositor::Compositor* compositor = nullptr)
+      : layout_(layout), compositor_(compositor) {}
 
   [[nodiscard]] OutputInventoryServiceResult
   service(gwipc_connection& connection, gwipc_role peer_role,
@@ -38,6 +41,7 @@ class OutputInventoryService final {
   [[nodiscard]] std::uint64_t allocate_snapshot_id() noexcept;
 
   const output::OutputLayout& layout_;
+  const gw::compositor::Compositor* compositor_{};
   std::uint64_t next_snapshot_id_{1};
 };
 

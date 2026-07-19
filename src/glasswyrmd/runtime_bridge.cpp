@@ -37,7 +37,8 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
 }
 
 PolicySnapshotSubmission
-initial_output_policy(const output::OutputLayout &layout) {
+initial_output_policy(const output::OutputLayout &layout,
+                      const VrrStateCache* vrr) {
   PolicySnapshotSubmission submission;
   submission.commit_id = 1;
   submission.generation = 1;
@@ -61,6 +62,20 @@ initial_output_policy(const output::OutputLayout &layout) {
     record.enabled = state.enabled;
     record.primary = state.primary;
     submission.outputs.push_back(record);
+  }
+  if (vrr) {
+    submission.vrr.outputs.reserve(layout.output_order.size());
+    for (const auto id : layout.output_order) {
+      const auto found = vrr->outputs().find(id.value);
+      if (found == vrr->outputs().end()) return {};
+      gwipc_policy_output_vrr_upsert record{};
+      record.struct_size = sizeof(record);
+      record.output_id = id.value;
+      record.mode = found->second.policy.mode;
+      record.hardware_capable = found->second.capability.hardware_capable;
+      record.kms_controllable = found->second.capability.kms_controllable;
+      submission.vrr.outputs.push_back(record);
+    }
   }
   return submission;
 }
@@ -117,11 +132,13 @@ RuntimeBridge::RuntimeBridge(std::string policy_path,
                              const bool software_content,
                              const bool session_state,
                              const bool cpu_buffer_synchronization,
-                             const bool output_model)
-    : policy_(std::move(policy_path), screen, true, output_model),
+                             const bool output_model, const bool vrr_profile)
+    : policy_(std::move(policy_path), screen, true, output_model, vrr_profile),
       compositor_(std::move(compositor_path), screen, software_content,
-                  session_state, cpu_buffer_synchronization, output_model),
-      deadline_duration_(deadline), output_model_(output_model) {}
+                  session_state, cpu_buffer_synchronization, output_model,
+                  vrr_profile),
+      deadline_duration_(deadline), output_model_(output_model),
+      vrr_profile_(vrr_profile) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
   policy_.disconnect();
@@ -257,7 +274,8 @@ bool RuntimeBridge::service(const short policy_revents,
         error = "output-model policy bootstrap has no compositor inventory";
         return false;
       }
-      auto bootstrap = initial_output_policy(*layout);
+      auto bootstrap = initial_output_policy(
+          *layout, vrr_profile_ ? compositor_.vrr_cache() : nullptr);
       if (!policy_.submit(bootstrap, error)) {
         stage_ = Stage::Failed;
         if (error.empty()) error = "could not submit output policy bootstrap";
@@ -305,9 +323,21 @@ bool RuntimeBridge::service(const short policy_revents,
           return false;
         }
         const auto& replay = compositor_.replay_input();
-        const auto submission = replay.commit_id != 0
-                                    ? replay
-                                    : initial_compositor_scene(*layout);
+        auto submission = replay.commit_id != 0
+                              ? replay
+                              : initial_compositor_scene(*layout);
+        if (vrr_profile_ && replay.commit_id == 0) {
+          const auto* cache = compositor_.vrr_cache();
+          if (!cache) {
+            stage_ = Stage::Failed;
+            error = "M14 scene bootstrap has no VRR inventory";
+            return false;
+          }
+          for (const auto& [id, value] : cache->outputs()) {
+            static_cast<void>(id);
+            submission.output_vrr_policies.push_back(value.policy);
+          }
+        }
         if (!compositor_.submit(submission, error)) {
           stage_ = Stage::Failed;
           if (error.empty())

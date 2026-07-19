@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <memory>
 #include <new>
+#include <set>
 
 namespace glasswyrm::compositor {
 namespace {
@@ -62,7 +63,8 @@ bool valid_query(const gwipc_output_state_query &query,
                  const std::uint64_t snapshot_id) noexcept {
   constexpr auto known_flags =
       GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_MODES |
-      GWIPC_OUTPUT_QUERY_LAYOUT | GWIPC_OUTPUT_QUERY_WINDOWS;
+      GWIPC_OUTPUT_QUERY_LAYOUT | GWIPC_OUTPUT_QUERY_WINDOWS |
+      GWIPC_OUTPUT_QUERY_VRR;
   return query.struct_size >= sizeof(query) && query.query_id != 0 &&
          query.flags != 0 && (query.flags & ~known_flags) == 0 &&
          query_sequence != 0 && snapshot_id != 0 &&
@@ -158,7 +160,8 @@ gwipc_output_upsert state_record(const output::OutputState &state) {
 
 std::uint32_t requested_item_count(const gwipc_output_state_query &query,
                                    const output::OutputLayout &layout,
-                                   const std::size_t window_count) {
+                                   const std::size_t window_count,
+                                   const OutputInventoryVrr* vrr) {
   std::size_t count = 0;
   if ((query.flags & GWIPC_OUTPUT_QUERY_DESCRIPTORS) != 0)
     count += layout.descriptors.size();
@@ -171,7 +174,55 @@ std::uint32_t requested_item_count(const gwipc_output_state_query &query,
     count += layout.states.size();
   if ((query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0)
     count += window_count * 3U;
+  if ((query.flags & GWIPC_OUTPUT_QUERY_VRR) != 0 && vrr) {
+    count += vrr->capabilities.size() + vrr->policies.size() +
+             vrr->states.size() + vrr->timings.size();
+    if ((query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0)
+      count += vrr->windows.size();
+  }
   return static_cast<std::uint32_t>(count);
+}
+
+gwipc_status append_vrr(std::vector<OutputInventoryMessage>& messages,
+                        const OutputInventoryVrr& vrr,
+                        const bool include_windows) {
+  for (const auto& value : vrr.capabilities) {
+    const auto status = append_contract(
+        messages, GWIPC_MESSAGE_OUTPUT_VRR_CAPABILITY_UPSERT,
+        GWIPC_FLAG_SNAPSHOT_ITEM, 0, value,
+        gwipc_contract_encode_output_vrr_capability_upsert);
+    if (status != GWIPC_STATUS_OK) return status;
+  }
+  for (const auto& value : vrr.policies) {
+    const auto status = append_contract(
+        messages, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+        GWIPC_FLAG_SNAPSHOT_ITEM, 0, value,
+        gwipc_contract_encode_output_vrr_policy_upsert);
+    if (status != GWIPC_STATUS_OK) return status;
+  }
+  for (const auto& value : vrr.states) {
+    const auto status = append_contract(
+        messages, GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT,
+        GWIPC_FLAG_SNAPSHOT_ITEM, 0, value,
+        gwipc_contract_encode_output_vrr_state_upsert);
+    if (status != GWIPC_STATUS_OK) return status;
+  }
+  for (const auto& value : vrr.timings) {
+    const auto status = append_contract(
+        messages, GWIPC_MESSAGE_PRESENTATION_TIMING,
+        GWIPC_FLAG_SNAPSHOT_ITEM, 0, value,
+        gwipc_contract_encode_presentation_timing);
+    if (status != GWIPC_STATUS_OK) return status;
+  }
+  if (include_windows)
+    for (const auto& value : vrr.windows) {
+      const auto status = append_contract(
+          messages, GWIPC_MESSAGE_SURFACE_VRR_STATE,
+          GWIPC_FLAG_SNAPSHOT_ITEM, 0, value,
+          gwipc_contract_encode_surface_vrr_state);
+      if (status != GWIPC_STATUS_OK) return status;
+    }
+  return GWIPC_STATUS_OK;
 }
 
 gwipc_status append_descriptors(std::vector<OutputInventoryMessage> &messages,
@@ -260,7 +311,8 @@ gwipc_status append_windows(
 OutputInventoryPublication build_output_inventory_publication(
     const gwipc_output_state_query &query, const std::uint64_t query_sequence,
     const std::uint64_t snapshot_id, const output::OutputLayout &layout,
-    const std::span<const OutputInventoryWindow> windows) {
+    const std::span<const OutputInventoryWindow> windows,
+    const OutputInventoryVrr* vrr) {
   OutputInventoryPublication result;
   if (!valid_query(query, query_sequence, snapshot_id)) {
     result.status = GWIPC_STATUS_INVALID_ARGUMENT;
@@ -271,6 +323,49 @@ OutputInventoryPublication build_output_inventory_publication(
     result.status = GWIPC_STATUS_INVALID_ARGUMENT;
     return result;
   }
+  const bool wants_vrr = (query.flags & GWIPC_OUTPUT_QUERY_VRR) != 0;
+  if (wants_vrr &&
+      (!vrr || vrr->capabilities.size() != layout.states.size() ||
+       vrr->policies.size() != layout.states.size() ||
+       vrr->states.size() != layout.states.size() ||
+       (((query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0) &&
+        vrr->windows.size() != windows.size()))) {
+    result.status = GWIPC_STATUS_INVALID_ARGUMENT;
+    return result;
+  }
+  if (wants_vrr) {
+    std::set<std::uint64_t> timing_ids;
+    for (std::size_t index = 0; index < layout.output_order.size(); ++index) {
+      const auto output_id = layout.output_order[index].value;
+      if (vrr->capabilities[index].output_id != output_id ||
+          vrr->policies[index].output_id != output_id ||
+          vrr->states[index].output_id != output_id) {
+        result.status = GWIPC_STATUS_INVALID_ARGUMENT;
+        return result;
+      }
+    }
+    for (const auto& timing : vrr->timings)
+      if (!layout.states.contains(output::OutputId{timing.output_id}) ||
+          !timing_ids.insert(timing.output_id).second) {
+        result.status = GWIPC_STATUS_INVALID_ARGUMENT;
+        return result;
+      }
+    if ((query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0) {
+      std::set<std::uint64_t> expected_surfaces;
+      std::set<std::uint64_t> actual_surfaces;
+      for (const auto& window : windows)
+        expected_surfaces.insert(window.surface.surface_id);
+      for (const auto& window : vrr->windows)
+        if (!actual_surfaces.insert(window.surface_id).second) {
+          result.status = GWIPC_STATUS_INVALID_ARGUMENT;
+          return result;
+        }
+      if (actual_surfaces != expected_surfaces) {
+        result.status = GWIPC_STATUS_INVALID_ARGUMENT;
+        return result;
+      }
+    }
+  }
 
   try {
     std::vector<OutputInventoryMessage> messages;
@@ -280,7 +375,8 @@ OutputInventoryPublication build_output_inventory_publication(
       result.status = GWIPC_STATUS_LIMIT_EXCEEDED;
       return result;
     }
-    const auto item_count = requested_item_count(query, layout, windows.size());
+    const auto item_count =
+        requested_item_count(query, layout, windows.size(), vrr);
     messages.reserve(static_cast<std::size_t>(item_count) + 3U);
 
     gwipc_snapshot_begin begin{};
@@ -300,6 +396,9 @@ OutputInventoryPublication build_output_inventory_publication(
     if (status == GWIPC_STATUS_OK &&
         (query.flags & GWIPC_OUTPUT_QUERY_LAYOUT) != 0)
       status = append_states(messages, layout);
+    if (status == GWIPC_STATUS_OK && wants_vrr)
+      status = append_vrr(messages, *vrr,
+                          (query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0);
     if (status == GWIPC_STATUS_OK &&
         (query.flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0)
       status = append_windows(messages, windows);

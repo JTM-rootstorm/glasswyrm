@@ -178,6 +178,14 @@ if get_option('libgwipc')
   )
   test('gwipc-public-vrr-api', gwipc_public_vrr_api_test, timeout: 10)
 
+  vrr_membership_hint_test = executable(
+    'vrr_membership_hint_test',
+    files(tests_source_dir / 'unit/ipc/vrr_membership_hint_test.cpp'),
+    include_directories: [test_source_root_include,
+                          include_directories('../../../src')],
+  )
+  test('gwipc-vrr-membership-hint', vrr_membership_hint_test, timeout: 10)
+
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',
     files(tests_source_dir / 'unit/ipc/decoder_fuzz_test.cpp'),

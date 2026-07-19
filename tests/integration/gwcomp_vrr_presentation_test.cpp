@@ -248,17 +248,17 @@ void stage(gw::compositor::Compositor& compositor,
 }  // namespace
 
 int main() {
+  std::string error;
   auto observed = std::make_shared<ObservedPresentation>();
   auto presenter = std::make_unique<FakeVrrPresenter>(observed);
   gw::compositor::Compositor compositor(std::move(presenter));
   compositor.set_peer_profile(
       gw::compositor::PeerProfile::M7BufferedProtocolServer);
-  compositor.set_vrr_contract_enabled(true);
+  gw::test::require(compositor.configure_vrr_contract(true, error), error);
   require(compositor.configure_scene_profile(
               gw::compositor::SceneProfile::OutputModel, 1, 7),
           "configure M14 output-model compositor");
 
-  std::string error;
   stage(compositor, GWIPC_VRR_POLICY_FULLSCREEN, 1, true, error);
   const auto enabled = compositor.commit(frame(1), error);
   require(enabled.result == GWIPC_FRAME_ACCEPTED &&

@@ -1,15 +1,20 @@
 #pragma once
 
 #include "wm/transaction.hpp"
+#include "wm/vrr_policy.hpp"
 
 #include <glasswyrm/ipc.h>
 
 #include <cstdint>
+#include <optional>
 
 namespace glasswyrm::wm::runtime {
 
 struct PeerState {
   Transaction transaction;
+  VrrInputs pending_vrr;
+  VrrPolicyState committed_vrr;
+  std::optional<VrrInputs> pre_snapshot_vrr;
   std::uint64_t snapshot_id{};
   std::uint64_t snapshot_generation{};
   std::uint64_t last_commit_id{};

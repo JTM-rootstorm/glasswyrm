@@ -71,6 +71,13 @@ if get_option('glasswyrmd')
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
     )
+    server_vrr_lifecycle_test = executable(
+      'server_vrr_lifecycle_test',
+      files(tests_source_dir / 'integration/server_vrr_lifecycle_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('server-vrr-lifecycle', server_vrr_lifecycle_test, timeout: 10)
     glasswyrmd_integrated_startup_test = executable(
       'glasswyrmd_integrated_startup_test',
       files(tests_source_dir / 'integration/glasswyrmd_integrated_startup_test.cpp'),

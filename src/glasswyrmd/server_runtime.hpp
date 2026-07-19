@@ -11,6 +11,7 @@
 #include "glasswyrmd/output_control_peer.hpp"
 #include "glasswyrmd/runtime_bridge.hpp"
 #include "glasswyrmd/synthetic_input_peer.hpp"
+#include "glasswyrmd/vrr_events.hpp"
 #include "input/input_state.hpp"
 #if GW_HAS_LIBINPUT_BACKEND
 #include "glasswyrmd/real_input_controller.hpp"
@@ -158,6 +159,7 @@ class ServerRuntime {
       OutputConfigurationRuntimeStage::Idle};
   std::optional<LifecycleSnapshot> output_configuration_before_;
   std::optional<LifecycleSnapshot> output_configuration_evaluated_;
+  std::optional<VrrStateCache> output_configuration_vrr_before_;
   std::vector<ProtocolEventIntent> output_configuration_events_;
   bool output_configuration_peer_reset_{};
   glasswyrm::input::InputState input_state_;
@@ -199,6 +201,8 @@ class ServerRuntime {
   std::optional<StructuralEventState> transition_before_;
   std::optional<WindowScaleState> scale_transition_before_;
   std::optional<InputTransitionState> input_transition_before_;
+  std::optional<VrrEventBatch> vrr_event_batch_;
+  std::optional<VrrStateCache> lifecycle_vrr_before_;
   bool content_replay_attempted_{false};
   std::map<std::uint64_t, PendingMutation> pending_mutations_;
 #endif

@@ -2,8 +2,11 @@
 
 #include "glasswyrmd/output_scene_projection.hpp"
 #include "glasswyrmd/gw_scale_state.hpp"
+#include "glasswyrmd/vrr_policy_projection.hpp"
+#include "ipc/vrr_membership_hint.hpp"
 
 #include <algorithm>
+#include <vector>
 
 namespace glasswyrm::server {
 namespace {
@@ -42,6 +45,17 @@ void append_policy_outputs(PolicySnapshotSubmission& submission,
   }
 }
 
+std::vector<std::uint64_t> canonical_output_ids(
+    const output::OutputLayout& layout) {
+  std::vector<std::uint64_t> result;
+  result.reserve(layout.states.size());
+  for (const auto& [id, unused] : layout.states) {
+    static_cast<void>(unused);
+    result.push_back(id.value);
+  }
+  return result;
+}
+
 gwipc_surface_scale_mode scale_mode(const WindowScaleState& scale) noexcept {
   return scale.presentation == WindowScalePresentationState::ScaleAwareActive
              ? GWIPC_SURFACE_SCALE_SCALED_PIXMAP
@@ -71,8 +85,11 @@ void apply_projected_scale(LifecycleWindow& window,
 PolicySnapshotSubmission project_policy(const LifecycleSnapshot& snapshot,
                                         std::uint64_t commit,
                                         std::uint64_t generation,
-                                        const output::OutputLayout* layout) {
+                                        const output::OutputLayout* layout,
+                                        const VrrStateCache* vrr) {
   PolicySnapshotSubmission output{commit, generation, {}, {}, {}};
+  const auto output_ids = layout ? canonical_output_ids(*layout)
+                                 : std::vector<std::uint64_t>{};
   for (const auto& [id, value] : snapshot.windows) {
     (void)id;
     gwipc_policy_lifecycle_window_upsert item{}; item.struct_size=sizeof(item);
@@ -108,21 +125,33 @@ PolicySnapshotSubmission project_policy(const LifecycleSnapshot& snapshot,
     item.stack_serial=value.stack_serial; item.stack_sibling=value.stack_sibling;
     item.stack_mode=static_cast<gwipc_policy_stack_mode>(value.stack_mode);
     output.windows.push_back(item);
-    if (layout && value.assigned_output_id != 0) {
+    if (layout && (value.assigned_output_id != 0 || vrr)) {
       gwipc_policy_window_output_hint hint{};
       hint.struct_size = sizeof(hint);
       hint.window_id = value.xid;
       hint.previous_output_id = value.assigned_output_id;
+      if (vrr) {
+        auto membership = value.output_memberships;
+        std::ranges::sort(membership);
+        membership.erase(std::unique(membership.begin(), membership.end()),
+                         membership.end());
+        const auto encoded =
+            glasswyrm::ipc::internal::encode_vrr_membership_hint(
+                output_ids, membership);
+        if (!encoded) return {};
+        hint.preferred_output_id = *encoded;
+      }
       output.output_hints.push_back(hint);
     }
   }
   if (layout) append_policy_outputs(output, *layout);
+  if (layout && vrr) output.vrr = project_vrr_policy(snapshot, *layout, *vrr);
   return output;
 }
 
 std::optional<LifecycleSnapshot> apply_policy_result(
     const LifecycleSnapshot& proposed, const PolicySnapshotResult& result,
-    const output::OutputLayout* layout) {
+    const output::OutputLayout* layout, VrrStateCache* vrr) {
   if (result.windows.size()!=proposed.windows.size()) return std::nullopt;
   auto evaluated=proposed; evaluated.focused_window=proposed.root_window;
   std::vector<std::pair<std::int32_t,std::uint32_t>> visible;
@@ -167,14 +196,20 @@ std::optional<LifecycleSnapshot> apply_policy_result(
   for(const auto id:proposed.root_order)
     if(std::none_of(visible.begin(),visible.end(),[&](const auto& item){return item.second==id;}))order.push_back(id);
   for(auto [stack,id]:visible){(void)stack;order.push_back(id);}
-  evaluated.root_order=std::move(order);return evaluated;
+  evaluated.root_order=std::move(order);
+  if (vrr &&
+      !vrr->stage_policy_result(result.generation, result.vrr_outputs,
+                                result.vrr_windows))
+    return std::nullopt;
+  return evaluated;
 }
 
 CompositorSnapshotSubmission project_compositor(const LifecycleSnapshot& snapshot,
                                                 std::uint64_t commit,
                                                 std::uint64_t generation,
                                                 const bool software_content,
-                                                const output::OutputLayout* layout) {
+                                                const output::OutputLayout* layout,
+                                                VrrStateCache* vrr) {
   CompositorSnapshotSubmission output{commit,generation,{},{},{},{}};
   for(const auto& [id,value]:snapshot.windows){
     gwipc_surface_upsert surface{};surface.struct_size=sizeof(surface);surface.surface_id=(UINT64_C(1)<<32)|id;
@@ -210,6 +245,19 @@ CompositorSnapshotSubmission project_compositor(const LifecycleSnapshot& snapsho
     }
   }
   if (layout && !populate_output_scene_records(output, *layout)) return {};
+  if (layout && vrr) {
+    for (const auto& [id, value] : vrr->outputs()) {
+      static_cast<void>(id);
+      output.output_vrr_policies.push_back(value.policy);
+    }
+    if (software_content) {
+      output.surface_vrr_states =
+          project_vrr_surfaces(snapshot, *vrr, vrr->generation());
+      if (output.surface_vrr_states.size() != snapshot.windows.size() ||
+          !vrr->stage_surface_states(output.surface_vrr_states))
+        return {};
+    }
+  }
   return output;
 }
 

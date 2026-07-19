@@ -54,6 +54,14 @@ int main() {
   FakeSink sink;
   std::string error;
 
+  require(compositor::session_wait_message_allowed(
+              GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) &&
+              !compositor::session_wait_message_allowed(
+                  GWIPC_MESSAGE_FRAME_COMMIT) &&
+              !compositor::session_wait_message_allowed(
+                  GWIPC_MESSAGE_OUTPUT_STATE_QUERY),
+          "only the session acknowledgement may pass the coordination gate");
+
   coordinator.configure(false);
   require(!coordinator.enabled() && coordinator.timeout_ms() == -1 &&
               sink.calls == 0,

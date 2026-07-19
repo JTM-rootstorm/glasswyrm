@@ -87,16 +87,43 @@ void ServerRuntime::initialize_lifecycle() {
 
 bool ServerRuntime::send_policy(const LifecycleSnapshot& snapshot) {
   std::string error;
+  auto* vrr = server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr;
+  if (vrr) {
+    const auto phase = lifecycle_ ? lifecycle_->phase()
+                                  : CoordinatorPhase::Idle;
+    if (phase == CoordinatorPhase::AwaitingPolicy &&
+        !lifecycle_vrr_before_)
+      lifecycle_vrr_before_ = *vrr;
+    if (phase == CoordinatorPhase::RollingBackPolicy &&
+        lifecycle_vrr_before_)
+      *vrr = *lifecycle_vrr_before_;
+    synchronize_vrr_windows(snapshot, server_.state_.vrr(), *vrr);
+    const auto* active = lifecycle_ ? lifecycle_->active() : nullptr;
+    const auto mutation = active ? pending_mutations_.find(active->token)
+                                 : pending_mutations_.end();
+    if (lifecycle_ && lifecycle_->phase() == CoordinatorPhase::AwaitingPolicy &&
+        mutation != pending_mutations_.end() && mutation->second.vrr)
+      vrr->set_window_preference(
+          mutation->second.vrr->window,
+          static_cast<gwipc_vrr_window_preference>(
+              mutation->second.vrr->preference));
+  }
   policy_commit_ = next_policy_commit_++;
   policy_generation_ = next_policy_generation_++;
   const bool sent = bridge_->submit_policy(
       project_policy(snapshot, policy_commit_, policy_generation_,
                      server_.options_.output_model ? bridge_->output_layout()
-                                                   : nullptr),
+                                                   : nullptr,
+                     vrr),
       error);
   if (!sent)
     std::fprintf(stderr, "glasswyrmd: policy submission failed: %s\n",
                  error.c_str());
+  if (!sent && vrr && lifecycle_vrr_before_ && lifecycle_ &&
+      lifecycle_->phase() == CoordinatorPhase::AwaitingPolicy) {
+    *vrr = *lifecycle_vrr_before_;
+    lifecycle_vrr_before_.reset();
+  }
   return sent;
 }
 
@@ -105,7 +132,8 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
   auto submission = project_compositor(
       snapshot, next_compositor_commit_++, next_compositor_generation_++,
       server_.options_.software_content,
-      server_.options_.output_model ? bridge_->output_layout() : nullptr);
+      server_.options_.output_model ? bridge_->output_layout() : nullptr,
+      server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
   if (content_presenter_ && !content_presenter_->prepare_lifecycle(
                                 snapshot, server_.state_.resources(), submission))
     return false;
@@ -119,6 +147,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   transition_before_.reset();
   scale_transition_before_.reset();
   input_transition_before_.reset();
+  vrr_event_batch_.reset();
   const auto* active = lifecycle_ ? lifecycle_->active() : nullptr;
   if (active) {
     EventRouter router(server_.state_.resources());
@@ -136,6 +165,21 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   const auto mutation = active ? pending_mutations_.find(active->token)
                                : pending_mutations_.end();
+  std::optional<VrrEventBatch> prepared_vrr;
+  if (server_.options_.vrr_protocol) {
+    const auto* cache = bridge_->vrr_cache();
+    std::map<std::uint64_t, std::uint32_t> output_xids;
+    for (const auto& output : server_.state_.randr().outputs())
+      output_xids.emplace(output.internal_id, output.xid);
+    if (!cache || output_xids.size() != cache->outputs().size())
+      return false;
+    auto batch = prepare_vrr_event_batch(*cache, server_.state_.vrr(),
+                                         output_xids);
+    if (batch.outputs.size() != cache->outputs().size() ||
+        batch.windows.size() != cache->windows().size())
+      return false;
+    prepared_vrr = std::move(batch);
+  }
   bool committed = false;
   if (active && mutation != pending_mutations_.end() &&
       mutation->second.create) {
@@ -208,6 +252,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   if (content_presenter_)
     content_presenter_->accept_lifecycle(snapshot, server_.state_.resources());
+  vrr_event_batch_ = std::move(prepared_vrr);
   if (cursor_presenter_) mark_cursor_dirty();
   return true;
 }
@@ -238,6 +283,13 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     for (const auto& client : server_.clients_)
       recipients.push_back(client.get());
     EventRouter router(server_.state_.resources());
+    if (vrr_event_batch_) {
+      const auto transitions = vrr_event_batch_->windows;
+      apply_vrr_event_batch(server_.state_.vrr(), *vrr_event_batch_);
+      for (const auto& transition : transitions)
+        route_vrr_notification(transition.before, transition.window_id,
+                               server_.state_, recipients);
+    }
     if (scale_transition_before_) {
       if (const auto* window =
               server_.state_.resources().find_window(operation->window)) {
@@ -255,7 +307,7 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
       route_property_notification(*mutation->second.property,
                                   server_.state_.resources(), recipients);
     if (mutation != pending_mutations_.end() && mutation->second.vrr &&
-        mutation->second.vrr_before)
+        mutation->second.vrr_before && !server_.options_.vrr_protocol)
       route_vrr_notification(*mutation->second.vrr_before,
                              mutation->second.vrr->window, server_.state_,
                              recipients);
@@ -384,6 +436,8 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
   (void)requester;
   transition_before_.reset();
   input_transition_before_.reset();
+  vrr_event_batch_.reset();
+  lifecycle_vrr_before_.reset();
   pending_mutations_.erase(token);
   if (cleanup_base) server_.pending_resource_bases_.erase(*cleanup_base);
   bridge_->clear_transaction_result();

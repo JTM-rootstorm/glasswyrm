@@ -32,6 +32,14 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
   test('gwcomp-output-inventory-publisher',
        gwcomp_output_inventory_publisher_test, timeout: 10)
 
+  gwcomp_vrr_inventory_test = executable(
+    'gwcomp_vrr_inventory_test',
+    files(tests_source_dir / 'unit/gwcomp_vrr_inventory_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-vrr-inventory', gwcomp_vrr_inventory_test, timeout: 10)
+
   compositor_vrr_state_test = executable(
     'compositor_vrr_state_test',
     files(tests_source_dir / 'unit/compositor_vrr_state_test.cpp'),
