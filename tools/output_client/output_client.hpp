@@ -163,13 +163,15 @@ struct Edit {
 
 class Client final {
 public:
-  explicit Client(std::string socket_path) : socket_path_(std::move(socket_path)) {}
+  explicit Client(std::string socket_path)
+      : socket_path_(std::move(socket_path)) {}
   ~Client();
   Client(const Client &) = delete;
   Client &operator=(const Client &) = delete;
 
   [[nodiscard]] bool query(std::uint32_t flags, Snapshot &snapshot,
-                           std::string &error);
+                           std::string &error,
+                           bool complete_configuration = false);
   [[nodiscard]] bool commit(const Snapshot &snapshot,
                             gwipc_output_configuration_acknowledged &ack,
                             std::string &error);
@@ -189,31 +191,34 @@ parse_transform(std::string_view value) noexcept;
 [[nodiscard]] const char *transform_name(gwipc_transform value) noexcept;
 [[nodiscard]] bool parse_scale(std::string_view value,
                                std::pair<std::uint32_t, std::uint32_t> &scale);
-[[nodiscard]] bool parse_position(
-    std::string_view value, std::pair<std::int32_t, std::int32_t> &position);
-[[nodiscard]] bool parse_mode(
-    std::string_view value, std::pair<std::uint32_t, std::uint32_t> &extent,
-    std::optional<std::uint32_t> &refresh);
+[[nodiscard]] bool
+parse_position(std::string_view value,
+               std::pair<std::int32_t, std::int32_t> &position);
+[[nodiscard]] bool parse_mode(std::string_view value,
+                              std::pair<std::uint32_t, std::uint32_t> &extent,
+                              std::optional<std::uint32_t> &refresh);
 
 void print_outputs(const Snapshot &snapshot, bool json, std::ostream &output);
 void print_windows(const Snapshot &snapshot, bool json, std::ostream &output);
 void print_all(const Snapshot &snapshot, bool json, std::ostream &output);
-void print_acknowledgement(
-    const gwipc_output_configuration_acknowledged &ack, bool json,
-    std::ostream &output);
+void print_acknowledgement(const gwipc_output_configuration_acknowledged &ack,
+                           bool json, std::ostream &output);
 [[nodiscard]] std::optional<gwipc_vrr_policy_mode>
 parse_vrr_policy(std::string_view value) noexcept;
 [[nodiscard]] const char *vrr_policy_name(gwipc_vrr_policy_mode value) noexcept;
-[[nodiscard]] const char *vrr_preference_name(
-    gwipc_vrr_window_preference value) noexcept;
+[[nodiscard]] const char *
+vrr_preference_name(gwipc_vrr_window_preference value) noexcept;
 [[nodiscard]] const char *vrr_decision_name(gwipc_vrr_decision value) noexcept;
-[[nodiscard]] std::vector<std::string_view> vrr_reason_names(
-    std::uint64_t reasons);
-[[nodiscard]] bool apply_vrr_edit(Snapshot &snapshot,
-                                  std::string_view selector,
+[[nodiscard]] std::vector<std::string_view>
+vrr_reason_names(std::uint64_t reasons);
+[[nodiscard]] bool apply_vrr_edit(Snapshot &snapshot, std::string_view selector,
                                   gwipc_vrr_policy_mode mode,
                                   std::string &error);
-void print_vrr(const Snapshot &snapshot, std::optional<std::string_view> selector,
-               bool json, std::ostream &output);
+[[nodiscard]] bool vrr_output_matches(const Snapshot &snapshot,
+                                      std::uint64_t output_id,
+                                      std::string_view selector) noexcept;
+void print_vrr(const Snapshot &snapshot,
+               std::optional<std::string_view> selector, bool json,
+               std::ostream &output);
 
 } // namespace glasswyrm::tools::output_client

@@ -1,7 +1,8 @@
-#include "output_client/output_client.hpp"
 #include "config.hpp"
+#include "output_client/output_client.hpp"
 
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 
@@ -37,6 +38,13 @@ bool has_edit(const Edit &edit) {
          edit.transform || edit.vrr_policy || edit.primary;
 }
 
+std::string json_document(std::ostringstream &stream) {
+  auto value = stream.str();
+  if (!value.empty() && value.back() == '\n')
+    value.pop_back();
+  return value;
+}
+
 } // namespace
 
 int main(const int argc, char **argv) {
@@ -64,7 +72,8 @@ int main(const int argc, char **argv) {
       json = true;
     else if (command.empty() && (argument == "list" || argument == "set"))
       command = argument;
-    else if (command == "set" && selector.empty() && !argument.starts_with("--"))
+    else if (command == "set" && selector.empty() &&
+             !argument.starts_with("--"))
       selector = argument;
     else if (argument == "--enable" && !edit.enabled)
       edit.enabled = true;
@@ -72,22 +81,21 @@ int main(const int argc, char **argv) {
       edit.enabled = false;
     else if (argument == "--primary")
       edit.primary = true;
-    else if (argument == "--position" &&
-             take_value(argc, argv, index, value)) {
+    else if (argument == "--position" && take_value(argc, argv, index, value)) {
       std::pair<std::int32_t, std::int32_t> position;
       parse_error = !parse_position(value, position);
-      if (!parse_error) edit.position = position;
-    } else if (argument == "--scale" &&
-               take_value(argc, argv, index, value)) {
+      if (!parse_error)
+        edit.position = position;
+    } else if (argument == "--scale" && take_value(argc, argv, index, value)) {
       std::pair<std::uint32_t, std::uint32_t> scale;
       parse_error = !parse_scale(value, scale);
-      if (!parse_error) edit.scale = scale;
+      if (!parse_error)
+        edit.scale = scale;
     } else if (argument == "--transform" &&
                take_value(argc, argv, index, value)) {
       edit.transform = parse_transform(value);
       parse_error = !edit.transform;
-    } else if (argument == "--mode" &&
-               take_value(argc, argv, index, value)) {
+    } else if (argument == "--mode" && take_value(argc, argv, index, value)) {
       std::pair<std::uint32_t, std::uint32_t> extent;
       std::optional<std::uint32_t> refresh;
       parse_error = !parse_mode(value, extent, refresh);
@@ -95,8 +103,7 @@ int main(const int argc, char **argv) {
         edit.mode = extent;
         edit.refresh_millihertz = refresh;
       }
-    } else if (argument == "--vrr" &&
-               take_value(argc, argv, index, value)) {
+    } else if (argument == "--vrr" && take_value(argc, argv, index, value)) {
       edit.vrr_policy = parse_vrr_policy(value);
       parse_error = !edit.vrr_policy;
     } else {
@@ -114,11 +121,11 @@ int main(const int argc, char **argv) {
   Client client(socket);
   Snapshot snapshot;
   std::string error;
-  auto query_flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS |
-                     GWIPC_OUTPUT_QUERY_MODES |
+  auto query_flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_MODES |
                      GWIPC_OUTPUT_QUERY_LAYOUT;
-  if (edit.vrr_policy) query_flags |= GWIPC_OUTPUT_QUERY_VRR;
-  if (!client.query(query_flags, snapshot, error)) {
+  if (edit.vrr_policy)
+    query_flags |= GWIPC_OUTPUT_QUERY_VRR;
+  if (!client.query(query_flags, snapshot, error, command == "set")) {
     std::cerr << "gwout: " << error << '\n';
     return 1;
   }
@@ -140,7 +147,6 @@ int main(const int argc, char **argv) {
     std::cerr << "gwout: " << error << '\n';
     return 1;
   }
-  print_acknowledgement(acknowledgement, json, std::cout);
   if (acknowledgement.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED) {
     if (edit.vrr_policy) {
       Snapshot applied;
@@ -150,10 +156,24 @@ int main(const int argc, char **argv) {
                   << error << '\n';
         return 1;
       }
-      print_vrr(applied, selector, json, std::cout);
+      if (json) {
+        std::ostringstream acknowledgement_json;
+        std::ostringstream state_json;
+        print_acknowledgement(acknowledgement, true, acknowledgement_json);
+        print_vrr(applied, selector, true, state_json);
+        std::cout << "{\"acknowledgement\":"
+                  << json_document(acknowledgement_json)
+                  << ",\"state\":" << json_document(state_json) << "}\n";
+      } else {
+        print_acknowledgement(acknowledgement, false, std::cout);
+        print_vrr(applied, selector, false, std::cout);
+      }
+    } else {
+      print_acknowledgement(acknowledgement, json, std::cout);
     }
     return 0;
   }
+  print_acknowledgement(acknowledgement, json, std::cout);
   if (acknowledgement.result == GWIPC_OUTPUT_CONFIGURATION_STALE_GENERATION)
     std::cerr << "gwout: stale layout generation; current generation is "
               << acknowledgement.applied_generation << '\n';
