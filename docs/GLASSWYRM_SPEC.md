@@ -968,7 +968,7 @@ M9  Simple real X11 clients                     complete
 M10 DRM/KMS software scanout                    complete
 M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients        complete
-M13 Output model and per-output scaling          acceptance pending
+M13 Output model and per-output scaling          complete
 M14 Variable refresh rate
 M15 Color management and HDR
 M16 Toolkit and daily-driver expansion
@@ -1082,9 +1082,11 @@ and one-workspace multi-output GWM policy. GWIPC API 0.8 retains SOVERSION 0
 and wire 1.0 while adding output inventory, policy, membership, and same-UID
 control contracts. RANDR 1.3 remains read-mostly; experimental `GW_SCALE` 0.1
 is proven only by the repository client. Software remains the canonical
-renderer. Final milestone acceptance requires the historical M12 gate followed
-by the clean M13 Gentoo VM sequence and is not established by host
-implementation tests alone.
+renderer. The bounded profile is accepted by the historical M12 gate followed
+by the clean M13 Gentoo VM sequence, including headless output, scaling,
+transform, RANDR, `GW_SCALE`, software/GLES, and replay evidence plus the
+one-output QXL DRM scale/transform, VT/input recovery, restoration, cleanup,
+and archive gates. Host implementation tests alone do not accept this profile.
 
 The exact M13 compatibility boundary is:
 

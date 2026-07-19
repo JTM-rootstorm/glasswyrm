@@ -1,7 +1,7 @@
 # Milestone 13 source-layout audit
 
-Status: implementation layout passes; final acceptance remains a separate VM
-and validation gate.
+Status: source layout accepted with an empty active allowlist; clean Gentoo VM
+and evidence-validation gates independently accept runtime behavior.
 
 Required baseline: `d3440d3b8df1533410a9a2c4be46f2eea0cfb88d`
 
