@@ -527,27 +527,58 @@ copy_latest_output "$left_id" "$control_data/milestone13-legacy-left.ppm"
 
 scene_line_before=$(wc -l <"$scenes/scene.jsonl")
 crossing_release=$control_data/pointer-release
+crossing_steps=$control_data/pointer-steps
 rm -f "$crossing_release"
+install -d -m 0700 "$crossing_steps"
 "$synthetic_input" --socket "$runtime/input.sock" --scenario crossing \
   --output "$control_data/pointer-acks.json" \
+  --step-directory "$crossing_steps" \
   --hold-until "$crossing_release" &
 synthetic_pid=$!
+wait_crossing_step() {
+  local input_id=$1
+  for _ in {1..400}; do
+    [[ -s $crossing_steps/step-$input_id.ready ]] && return
+    sleep .05
+  done
+  return 1
+}
+wait_cursor_position() {
+  local expected_id=$1 expected_x=$2 expected_y=$3
+  for _ in {1..400}; do
+    if python3 - "$scenes/scene.jsonl" "$scene_line_before" \
+      "$expected_id" "$expected_x" "$expected_y" 2>/dev/null <<'PY'
+import json,sys
+records=[json.loads(line) for line in open(sys.argv[1]).read().splitlines()[int(sys.argv[2]):]]
+expected,x,y=int(sys.argv[3],16),int(sys.argv[4]),int(sys.argv[5])
+assert any((cursor.get('x'),cursor.get('y'))==(x,y) and
+           expected in cursor.get('memberships',[])
+           for record in records for cursor in record.get('cursors',[]))
+PY
+    then
+      return
+    fi
+    sleep .05
+  done
+  return 1
+}
+wait_crossing_step 2
+wait_cursor_position "$left_id" 100 100
+: >"$crossing_steps/step-2.release"
+wait_crossing_step 3
+wait_cursor_position "$right_id" 700 479
+: >"$crossing_steps/step-3.release"
 for _ in {1..400}; do
   [[ -s $control_data/pointer-acks.json ]] && break
   sleep .05
 done
 [[ -s $control_data/pointer-acks.json ]]
-crossing_ready=false
-for _ in {1..400}; do
-  if python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
-    "$scene_line_before" "$left_id" "$right_id" \
-    "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
+python3 - "$control_data/pointer-acks.json" "$scenes/scene.jsonl" \
+  "$scene_line_before" "$left_id" "$right_id" \
+  "$artifact_dir/milestone13-pointer-crossing.json" <<'PY'
 import json,sys
 acks=json.load(open(sys.argv[1]))
-try:
-    records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
-except json.JSONDecodeError:
-    raise SystemExit(1)
+records=[json.loads(line) for line in open(sys.argv[2]).read().splitlines()[int(sys.argv[3]):]]
 events=acks['acknowledgements']
 assert acks['scenario']=='crossing' and len(events)==4
 assert (events[1]['root_x'],events[1]['root_y'])==(100,100)
@@ -563,13 +594,6 @@ assert cursor_ids.index(left)<len(cursor_ids)-1-cursor_ids[::-1].index(right)
 json.dump({'schema':1,'passed':True,'acknowledgements':events,
            'cursor_output_ids':cursor_ids},open(sys.argv[6],'w'),sort_keys=True)
 PY
-  then
-    crossing_ready=true
-    break
-  fi
-  sleep .05
-done
-[[ $crossing_ready == true ]]
 : >"$crossing_release"
 wait "$synthetic_pid"
 synthetic_pid=0

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -50,7 +51,7 @@ struct Record {
 void usage(FILE* output) {
   std::fprintf(output,
       "Usage: gwinput_m8 --socket PATH --scenario NAME --output PATH "
-      "[--hold-until PATH]\n"
+      "[--hold-until PATH] [--step-directory PATH]\n"
       "Scenarios: barrier, motion, crossing, buttons, button-motion, "
       "modifiers, keyboard, click-focus, invalid-transition, malformed, "
       "queue-limit, reconnect, m9-xeyes, m10-xeyes-repaint\n");
@@ -76,6 +77,24 @@ bool pump(gwipc_connection* connection, int timeout_ms) {
                        GWIPC_STATUS_SYSTEM_ERROR)
     return false;
   return gwipc_connection_get_state(connection) != GWIPC_CONNECTION_CLOSED;
+}
+
+bool hold_motion_step(gwipc_connection* connection,
+                      const std::filesystem::path& directory,
+                      const std::uint64_t input_id) {
+  if (!std::filesystem::is_directory(directory)) return false;
+  const auto stem = "step-" + std::to_string(input_id);
+  const auto ready = directory / (stem + ".ready");
+  const auto release = directory / (stem + ".release");
+  std::ofstream ready_file(ready, std::ios::trunc);
+  ready_file << input_id << '\n';
+  ready_file.close();
+  if (!ready_file) return false;
+  for (int attempt = 0; attempt != 1200; ++attempt) {
+    if (std::filesystem::exists(release)) return true;
+    if (!pump(connection, 50)) return false;
+  }
+  return false;
 }
 
 Connection connect_to(const std::string& path) {
@@ -257,7 +276,7 @@ const char* result_name(gwipc_synthetic_input_result value) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string socket, name, output, hold_until;
+  std::string socket, name, output, hold_until, step_directory;
   for (int index = 1; index < argc; ++index) {
     const std::string_view arg(argv[index]);
     if (arg == "--help") { usage(stdout); return 0; }
@@ -266,6 +285,7 @@ int main(int argc, char** argv) {
     else if (arg == "--scenario") name = argv[++index];
     else if (arg == "--output") output = argv[++index];
     else if (arg == "--hold-until") hold_until = argv[++index];
+    else if (arg == "--step-directory") step_directory = argv[++index];
     else { usage(stderr); return 2; }
   }
   if (socket.empty() || output.empty() || !known_scenario(name)) {
@@ -289,6 +309,9 @@ int main(int argc, char** argv) {
     gwipc_synthetic_input_acknowledged ack{};
     if (!receive_ack(connection.get(), ack) || ack.input_id != record.id) return 1;
     acknowledgements.push_back(ack);
+    if (!step_directory.empty() && record.kind == Record::Kind::motion &&
+        !hold_motion_step(connection.get(), step_directory, record.id))
+      return 1;
     if ((name == "m9-xeyes" || name == "m10-xeyes-repaint") &&
         record.kind == Record::Kind::barrier)
       std::this_thread::sleep_for(std::chrono::milliseconds(350));
