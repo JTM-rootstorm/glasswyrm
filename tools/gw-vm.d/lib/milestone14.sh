@@ -13,6 +13,8 @@ M14_TEXT_ARTIFACTS=(
   milestone14-qxl-capability.json milestone14-qxl-state.json
   milestone14-headless-report.jsonl milestone14-gw-vrr.log
   milestone14-gwout.log milestone14-gwinfo.json
+  milestone14-policy-matrix.json milestone14-sdl-vrr.json
+  milestone14-sdl-probe.json milestone14-client-build.log
   milestone14-restart.json milestone14-restoration.json
   milestone14-glasswyrmd-journal.log milestone14-gwm-journal.log
   milestone14-gwcomp-journal.log milestone14-facts.env
@@ -97,6 +99,7 @@ headless=/var/tmp/glasswyrm-build-m14-headless
 drm=/var/tmp/glasswyrm-build-m14-drm
 clang_build=/var/tmp/glasswyrm-build-m14-clang
 components=/var/tmp/glasswyrm-build-m14-components
+clients=/var/tmp/glasswyrm-m14-clients
 runtime=/run/glasswyrm-m14
 control=/var/tmp/glasswyrm-m14-control
 work=/var/tmp/glasswyrm-m14-headless
@@ -107,6 +110,7 @@ declare -A result
 required_results=(historical_default strict_m14 strict_gles sanitizer
   component_builds api_consumers source_layout fake_drm_matrix
   simulated_headless_matrix raw_little_big gwout_vrr gwinfo_vrr
+  vrr_policy_matrix sdl_vrr_reuse
   qxl_unsupported vt_replay gwm_replay compositor_replay restoration
   socket_cleanup archive_validation journal_evidence)
 for key in "${required_results[@]}"; do result[$key]=failed; done
@@ -115,7 +119,7 @@ getty_unit='' getty_active_before='' getty_enabled_before=''
 logind_unit=systemd-logind.service logind_socket=systemd-logind-varlink.socket
 logind_active_before='' logind_socket_active_before=''
 logind_enabled_before='' logind_socket_enabled_before=''
-client_pid=0
+client_pid=0 focus_a_pid=0
 
 write_facts() {
   {
@@ -147,8 +151,14 @@ cleanup() {
   local saved_status=$?
   set +e
   ((client_pid == 0)) || { kill "$client_pid" 2>/dev/null; wait "$client_pid" 2>/dev/null; }
+  ((focus_a_pid == 0)) || {
+    kill "$focus_a_pid" 2>/dev/null
+    wait "$focus_a_pid" 2>/dev/null
+  }
   systemctl stop glasswyrmd-m14-headless.service gwm-m14-headless.service \
     gwcomp-m14-headless.service glasswyrm-m14-qxl.service \
+    glasswyrmd-m14-single.service gwm-m14-single.service \
+    gwcomp-m14-single.service \
     gw-uinput-m14.service >/dev/null 2>&1 || true
   if [[ $logind_state_captured == true ]]; then
     systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1
@@ -164,14 +174,15 @@ cleanup() {
     [[ $getty_active_before == active ]] || systemctl stop "$getty_unit" >/dev/null 2>&1
   fi
   [[ -z $original_vt ]] || chvt "$original_vt" >/dev/null 2>&1
-  rm -f /tmp/.X11-unix/X99 "$runtime"/*.sock
+  rm -f /tmp/.X11-unix/X98 /tmp/.X11-unix/X99 "$runtime"/*.sock
   write_facts
   return "$saved_status"
 }
 trap cleanup EXIT
 
 rm -rf -- "$build" "$asan" "$default" "$headless" "$drm" "$clang_build" \
-  "$components" "$runtime" "$control" "$work" "$qxl" "$artifact_dir"
+  "$components" "$clients" "$runtime" "$control" "$work" "$qxl" \
+  "$artifact_dir"
 install -d -m 0755 "$artifact_dir" "$control" "$work" "$qxl"
 install -d -m 0700 "$runtime"
 
@@ -179,15 +190,29 @@ failure_stage=dependencies
 install -d -m 0755 /etc/portage/package.use
 printf 'media-libs/libglvnd X\nmedia-libs/mesa -llvm\n' \
   >/etc/portage/package.use/glasswyrm-m14
-emerge --oneshot --noreplace dev-build/meson dev-build/ninja dev-vcs/git \
-  app-misc/jq media-libs/mesa x11-libs/libdrm dev-libs/libinput \
-  x11-libs/libxkbcommon x11-misc/xkeyboard-config x11-libs/libxcb
+emerge --oneshot --noreplace dev-build/meson dev-build/ninja dev-build/cmake \
+  dev-vcs/git net-misc/curl app-crypt/gnupg app-misc/jq media-libs/mesa \
+  x11-libs/libdrm dev-libs/libinput x11-libs/libxkbcommon \
+  x11-misc/xkeyboard-config x11-libs/libX11 x11-libs/libXext \
+  x11-libs/libXfixes x11-libs/libXdamage x11-libs/libXrender \
+  x11-libs/libXcomposite x11-libs/libXrandr x11-libs/libxcb \
+  x11-libs/xcb-util x11-base/xorg-proto
 for forbidden in x11-base/xorg-server x11-base/xwayland x11-base/xwayland-run \
   x11-misc/xvfb x11-misc/lightdm x11-misc/sddm gnome-base/gdm gui-apps/greetd; do
   ! qlist -IC "$forbidden" 2>/dev/null | grep -q . || {
     printf 'Forbidden M14 package installed: %s\n' "$forbidden" >&2; exit 1;
   }
 done
+
+failure_stage=sdl-acquisition
+"$source_dir/tests/compat/m12/acquire_sdl.sh" "$clients/download"
+sdl_archive=$clients/download/SDL2-2.32.10.tar.gz
+[[ $(sha256sum "$sdl_archive" | awk '{print $1}') == \
+  5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 ]]
+failure_stage=client-build
+"$source_dir/tests/compat/m12/build_clients.sh" "$sdl_archive" \
+  "$clients/source" "$clients/build" "$clients/install" \
+  >"$artifact_dir/milestone14-client-build.log" 2>&1
 
 failure_stage='build-matrix'
 setup_build() {
@@ -301,54 +326,218 @@ assert all(x['simulated'] and not x['hardware_capable'] and
            x['kms_controllable'] for x in d['vrr'])
 PY
 result[gwinfo_vrr]=passed
-declare -A client_mode=([off]=windowed [fullscreen]=fullscreen [focused]=windowed
-  [app-requested]=app-requested [always-eligible]=windowed)
-for mode in off fullscreen focused app-requested always-eligible; do
+declare -A client_mode=([off]=windowed [fullscreen]=fullscreen
+  [focused]=windowed [app-requested]=app-requested
+  [always-eligible]=windowed)
+wait_file() {
+  local path=$1
+  for _ in {1..400}; do [[ -s $path ]] && return; sleep .05; done
+  printf 'Timed out waiting for M14 file: %s\n' "$path" >&2
+  return 1
+}
+run_policy_client() {
+  local label=$1 mode=$2 client=$3 preference=${4:-}
   "$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr "$mode" --json \
     >>"$artifact_dir/milestone14-gwout.log"
-  DISPLAY=:99 "$vrr_client" --display :99 --mode "${client_mode[$mode]}" \
-    --hold-ms 500 --result "$work/client-$mode.json" & client_pid=$!
-  sleep .2
+  local -a arguments=(--display :99 --mode "$client" --hold-ms 700
+    --result "$work/client-$label.json")
+  [[ -z $preference ]] || arguments+=(--preference "$preference")
+  DISPLAY=:99 "$vrr_client" "${arguments[@]}" & client_pid=$!
+  wait_file "$work/client-$label.json"
   "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
-    >"$work/gwinfo-$mode.json"
+    >"$work/gwinfo-$label.json"
   wait "$client_pid"; client_pid=0
+}
+for mode in off fullscreen focused app-requested always-eligible; do
+  run_policy_client "$mode" "$mode" "${client_mode[$mode]}"
 done
-"$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr fullscreen --json \
+
+for preference in default prefer disable; do
+  run_policy_client "app-$preference" app-requested windowed "$preference"
+done
+
+"$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr focused --json \
   >>"$artifact_dir/milestone14-gwout.log"
-DISPLAY=:99 "$vrr_client" --display :99 --mode borderless --hold-ms 500 \
-  --result "$work/client-borderless.json" & client_pid=$!
+DISPLAY=:99 "$vrr_client" --display :99 --mode windowed --hold-ms 3000 \
+  --result "$work/client-focus-a.json" & focus_a_pid=$!
+wait_file "$work/client-focus-a.json"
+DISPLAY=:99 "$vrr_client" --display :99 --mode windowed --hold-ms 700 \
+  --result "$work/client-focus-b.json" & focus_b=$!
+client_pid=$focus_b
+wait_file "$work/client-focus-b.json"
+"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+  >"$work/gwinfo-focus-b.json"
+wait "$focus_b"; client_pid=0
 sleep .2
 "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
-  >"$work/gwinfo-borderless.json"
-wait "$client_pid"; client_pid=0
+  >"$work/gwinfo-focus-a.json"
+wait "$focus_a_pid"; focus_a_pid=0
+
 python3 - "$artifact_dir/milestone14-gwout.log" <<'PY'
 import json,sys
 records=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]
-assert len(records)==6
+assert len(records)==9
 assert all(r.get('acknowledgement',{}).get('result')==1 for r in records)
 PY
 result[gwout_vrr]=passed
 
+"$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr focused --json \
+  >>"$artifact_dir/milestone14-gwout.log"
+DISPLAY=:99 "$vrr_client" --display :99 --mode windowed --hold-ms 8000 \
+  --result "$work/client-restart.json" & client_pid=$!
+wait_file "$work/client-restart.json"
+"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+  >"$work/pre-restart.json"
 systemctl restart gwm-m14-headless.service
 wait_socket "$runtime/gwm.sock"
 "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json >"$work/post-gwm.json"
 result[gwm_replay]=passed
-systemctl stop gwcomp-m14-headless.service
 mv "$work/headless-vrr.jsonl" "$work/headless-vrr-before-restart.jsonl"
-systemctl start gwcomp-m14-headless.service
+systemctl restart gwcomp-m14-headless.service
 wait_socket "$runtime/gwcomp.sock"
-"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json >"$work/post-gwcomp.json"
+for _ in {1..200}; do
+  "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+    >"$work/post-gwcomp.json" 2>/dev/null && break
+  sleep .05
+done
+[[ -s $work/post-gwcomp.json ]]
 result[compositor_replay]=passed
-python3 - "$work/post-gwm.json" "$work/post-gwcomp.json" \
+python3 - "$work/pre-restart.json" "$work/post-gwm.json" \
+  "$work/post-gwcomp.json" "$work/client-restart.json" \
   "$artifact_dir/milestone14-restart.json" <<'PY'
 import json,sys
-a,b=(json.load(open(p)) for p in sys.argv[1:3])
-assert len(a['vrr'])==2 and len(b['vrr'])==2
-json.dump({'schema':1,'passed':True,'gwm_replay':True,'compositor_replay':True},open(sys.argv[3],'w'),sort_keys=True)
+before,gwm,comp,client=(json.load(open(p)) for p in sys.argv[1:5])
+window=client['window']
+def left(value): return next(x for x in value['vrr'] if x['name']=='LEFT')
+def semantic(value):
+ x=left(value)
+ return (x['policy'],x['decision'],x['desired_enabled'],x['effective_enabled'],
+         x['candidate_window'],tuple(x['reasons']))
+expected=semantic(before)
+assert expected[0:5]==('focused','enabled',True,True,window)
+assert semantic(gwm)==expected and semantic(comp)==expected
+json.dump({'schema':1,'passed':True,'gwm_replay':True,
+ 'compositor_replay':True,'candidate_window':window,
+ 'semantic_state':{'policy':expected[0],'decision':expected[1],
+ 'desired_enabled':expected[2],'effective_enabled':expected[3],
+ 'reasons':list(expected[5])}},open(sys.argv[5],'w'),sort_keys=True)
 PY
+wait "$client_pid"; client_pid=0
 systemctl stop glasswyrmd-m14-headless.service gwm-m14-headless.service \
   gwcomp-m14-headless.service
+
+failure_stage='single-output-acceptance'
+systemd-run --unit=gwm-m14-single --property=Type=simple --no-block -- \
+  "$build/src/gwm" --ipc-socket "$runtime/gwm-single.sock"
+wait_socket "$runtime/gwm-single.sock"
+systemd-run --unit=gwcomp-m14-single --property=Type=simple --no-block -- \
+  "$build/src/gwcomp" --backend headless \
+  --ipc-socket "$runtime/gwcomp-single.sock" --dump-dir "$work/single-frames" \
+  --headless-output LEFT:800x600@60000 --headless-vrr LEFT=40000-60000 \
+  --vrr-report "$work/headless-vrr-single.jsonl"
+wait_socket "$runtime/gwcomp-single.sock"
+systemd-run --unit=glasswyrmd-m14-single --property=Type=simple --no-block -- \
+  "$build/src/glasswyrmd" --display 98 --wm-socket "$runtime/gwm-single.sock" \
+  --compositor-socket "$runtime/gwcomp-single.sock" --software-content \
+  --output-model --control-socket "$runtime/control-single.sock" \
+  --game-compat --vrr-protocol
+wait_socket "$runtime/control-single.sock"; wait_socket /tmp/.X11-unix/X98
+
+"$build/tools/gwout" --socket "$runtime/control-single.sock" set LEFT \
+  --vrr fullscreen --json >/dev/null
+DISPLAY=:98 "$vrr_client" --display :98 --mode borderless --hold-ms 700 \
+  --result "$work/client-borderless.json" & client_pid=$!
+wait_file "$work/client-borderless.json"
+"$build/tools/gwinfo" --socket "$runtime/control-single.sock" vrr --json \
+  >"$work/gwinfo-borderless.json"
+wait "$client_pid"; client_pid=0
+
+sdl_library="$clients/install/lib64:$clients/install/lib"
+SDL_VIDEODRIVER=x11 SDL_RENDER_DRIVER=software SDL_AUDIODRIVER=dummy \
+  LD_LIBRARY_PATH="$sdl_library" DISPLAY=:98 \
+  "$clients/install/bin/m12_sdl_probe" \
+  --output "$artifact_dir/milestone14-sdl-probe.json"
+"$build/tools/gwout" --socket "$runtime/control-single.sock" set LEFT \
+  --vrr app-requested --json >/dev/null
+SDL_VIDEODRIVER=x11 SDL_RENDER_DRIVER=software SDL_AUDIODRIVER=dummy \
+  LD_LIBRARY_PATH="$sdl_library" DISPLAY=:98 \
+  "$clients/install/bin/m12_sdl_probe" --output "$work/sdl-app-requested.json"
+
+python3 - "$work/gwinfo-off.json" "$work/gwinfo-fullscreen.json" \
+  "$work/gwinfo-focused.json" "$work/gwinfo-app-requested.json" \
+  "$work/gwinfo-always-eligible.json" "$work/gwinfo-app-default.json" \
+  "$work/gwinfo-app-prefer.json" "$work/gwinfo-app-disable.json" \
+  "$work/gwinfo-focus-b.json" "$work/gwinfo-focus-a.json" \
+  "$work/client-focus-b.json" "$work/client-focus-a.json" \
+  "$work/gwinfo-borderless.json" \
+  "$artifact_dir/milestone14-policy-matrix.json" <<'PY'
+import json,sys
+docs=[json.load(open(p)) for p in sys.argv[1:11]]
+focus_b,focus_a=(json.load(open(p)) for p in sys.argv[11:13])
+borderless=json.load(open(sys.argv[13])); destination=sys.argv[14]
+def left(value): return next(x for x in value['vrr'] if x['name']=='LEFT')
+expected=(('off',False,False,'policy-off'),('fullscreen',True,True,None),
+ ('focused',True,True,None),('app-requested',True,True,None),
+ ('always-eligible',True,True,'manual-always-eligible'))
+modes={}
+for value,(policy,desired,effective,reason) in zip(docs[:5],expected):
+ out=left(value); assert out['policy']==policy
+ assert out['desired_enabled'] is desired and out['effective_enabled'] is effective
+ if reason: assert reason in out['reasons']
+ modes[policy]={'desired_enabled':desired,'effective_enabled':effective,
+                'candidate_window':out['candidate_window'],'reasons':out['reasons']}
+transitions=[]
+for value,preference,effective,reason in zip(docs[5:8],('default','prefer','disable'),
+ (False,True,False),('window-did-not-request',None,'window-preference-disabled')):
+ out=left(value); assert out['policy']=='app-requested' and out['effective_enabled'] is effective
+ window=next(x for x in value['windows'] if x['output']==out['id'])
+ assert window['preference']==preference
+ if reason: assert reason in out['reasons']
+ transitions.append({'preference':preference,'effective_enabled':effective,
+                     'reasons':out['reasons']})
+b=left(docs[8]); a=left(docs[9])
+assert b['candidate_window']==focus_b['window'] and a['candidate_window']==focus_a['window']
+bo=left(borderless); bw=next(x for x in borderless['windows'] if x['window']==bo['candidate_window'])
+assert bo['effective_enabled'] and bw['borderless_fullscreen']
+json.dump({'schema':1,'passed':True,'modes':modes,
+ 'app_requested_transitions':transitions,
+ 'focused_candidates':[b['candidate_window'],a['candidate_window']],
+ 'borderless':{'effective_enabled':True,'classified':True,
+               'candidate_window':bo['candidate_window']}},open(destination,'w'),sort_keys=True)
+PY
+result[vrr_policy_matrix]=passed
+
+python3 - "$work/headless-vrr-single.jsonl" \
+  "$artifact_dir/milestone14-sdl-probe.json" "$work/sdl-app-requested.json" \
+  "$artifact_dir/milestone14-sdl-vrr.json" <<'PY'
+import json,sys
+records=[json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+first=json.load(open(sys.argv[2])); second=json.load(open(sys.argv[3]))
+assert first['passed'] and second['passed']
+assert first['probe']==second['probe']=='m12_sdl_probe'
+assert first['sdl_version']==second['sdl_version']=='2.32.10'
+assert first['video_driver']==second['video_driver']=='x11'
+decisions=[x for x in records if x.get('record')=='decision']
+fullscreen=[x for x in decisions if x.get('policy_mode')==2]
+requested=[x for x in decisions if x.get('policy_mode')==4]
+assert any(x.get('effective_enabled') and x.get('candidate_window_id',0)!=0
+           for x in fullscreen)
+assert any(not x.get('effective_enabled') and
+           {'WindowNotFullscreen','WindowNotBorderlessFullscreen'} &
+           set(x.get('reason_names',())) for x in fullscreen)
+assert requested and not any(x.get('effective_enabled') for x in requested)
+assert any('WindowDidNotRequest' in x.get('reason_names',()) for x in requested)
+json.dump({'schema':1,'passed':True,'sdl_version':'2.32.10',
+ 'fullscreen_desktop_enabled':True,'borderless_windowed_rejected':True,
+ 'implicit_app_request':False,'app_requested_effective':False},
+ open(sys.argv[4],'w'),sort_keys=True)
+PY
+result[sdl_vrr_reuse]=passed
+systemctl stop glasswyrmd-m14-single.service gwcomp-m14-single.service \
+  gwm-m14-single.service
+
 cat "$work/headless-vrr-before-restart.jsonl" "$work/headless-vrr.jsonl" \
+  "$work/headless-vrr-single.jsonl" \
   >"$artifact_dir/milestone14-headless-report.jsonl"
 
 failure_stage='qxl-runtime'
@@ -536,18 +725,23 @@ PY
 result[restoration]=passed
 
 failure_stage=evidence
-journalctl -u glasswyrmd-m14-headless.service -u glasswyrm-m14-qxl.service \
+journalctl -u glasswyrmd-m14-headless.service -u glasswyrmd-m14-single.service \
+  -u glasswyrm-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-glasswyrmd-journal.log"
-journalctl -u gwm-m14-headless.service -u glasswyrm-m14-qxl.service \
+journalctl -u gwm-m14-headless.service -u gwm-m14-single.service \
+  -u glasswyrm-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-gwm-journal.log"
-journalctl -u gwcomp-m14-headless.service -u glasswyrm-m14-qxl.service \
+journalctl -u gwcomp-m14-headless.service -u gwcomp-m14-single.service \
+  -u glasswyrm-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-gwcomp-journal.log"
 [[ -s $artifact_dir/milestone14-glasswyrmd-journal.log &&
    -s $artifact_dir/milestone14-gwm-journal.log &&
    -s $artifact_dir/milestone14-gwcomp-journal.log ]]
 result[journal_evidence]=passed
 [[ ! -S $runtime/gwm.sock && ! -S $runtime/gwcomp.sock &&
-   ! -S $runtime/control.sock && ! -S /tmp/.X11-unix/X99 ]]
+   ! -S $runtime/control.sock && ! -S $runtime/gwm-single.sock &&
+   ! -S $runtime/gwcomp-single.sock && ! -S $runtime/control-single.sock &&
+   ! -S /tmp/.X11-unix/X98 && ! -S /tmp/.X11-unix/X99 ]]
 result[socket_cleanup]=passed
 
 failure_stage=archive
@@ -556,7 +750,10 @@ install -d -m 0755 "$evidence"
 for name in milestone14-qxl-capability.json milestone14-qxl-state.json \
   milestone14-headless-report.jsonl milestone14-gw-vrr.log \
   milestone14-gwout.log milestone14-gwinfo.json milestone14-restart.json \
-  milestone14-restoration.json; do cp "$artifact_dir/$name" "$evidence/"; done
+  milestone14-policy-matrix.json milestone14-sdl-vrr.json \
+  milestone14-sdl-probe.json milestone14-restoration.json; do
+  cp "$artifact_dir/$name" "$evidence/"
+done
 (cd "$evidence" && sha256sum -- * >SHA256SUMS && \
   sha256sum --check --status SHA256SUMS && \
   tar -cf "$artifact_dir/milestone14-vm-vrr-evidence.tar" ./*)

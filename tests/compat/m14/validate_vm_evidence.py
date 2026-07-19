@@ -15,7 +15,8 @@ REQUIRED_BASE = "6864ea631d61636289a21c7d2d6655a17be0c004"
 REQUIRED_RESULTS = (
     "historical_default strict_m14 strict_gles sanitizer component_builds "
     "api_consumers source_layout fake_drm_matrix simulated_headless_matrix "
-    "raw_little_big gwout_vrr gwinfo_vrr qxl_unsupported vt_replay "
+    "raw_little_big gwout_vrr gwinfo_vrr vrr_policy_matrix sdl_vrr_reuse "
+    "qxl_unsupported vt_replay "
     "gwm_replay compositor_replay restoration socket_cleanup "
     "archive_validation journal_evidence"
 ).split()
@@ -47,6 +48,10 @@ ARTIFACTS = (
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
     "milestone14-gwinfo.json",
+    "milestone14-policy-matrix.json",
+    "milestone14-sdl-vrr.json",
+    "milestone14-sdl-probe.json",
+    "milestone14-client-build.log",
     "milestone14-restart.json",
     "milestone14-restoration.json",
     "milestone14-glasswyrmd-journal.log",
@@ -62,6 +67,9 @@ ARCHIVE_MEMBERS = {
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
     "milestone14-gwinfo.json",
+    "milestone14-policy-matrix.json",
+    "milestone14-sdl-vrr.json",
+    "milestone14-sdl-probe.json",
     "milestone14-restart.json",
     "milestone14-restoration.json",
 }
@@ -96,7 +104,7 @@ def load_jsonl(path: pathlib.Path) -> list[dict]:
     return records
 
 
-def validate_archive(path: pathlib.Path) -> None:
+def validate_archive(path: pathlib.Path, root: pathlib.Path) -> None:
     with tarfile.open(path, "r:") as archive:
         members = archive.getmembers()
         if any(member.isdir() or not member.isfile() or member.name.startswith("/")
@@ -116,6 +124,8 @@ def validate_archive(path: pathlib.Path) -> None:
     for name in ARCHIVE_MEMBERS:
         if hashlib.sha256(payloads[name]).hexdigest() != checksums[name]:
             raise ValueError(f"evidence checksum differs for {name}")
+        if payloads[name] != (root / name).read_bytes():
+            raise ValueError(f"evidence archive differs from collected {name}")
 
 
 def validate_artifacts(root: pathlib.Path) -> list[str]:
@@ -204,22 +214,69 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                     if record.get("acknowledgement", {}).get("result") == 1]
         rejected = [record for record in gwout
                     if record.get("profile") == "qxl-unsupported"]
-        if (len(accepted) != 6 or len(rejected) != 1
+        if (len(accepted) != 10 or len(rejected) != 1
                 or rejected[0].get("accepted") is not False
                 or rejected[0].get("requested_policy") != "always-eligible"
                 or rejected[0].get("exit_status") in (None, 0)
                 or rejected[0].get("error") !=
                 "gwout: selected output does not provide controllable VRR"):
             raise ValueError(
-                "gwout log does not contain six accepted simulated policies "
+                "gwout log does not contain ten accepted simulated transitions "
                 "and the explicit QXL rejection")
         gwinfo = load_object(root / "milestone14-gwinfo.json")
         if (len(gwinfo.get("vrr", [])) != 2
                 or any(record.get("simulated") is not True for record in gwinfo["vrr"])):
             raise ValueError("gwinfo does not expose two simulated VRR outputs")
+        policy = load_object(root / "milestone14-policy-matrix.json")
+        modes = policy.get("modes", {})
+        expected_modes = {
+            "off": False,
+            "fullscreen": True,
+            "focused": True,
+            "app-requested": True,
+            "always-eligible": True,
+        }
+        transitions = policy.get("app_requested_transitions", [])
+        focused = policy.get("focused_candidates", [])
+        borderless = policy.get("borderless", {})
+        if (policy.get("passed") is not True or set(modes) != set(expected_modes)
+                or any(modes[name].get("effective_enabled") is not enabled
+                       or modes[name].get("desired_enabled") is not enabled
+                       for name, enabled in expected_modes.items())
+                or [(value.get("preference"), value.get("effective_enabled"))
+                    for value in transitions] != [
+                        ("default", False), ("prefer", True),
+                        ("disable", False)]
+                or len(focused) != 2 or any(not isinstance(value, int) or value == 0
+                                            for value in focused)
+                or focused[0] == focused[1]
+                or borderless.get("effective_enabled") is not True
+                or borderless.get("classified") is not True
+                or not isinstance(borderless.get("candidate_window"), int)
+                or borderless.get("candidate_window") == 0):
+            raise ValueError("policy matrix does not prove M14 live transitions")
+        sdl = load_object(root / "milestone14-sdl-vrr.json")
+        probe = load_object(root / "milestone14-sdl-probe.json")
+        if (sdl.get("passed") is not True or sdl.get("sdl_version") != "2.32.10"
+                or sdl.get("fullscreen_desktop_enabled") is not True
+                or sdl.get("borderless_windowed_rejected") is not True
+                or sdl.get("implicit_app_request") is not False
+                or sdl.get("app_requested_effective") is not False
+                or probe.get("probe") != "m12_sdl_probe"
+                or probe.get("sdl_version") != "2.32.10"
+                or probe.get("video_driver") != "x11"
+                or probe.get("passed") is not True):
+            raise ValueError("pinned SDL evidence does not prove M14 behavior")
         restart = load_object(root / "milestone14-restart.json")
+        semantic = restart.get("semantic_state", {})
         if (restart.get("passed") is not True or restart.get("gwm_replay") is not True
-                or restart.get("compositor_replay") is not True):
+                or restart.get("compositor_replay") is not True
+                or restart.get("candidate_window") in (None, 0)
+                or semantic.get("policy") != "focused"
+                or semantic.get("decision") != "enabled"
+                or semantic.get("desired_enabled") is not True
+                or semantic.get("effective_enabled") is not True
+                or not isinstance(semantic.get("reasons"), list)):
             raise ValueError("restart evidence is incomplete")
         restoration = load_object(root / "milestone14-restoration.json")
         checks = restoration.get("checks", {})
@@ -227,7 +284,7 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or set(checks) != {"kms", "vt", "vrr", "getty", "logind"}
                 or not all(checks.values())):
             raise ValueError("restoration evidence is incomplete")
-        validate_archive(root / "milestone14-vm-vrr-evidence.tar")
+        validate_archive(root / "milestone14-vm-vrr-evidence.tar", root)
     except (OSError, ValueError, KeyError, StopIteration, json.JSONDecodeError,
             tarfile.TarError) as error:
         errors.append(str(error))

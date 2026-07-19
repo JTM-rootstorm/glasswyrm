@@ -48,6 +48,7 @@ for expected in \
   /var/tmp/glasswyrm-build-m14-drm /var/tmp/glasswyrm-build-m14-clang \
   /var/tmp/glasswyrm-build-m14-components /var/tmp/glasswyrm-m14-headless \
   /var/tmp/glasswyrm-m14-qxl /var/tmp/glasswyrm-m14-control \
+  /var/tmp/glasswyrm-m14-clients \
   /var/tmp/glasswyrm-m14-artifacts /run/glasswyrm-m14 \
   '-Dexperimental=false' '-Dexperimental=true' '-Drender_gl=false' \
   '-Drender_gl=true' '-Dasan=true' '-Dubsan=true' \
@@ -64,9 +65,10 @@ for expected in \
   '--headless-vrr LEFT=40000-60000' '--headless-vrr RIGHT=48000-75000' \
   '--vrr-report' '--vrr-protocol' '--vrr "$mode"' 'gwinfo" --socket' \
   'm14_vrr_client' off fullscreen focused app-requested always-eligible borderless \
+  '--preference "$preference"' 'm12/acquire_sdl.sh' 'm12/build_clients.sh' \
+  5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 \
   'systemctl restart gwm-m14-headless.service' \
-  'systemctl stop gwcomp-m14-headless.service' \
-  'systemctl start gwcomp-m14-headless.service' \
+  'systemctl restart gwcomp-m14-headless.service' \
   'M14 QXL unsupported profile requires driver qxl' \
   'gwout: selected output does not provide controllable VRR' \
   '--backend drm' '--drm-api auto' '--connector "$connector"' \
@@ -76,6 +78,8 @@ for expected in \
   'milestone14-qxl-capability.json' 'milestone14-qxl-state.json' \
   'milestone14-headless-report.jsonl' 'milestone14-gw-vrr.log' \
   'milestone14-gwout.log' 'milestone14-gwinfo.json' \
+  'milestone14-policy-matrix.json' 'milestone14-sdl-vrr.json' \
+  'milestone14-sdl-probe.json' 'milestone14-client-build.log' \
   'milestone14-restart.json' 'milestone14-restoration.json' \
   'milestone14-glasswyrmd-journal.log' 'milestone14-gwm-journal.log' \
   'milestone14-gwcomp-journal.log' 'milestone14-facts.env' \
