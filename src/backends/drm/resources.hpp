@@ -64,6 +64,8 @@ struct Connector {
   std::uint32_t physical_width_mm{};
   std::uint32_t physical_height_mm{};
   std::vector<std::uint8_t> edid_digest;
+  bool vrr_property_present{};
+  bool vrr_capable{};
 };
 
 struct Crtc {

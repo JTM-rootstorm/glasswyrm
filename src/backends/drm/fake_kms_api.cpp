@@ -102,6 +102,11 @@ bool FakeKmsApi::object_properties(int, KmsObjectType t, std::uint32_t id,
     return false;
   }
   out = it->second;
+  for (auto &property : out) {
+    const auto override = property_readback_overrides.find({id, property.id});
+    if (override != property_readback_overrides.end())
+      property.value = override->second;
+  }
   return true;
 }
 bool FakeKmsApi::read_connector_crtc(int, std::uint32_t id, std::uint32_t &out,
@@ -160,7 +165,27 @@ bool FakeKmsApi::atomic_commit(int, std::span<const AtomicPropertyValue> p,
   calls.push_back("atomic:" + std::to_string(flags));
   if (reject(KmsOperation::AtomicCommit, e))
     return false;
+  if ((flags & AtomicTestOnly) != 0 && rejected_test_property) {
+    for (const auto &property : p) {
+      if (property.property_id == rejected_test_property->first &&
+          property.value == rejected_test_property->second) {
+        e = "injected TEST_ONLY property rejection";
+        return false;
+      }
+    }
+  }
   atomic_commits.push_back({{p.begin(), p.end()}, flags, cookie});
+  if ((flags & AtomicTestOnly) == 0) {
+    for (const auto &value : p) {
+      for (auto &[object, object_properties] : properties) {
+        if (object.second != value.object_id)
+          continue;
+        for (auto &property : object_properties)
+          if (property.id == value.property_id)
+            property.value = value.value;
+      }
+    }
+  }
   if (atomic_result_connector_crtc && !connector_crtcs.empty())
     connector_crtcs.begin()->second = *atomic_result_connector_crtc;
   if (atomic_result_crtc)

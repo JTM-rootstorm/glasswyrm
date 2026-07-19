@@ -48,6 +48,10 @@ public:
   std::optional<KmsCrtcState> atomic_result_crtc;
   std::optional<KmsPlaneState> atomic_result_plane;
   std::optional<std::uint32_t> atomic_result_connector_crtc;
+  std::optional<std::pair<std::uint32_t, std::uint64_t>>
+      rejected_test_property;
+  std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>
+      property_readback_overrides;
 
   void fail_next(KmsOperation operation) { failure_ = operation; }
   bool is_master(int, bool &, std::string &) override;
