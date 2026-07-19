@@ -352,15 +352,20 @@ start_headless_peers() {
   wait_socket "$runtime/input.sock"
   wait_socket /tmp/.X11-unix/X99
 }
+stop_transient_unit() {
+  local unit=$1 main_pid
+  main_pid=$(systemctl show "$unit" -p MainPID --value)
+  [[ $main_pid =~ ^[0-9]+$ && $main_pid -gt 0 ]]
+  systemctl stop "$unit"
+  ! kill -0 "$main_pid" 2>/dev/null
+  service_checks=$((service_checks + 1))
+}
 stop_headless_peers() {
   local suffix=$1
   local unit
   for unit in "glasswyrmd-m13$suffix.service" "gwcomp-m13$suffix.service" \
     "gwm-m13$suffix.service"; do
-    systemctl stop "$unit"
-    [[ $(systemctl show "$unit" -p LoadState --value) == loaded ]]
-    [[ $(systemctl show "$unit" -p ExecMainStatus --value) == 0 ]]
-    service_checks=$((service_checks + 1))
+    stop_transient_unit "$unit"
   done
 }
 
@@ -811,9 +816,7 @@ for _ in {1..400}; do
   sleep .05
 done
 [[ -s $control_data/after-gwm.json ]]
-systemctl stop gwcomp-m13.service
-[[ $(systemctl show gwcomp-m13.service -p ExecMainStatus --value) == 0 ]]
-[[ $(systemctl show gwcomp-m13.service -p MainPID --value) == 0 ]]
+stop_transient_unit gwcomp-m13.service
 [[ ! -S $runtime/gwcomp.sock ]]
 install -d -m 0755 "$control_data/pre-restart-frames"
 find "$runtime/frames" -mindepth 1 -maxdepth 1 \
@@ -1087,10 +1090,7 @@ d=json.load(open(sys.argv[1])); o=d['outputs'][0]
 assert (o['scale_numerator'],o['scale_denominator'])==(1,1)
 assert o['transform']=='normal'
 PY
-systemctl stop glasswyrm-m13-drm.service
-[[ $(systemctl show glasswyrm-m13-drm.service -p LoadState --value) == loaded ]]
-[[ $(systemctl show glasswyrm-m13-drm.service -p ExecMainStatus --value) == 0 ]]
-[[ $(systemctl show glasswyrm-m13-drm.service -p MainPID --value) == 0 ]]
+stop_transient_unit glasswyrm-m13-drm.service
 python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
   "$artifact_dir/milestone13-renderer-drm.jsonl" \
   "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame" \
@@ -1124,12 +1124,7 @@ json.dump({'schema':1,'passed':True,'scale':[4,3],'transform':'rotate-180',
   'master_drop':restore['master_drop'],'texture_cache_zero':True,'no_fatal':True}},
  open(sys.argv[5],'w'),sort_keys=True)
 PY
-service_checks=$((service_checks + 1))
-systemctl stop gw-uinput-m13.service
-[[ $(systemctl show gw-uinput-m13.service -p LoadState --value) == loaded ]]
-[[ $(systemctl show gw-uinput-m13.service -p ExecMainStatus --value) == 0 ]]
-[[ $(systemctl show gw-uinput-m13.service -p MainPID --value) == 0 ]]
-service_checks=$((service_checks + 1))
+stop_transient_unit gw-uinput-m13.service
 chvt "$original_vt"
 [[ $getty_active_before != active ]] || systemctl start "$getty_unit"
 getty_active_after=$(systemctl is-active "$getty_unit" 2>/dev/null || true)
@@ -1184,7 +1179,7 @@ json.dump({'schema':1,'active_before':ab,'active_after':aa,
  'restored':ab==aa and sb==sa and eb==ea and seb==sea},open(out,'w'),sort_keys=True)
 PY
 result[restoration]=passed
-((service_checks == 11))
+((service_checks == 12))
 result[service_results]=passed
 
 failure_stage=evidence
