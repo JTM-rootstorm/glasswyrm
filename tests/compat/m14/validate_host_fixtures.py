@@ -15,9 +15,13 @@ REQUIRED = {
     "README.md",
     "gw-vrr-big.json",
     "gw-vrr-little.json",
+    "fake-drm-vrr-report.jsonl",
     "gwinfo-vrr.json",
     "gwout-vrr-result.json",
+    "headless-vrr-report.jsonl",
     "m14-vrr-client.json",
+    "qxl-unsupported.json",
+    "vrr-capability-headless.json",
     "vrr-reasons.json",
     "vrr-state-always.json",
     "vrr-state-app-requested.json",
@@ -37,6 +41,15 @@ def load(root: Path, name: str) -> dict[str, object]:
     if not isinstance(value, dict):
         fail(f"{name} must contain a JSON object")
     return value
+
+
+def load_jsonl(root: Path, name: str) -> list[dict[str, object]]:
+    values = [json.loads(line) for line in
+              (root / name).read_text(encoding="utf-8").splitlines()
+              if line.strip()]
+    if not values or any(not isinstance(value, dict) for value in values):
+        fail(f"{name} must contain JSON object records")
+    return values
 
 
 def validate(root: Path) -> None:
@@ -125,6 +138,69 @@ def validate(root: Path) -> None:
             or not isinstance(output_states[0], dict)
             or output_states[0].get("policy") != "fullscreen"):
         fail("gwout VRR fixture is not an accepted fullscreen policy commit")
+    client = load(root, "m14-vrr-client.json")
+    if (client.get("schema") != "glasswyrm.m14-vrr-client.v2"
+            or client.get("mode") != "cadence"
+            or client.get("events_selected") is not True
+            or client.get("eventfd_synchronized") is not True
+            or client.get("cadence_absolute_monotonic") is not True
+            or client.get("preference_sequence") != []):
+        fail("M14 live-client fixture differs")
+
+    capability = load(root, "vrr-capability-headless.json")
+    outputs = capability.get("outputs")
+    if (capability.get("schema") != "glasswyrm.m14-vrr-capability.v1"
+            or not isinstance(outputs, list) or len(outputs) != 2
+            or any(not isinstance(item, dict) for item in outputs)
+            or {(item.get("name"), tuple(item.get("range_millihertz", [])))
+                for item in outputs if isinstance(item, dict)} != {
+                    ("LEFT", (40000, 60000)), ("RIGHT", (48000, 75000))}
+            or any(item.get("backend") != "headless"
+                   or item.get("simulated") is not True
+                   or item.get("hardware_capable") is not False
+                   or item.get("kms_controllable") is not True
+                   for item in outputs if isinstance(item, dict))):
+        fail("headless capability fixture differs")
+
+    headless = load_jsonl(root, "headless-vrr-report.jsonl")
+    if ([record.get("record") for record in headless]
+            != ["capability", "decision", "timing", "summary", "restore"]
+            or any(record.get("simulated") is not True for record in headless)
+            or headless[0].get("hardware_capable") is not False
+            or headless[0].get("controllable") is not True
+            or headless[1].get("reason_names") != ["SimulatedHeadless"]
+            or headless[2].get("within_threshold") is not True
+            or headless[3].get("sample_count") != 1
+            or headless[4].get("readback_success") is not True):
+        fail("headless VRR report fixture differs")
+
+    fake_drm = load_jsonl(root, "fake-drm-vrr-report.jsonl")
+    if ([record.get("record") for record in fake_drm] != [
+            "vrr-capability", "vrr-decision", "vrr-timing", "vrr-summary",
+            "vrr-restore"]
+            or fake_drm[0].get("driver") != "fake"
+            or fake_drm[0].get("controllable") is not True
+            or fake_drm[1].get("effective_enabled") is not True
+            or fake_drm[2].get("within_threshold") is not True
+            or fake_drm[3].get("pass_basis_points") != 10000
+            or fake_drm[4].get("readback_success") is not True):
+        fail("fake DRM VRR report fixture differs")
+
+    qxl = load(root, "qxl-unsupported.json")
+    forced = qxl.get("forced_policy")
+    if (qxl.get("schema") != "glasswyrm.m14-qxl-unsupported.v1"
+            or qxl.get("profile") != "qxl-unsupported"
+            or qxl.get("driver") != "qxl"
+            or qxl.get("simulated") is not False
+            or qxl.get("hardware_capable") is not False
+            or qxl.get("kms_controllable") is not False
+            or qxl.get("effective_enabled") is not False
+            or qxl.get("reasons") != ["OutputNotVrrCapable",
+                                       "VrrPropertyMissing"]
+            or not isinstance(forced, dict)
+            or forced.get("requested") != "always-eligible"
+            or forced.get("accepted") is not False):
+        fail("QXL unsupported fixture differs")
 
 
 def main() -> int:

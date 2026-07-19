@@ -39,6 +39,13 @@ VRR range is trustworthy, but it is not the primary pass condition.
 
 Headless simulation emits deterministic synthetic timestamps and marks every
 record simulated. It validates policy, ordering, codecs, tools, and statistics
-but cannot confirm hardware behavior. DRM JSONL emits separate `capability`,
-`decision`, `timing`, `summary`, and `restore` records so pixel hashes remain
-unchanged.
+but cannot confirm hardware behavior. Its JSONL record tags are `capability`,
+`decision`, `timing`, `summary`, and `restore`. DRM JSONL uses
+`vrr-capability`, `vrr-decision`, `vrr-timing`, `vrr-summary`, and
+`vrr-restore`. The distinct vocabularies are frozen in the deterministic M14
+fixtures and keep pixel hashes unchanged.
+
+Reason masks are authoritative. Engine state, backend reports, and fixtures
+use the canonical CamelCase names from the 33-bit registry; `gwinfo`/`gwout`
+render those same ordered bits as kebab-case command-line names. Neither form
+may invent, drop, or reorder a reason.

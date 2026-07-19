@@ -8,3 +8,10 @@ The little- and big-endian protocol fixtures are regenerated logically by
 `m14_gw_vrr_fixture_test`. The policy fixtures are regenerated logically by
 `m14_policy_fixture_test`. The tool fixtures must match output from the bounded
 fake output-control server. `SHA256SUMS` protects every fixture in this folder.
+
+The headless and fake-DRM JSONL reports freeze the two deliberately distinct
+record vocabularies emitted by those backends. `qxl-unsupported.json` is the
+negative-capability profile and never represents physical VRR proof.
+`m14-vrr-client.json` uses the intentionally incompatible v2 client-state
+schema, which adds event selection, reply/notification evidence, known reason
+masks, the bounded preference sequence, and eventfd cadence synchronization.
