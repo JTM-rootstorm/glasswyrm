@@ -12,3 +12,4 @@ extension compatibility.
 - [Milestone 12 RANDR subset](M12_RANDR.md)
 - [Milestone 13 RANDR multi-output subset](M13_RANDR.md)
 - [Milestone 13 GW_SCALE 0.1 prototype](M13_GW_SCALE.md)
+- [Milestone 14 GW_VRR 0.1 prototype](M14_GW_VRR.md)
