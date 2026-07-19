@@ -32,6 +32,11 @@ endif
 m9_fixed_time = shared_library(
   'gw_m9_fixed_time',
   m9_fixed_time_sources,
+  # This test-only interposer must be the first preloaded object. Meson's
+  # built-in AddressSanitizer runtime also requires first position, so keep
+  # this fixture outside that target-level sanitizer instrumentation. The
+  # production targets and the rest of the test suite remain instrumented.
+  override_options: ['b_sanitize=none'],
   install: false,
 )
 

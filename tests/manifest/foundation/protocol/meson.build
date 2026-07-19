@@ -87,6 +87,7 @@ test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
 m9_fixed_time_test = executable(
   'm9_fixed_time_test',
   files(tests_source_dir / 'apps/m9_fixed_time_test.cpp'),
+  override_options: ['b_sanitize=none'],
 )
 m9_fixed_time_preload = m9_fixed_time.full_path()
 m9_fixed_time_environment = []
