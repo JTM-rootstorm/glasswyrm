@@ -1,0 +1,82 @@
+{
+  "byte_order": "big",
+  "checks": {
+    "crtc_geometry": true,
+    "names": true,
+    "primary": true,
+    "selected_events": true,
+    "stable_registry": true,
+    "two_crtcs": true,
+    "two_modes": true,
+    "two_outputs": true,
+    "version_1_3": true
+  },
+  "errors": [],
+  "evidence": {
+    "crtcs": [
+      {
+        "height": 480,
+        "mode": 258,
+        "rotation": 1,
+        "width": 640,
+        "x": 0,
+        "xid": 257,
+        "y": 0
+      },
+      {
+        "height": 480,
+        "mode": 261,
+        "rotation": 1,
+        "width": 640,
+        "x": 640,
+        "xid": 260,
+        "y": 0
+      }
+    ],
+    "error_base": 136,
+    "event_base": 67,
+    "outputs": [
+      {
+        "connected": true,
+        "crtc": 257,
+        "name": "LEFT",
+        "xid": 256
+      },
+      {
+        "connected": true,
+        "crtc": 260,
+        "name": "RIGHT",
+        "xid": 259
+      }
+    ],
+    "primary": 256,
+    "selected_events": [
+      {
+        "event": 67,
+        "subcode": -1
+      },
+      {
+        "event": 68,
+        "subcode": 0
+      },
+      {
+        "event": 68,
+        "subcode": 1
+      },
+      {
+        "event": 68,
+        "subcode": 0
+      },
+      {
+        "event": 68,
+        "subcode": 1
+      }
+    ],
+    "timestamp": 4,
+    "version": "1.3"
+  },
+  "passed": true,
+  "probe": "m13_raw_output_probe",
+  "scenario": "randr",
+  "schema": 1
+}
