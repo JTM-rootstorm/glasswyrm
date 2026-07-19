@@ -261,4 +261,13 @@ std::vector<VrrNotification> gw_vrr_notifications(
   return result;
 }
 
+std::vector<std::uint8_t> gw_vrr_lifecycle_completion(
+    const x11::ByteOrder order, const std::uint64_t sequence,
+    const DeferredVrrMutation& mutation, const bool accepted) {
+  if (accepted) return mutation.accepted_reply;
+  return x11::encode_core_error(
+      order, {x11::CoreErrorCode::BadImplementation, sequence, mutation.window,
+              kGwVrrMajorOpcode, 3});
+}
+
 }  // namespace glasswyrm::server::extensions

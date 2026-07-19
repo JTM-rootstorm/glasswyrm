@@ -32,4 +32,8 @@ struct VrrDispatchResult {
     std::uint32_t window, const WindowVrrState& before,
     const WindowVrrState& after, OutputVrrPolicyMode policy);
 
+[[nodiscard]] std::vector<std::uint8_t> gw_vrr_lifecycle_completion(
+    gw::protocol::x11::ByteOrder order, std::uint64_t sequence,
+    const DeferredVrrMutation& mutation, bool accepted);
+
 }  // namespace glasswyrm::server::extensions

@@ -140,7 +140,7 @@ int main() {
   if (parse({"glasswyrmd"}, options, output, error) !=
           ParseOptionsResult::Run ||
       options.integrated() || options.real_input_enabled() ||
-      options.output_model || options.scale_protocol ||
+      options.output_model || options.scale_protocol || options.vrr_protocol ||
       options.xkb_rules != "evdev" || options.xkb_model != "pc105" ||
       options.xkb_layout != "us" || !options.xkb_variant.empty() ||
       !options.xkb_options.empty() || options.repeat_delay_ms != 500 ||
@@ -160,6 +160,9 @@ int main() {
   }
   if (output.find("--scale-protocol") == std::string::npos) {
     return 19;
+  }
+  if (output.find("--vrr-protocol") == std::string::npos) {
+    return 24;
   }
   if (output.find("--control-socket PATH") == std::string::npos) {
     return 23;
@@ -198,6 +201,14 @@ int main() {
       !options.scale_protocol) {
     return 20;
   }
+  options = {};
+  if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm",
+             "--compositor-socket", "/tmp/comp", "--output-model",
+             "--vrr-protocol"},
+            options, output, error) != ParseOptionsResult::Run ||
+      !options.vrr_protocol) {
+    return 25;
+  }
 #endif
   options = {};
   if (parse({"glasswyrmd", "--wm-socket", "/tmp/wm", "--compositor-socket",
@@ -212,10 +223,15 @@ int main() {
   for (const auto &values : {
            std::vector<std::string>{"glasswyrmd", "--game-compat"},
            std::vector<std::string>{"glasswyrmd", "--scale-protocol"},
+           std::vector<std::string>{"glasswyrmd", "--vrr-protocol"},
            std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/wm",
                                     "--compositor-socket", "/tmp/comp",
                                     "--output-model", "--scale-protocol",
                                     "--scale-protocol"},
+           std::vector<std::string>{"glasswyrmd", "--wm-socket", "/tmp/wm",
+                                    "--compositor-socket", "/tmp/comp",
+                                    "--output-model", "--vrr-protocol",
+                                    "--vrr-protocol"},
            std::vector<std::string>{"glasswyrmd", "--disable-extension",
                                     "MIT-SHM"},
            std::vector<std::string>{"glasswyrmd", "--disable-extension",

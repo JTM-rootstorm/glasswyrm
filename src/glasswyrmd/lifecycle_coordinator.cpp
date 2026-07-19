@@ -80,6 +80,8 @@ std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
     case LifecycleOperationKind::ScaleChange:
       target->second.scale = source->second.scale;
       break;
+    case LifecycleOperationKind::VrrChange:
+      break;
     case LifecycleOperationKind::Focus:
       target->second.focus_serial = source->second.focus_serial;
       break;

@@ -12,8 +12,8 @@
 namespace glasswyrm::server {
 
 enum class LifecycleOperationKind { Create, Map, Unmap, Configure, Destroy,
-                                    OverrideChange, PolicyChange, ScaleChange, Focus,
-                                    ClientCleanup };
+                                    OverrideChange, PolicyChange, ScaleChange,
+                                    VrrChange, Focus, ClientCleanup };
 enum class CoordinatorPhase { Idle, AwaitingPolicy, AwaitingCompositor,
                               RollingBackPolicy, RollingBackCompositor,
                               WaitingForPeer, Fatal };

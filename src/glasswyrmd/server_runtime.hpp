@@ -75,6 +75,8 @@ class ServerRuntime {
     std::optional<ClientCleanupPlan> cleanup;
     std::optional<DeferredPropertyMutation> property;
     std::optional<WindowScaleState> scale;
+    std::optional<DeferredVrrMutation> vrr;
+    std::optional<WindowVrrState> vrr_before;
   };
 
   void initialize_lifecycle();

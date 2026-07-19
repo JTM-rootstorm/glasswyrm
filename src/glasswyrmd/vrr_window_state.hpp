@@ -7,6 +7,8 @@
 
 namespace glasswyrm::server {
 
+class ResourceTable;
+
 enum class WindowVrrPreference : std::uint16_t {
   Default = 0,
   Disable = 1,
@@ -78,6 +80,8 @@ class VrrWindowStateStore {
   WindowVrrState& ensure_window(std::uint32_t window);
   PublishedOutputVrrState& ensure_output(std::uint32_t output);
   void erase_window(std::uint32_t window) noexcept;
+  void clear_client(std::uint64_t client) noexcept;
+  void prune_windows(const ResourceTable& resources) noexcept;
 
  private:
   std::unordered_map<std::uint32_t, WindowVrrState> windows_;

@@ -1,5 +1,7 @@
 #include "glasswyrmd/vrr_window_state.hpp"
 
+#include "glasswyrmd/resource_table.hpp"
+
 namespace glasswyrm::server {
 
 WindowVrrState* VrrWindowStateStore::find_window(
@@ -38,6 +40,20 @@ PublishedOutputVrrState& VrrWindowStateStore::ensure_output(
 
 void VrrWindowStateStore::erase_window(const std::uint32_t window) noexcept {
   windows_.erase(window);
+}
+
+void VrrWindowStateStore::clear_client(const std::uint64_t client) noexcept {
+  for (auto& [window, state] : windows_) {
+    static_cast<void>(window);
+    state.event_selections.erase(client);
+  }
+}
+
+void VrrWindowStateStore::prune_windows(
+    const ResourceTable& resources) noexcept {
+  std::erase_if(windows_, [&resources](const auto& entry) {
+    return resources.find_window(entry.first) == nullptr;
+  });
 }
 
 bool valid_vrr_preference(const std::uint16_t value) noexcept {

@@ -4,6 +4,7 @@
 
 #include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/extension_event_helpers.hpp"
+#include "glasswyrmd/extensions/gw_vrr.hpp"
 #include "glasswyrmd/gw_scale_state.hpp"
 #include "glasswyrmd/protocol_event_router.hpp"
 #include "input/input_router.hpp"
@@ -30,6 +31,28 @@ void route_property_notification(
                      : gw::protocol::x11::PropertyNotifyState::Deleted};
   ProtocolEventRouter router(resources);
   (void)router.route(intent, recipients);
+}
+
+void route_vrr_notification(
+    const WindowVrrState& before, const std::uint32_t window,
+    const ServerState& state,
+    const std::span<ClientConnection* const> recipients) {
+  const auto* after = state.vrr().find_window(window);
+  if (!after) return;
+  auto policy = OutputVrrPolicyMode::Off;
+  if (const auto* output = state.vrr().find_output(after->primary_output))
+    policy = output->policy;
+  const auto changed = vrr_change_mask(before, *after);
+  for (auto* recipient : recipients) {
+    const auto selection =
+        after->event_selections.find(recipient->identifier());
+    if (selection == after->event_selections.end()) continue;
+    const auto selected = changed & selection->second & kKnownVrrEventMask;
+    if (selected != 0)
+      (void)recipient->enqueue_server_packet(extensions::encode_gw_vrr_notify(
+          recipient->byte_order(), recipient->last_request_sequence(), selected,
+          window, *after, policy));
+  }
 }
 
 }  // namespace
@@ -127,6 +150,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
       (void)staged.selections().clear_window(item.xid);
       (void)staged.grabs().cleanup_window(item.xid);
       (void)staged.composite().remove_window(item.xid);
+      staged.vrr().erase_window(item.xid);
     }
     committed = staged.resources().commit_destroy_plan(
                     *mutation->second.destroy) == DestroyWindowStatus::Success;
@@ -137,7 +161,9 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     auto staged = server_.state_;
     (void)staged.selections().clear_client(mutation->second.cleanup->owner);
     (void)staged.composite().remove_client(mutation->second.cleanup->owner);
+    staged.vrr().clear_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
+    staged.vrr().prune_windows(staged.resources());
     committed = staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
   } else if (active && mutation != pending_mutations_.end() &&
@@ -164,6 +190,15 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     if (committed) window->scale = *mutation->second.scale;
     committed = committed && staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
+  } else if (active && mutation != pending_mutations_.end() &&
+             mutation->second.vrr) {
+    auto staged = server_.state_;
+    const auto& vrr = *mutation->second.vrr;
+    committed = staged.resources().find_window(vrr.window) != nullptr;
+    if (committed)
+      staged.vrr().ensure_window(vrr.window).preference = vrr.preference;
+    committed = committed && staged.commit_lifecycle(snapshot);
+    if (committed) server_.state_ = std::move(staged);
   } else {
     committed = server_.state_.commit_lifecycle(snapshot);
   }
@@ -188,6 +223,15 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
       mutation != pending_mutations_.end() && mutation->second.cleanup
           ? std::optional<std::uint32_t>(mutation->second.resource_base)
           : std::nullopt;
+  if (requester && mutation != pending_mutations_.end() &&
+      mutation->second.vrr) {
+    const auto sequence = operation ? operation->request_sequence
+                                    : requester->last_request_sequence();
+    (void)requester->enqueue_server_packet(
+        extensions::gw_vrr_lifecycle_completion(
+            requester->byte_order(), sequence, *mutation->second.vrr,
+            success));
+  }
   if (success && operation) {
     std::vector<ClientConnection*> recipients;
     recipients.reserve(server_.clients_.size());
@@ -210,6 +254,11 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     if (mutation != pending_mutations_.end() && mutation->second.property)
       route_property_notification(*mutation->second.property,
                                   server_.state_.resources(), recipients);
+    if (mutation != pending_mutations_.end() && mutation->second.vrr &&
+        mutation->second.vrr_before)
+      route_vrr_notification(*mutation->second.vrr_before,
+                             mutation->second.vrr->window, server_.state_,
+                             recipients);
     if (operation->kind == LifecycleOperationKind::Destroy &&
         mutation != pending_mutations_.end() && mutation->second.destroy) {
       for (const auto& item : mutation->second.destroy->postorder) {
@@ -237,6 +286,7 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
       const auto committed = router.capture(operation->window);
       if (operation->kind != LifecycleOperationKind::Create &&
           operation->kind != LifecycleOperationKind::ScaleChange &&
+          operation->kind != LifecycleOperationKind::VrrChange &&
           operation->kind != LifecycleOperationKind::Focus) {
         const auto kind = operation->kind == LifecycleOperationKind::Map
                               ? StructuralTransitionKind::Map
@@ -415,6 +465,12 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
       operation.kind = LifecycleOperationKind::ScaleChange;
       found->second.scale = result.deferred_scale->scale;
       mutation.scale = result.deferred_scale->scale;
+    } else if (result.deferred_vrr) {
+      operation.kind = LifecycleOperationKind::VrrChange;
+      mutation.vrr = result.deferred_vrr;
+      const auto* before =
+          server_.state_.vrr().find_window(result.deferred_vrr->window);
+      mutation.vrr_before = before ? *before : WindowVrrState{};
     } else if (result.deferred_configure) {
       operation.kind = LifecycleOperationKind::Configure;
       const auto& request = *result.deferred_configure;
@@ -471,6 +527,8 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
                  ? gw::protocol::x11::CoreOpcode::SendEvent
              : result.deferred_scale
                  ? static_cast<gw::protocol::x11::CoreOpcode>(135)
+             : result.deferred_vrr
+                 ? static_cast<gw::protocol::x11::CoreOpcode>(136)
              : result.deferred_map ? gw::protocol::x11::CoreOpcode::MapWindow
                                    : gw::protocol::x11::CoreOpcode::UnmapWindow),
          0}));
@@ -491,9 +549,11 @@ void ServerRuntime::cancel_client_lifecycle(
 #endif
   lifecycle_->cancel_client(client);
   (void)server_.state_.selections().clear_client(client);
+  server_.state_.vrr().clear_client(client);
   auto plan = server_.state_.resources().prepare_client_cleanup(client);
   if (!plan.affects_policy) {
     (void)server_.state_.resources().commit_client_cleanup(plan);
+    server_.state_.vrr().prune_windows(server_.state_.resources());
     server_.pending_resource_bases_.erase(resource_base);
     return;
   }

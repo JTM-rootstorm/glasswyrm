@@ -7,6 +7,7 @@
 #include "glasswyrmd/extensions/damage.hpp"
 #include "glasswyrmd/extensions/randr.hpp"
 #include "glasswyrmd/extensions/gw_scale.hpp"
+#include "glasswyrmd/extensions/gw_vrr.hpp"
 #include "glasswyrmd/extensions/render.hpp"
 #include "glasswyrmd/extensions/composite.hpp"
 #include "protocol/x11/reply.hpp"
@@ -51,6 +52,23 @@ DispatchResult dispatch_extension_request(
       return extensions::dispatch_randr(state, context, request);
     case ExtensionKind::GwScale:
       return extensions::dispatch_gw_scale(state, context, request);
+    case ExtensionKind::GwVrr: {
+      auto result = extensions::dispatch_gw_vrr(
+          state, state.vrr(), context, request);
+      if (!result.preference_change)
+        return std::move(result.dispatch);
+      if (context.integrated_lifecycle) {
+        auto deferred = DispatchResult::deferred_vrr_change(
+            {result.preference_change->window,
+             result.preference_change->preference,
+             std::move(result.dispatch.output)});
+        return deferred;
+      }
+      state.vrr()
+          .ensure_window(result.preference_change->window)
+          .preference = result.preference_change->preference;
+      return std::move(result.dispatch);
+    }
   }
 
   return request_handlers::error(context, request,
