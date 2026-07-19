@@ -178,6 +178,26 @@ def validate_gwout_result(path: pathlib.Path) -> None:
         raise ValueError(f"{path.name} is not an accepted commit")
 
 
+def validate_restarted_renderer_report(path: pathlib.Path) -> None:
+    records = [json.loads(line) for line in
+               path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    selections = [index for index, record in enumerate(records)
+                  if record.get("record") == "selection"]
+    if (len(selections) != 2
+            or any(records[index].get("selected") != "software"
+                   for index in selections)
+            or any(record.get("record") == "fatal" for record in records)):
+        raise ValueError(f"{path.name} does not contain two software lifetimes")
+    boundaries = selections[1:] + [len(records)]
+    for start, end in zip(selections, boundaries):
+        if not any(record.get("record") == "output-frame"
+                   and record.get("selected") == "software"
+                   and record.get("disposition") == "complete"
+                   for record in records[start + 1:end]):
+            raise ValueError(
+                f"{path.name} has no complete frame after a restart boundary")
+
+
 def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
     errors: list[str] = []
     try:
@@ -209,6 +229,8 @@ def validate_artifacts(root: pathlib.Path, facts: dict[str, str]) -> list[str]:
                     root / f"milestone13-{protocol}-{order}.json", order)
 
         validate_gwout_result(root / "milestone13-gwout-result.json")
+        validate_restarted_renderer_report(
+            root / "milestone13-renderer-software.jsonl")
 
         scale_client = load_object(root / "milestone13-scale-client.json")
         if (scale_client.get("schema") != "glasswyrm.m13-scale-client.v1"
