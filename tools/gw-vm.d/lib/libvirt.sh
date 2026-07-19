@@ -30,6 +30,7 @@ vm_boot() {
       virsh --connect "$LIBVIRT_URI" start "$VM_DOMAIN" || return
       ;;
   esac
+  wait_for_guest || return
   record_scenario "boot" "passed" ""
 }
 
