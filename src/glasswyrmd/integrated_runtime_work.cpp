@@ -157,9 +157,9 @@ bool ServerRuntime::service_peer_replay(std::string& error) {
 bool ServerRuntime::service_lifecycle_work(
     const std::vector<CompositorBufferRelease>& compositor_releases) {
   if (lifecycle_ && bridge_->policy_result_ready()) {
-    const auto* active = lifecycle_->active();
-    auto evaluated = active
-                         ? apply_policy_result(active->proposed,
+    const auto* expected = lifecycle_->pending_policy_snapshot();
+    auto evaluated = expected
+                         ? apply_policy_result(*expected,
                                                bridge_->policy_result(),
                                                server_.options_.output_model
                                                    ? bridge_->output_layout()

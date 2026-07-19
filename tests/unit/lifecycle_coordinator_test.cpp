@@ -139,14 +139,23 @@ void test_cancellation_before_policy_result() {
   LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
   require(coordinator.enqueue(operation(10, 7, 10)) == EnqueueStatus::Queued,
           "queue cancellable operation");
+  require(coordinator.pending_policy_snapshot() != nullptr &&
+              coordinator.pending_policy_snapshot()->focused_window == 10,
+          "active proposal is the expected policy result");
   coordinator.cancel_client(7);
   require(coordinator.policy_accepted(snapshot(10)) &&
               coordinator.phase() == CoordinatorPhase::RollingBackPolicy &&
               recorder.compositor.empty() && recorder.policy.back() == 1 &&
               recorder.rollbacks_prepared == 1,
           "canceled accepted policy is never projected to compositor");
+  require(coordinator.pending_policy_snapshot() != nullptr &&
+              coordinator.pending_policy_snapshot()->focused_window == 1,
+          "committed snapshot is the expected rollback policy result");
   require(coordinator.policy_accepted(snapshot(1)) &&
-              coordinator.compositor_accepted() &&
+              coordinator.pending_policy_snapshot() == nullptr,
+          "compositor rollback does not retain an expected policy result");
+  require(coordinator.compositor_accepted() &&
+              coordinator.pending_policy_snapshot() == nullptr &&
               recorder.completed.back() ==
                   std::pair<std::uint64_t, bool>{10, false},
           "canceled operation completes only after rollback");
