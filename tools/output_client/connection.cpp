@@ -173,16 +173,28 @@ bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
                    std::string &error) {
   if (!connect(error))
     return false;
+  const auto negotiated = gwipc_connection_peer_info(connection_).capabilities;
+  constexpr auto vrr_profile =
+      GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY;
+  if ((flags & GWIPC_OUTPUT_QUERY_VRR) != 0 &&
+      (negotiated & vrr_profile) != vrr_profile) {
+    error = "output control peer does not support VRR queries";
+    return false;
+  }
+  const auto effective_flags =
+      (negotiated & vrr_profile) == vrr_profile
+          ? flags | GWIPC_OUTPUT_QUERY_VRR
+          : flags;
   const auto request_id = next_request_id_++;
   gwipc_output_state_query query{};
   query.struct_size = sizeof(query);
   query.query_id = request_id;
-  query.flags = flags;
+  query.flags = effective_flags;
   if (!enqueue_contract(connection_, GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
                         GWIPC_FLAG_ACK_REQUIRED, query,
                         gwipc_contract_encode_output_state_query, error))
     return false;
-  SnapshotDecoder decoder(request_id, flags);
+  SnapshotDecoder decoder(request_id, effective_flags);
   for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
     if (!pump(connection_, error))
       return false;
