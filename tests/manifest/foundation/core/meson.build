@@ -46,6 +46,22 @@ output_mapping_test = executable(
 )
 test('output-mapping', output_mapping_test)
 
+vrr_decision_test = executable(
+  'vrr_decision_test',
+  files(tests_source_dir / 'unit/output/vrr_decision_test.cpp'),
+  dependencies: gw_vrr_model_dep,
+  include_directories: test_source_root_include,
+)
+test('vrr-decision', vrr_decision_test, timeout: 10)
+
+vrr_timing_stats_test = executable(
+  'vrr_timing_stats_test',
+  files(tests_source_dir / 'unit/output/vrr_timing_stats_test.cpp'),
+  dependencies: gw_vrr_model_dep,
+  include_directories: test_source_root_include,
+)
+test('vrr-timing-stats', vrr_timing_stats_test, timeout: 10)
+
 output_damage_mapping_test = executable(
   'output_damage_mapping_test',
   files(tests_source_dir / 'unit/output/output_damage_mapping_test.cpp'),

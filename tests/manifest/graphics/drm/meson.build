@@ -84,6 +84,9 @@ if get_option('drm_backend')
     ['drm-device-api', 'device_api_test.cpp'],
     ['drm-fake-events', 'fake_drm_event_test.cpp'],
     ['drm-kms-api', 'kms_api_test.cpp'],
+    ['drm-vrr-capability-property', '../unit/drm/vrr_capability_property_test.cpp'],
+    ['drm-vrr-saved-state', '../unit/drm/vrr_saved_state_test.cpp'],
+    ['drm-vrr-timing', '../unit/drm/vrr_timing_test.cpp'],
   ]
     drm_api_test_executable = executable(
       drm_api_test[0].underscorify(),
