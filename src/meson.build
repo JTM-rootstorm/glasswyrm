@@ -162,6 +162,7 @@ if get_option('drm_backend')
       'backends/drm/damage_copy.cpp',
       'backends/drm/dumb_buffer.cpp',
       'backends/drm/drm_report.cpp',
+      'backends/drm/drm_vrr_report.cpp',
       'backends/drm/edid_digest.cpp',
       'backends/drm/inventory.cpp',
       'backends/drm/mode_selector.cpp',
@@ -169,12 +170,14 @@ if get_option('drm_backend')
       'backends/drm/property_cache.cpp',
       'backends/drm/vrr_capability.cpp',
     ),
-    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep],
     include_directories: include_directories('.'),
   )
   gw_drm_model_dep = declare_dependency(
     link_with: gw_drm_model_lib,
-    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep],
     include_directories: include_directories('.'),
   )
 
@@ -186,6 +189,7 @@ if get_option('drm_backend')
       'backends/drm/fake_kms_api.cpp',
       'backends/drm/kms_dumb_buffer_api.cpp',
       'backends/drm/kms_state.cpp',
+      'backends/drm/kms_vrr_state.cpp',
       'backends/drm/real_drm_api.cpp',
       'backends/drm/real_kms_api.cpp',
       'backends/drm/vrr_property.cpp',
@@ -221,6 +225,7 @@ if get_option('drm_backend')
       'backends/drm/presenter_frame_set.cpp',
       'backends/drm/presenter_damage.cpp',
       'backends/drm/presenter_pipeline.cpp',
+      'backends/drm/presenter_vrr.cpp',
     ),
     dependencies: [gw_drm_api_dep, gw_session_dep, gw_output_dep],
     include_directories: include_directories('.'),

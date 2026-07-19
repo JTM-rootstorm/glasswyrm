@@ -192,6 +192,10 @@ std::string serialize(const FatalReport& value) {
   return stream.str();
 }
 
+std::string serialize(const DrmVrrReportRecord& value) {
+  return serialize_drm_vrr_report_record(value);
+}
+
 bool write_all(const int fd, std::string_view bytes, std::string& error) {
   while (!bytes.empty()) {
     const auto written = ::write(fd, bytes.data(), bytes.size());
@@ -253,6 +257,10 @@ bool valid(const RestoreReport&) { return true; }
 
 bool valid(const FatalReport& value) {
   return !value.stage.empty() && !value.reason.empty();
+}
+
+bool valid(const DrmVrrReportRecord& value) {
+  return valid_drm_vrr_report_record(value);
 }
 
 bool valid(const DrmReportRecord& record) {

@@ -28,6 +28,7 @@ struct DrmRuntimeResources {
   std::unique_ptr<drm::DrmApi> drm_api;
   std::unique_ptr<drm::KmsApi> kms_api;
   std::unique_ptr<drm::DrmReport> report;
+  std::unique_ptr<drm::DrmReport> vrr_report;
   std::unique_ptr<headless::FrameDumper> mirror;
   std::unique_ptr<session::LinuxVirtualTerminalApi> vt_api;
 

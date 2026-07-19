@@ -3,9 +3,11 @@
 #include "backends/drm/device.hpp"
 #include "backends/drm/damage_copy.hpp"
 #include "backends/drm/drm_report.hpp"
+#include "backends/drm/drm_vrr_report.hpp"
 #include "backends/drm/dumb_buffer.hpp"
 #include "backends/drm/kms_api.hpp"
 #include "backends/drm/kms_state.hpp"
+#include "backends/drm/presenter_vrr.hpp"
 #include "backends/headless/frame_dump.hpp"
 #include "backends/output/presentation_backend.hpp"
 #include "backends/session/vt_session.hpp"
@@ -29,6 +31,8 @@ struct DrmPresenterConfig {
   std::string tty_path;
   session::VirtualTerminalSignals vt_signals;
   bool damage_aware_copy{};
+  bool vrr_reporting{};
+  bool reaffirm_vrr_on_flip{};
 };
 
 class DrmPresenter final : public output::PresentationBackend,
@@ -38,7 +42,8 @@ class DrmPresenter final : public output::PresentationBackend,
   static constexpr std::size_t kMaximumDiagnosticBytes = 512;
 
   DrmPresenter(Device device, KmsApi& kms, DrmReport* report = nullptr,
-               headless::FrameDumper* mirror = nullptr) noexcept;
+               headless::FrameDumper* mirror = nullptr,
+               DrmReport* vrr_report = nullptr) noexcept;
   ~DrmPresenter() override;
   DrmPresenter(const DrmPresenter&) = delete;
   DrmPresenter& operator=(const DrmPresenter&) = delete;
@@ -46,6 +51,9 @@ class DrmPresenter final : public output::PresentationBackend,
   [[nodiscard]] bool initialize(const DrmPresenterConfig& config,
                                 session::VirtualTerminalApi* vt_api,
                                 std::string& error);
+
+  [[nodiscard]] std::optional<output::VrrPresentationCapability>
+  vrr_capability(std::uint64_t output_id) const noexcept override;
 
   [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameView& frame) override;
@@ -100,22 +108,40 @@ class DrmPresenter final : public output::PresentationBackend,
                                   std::string& error) const;
   [[nodiscard]] bool commit_evidence(headless::StagedFrameDump& mirror,
                                      StagedDrmReport& report,
+                                     StagedDrmReport& vrr_report,
                                      std::string& error);
   [[nodiscard]] bool blocking_modeset(DumbBuffer& buffer, std::string& error);
+  [[nodiscard]] bool set_vrr_off_on_current_frame(std::string& error);
+  [[nodiscard]] bool verify_vrr_state(bool expected, std::string& error);
+  [[nodiscard]] bool append_vrr_capability_report(std::string& error);
+  [[nodiscard]] DrmVrrDecisionReport vrr_decision_report(
+      const output::VrrPresentationRequest& request, std::uint64_t commit_id,
+      std::uint64_t generation, bool effective) const;
+  [[nodiscard]] DrmVrrTimingReport vrr_timing_report(
+      std::uint64_t commit_id, std::uint64_t generation,
+      const output::VrrPresentationRequest& request,
+      const output::VrrPresentationFeedback& feedback) const;
   [[nodiscard]] output::PresentResult present_initial(
       const output::SoftwareFrameView& frame, std::uint64_t hash,
-      FullCopyReason forced_reason, std::uint64_t layout_generation);
+      FullCopyReason forced_reason, std::uint64_t layout_generation,
+      const output::VrrPresentationRequest* vrr_request,
+      const PresenterVrrPlan& vrr_plan);
   [[nodiscard]] output::PresentResult present_flip(
       const output::SoftwareFrameView& frame, std::uint64_t hash,
-      FullCopyReason forced_reason, std::uint64_t layout_generation);
+      FullCopyReason forced_reason, std::uint64_t layout_generation,
+      const output::VrrPresentationRequest* vrr_request,
+      const PresenterVrrPlan& vrr_plan);
   [[nodiscard]] output::PresentResult present_validated(
       const output::SoftwareFrameView& frame, FullCopyReason forced_reason,
-      std::uint64_t layout_generation);
+      std::uint64_t layout_generation,
+      const output::VrrPresentationRequest* vrr_request = nullptr);
   [[nodiscard]] output::BackendEvent fatal_event(std::string stage,
                                                  std::string reason);
   void record_fatal(std::string stage, std::string reason) noexcept;
   [[nodiscard]] bool append_report(const DrmReportRecord& record,
                                    std::string& error);
+  [[nodiscard]] bool append_vrr_report(const DrmVrrReportRecord& record,
+                                       std::string& error);
   [[nodiscard]] bool copy_frame_to(
       DumbBuffer& target, const output::SoftwareFrameView& frame,
       std::uint64_t expected_hash, FullCopyReason forced_reason,
@@ -132,6 +158,7 @@ class DrmPresenter final : public output::PresentationBackend,
   KmsApi& kms_;
   DrmReport* report_{};
   headless::FrameDumper* mirror_{};
+  DrmReport* vrr_report_{};
   KmsDumbBufferApi dumb_api_;
   DumbBufferPair buffers_;
   DrmPresenterConfig config_;
@@ -156,6 +183,8 @@ class DrmPresenter final : public output::PresentationBackend,
   std::string fallback_reason_;
   std::string shutdown_error_;
   std::size_t front_index_{};
+  PresenterVrrState vrr_state_;
+  bool vrr_state_initialized_{};
   bool initialized_{};
   bool initial_modeset_{};
   bool display_taken_{};
