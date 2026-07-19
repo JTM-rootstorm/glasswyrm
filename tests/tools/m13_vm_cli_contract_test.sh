@@ -112,6 +112,7 @@ require_text "$library" "full_copy_reason')=='output-configuration-changed'"
 require_text "$library" "{canonical_ordinal,post_vt_ordinal} <= flip_ordinals & frame_ordinals"
 require_text "$library" '[[ $logind_socket_enabled_before != masked-runtime ]]'
 require_text "$library" 'printf "screen-capture-failed\n" >"$1"'
+require_text "$library" 'sha256sum -- * >SHA256SUMS'
 
 (
   unset GW_VM_MILESTONE13_LOADED
