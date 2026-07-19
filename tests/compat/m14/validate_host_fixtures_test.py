@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -33,6 +35,20 @@ def main() -> int:
         fixture = copy / "gw-vrr-big.json"
         fixture.write_text(fixture.read_text(encoding="utf-8") + " ",
                            encoding="utf-8")
+        run(options.validator, copy, 1)
+    with tempfile.TemporaryDirectory() as directory:
+        copy = Path(directory) / "m14"
+        shutil.copytree(options.fixtures, copy)
+        fixture = copy / "qxl-unsupported.json"
+        value = json.loads(fixture.read_text(encoding="utf-8"))
+        value["hardware_capable"] = True
+        fixture.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        sums = copy / "SHA256SUMS"
+        lines = sums.read_text(encoding="ascii").splitlines()
+        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        sums.write_text("\n".join(
+            f"{digest}  {fixture.name}" if line.endswith(f"  {fixture.name}")
+            else line for line in lines) + "\n", encoding="ascii")
         run(options.validator, copy, 1)
     print("m14 host fixture validator test: ok")
     return 0
