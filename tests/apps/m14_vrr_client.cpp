@@ -21,6 +21,8 @@ namespace {
 using gw::test::m14::ClientMode;
 using gw::test::m14::ClientOptions;
 using gw::test::m14::ClientState;
+using gw::test::m14::ClientPreference;
+using gw::test::m14::EventfdDamageProducer;
 
 xcb_extension_t gw_vrr_extension{"GW_VRR", 0};
 
@@ -95,7 +97,8 @@ struct VrrRequest {
 static_assert(sizeof(VrrRequest) == 12);
 
 void *vrr_reply(xcb_connection_t *connection, const std::uint8_t minor,
-                const std::uint32_t first, const std::uint32_t second) {
+                const std::uint32_t first, const std::uint32_t second,
+                const std::uint8_t words = 2) {
   VrrRequest request{};
   request.minor_opcode = minor;
   request.first = first;
@@ -103,7 +106,7 @@ void *vrr_reply(xcb_connection_t *connection, const std::uint8_t minor,
   const xcb_protocol_request_t protocol{2, &gw_vrr_extension, minor, 0};
   std::array<iovec, 4> parts{};
   parts[2].iov_base = &request;
-  parts[2].iov_len = sizeof(request);
+  parts[2].iov_len = 4U + static_cast<std::size_t>(words) * 4U;
   parts[3].iov_base = nullptr;
   parts[3].iov_len = -sizeof(request) & 3U;
   const auto sequence = xcb_send_request(connection, XCB_REQUEST_CHECKED,
@@ -120,7 +123,59 @@ void *vrr_reply(xcb_connection_t *connection, const std::uint8_t minor,
   return reply;
 }
 
-void set_prefer(xcb_connection_t *connection, const xcb_window_t window) {
+struct VrrEvidence {
+  bool selected{};
+  std::uint32_t replies{};
+  std::uint32_t events{};
+  std::uint32_t change_mask{};
+  std::uint64_t reason_mask{};
+};
+
+void select_vrr_events(xcb_connection_t *connection,
+                       const xcb_window_t window) {
+  VrrRequest request{};
+  request.minor_opcode = 1;
+  request.first = window;
+  request.second = 7;
+  const xcb_protocol_request_t protocol{2, &gw_vrr_extension, 1, 1};
+  std::array<iovec, 4> parts{};
+  parts[2].iov_base = &request;
+  parts[2].iov_len = sizeof(request);
+  parts[3].iov_base = nullptr;
+  parts[3].iov_len = 0;
+  const auto sequence = xcb_send_request(connection, XCB_REQUEST_CHECKED,
+                                         parts.data() + 2, &protocol);
+  require(sequence != 0, "could not select GW_VRR events");
+  checked(connection, {sequence}, "GW_VRR SelectInput failed");
+}
+
+void observe_vrr_event(xcb_connection_t *connection, VrrEvidence &evidence,
+                       const bool required) {
+  for (unsigned attempt = 0; attempt < 200; ++attempt) {
+    auto *event = xcb_poll_for_event(connection);
+    if (!event) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      continue;
+    }
+    if ((event->response_type & 0x7fU) == 70U) {
+      const auto *bytes = reinterpret_cast<const std::uint8_t *>(event);
+      ++evidence.events;
+      evidence.change_mask |= bytes[1] & 7U;
+      std::uint32_t high{}, low{};
+      std::memcpy(&high, bytes + 16, sizeof(high));
+      std::memcpy(&low, bytes + 20, sizeof(low));
+      evidence.reason_mask = (static_cast<std::uint64_t>(high) << 32U) | low;
+      std::free(event);
+      return;
+    }
+    std::free(event);
+  }
+  require(!required, "GW_VRR notification was not observed");
+}
+
+void set_preference(xcb_connection_t *connection, const xcb_window_t window,
+                    const gw::test::m14::ClientPreference preference,
+                    VrrEvidence &evidence, const bool event_required = true) {
   const auto *extension = xcb_get_extension_data(connection, &gw_vrr_extension);
   require(extension && extension->present, "GW_VRR is unavailable");
   auto *version = static_cast<std::uint8_t *>(vrr_reply(connection, 0, 0, 1));
@@ -131,11 +186,27 @@ void set_prefer(xcb_connection_t *connection, const xcb_window_t window) {
   require(major == 0 && minor >= 1, "GW_VRR 0.1 was not negotiated");
 
   auto *changed =
-      static_cast<std::uint8_t *>(vrr_reply(connection, 3, window, 3));
-  std::uint16_t preference{};
-  std::memcpy(&preference, changed + 8, sizeof(preference));
+      static_cast<std::uint8_t *>(vrr_reply(
+          connection, 3, window, static_cast<std::uint16_t>(preference)));
+  std::uint16_t accepted{};
+  std::memcpy(&accepted, changed + 8, sizeof(accepted));
   std::free(changed);
-  require(preference == 3, "GW_VRR Prefer was not accepted");
+  require(accepted == static_cast<std::uint16_t>(preference),
+          "GW_VRR preference was not accepted");
+  ++evidence.replies;
+  observe_vrr_event(connection, evidence, event_required);
+  auto *queried = static_cast<std::uint8_t *>(vrr_reply(connection, 2, window, 0, 1));
+  std::uint16_t current{};
+  std::memcpy(&current, queried + 12, sizeof(current));
+  std::free(queried);
+  require(current == static_cast<std::uint16_t>(preference),
+          "GW_VRR preference query disagreed with reply");
+  auto *state = static_cast<std::uint8_t *>(vrr_reply(connection, 4, window, 0, 1));
+  std::uint32_t high{}, low{};
+  std::memcpy(&high, state + 24, sizeof(high));
+  std::memcpy(&low, state + 28, sizeof(low));
+  evidence.reason_mask = (static_cast<std::uint64_t>(high) << 32U) | low;
+  std::free(state);
 }
 
 void put_pixels(xcb_connection_t *connection, const xcb_drawable_t drawable,
@@ -222,9 +293,6 @@ int run_client(const ClientOptions &options) {
             "could not focus VRR client window");
     if (fullscreen)
       request_fullscreen(connection, screen, window);
-    if (options.prefer)
-      set_prefer(connection, window);
-
     const auto pattern_width =
         std::min<std::uint16_t>(width, gw::test::m14::kPatternWidth);
     const auto pattern_height =
@@ -236,9 +304,37 @@ int run_client(const ClientOptions &options) {
     require(xcb_flush(connection) > 0, "could not flush initial X11 pattern");
     synchronize(connection);
 
+    VrrEvidence vrr_evidence;
+    const auto *extension = xcb_get_extension_data(connection, &gw_vrr_extension);
+    require(extension && extension->present, "GW_VRR is unavailable");
+    auto *version = static_cast<std::uint8_t *>(vrr_reply(connection, 0, 0, 1));
+    std::uint32_t major{}, minor{};
+    std::memcpy(&major, version + 8, sizeof(major));
+    std::memcpy(&minor, version + 12, sizeof(minor));
+    std::free(version);
+    require(major == 0 && minor >= 1, "GW_VRR 0.1 was not negotiated");
+    select_vrr_events(connection, window);
+    vrr_evidence.selected = true;
+    if (options.mode == ClientMode::Preference) {
+      set_preference(connection, window, ClientPreference::Default,
+                     vrr_evidence, false);
+      for (const auto preference : {ClientPreference::Allow,
+                                    ClientPreference::Prefer,
+                                    ClientPreference::Disable}) {
+        set_preference(connection, window, preference, vrr_evidence);
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+      }
+    } else if (options.preference_set) {
+      set_preference(connection, window, options.preference, vrr_evidence,
+                     options.preference != ClientPreference::Default);
+    }
+
     const auto interval =
         gw::test::m14::target_interval_nanoseconds(options.target_refresh_hz);
+    bool eventfd_synchronized = false;
     if (options.mode == ClientMode::Cadence) {
+      EventfdDamageProducer producer;
+      eventfd_synchronized = true;
       timespec start_time{};
       require(::clock_gettime(CLOCK_MONOTONIC, &start_time) == 0,
               "could not read monotonic cadence clock");
@@ -251,9 +347,9 @@ int run_client(const ClientOptions &options) {
                                                  deadline) &&
                     gw::test::m14::wait_until_monotonic(deadline),
                 "absolute monotonic cadence scheduling failed");
+        const auto pixels = producer.produce(frame);
         put_pixels(connection, window, gc, gw::test::m14::kDamageWidth,
-                   gw::test::m14::kDamageHeight, 0, 0,
-                   gw::test::m14::deterministic_damage(frame),
+                   gw::test::m14::kDamageHeight, 0, 0, pixels,
                    screen.root_depth);
         require(xcb_flush(connection) > 0, "could not flush cadence frame");
       }
@@ -269,7 +365,16 @@ int run_client(const ClientOptions &options) {
                             borderless,
                             options.frame_count,
                             options.target_refresh_hz,
-                            interval};
+                            interval,
+                            options.mode == ClientMode::Preference
+                                ? ClientPreference::Disable
+                                : options.preference,
+                            vrr_evidence.selected,
+                            vrr_evidence.replies,
+                            vrr_evidence.events,
+                            vrr_evidence.change_mask,
+                            vrr_evidence.reason_mask,
+                            eventfd_synchronized};
     gw::test::m14::write_client_state(options.result_path, state);
     if (options.hold_ms != 0)
       std::this_thread::sleep_for(std::chrono::milliseconds(options.hold_ms));

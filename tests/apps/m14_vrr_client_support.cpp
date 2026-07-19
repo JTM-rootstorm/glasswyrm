@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+#include <sys/eventfd.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -41,6 +42,63 @@ void write_all(const int descriptor, const std::string_view contents) {
 }
 
 } // namespace
+
+EventfdDamageProducer::EventfdDamageProducer()
+    : request_(::eventfd(0, EFD_CLOEXEC)), ready_(::eventfd(0, EFD_CLOEXEC)) {
+  if (request_ < 0 || ready_ < 0) {
+    if (request_ >= 0)
+      ::close(request_);
+    if (ready_ >= 0)
+      ::close(ready_);
+    throw std::runtime_error("could not create cadence eventfds");
+  }
+  worker_ = std::thread([this] { run(); });
+}
+
+EventfdDamageProducer::~EventfdDamageProducer() noexcept {
+  stop_.store(true);
+  const std::uint64_t one = 1;
+  (void)::write(request_, &one, sizeof(one));
+  if (worker_.joinable())
+    worker_.join();
+  (void)::close(request_);
+  (void)::close(ready_);
+}
+
+void EventfdDamageProducer::signal(const int descriptor) {
+  const std::uint64_t one = 1;
+  if (::write(descriptor, &one, sizeof(one)) != sizeof(one))
+    throw std::runtime_error("cadence eventfd signal failed");
+}
+
+void EventfdDamageProducer::wait(const int descriptor) {
+  std::uint64_t value{};
+  if (::read(descriptor, &value, sizeof(value)) != sizeof(value))
+    throw std::runtime_error("cadence eventfd wait failed");
+}
+
+void EventfdDamageProducer::run() {
+  for (;;) {
+    wait(request_);
+    if (stop_.load())
+      return;
+    auto value = deterministic_damage(frame_.load());
+    {
+      std::lock_guard lock(mutex_);
+      pixels_ = std::move(value);
+    }
+    signal(ready_);
+  }
+}
+
+std::vector<std::uint32_t>
+EventfdDamageProducer::produce(const std::uint32_t frame) {
+  frame_.store(frame);
+  signal(request_);
+  wait(ready_);
+  std::lock_guard lock(mutex_);
+  return pixels_;
+}
 
 std::uint64_t
 target_interval_nanoseconds(const std::uint32_t refresh_hz) noexcept {
@@ -120,7 +178,7 @@ deterministic_damage(const std::uint32_t frame_index) {
 
 std::string client_state_json(const ClientState &state) {
   return "{\n"
-         "  \"schema\": \"glasswyrm.m14-vrr-client.v1\",\n"
+         "  \"schema\": \"glasswyrm.m14-vrr-client.v2\",\n"
          "  \"mode\": \"" +
          std::string(client_mode_name(state.mode)) +
          "\",\n"
@@ -134,7 +192,11 @@ std::string client_state_json(const ClientState &state) {
          std::to_string(state.height) +
          ",\n"
          "  \"preference\": \"" +
-         (state.prefer ? "Prefer" : "Default") +
+         std::string(client_preference_name(state.preference ==
+                                                    ClientPreference::Default &&
+                                                state.prefer
+                                            ? ClientPreference::Prefer
+                                            : state.preference)) +
          "\",\n"
          "  \"fullscreen_requested\": " +
          (state.fullscreen_requested ? "true" : "false") +
@@ -150,6 +212,29 @@ std::string client_state_json(const ClientState &state) {
          ",\n"
          "  \"target_interval_nanoseconds\": " +
          std::to_string(state.target_interval_nanoseconds) +
+         ",\n"
+         "  \"events_selected\": " +
+         (state.events_selected ? "true" : "false") +
+         ",\n"
+         "  \"preference_reply_count\": " +
+         std::to_string(state.preference_reply_count) +
+         ",\n"
+         "  \"notify_event_count\": " +
+         std::to_string(state.notify_event_count) +
+         ",\n"
+         "  \"notify_change_mask\": " +
+         std::to_string(state.notify_change_mask) +
+         ",\n"
+         "  \"reason_mask\": " +
+         std::to_string(state.reason_mask) +
+         ",\n"
+         "  \"eventfd_synchronized\": " +
+         (state.eventfd_synchronized ? "true" : "false") +
+         ",\n"
+         "  \"preference_sequence\": " +
+         (state.mode == ClientMode::Preference
+              ? "[\"Default\",\"Allow\",\"Prefer\",\"Disable\"]"
+              : "[]") +
          ",\n"
          "  \"cadence_absolute_monotonic\": " +
          (state.mode == ClientMode::Cadence ? "true" : "false") +

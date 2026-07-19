@@ -3,7 +3,10 @@
 #include "m14_vrr_client_options.hpp"
 
 #include <cstdint>
+#include <atomic>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace gw::test::m14 {
@@ -25,6 +28,34 @@ struct ClientState {
   std::uint32_t frame_count{};
   std::uint32_t target_refresh_hz{};
   std::uint64_t target_interval_nanoseconds{};
+  ClientPreference preference{ClientPreference::Default};
+  bool events_selected{};
+  std::uint32_t preference_reply_count{};
+  std::uint32_t notify_event_count{};
+  std::uint32_t notify_change_mask{};
+  std::uint64_t reason_mask{};
+  bool eventfd_synchronized{};
+};
+
+class EventfdDamageProducer {
+public:
+  EventfdDamageProducer();
+  ~EventfdDamageProducer() noexcept;
+  EventfdDamageProducer(const EventfdDamageProducer &) = delete;
+  EventfdDamageProducer &operator=(const EventfdDamageProducer &) = delete;
+  [[nodiscard]] std::vector<std::uint32_t> produce(std::uint32_t frame);
+
+private:
+  static void signal(int descriptor);
+  static void wait(int descriptor);
+  void run();
+  int request_{-1};
+  int ready_{-1};
+  std::atomic<bool> stop_{};
+  std::atomic<std::uint32_t> frame_{};
+  std::mutex mutex_;
+  std::vector<std::uint32_t> pixels_;
+  std::thread worker_;
 };
 
 [[nodiscard]] std::uint64_t
