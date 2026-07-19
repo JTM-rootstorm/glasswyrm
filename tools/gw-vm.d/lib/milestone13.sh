@@ -1228,7 +1228,9 @@ python3 - "$control_data/drm-scene.jsonl" "$drm_scene_before" \
   "$control_data/drm-scaled.json" <<'PY'
 import json,pathlib,sys,time
 path=pathlib.Path(sys.argv[1]); before=int(sys.argv[2])
-output=json.load(open(sys.argv[3]))['outputs'][0]['id']; deadline=time.monotonic()+10
+output=json.load(open(sys.argv[3]))['outputs'][0]['id']
+output=int(output,16) if isinstance(output,str) else output
+deadline=time.monotonic()+10
 while True:
     try:
         lines=path.read_text().splitlines()
