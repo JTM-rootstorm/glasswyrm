@@ -1,0 +1,9 @@
+{
+  "schema": "glasswyrm.m14-vrr-state.v1",
+  "scenario": "always-eligible",
+  "policy": 5,
+  "decision": "enabled",
+  "desired_enabled": true,
+  "candidate_window": 0,
+  "reasons": ["SimulatedHeadless","ManualAlwaysEligible"]
+}

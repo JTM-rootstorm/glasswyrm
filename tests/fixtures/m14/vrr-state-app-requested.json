@@ -1,0 +1,6 @@
+{
+  "schema": "glasswyrm.m14-vrr-state.v1",
+  "scenario": "app-requested",
+  "policy": 4,
+  "preference_transitions": [{"preference":"Default","desired_enabled":false,"primary_reason":"WindowDidNotRequest"},{"preference":"Prefer","desired_enabled":true,"primary_reason":"SimulatedHeadless"},{"preference":"Disable","desired_enabled":false,"primary_reason":"WindowPreferenceDisabled"}]
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "glasswyrm.m14-vrr-state.v1",
+  "scenario": "off",
+  "policy": 1,
+  "decision": "disabled",
+  "desired_enabled": false,
+  "candidate_window": 0,
+  "reasons": ["PolicyOff","SimulatedHeadless"]
+}

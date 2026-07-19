@@ -1,0 +1,16 @@
+{
+  "schema": "glasswyrm.m14-vrr-client.v1",
+  "mode": "cadence",
+  "window": 42,
+  "width": 640,
+  "height": 480,
+  "preference": "Prefer",
+  "fullscreen_requested": true,
+  "borderless": false,
+  "frame_count": 120,
+  "target_refresh_hz": 72,
+  "target_interval_nanoseconds": 13888888,
+  "cadence_absolute_monotonic": true,
+  "bounded_damage_width": 64,
+  "bounded_damage_height": 64
+}
