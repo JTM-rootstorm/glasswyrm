@@ -103,6 +103,29 @@ if get_option('glasswyrmd')
   endif
 endif
 
+m14_vm_evidence_validator = find_program(
+  tests_source_dir / 'compat/m14/validate_vm_evidence.py',
+)
+m14_vm_evidence_validator_test = find_program(
+  tests_source_dir / 'compat/m14/validate_vm_evidence_test.py',
+)
+test(
+  'm14-vm-evidence-validator',
+  m14_vm_evidence_validator_test,
+  args: [m14_vm_evidence_validator.full_path()],
+  timeout: 10,
+)
+
+m14_vm_cli_contract_test = find_program(
+  tests_source_dir / 'tools/m14_vm_cli_contract_test.sh',
+)
+test(
+  'm14-vm-cli-contract',
+  m14_vm_cli_contract_test,
+  args: [meson.project_source_root()],
+  timeout: 15,
+)
+
 if get_option('tools') and get_option('libgwipc')
   m14_output_tool_fixture_test = find_program(
     tests_source_dir / 'tools/m14_output_tool_fixture_test.sh',
