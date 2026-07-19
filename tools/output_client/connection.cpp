@@ -109,13 +109,19 @@ gwipc_output_upsert public_output(const OutputState &state) {
   value.scale_numerator = state.scale_numerator;
   value.scale_denominator = state.scale_denominator;
   value.transform = state.transform;
-  value.color = {GWIPC_SDR_COLOR_SPACE_SRGB, GWIPC_TRANSFER_FUNCTION_SRGB,
-                 GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
+  value.color = {GWIPC_SDR_COLOR_SPACE_SRGB,
+                 GWIPC_TRANSFER_FUNCTION_SRGB,
+                 GWIPC_COLOR_PRIMARIES_SRGB,
+                 0,
+                 0,
+                 0,
+                 0};
   return value;
 }
 
-gwipc_output_vrr_policy_upsert public_vrr_policy(
-    const std::uint64_t output_id, const gwipc_vrr_policy_mode mode) {
+gwipc_output_vrr_policy_upsert
+public_vrr_policy(const std::uint64_t output_id,
+                  const gwipc_vrr_policy_mode mode) {
   gwipc_output_vrr_policy_upsert value{};
   value.struct_size = sizeof(value);
   value.output_id = output_id;
@@ -159,8 +165,7 @@ bool Client::connect(std::string &error) {
 
 bool Client::wait_established(std::string &error) {
   for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
-    if (gwipc_connection_get_state(connection_) ==
-        GWIPC_CONNECTION_ESTABLISHED)
+    if (gwipc_connection_get_state(connection_) == GWIPC_CONNECTION_ESTABLISHED)
       return true;
     if (!pump(connection_, error))
       return false;
@@ -170,19 +175,18 @@ bool Client::wait_established(std::string &error) {
 }
 
 bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
-                   std::string &error) {
+                   std::string &error, const bool complete_configuration) {
   if (!connect(error))
     return false;
   const auto negotiated = gwipc_connection_peer_info(connection_).capabilities;
-  constexpr auto vrr_profile =
-      GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY;
+  constexpr auto vrr_profile = GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY;
   if ((flags & GWIPC_OUTPUT_QUERY_VRR) != 0 &&
       (negotiated & vrr_profile) != vrr_profile) {
     error = "output control peer does not support VRR queries";
     return false;
   }
   const auto effective_flags =
-      (negotiated & vrr_profile) == vrr_profile
+      complete_configuration && (negotiated & vrr_profile) == vrr_profile
           ? flags | GWIPC_OUTPUT_QUERY_VRR
           : flags;
   const auto request_id = next_request_id_++;
@@ -238,10 +242,9 @@ bool Client::commit(const Snapshot &snapshot,
     error = "VRR configuration requires one policy for every output";
     return false;
   }
-  begin.expected_item_count = snapshot.outputs.size() +
-                              (snapshot.vrr_queried
-                                   ? snapshot.vrr_policies.size()
-                                   : 0U);
+  begin.expected_item_count =
+      snapshot.outputs.size() +
+      (snapshot.vrr_queried ? snapshot.vrr_policies.size() : 0U);
   if (!enqueue_control(connection_, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                        gwipc_control_encode_snapshot_begin, error))
     return false;
@@ -301,10 +304,10 @@ bool Client::commit(const Snapshot &snapshot,
       std::unique_ptr<gwipc_decoded_contract,
                       decltype(&gwipc_decoded_contract_destroy)>
           decoded(decoded_raw, gwipc_decoded_contract_destroy);
-      const auto *value = decoded_status == GWIPC_STATUS_OK
-                              ? gwipc_decoded_output_configuration_acknowledged(
-                                    decoded.get())
-                              : nullptr;
+      const auto *value =
+          decoded_status == GWIPC_STATUS_OK
+              ? gwipc_decoded_output_configuration_acknowledged(decoded.get())
+              : nullptr;
       if (!value || value->request_id != configuration_id) {
         error = "control server sent an invalid configuration acknowledgement";
         return false;

@@ -1,4 +1,5 @@
 #include "output_client/output_client.hpp"
+#include "output_client/vrr_snapshot.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <sstream>
@@ -49,8 +50,7 @@ Snapshot fixture(const bool controllable = true) {
 
 void test_parsing_and_edit() {
   require(parse_vrr_policy("off") == GWIPC_VRR_POLICY_OFF &&
-              parse_vrr_policy("fullscreen") ==
-                  GWIPC_VRR_POLICY_FULLSCREEN &&
+              parse_vrr_policy("fullscreen") == GWIPC_VRR_POLICY_FULLSCREEN &&
               parse_vrr_policy("focused") == GWIPC_VRR_POLICY_FOCUSED &&
               parse_vrr_policy("app-requested") ==
                   GWIPC_VRR_POLICY_APP_REQUESTED &&
@@ -60,20 +60,19 @@ void test_parsing_and_edit() {
           "VRR tool parser accepts only the five frozen modes");
   auto snapshot = fixture();
   std::string error;
-  require(apply_vrr_edit(snapshot, "VRR-1", GWIPC_VRR_POLICY_FULLSCREEN,
-                         error) &&
-              snapshot.vrr_policies.at(0x11) ==
-                  GWIPC_VRR_POLICY_FULLSCREEN,
-          "VRR edit selects by stable output name");
+  require(
+      apply_vrr_edit(snapshot, "VRR-1", GWIPC_VRR_POLICY_FULLSCREEN, error) &&
+          snapshot.vrr_policies.at(0x11) == GWIPC_VRR_POLICY_FULLSCREEN,
+      "VRR edit selects by stable output name");
   require(apply_vrr_edit(snapshot, "0x0000000000000011",
                          GWIPC_VRR_POLICY_FOCUSED, error) &&
               snapshot.vrr_policies.at(0x11) == GWIPC_VRR_POLICY_FOCUSED,
           "VRR edit selects by fixed-width output ID");
   auto incapable = fixture(false);
-  require(!apply_vrr_edit(incapable, "VRR-1", GWIPC_VRR_POLICY_FULLSCREEN,
-                          error) &&
-              error.find("controllable") != std::string::npos,
-          "non-off policy exits through the unsupported hardware path");
+  require(
+      !apply_vrr_edit(incapable, "VRR-1", GWIPC_VRR_POLICY_FULLSCREEN, error) &&
+          error.find("controllable") != std::string::npos,
+      "non-off policy exits through the unsupported hardware path");
   require(apply_vrr_edit(incapable, "VRR-1", GWIPC_VRR_POLICY_OFF, error),
           "VRR can always be explicitly disabled");
 }
@@ -86,9 +85,9 @@ void test_names_and_format() {
               vrr_decision_name(GWIPC_VRR_DECISION_REJECTED) ==
                   std::string_view("rejected"),
           "public VRR enums have stable diagnostic names");
-  const auto reasons = vrr_reason_names(
-      GWIPC_VRR_REASON_OUTPUT_DISABLED |
-      GWIPC_VRR_REASON_MANUAL_ALWAYS_ELIGIBLE);
+  const auto reasons =
+      vrr_reason_names(GWIPC_VRR_REASON_OUTPUT_DISABLED |
+                       GWIPC_VRR_REASON_MANUAL_ALWAYS_ELIGIBLE);
   require(reasons.size() == 2 && reasons[0] == "output-disabled" &&
               reasons[1] == "manual-always-eligible",
           "reason formatting follows stable bit order");
@@ -109,15 +108,47 @@ void test_names_and_format() {
           "VRR JSON uses deterministic field order and fixed-width IDs");
   std::ostringstream text;
   print_vrr(snapshot, std::string_view("VRR-1"), false, text);
-  require(text.str().find("policy=off hardware=1 controllable=1") !=
-              std::string::npos,
-          "VRR text report labels policy and controllability");
+  require(text.str().find(
+              "policy=off property_present=1 hardware=1 controllable=1") !=
+                  std::string::npos &&
+              text.str().find("reasons=[policy-off]") != std::string::npos &&
+              text.str().find("flip_timestamp_monotonic_ns=0") !=
+                  std::string::npos,
+          "VRR text report includes stable decision and reason diagnostics");
 }
 
-}  // namespace
+void test_snapshot_reference_validation() {
+  auto snapshot = fixture();
+  std::string error;
+  require(validate_vrr_snapshot(snapshot, error),
+          "complete output-only VRR snapshot validates");
+
+  snapshot.vrr_timings.emplace(0x22, VrrTiming{.output_id = 0x22});
+  require(!validate_vrr_snapshot(snapshot, error) &&
+              error.find("unknown output") != std::string::npos,
+          "VRR timing cannot reference an unknown output");
+  snapshot.vrr_timings.clear();
+
+  WindowState window;
+  window.surface_id = 0x33;
+  window.window_id = 44;
+  snapshot.windows.emplace(window.window_id, window);
+  require(!validate_vrr_snapshot(snapshot, error) &&
+              error.find("omits queried window") != std::string::npos,
+          "queried windows require symmetric VRR state");
+  snapshot.vrr_windows.emplace(window.window_id,
+                               VrrWindowState{.surface_id = window.surface_id,
+                                              .window_id = window.window_id,
+                                              .output_id = 0x11});
+  require(validate_vrr_snapshot(snapshot, error),
+          "matching window and output references validate");
+}
+
+} // namespace
 
 int main() {
   test_parsing_and_edit();
   test_names_and_format();
+  test_snapshot_reference_validation();
   return 0;
 }

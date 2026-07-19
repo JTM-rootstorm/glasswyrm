@@ -71,7 +71,7 @@ grep -q 'requested exact scale is unsupported' "${directory}/invalid.err"
 start_server gwinfo-vrr vrr-query
 vrr=$(${gwinfo} --socket "${socket}" vrr --json)
 finish_server
-[[ ${vrr} == *'"id":"0x000000000000000b","name":"LEFT","policy":"off","property_present":false,"hardware_capable":false,"kms_controllable":false,"simulated":false,"range_millihertz":[0,0],"decision":"unsupported"'* ]]
+[[ ${vrr} == *'"id":"0x000000000000000b","name":"LEFT","policy":"off","property_present":false,"hardware_capable":false,"kms_controllable":false,"simulated":false,"range_millihertz":null,"decision":"unsupported"'* ]]
 [[ ${vrr} == *'"reasons":["output-not-drm","output-not-vrr-capable","vrr-property-missing"]'* ]]
 [[ ${vrr} == *'"id":"0x000000000000000c","name":"RIGHT","policy":"off","property_present":false,"hardware_capable":false,"kms_controllable":true,"simulated":true,"range_millihertz":[40000,144000],"decision":"disabled"'* ]]
 [[ ${vrr} == *'"reasons":["policy-off","simulated-headless"],"latest_timing_interval_ns":16666667'* ]]
@@ -91,6 +91,8 @@ finish_server
 [[ ${changed_vrr} == *'"name":"RIGHT","policy":"fullscreen"'* ]]
 [[ ${changed_vrr} == *'"decision":"disabled"'* ]]
 [[ ${changed_vrr} == *'"reasons":["no-candidate","simulated-headless"]'* ]]
+printf '%s' "${changed_vrr}" | python3 -c \
+  'import json,sys; value=json.load(sys.stdin); assert set(value) == {"acknowledgement", "state"}'
 
 start_server gwout-vrr-unsupported vrr-query
 if ${gwout} --socket "${socket}" set LEFT --vrr focused --json \
