@@ -78,7 +78,7 @@ done < "${allowlist_file}"
 baseline_available=1
 if ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}^{commit}" 2>/dev/null; then
   baseline_available=0
-  printf 'source-layout: note: baseline commit unavailable; enforcing the 600-line material-change budget on every non-allowlisted file\n' >&2
+  printf 'source-layout: note: baseline commit unavailable; enforcing hard and responsibility-specific budgets only\n' >&2
 fi
 
 is_materially_rewritten() {
@@ -167,10 +167,11 @@ while IFS= read -r -d '' absolute_path; do
   material=0
 
   if (( ! baseline_available )); then
-    # Release and VM source exports intentionally omit .git. Applying the
-    # 600-line budget to every source file is a conservative substitute for
-    # baseline-aware change classification.
-    material=1
+    # Release and VM exports intentionally omit .git. Their source identity is
+    # frozen by the exporting gate, which runs this baseline-aware check before
+    # transfer. Recheck objective hard and responsibility-specific budgets here;
+    # do not misclassify every unchanged historical file as materially rewritten.
+    :
   elif ! git -C "${repo_root}" cat-file -e "${BASE_COMMIT}:${path}" 2>/dev/null; then
     introduced=1
   else

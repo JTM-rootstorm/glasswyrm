@@ -251,3 +251,13 @@ test(
   source_layout_test,
   timeout: 30,
 )
+
+source_layout_archive_test = find_program(
+  tests_source_dir / 'tools/source_layout_archive_test.sh',
+)
+test(
+  'source-layout-archive',
+  source_layout_archive_test,
+  args: [meson.project_source_root()],
+  timeout: 30,
+)

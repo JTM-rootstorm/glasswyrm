@@ -33,6 +33,12 @@ The current guard reports `source-layout: PASS (11 function review item(s))`
 with no file-budget, coordinator, main, routing-shell, stale-entry, or missing-
 allowlist failure.
 
+The baseline-aware host check runs before VM source transfer. Source archives
+that intentionally omit `.git` recheck the 1,000-line hard default, the focused
+coordinator/main/subsystem caps, the empty allowlist, and function-review
+inventory without treating every unchanged baseline file as a material rewrite.
+`source-layout-archive` exercises that exported-tree path directly.
+
 ## Empty allowlist evidence
 
 `docs/maintenance/source_size_allowlist.txt` contains only its five-field
