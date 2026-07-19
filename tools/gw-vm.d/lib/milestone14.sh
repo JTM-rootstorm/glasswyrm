@@ -24,8 +24,7 @@ M14_BINARY_ARTIFACTS=(milestone14-vm-vrr-evidence.tar)
 milestone14_source_status_ignored() {
   local line=$1
   [[ $line == '?? Plans/'* || $line == '?? .codex/'* ||
-     $line == '?? tests/'*'/__pycache__/'*.pyc ||
-     $line == '?? tools/'*'/__pycache__/'*.pyc ]]
+     $line == '?? '*'/__pycache__/'*.pyc ]]
 }
 
 verify_milestone14_source_identity() {

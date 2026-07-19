@@ -99,6 +99,9 @@ done
   milestone14_source_status_ignored \
     '?? tests/compat/m14/__pycache__/validate_vm_evidence.cpython-314.pyc' ||
     fail 'Python bytecode cache should not invalidate M14 source identity'
+  milestone14_source_status_ignored \
+    '?? tools/__pycache__/gw-hw.cpython-314.pyc' ||
+    fail 'top-level tool bytecode should not invalidate M14 source identity'
   if milestone14_source_status_ignored '?? tests/compat/m14/random_probe.cpp'; then
     fail 'untracked implementation source must invalidate M14 source identity'
   fi

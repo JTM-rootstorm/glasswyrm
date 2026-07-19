@@ -1980,6 +1980,9 @@ assert_contains "$work_dir/milestone12-wrapper-gate.out" \
   milestone12_source_status_ignored \
     '?? tests/compat/m12/__pycache__/validate_result.cpython-314.pyc' ||
     fail 'Python bytecode cache should not invalidate M12 source identity'
+  milestone12_source_status_ignored \
+    '?? tools/__pycache__/gw-hw.cpython-314.pyc' ||
+    fail 'top-level tool bytecode should not invalidate M12 source identity'
   if milestone12_source_status_ignored '?? tests/compat/m12/random_probe.cpp'; then
     fail 'untracked implementation source must invalidate M12 source identity'
   fi

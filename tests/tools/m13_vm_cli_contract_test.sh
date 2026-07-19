@@ -99,7 +99,7 @@ require_text "$library" 'synthetic_pid=$!'
 require_text "$library" 'compare_software_pid=0'
 require_text "$library" '"$compare_software_pid"'
 require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]'
-require_text "$library" "\$line == '?? tests/'*'/__pycache__/'*.pyc"
+require_text "$library" "\$line == '?? '*'/__pycache__/'*.pyc"
 require_text "$library" 'PYTHONDONTWRITEBYTECODE=1 "${command[@]}"'
 require_text "$library" '--scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"'
 require_text "$library" "assert any(state!=baseline for state in states)"
@@ -132,6 +132,9 @@ require_text "$library" '"$control_data/restart-right-before.ppm"'
   milestone13_source_status_ignored \
     '?? tests/compat/m13/__pycache__/validate_frame_sets.cpython-314.pyc' ||
     fail 'Python bytecode cache should not invalidate M13 source identity'
+  milestone13_source_status_ignored \
+    '?? tools/__pycache__/gw-hw.cpython-314.pyc' ||
+    fail 'top-level tool bytecode should not invalidate M13 source identity'
   if milestone13_source_status_ignored '?? tests/compat/m13/random_probe.cpp'; then
     fail 'untracked implementation source must invalidate M13 source identity'
   fi

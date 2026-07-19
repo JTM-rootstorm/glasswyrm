@@ -81,7 +81,7 @@ verify_milestone13_source_identity() {
 milestone13_source_status_ignored() {
   local line=$1
   [[ $line == '?? Plans/'* || $line == '?? .codex/'* ||
-     $line == '?? tests/'*'/__pycache__/'*.pyc ]]
+     $line == '?? '*'/__pycache__/'*.pyc ]]
 }
 
 prepare_milestone13_evidence() {
