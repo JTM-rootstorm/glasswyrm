@@ -124,6 +124,15 @@ def write_artifacts(root: pathlib.Path, validator) -> str:
     for name, value in objects.items():
         (root / name).write_text(json.dumps(value) + "\n")
 
+    renderer_lifetime = "".join(json.dumps(record) + "\n" for record in (
+        {"record": "selection", "requested": "software",
+         "selected": "software"},
+        {"record": "output-frame", "selected": "software",
+         "disposition": "complete"},
+    ))
+    (root / "milestone13-renderer-software.jsonl").write_text(
+        renderer_lifetime + renderer_lifetime)
+
     pixels = ppm()
     (root / "milestone13-drm-canonical.ppm").write_bytes(pixels)
     (root / "milestone13-drm-screen.ppm").write_bytes(pixels)
@@ -221,6 +230,17 @@ with tempfile.TemporaryDirectory() as name:
         "result": GWIPC_OUTPUT_CONFIGURATION_ACCEPTED,
         "applied_generation": 4,
     }) + "\n")
+
+    renderer = root / "milestone13-renderer-software.jsonl"
+    renderer_report = renderer.read_text()
+    renderer.write_text(renderer_report[:len(renderer_report) // 2])
+    rejected_run = subprocess.run(command, text=True, capture_output=True,
+                                  check=False)
+    assert rejected_run.returncode == 2
+    rejected = json.loads(summary.read_text())
+    assert any("two software lifetimes" in error
+               for error in rejected["evidence_errors"])
+    renderer.write_text(renderer_report)
 
     write_facts(facts, "fractional_scaling")
     facts.write_text(facts.read_text().replace(

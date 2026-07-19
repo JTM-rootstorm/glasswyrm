@@ -806,10 +806,16 @@ for _ in {1..400}; do
   sleep .05
 done
 [[ -s $control_data/after-gwm.json ]]
+systemctl stop gwcomp-m13.service
+[[ $(systemctl show gwcomp-m13.service -p ExecMainStatus --value) == 0 ]]
+[[ $(systemctl show gwcomp-m13.service -p MainPID --value) == 0 ]]
+[[ ! -S $runtime/gwcomp.sock ]]
 install -d -m 0755 "$control_data/pre-restart-frames"
 find "$runtime/frames" -mindepth 1 -maxdepth 1 \
   -exec mv -t "$control_data/pre-restart-frames" -- {} +
-systemctl restart gwcomp-m13.service
+mv "$artifact_dir/milestone13-renderer-software.jsonl" \
+  "$control_data/milestone13-renderer-software-pre-restart.jsonl"
+systemctl start gwcomp-m13.service
 wait_socket "$runtime/gwcomp.sock"
 wait_frames_after 0
 [[ -s $runtime/frames/frame-sets.jsonl ]]
@@ -856,6 +862,11 @@ headless_aggregate_hash=$("$source_dir/tests/compat/m13/validate_frame_sets.py" 
 result[headless_frame_hashes]=passed result[aggregate_hash]=passed
 
 stop_headless_peers ''
+cat "$control_data/milestone13-renderer-software-pre-restart.jsonl" \
+  "$artifact_dir/milestone13-renderer-software.jsonl" \
+  >"$control_data/milestone13-renderer-software.jsonl"
+mv "$control_data/milestone13-renderer-software.jsonl" \
+  "$artifact_dir/milestone13-renderer-software.jsonl"
 rm -rf -- "$runtime"; install -d -m 0700 "$runtime"
 start_headless_peers "$software" -compare software \
   "$control_data/compare-software-renderer.jsonl" \
