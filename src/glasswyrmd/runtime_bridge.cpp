@@ -323,7 +323,12 @@ bool RuntimeBridge::service(const short policy_revents,
           return false;
         }
         const auto& replay = compositor_.replay_input();
-        auto submission = replay.commit_id != 0
+        const bool resume_compositor_transaction =
+            recovering_ &&
+            resume_transaction_stage_ == TransactionStage::Compositor;
+        auto submission = resume_compositor_transaction
+                              ? pending_compositor_
+                          : replay.commit_id != 0
                               ? replay
                               : initial_compositor_scene(*layout);
         if (vrr_profile_ && replay.commit_id == 0) {
@@ -358,10 +363,18 @@ bool RuntimeBridge::service(const short policy_revents,
           return false;
         }
         if (resume_transaction_stage_ == TransactionStage::Compositor) {
-          transaction_stage_ = TransactionStage::PolicyReady;
-          if (!submit_compositor(pending_compositor_, resume_error)) {
-            error = resume_error;
-            return false;
+          if (output_model_) {
+            // The reconnect bootstrap above already submitted the retained
+            // compositor transaction. Its accepted response is the original
+            // transaction's completion, not a replay prelude to a duplicate
+            // commit with the same generation.
+            transaction_stage_ = TransactionStage::Complete;
+          } else {
+            transaction_stage_ = TransactionStage::PolicyReady;
+            if (!submit_compositor(pending_compositor_, resume_error)) {
+              error = resume_error;
+              return false;
+            }
           }
         }
         if (resume_transaction_stage_ == TransactionStage::Content &&
