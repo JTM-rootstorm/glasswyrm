@@ -2,6 +2,7 @@
 #include "config.hpp"
 
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -12,6 +13,7 @@ void usage(std::ostream &output) {
             "  gwinfo --socket PATH outputs [--json]\n"
             "  gwinfo --socket PATH windows [--json]\n"
             "  gwinfo --socket PATH all [--json]\n"
+            "  gwinfo --socket PATH vrr [OUTPUT] [--json]\n"
             "  gwinfo --help\n"
             "  gwinfo --version\n";
 }
@@ -30,6 +32,7 @@ int main(const int argc, char **argv) {
   }
   std::string socket;
   std::string command;
+  std::optional<std::string> selector;
   bool json = false;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
@@ -39,8 +42,10 @@ int main(const int argc, char **argv) {
       json = true;
     else if (command.empty() &&
              (argument == "outputs" || argument == "windows" ||
-              argument == "all"))
+              argument == "all" || argument == "vrr"))
       command = argument;
+    else if (command == "vrr" && !selector && !argument.starts_with("--"))
+      selector = argument;
     else {
       std::cerr << "gwinfo: invalid argument '" << argument << "'\n";
       usage(std::cerr);
@@ -58,6 +63,9 @@ int main(const int argc, char **argv) {
              GWIPC_OUTPUT_QUERY_LAYOUT;
   if (command != "outputs")
     flags |= GWIPC_OUTPUT_QUERY_WINDOWS;
+  if (command == "vrr")
+    flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
+            GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
   Client client(socket);
   Snapshot snapshot;
   std::string error;
@@ -65,7 +73,12 @@ int main(const int argc, char **argv) {
     std::cerr << "gwinfo: " << error << '\n';
     return 1;
   }
-  if (command == "outputs")
+  if (command == "vrr")
+    print_vrr(snapshot,
+              selector ? std::optional<std::string_view>(*selector)
+                       : std::nullopt,
+              json, std::cout);
+  else if (command == "outputs")
     print_outputs(snapshot, json, std::cout);
   else if (command == "windows")
     print_windows(snapshot, json, std::cout);

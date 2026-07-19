@@ -6,8 +6,8 @@ namespace glasswyrm::tools::output_client {
 
 class SnapshotDecoder final {
 public:
-  explicit SnapshotDecoder(std::uint64_t request_id)
-      : request_id_(request_id) {}
+  SnapshotDecoder(std::uint64_t request_id, std::uint32_t query_flags)
+      : request_id_(request_id), query_flags_(query_flags) {}
 
   [[nodiscard]] bool consume(const gwipc_message *message, std::string &error);
   [[nodiscard]] bool complete() const noexcept { return complete_; }
@@ -19,6 +19,7 @@ private:
   [[nodiscard]] bool consume_contract(const gwipc_message *message,
                                       std::string &error);
   std::uint64_t request_id_{};
+  std::uint32_t query_flags_{};
   Snapshot snapshot_;
   std::uint64_t snapshot_id_{};
   std::uint32_t expected_items_{};

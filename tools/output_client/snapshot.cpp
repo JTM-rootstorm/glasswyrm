@@ -1,4 +1,5 @@
 #include "output_client/internal.hpp"
+#include "output_client/vrr_snapshot.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -31,6 +32,7 @@ bool SnapshotDecoder::consume_control(const gwipc_message *message,
       return fail(error, "control server sent an invalid output snapshot begin");
     snapshot_id_ = begin->snapshot_id;
     snapshot_.generation = begin->generation;
+    snapshot_.vrr_queried = (query_flags_ & GWIPC_OUTPUT_QUERY_VRR) != 0;
     expected_items_ = begin->expected_item_count;
     reading_ = true;
     return true;
@@ -41,6 +43,7 @@ bool SnapshotDecoder::consume_control(const gwipc_message *message,
       end->actual_item_count != actual_items_ ||
       end->actual_item_count != expected_items_)
     return fail(error, "control server sent an incomplete output snapshot");
+  if (!validate_vrr_snapshot(snapshot_, error)) return false;
   reading_ = false;
   ended_ = true;
   complete_ = acknowledged_;
@@ -75,6 +78,13 @@ bool SnapshotDecoder::consume_contract(const gwipc_message *message,
   ++actual_items_;
   if (actual_items_ > expected_items_)
     return fail(error, "control server exceeded its output snapshot count");
+  const auto vrr_record =
+      consume_vrr_snapshot_record(type, decoded.get(), snapshot_, error);
+  if (vrr_record != VrrRecordResult::NotVrr) {
+    if ((query_flags_ & GWIPC_OUTPUT_QUERY_VRR) == 0)
+      return fail(error, "control server sent unrequested VRR state");
+    return vrr_record == VrrRecordResult::Consumed;
+  }
   if (type == GWIPC_MESSAGE_OUTPUT_DESCRIPTOR_UPSERT) {
     const auto *value = gwipc_decoded_output_descriptor_upsert(decoded.get());
     if (!value || snapshot_.descriptors.contains(value->output_id))

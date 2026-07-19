@@ -19,6 +19,7 @@ void usage(std::ostream &output) {
             "  --position X,Y\n"
             "  --scale NUM/DEN\n"
             "  --transform NAME\n"
+            "  --vrr off|fullscreen|focused|app-requested|always-eligible\n"
             "  --primary\n"
             "  --help | --version\n";
 }
@@ -33,7 +34,7 @@ bool take_value(const int argc, char **argv, int &index,
 
 bool has_edit(const Edit &edit) {
   return edit.enabled || edit.mode || edit.position || edit.scale ||
-         edit.transform || edit.primary;
+         edit.transform || edit.vrr_policy || edit.primary;
 }
 
 } // namespace
@@ -94,6 +95,10 @@ int main(const int argc, char **argv) {
         edit.mode = extent;
         edit.refresh_millihertz = refresh;
       }
+    } else if (argument == "--vrr" &&
+               take_value(argc, argv, index, value)) {
+      edit.vrr_policy = parse_vrr_policy(value);
+      parse_error = !edit.vrr_policy;
     } else {
       parse_error = true;
     }
@@ -109,9 +114,10 @@ int main(const int argc, char **argv) {
   Client client(socket);
   Snapshot snapshot;
   std::string error;
-  constexpr auto query_flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS |
-                               GWIPC_OUTPUT_QUERY_MODES |
-                               GWIPC_OUTPUT_QUERY_LAYOUT;
+  auto query_flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS |
+                     GWIPC_OUTPUT_QUERY_MODES |
+                     GWIPC_OUTPUT_QUERY_LAYOUT;
+  if (edit.vrr_policy) query_flags |= GWIPC_OUTPUT_QUERY_VRR;
   if (!client.query(query_flags, snapshot, error)) {
     std::cerr << "gwout: " << error << '\n';
     return 1;
@@ -124,14 +130,30 @@ int main(const int argc, char **argv) {
     std::cerr << "gwout: " << error << '\n';
     return 1;
   }
+  if (edit.vrr_policy &&
+      !apply_vrr_edit(snapshot, selector, *edit.vrr_policy, error)) {
+    std::cerr << "gwout: " << error << '\n';
+    return 1;
+  }
   gwipc_output_configuration_acknowledged acknowledgement{};
   if (!client.commit(snapshot, acknowledgement, error)) {
     std::cerr << "gwout: " << error << '\n';
     return 1;
   }
   print_acknowledgement(acknowledgement, json, std::cout);
-  if (acknowledgement.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED)
+  if (acknowledgement.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED) {
+    if (edit.vrr_policy) {
+      Snapshot applied;
+      if (!client.query(query_flags, applied, error)) {
+        std::cerr << "gwout: accepted configuration but could not query "
+                     "effective VRR state: "
+                  << error << '\n';
+        return 1;
+      }
+      print_vrr(applied, selector, json, std::cout);
+    }
     return 0;
+  }
   if (acknowledgement.result == GWIPC_OUTPUT_CONFIGURATION_STALE_GENERATION)
     std::cerr << "gwout: stale layout generation; current generation is "
               << acknowledgement.applied_generation << '\n';

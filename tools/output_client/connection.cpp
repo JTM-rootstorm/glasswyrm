@@ -114,6 +114,15 @@ gwipc_output_upsert public_output(const OutputState &state) {
   return value;
 }
 
+gwipc_output_vrr_policy_upsert public_vrr_policy(
+    const std::uint64_t output_id, const gwipc_vrr_policy_mode mode) {
+  gwipc_output_vrr_policy_upsert value{};
+  value.struct_size = sizeof(value);
+  value.output_id = output_id;
+  value.mode = mode;
+  return value;
+}
+
 } // namespace
 
 Client::~Client() { gwipc_connection_destroy(connection_); }
@@ -130,6 +139,9 @@ bool Client::connect(std::string &error) {
       GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_OUTPUT_CONTROL |
       GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_WINDOW_LIFECYCLE |
       GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP | GWIPC_CAP_SCALE_METADATA;
+  options.offered_capabilities |= GWIPC_CAP_VRR_METADATA |
+                                  GWIPC_CAP_VRR_POLICY |
+                                  GWIPC_CAP_PRESENTATION_TIMING;
   options.required_peer_capabilities = GWIPC_CAP_OUTPUT_CONTROL;
   options.maximum_payload = kMaximumPayload;
   options.maximum_fd_count = 0;
@@ -170,7 +182,7 @@ bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
                         GWIPC_FLAG_ACK_REQUIRED, query,
                         gwipc_contract_encode_output_state_query, error))
     return false;
-  SnapshotDecoder decoder(request_id);
+  SnapshotDecoder decoder(request_id, flags);
   for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
     if (!pump(connection_, error))
       return false;
@@ -209,7 +221,15 @@ bool Client::commit(const Snapshot &snapshot,
   begin.snapshot_id = configuration_id;
   begin.domain = GWIPC_SNAPSHOT_OUTPUTS;
   begin.generation = snapshot.generation;
-  begin.expected_item_count = snapshot.outputs.size();
+  if (snapshot.vrr_queried &&
+      snapshot.vrr_policies.size() != snapshot.outputs.size()) {
+    error = "VRR configuration requires one policy for every output";
+    return false;
+  }
+  begin.expected_item_count = snapshot.outputs.size() +
+                              (snapshot.vrr_queried
+                                   ? snapshot.vrr_policies.size()
+                                   : 0U);
   if (!enqueue_control(connection_, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                        gwipc_control_encode_snapshot_begin, error))
     return false;
@@ -221,11 +241,21 @@ bool Client::commit(const Snapshot &snapshot,
                           gwipc_contract_encode_output_upsert, error))
       return false;
   }
+  if (snapshot.vrr_queried) {
+    for (const auto &[output_id, mode] : snapshot.vrr_policies) {
+      const auto value = public_vrr_policy(output_id, mode);
+      if (!enqueue_contract(connection_, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                            GWIPC_FLAG_SNAPSHOT_ITEM, value,
+                            gwipc_contract_encode_output_vrr_policy_upsert,
+                            error))
+        return false;
+    }
+  }
   gwipc_snapshot_end end{};
   end.struct_size = sizeof(end);
   end.snapshot_id = configuration_id;
   end.generation = snapshot.generation;
-  end.actual_item_count = snapshot.outputs.size();
+  end.actual_item_count = begin.expected_item_count;
   if (!enqueue_control(connection_, GWIPC_MESSAGE_SNAPSHOT_END, end,
                        gwipc_control_encode_snapshot_end, error))
     return false;

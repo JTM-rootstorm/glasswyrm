@@ -72,6 +72,66 @@ struct WindowState {
   bool fullscreen{};
 };
 
+struct VrrCapability {
+  std::uint64_t output_id{};
+  bool connector_property_present{};
+  bool hardware_capable{};
+  bool kms_controllable{};
+  bool simulated{};
+  bool range_available{};
+  bool atomic_required{};
+  std::uint32_t minimum_refresh_millihertz{};
+  std::uint32_t maximum_refresh_millihertz{};
+  std::uint64_t reason_flags{};
+};
+
+struct VrrOutputState {
+  std::uint64_t output_id{};
+  gwipc_vrr_policy_mode requested_mode{GWIPC_VRR_POLICY_OFF};
+  gwipc_vrr_decision decision{GWIPC_VRR_DECISION_DISABLED};
+  bool desired_enabled{};
+  bool effective_enabled{};
+  bool property_readback_valid{};
+  bool session_active{};
+  std::uint32_t candidate_window_id{};
+  std::uint64_t candidate_surface_id{};
+  std::uint64_t reason_flags{};
+  std::uint64_t state_generation{};
+  std::uint64_t transition_serial{};
+  std::uint64_t last_commit_id{};
+  std::uint64_t last_presented_generation{};
+  std::uint32_t last_flip_sequence{};
+  std::uint64_t last_flip_timestamp_nanoseconds{};
+  std::uint64_t last_interval_nanoseconds{};
+};
+
+struct VrrWindowState {
+  std::uint64_t surface_id{};
+  std::uint32_t window_id{};
+  std::uint64_t output_id{};
+  gwipc_vrr_window_preference preference{GWIPC_VRR_PREFERENCE_DEFAULT};
+  bool policy_selected{};
+  bool policy_eligible{};
+  bool focused{};
+  bool fullscreen{};
+  bool borderless_fullscreen{};
+  bool exclusive_output_membership{};
+  std::uint64_t reason_flags{};
+  std::uint64_t policy_generation{};
+};
+
+struct VrrTiming {
+  std::uint64_t output_id{};
+  std::uint64_t commit_id{};
+  std::uint64_t presented_generation{};
+  std::uint32_t flip_sequence{};
+  std::uint32_t flags{};
+  std::uint64_t kernel_timestamp_nanoseconds{};
+  std::uint64_t interval_nanoseconds{};
+  bool effective_enabled{};
+  bool timestamp_available{};
+};
+
 struct Snapshot {
   std::uint64_t generation{};
   std::uint64_t primary_output_id{};
@@ -82,6 +142,12 @@ struct Snapshot {
   std::vector<OutputMode> modes;
   std::map<std::uint64_t, OutputState> outputs;
   std::map<std::uint32_t, WindowState> windows;
+  std::map<std::uint64_t, VrrCapability> vrr_capabilities;
+  std::map<std::uint64_t, gwipc_vrr_policy_mode> vrr_policies;
+  std::map<std::uint64_t, VrrOutputState> vrr_outputs;
+  std::map<std::uint32_t, VrrWindowState> vrr_windows;
+  std::map<std::uint64_t, VrrTiming> vrr_timings;
+  bool vrr_queried{};
 };
 
 struct Edit {
@@ -91,6 +157,7 @@ struct Edit {
   std::optional<std::pair<std::int32_t, std::int32_t>> position;
   std::optional<std::pair<std::uint32_t, std::uint32_t>> scale;
   std::optional<gwipc_transform> transform;
+  std::optional<gwipc_vrr_policy_mode> vrr_policy;
   bool primary{};
 };
 
@@ -134,5 +201,19 @@ void print_all(const Snapshot &snapshot, bool json, std::ostream &output);
 void print_acknowledgement(
     const gwipc_output_configuration_acknowledged &ack, bool json,
     std::ostream &output);
+[[nodiscard]] std::optional<gwipc_vrr_policy_mode>
+parse_vrr_policy(std::string_view value) noexcept;
+[[nodiscard]] const char *vrr_policy_name(gwipc_vrr_policy_mode value) noexcept;
+[[nodiscard]] const char *vrr_preference_name(
+    gwipc_vrr_window_preference value) noexcept;
+[[nodiscard]] const char *vrr_decision_name(gwipc_vrr_decision value) noexcept;
+[[nodiscard]] std::vector<std::string_view> vrr_reason_names(
+    std::uint64_t reasons);
+[[nodiscard]] bool apply_vrr_edit(Snapshot &snapshot,
+                                  std::string_view selector,
+                                  gwipc_vrr_policy_mode mode,
+                                  std::string &error);
+void print_vrr(const Snapshot &snapshot, std::optional<std::string_view> selector,
+               bool json, std::ostream &output);
 
 } // namespace glasswyrm::tools::output_client
