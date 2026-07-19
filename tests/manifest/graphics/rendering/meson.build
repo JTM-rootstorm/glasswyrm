@@ -32,6 +32,30 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
   test('gwcomp-output-inventory-publisher',
        gwcomp_output_inventory_publisher_test, timeout: 10)
 
+  compositor_vrr_state_test = executable(
+    'compositor_vrr_state_test',
+    files(tests_source_dir / 'unit/compositor_vrr_state_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('compositor-vrr-state', compositor_vrr_state_test, timeout: 10)
+
+  compositor_vrr_runtime_test = executable(
+    'compositor_vrr_runtime_test',
+    files(tests_source_dir / 'unit/compositor_vrr_runtime_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('compositor-vrr-runtime', compositor_vrr_runtime_test, timeout: 10)
+
+  gwcomp_vrr_presentation_test = executable(
+    'gwcomp_vrr_presentation_test',
+    files(tests_source_dir / 'integration/gwcomp_vrr_presentation_test.cpp'),
+    dependencies: gwcomp_options_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwcomp-vrr-presentation', gwcomp_vrr_presentation_test, timeout: 10)
+
 compositor_geometry_test = executable(
   'compositor_geometry_test',
   files(tests_source_dir / 'unit/compositor_geometry_test.cpp'),

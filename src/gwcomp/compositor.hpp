@@ -7,6 +7,7 @@
 #include "compositor/buffer.hpp"
 #include "compositor/scene.hpp"
 #include "gwcomp/scene_manifest.hpp"
+#include "gwcomp/vrr_response_batch.hpp"
 #include "render/scene_renderer.hpp"
 #include "render/output_scene_renderer.hpp"
 
@@ -42,6 +43,7 @@ struct PresentedFrame {
   std::uint64_t generation{};
   std::uint64_t ordinal{};
   std::uint64_t hash{};
+  std::vector<VrrResponseMessage> vrr_response;
 };
 
 struct PresentationTiming {
@@ -80,6 +82,9 @@ public:
   void set_cpu_buffer_synchronization(const bool enabled) noexcept {
     cpu_buffer_synchronization_ = enabled;
   }
+  void set_vrr_contract_enabled(const bool enabled) noexcept {
+    vrr_contract_enabled_ = enabled;
+  }
   [[nodiscard]] bool configure_scene_profile(
       SceneProfile profile, std::uint64_t primary_output_id = 0,
       std::uint64_t output_layout_generation = 0) noexcept;
@@ -92,6 +97,8 @@ public:
   [[nodiscard]] bool apply(const gwipc_surface_upsert& value);
   [[nodiscard]] bool apply(const gwipc_surface_output_state& value);
   [[nodiscard]] bool apply(const gwipc_surface_policy_upsert& value);
+  [[nodiscard]] bool apply(const gwipc_output_vrr_policy_upsert& value);
+  [[nodiscard]] bool apply(const gwipc_surface_vrr_state& value);
   [[nodiscard]] bool apply(const gwipc_surface_remove& value);
   [[nodiscard]] bool apply(const gwipc_surface_damage& value);
   [[nodiscard]] bool attach(const gwipc_buffer_attach& value, int fd,
@@ -153,6 +160,7 @@ private:
   bool presentation_shutdown_{};
   std::optional<SceneManifest> scene_manifest_;
   std::map<std::uint64_t, gwipc_buffer_release_reason> releases_;
+  CommittedVrrState committed_vrr_;
   std::uint64_t frame_ordinal_{};
   std::uint64_t last_commit_id_{};
   std::uint64_t last_generation_{};
@@ -166,6 +174,7 @@ private:
   std::uint64_t output_layout_generation_{};
   PeerProfile profile_{PeerProfile::M4TestProducer};
   bool cpu_buffer_synchronization_{};
+  bool vrr_contract_enabled_{};
 };
 
 } // namespace gw::compositor

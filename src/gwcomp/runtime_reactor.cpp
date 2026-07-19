@@ -12,6 +12,9 @@ namespace {
 constexpr std::uint64_t kOutputModelCapabilities =
     GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
     GWIPC_CAP_SCALE_METADATA;
+constexpr std::uint64_t kVrrCapabilities =
+    GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY |
+    GWIPC_CAP_PRESENTATION_TIMING;
 
 constexpr std::size_t kMaximumMessagesPerTurn = 64;
 constexpr std::size_t kMaximumPayloadBytesPerTurn = 512U * 1024U;
@@ -294,6 +297,8 @@ void RuntimeReactor::validate_producer() {
   compositor_.set_peer_profile(*peer_profile_);
   compositor_.set_cpu_buffer_synchronization(
       (info.capabilities & GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION) != 0);
+  compositor_.set_vrr_contract_enabled(
+      (info.capabilities & kVrrCapabilities) == kVrrCapabilities);
   peer_validated_ = true;
   session_state_.configure(
       peer_role_ == GWIPC_ROLE_PROTOCOL_SERVER &&

@@ -1,6 +1,7 @@
 #include "gwcomp/presentation_transaction.hpp"
 
 #include "gwcomp/compositor.hpp"
+#include "compositor/scene_vrr_validation.hpp"
 #include "render/scene_renderer.hpp"
 
 #include <algorithm>
@@ -34,12 +35,15 @@ PresentationTransaction::PresentationTransaction(
     std::optional<glasswyrm::output::SoftwareFrameSet> frame_set,
     gwipc_frame_commit commit,
     PresentedFrame presented, std::optional<PreparedSceneManifest> manifest,
+    std::optional<PreparedVrrFrame> vrr,
+    std::optional<VrrResponseBatch> vrr_response,
     const std::uint64_t token,
     const std::chrono::steady_clock::time_point deadline)
     : candidate_(std::move(candidate)), attachments_(std::move(attachments)),
       releases_(std::move(releases)), frame_(std::move(frame)),
       frame_set_(std::move(frame_set)), commit_(commit), presented_(presented),
-      manifest_(std::move(manifest)), token_(token),
+      manifest_(std::move(manifest)), vrr_(std::move(vrr)),
+      vrr_response_(std::move(vrr_response)), token_(token),
       deadline_(deadline) {}
 
 PresentationTransaction::ReleaseMap
@@ -83,6 +87,19 @@ void PresentationTransaction::release_retired_buffers(
 
 PresentedFrame PresentationTransaction::promote(
     Compositor& compositor, const std::uint64_t visible_hash) {
+  if (completed_vrr_) {
+    std::string state_error;
+    if (!compositor.committed_vrr_.promote(
+            std::move(completed_vrr_->states),
+            std::move(completed_vrr_->timings), commit_.commit_id,
+            commit_.producer_generation, state_error) ||
+        !vrr_response_ || !vrr_response_->ready()) {
+      presented_.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      presented_.disposition = PresentedFrame::Disposition::Fatal;
+      return presented_;
+    }
+    presented_.vrr_response = vrr_response_->messages();
+  }
   for (const auto& [buffer_id, reason] : releases_)
     compositor.releases_.insert_or_assign(buffer_id, reason);
   for (const auto& [buffer_id, reason] : releases_) {
@@ -99,6 +116,25 @@ PresentedFrame PresentationTransaction::promote(
   presented_.ordinal = compositor.frame_ordinal_;
   presented_.hash = visible_hash;
   return presented_;
+}
+
+bool PresentationTransaction::finalize_vrr(
+    const glasswyrm::output::VrrPresentationFeedbackMap& feedback,
+    std::string& error) {
+  if (!vrr_) {
+    if (!feedback.empty()) {
+      error = "presenter returned unrequested VRR feedback";
+      return false;
+    }
+    return true;
+  }
+  auto completed = VrrRuntime::complete(*vrr_, feedback, commit_.commit_id,
+                                        commit_.producer_generation, error);
+  if (!completed || !vrr_response_ ||
+      !vrr_response_->finalize(*completed, error))
+    return false;
+  completed_vrr_ = std::move(*completed);
+  return true;
 }
 
 bool PresentationTransaction::publish_manifest(Compositor& compositor,
@@ -139,6 +175,13 @@ PresentationTransaction::validate_scene(Compositor& compositor,
   presented.generation = validated.result.presented_generation;
   if (!validated.result.accepted())
     return std::nullopt;
+  const auto vrr_validation = validate_scene_vrr(
+      validated.candidate.committed(), compositor.vrr_contract_enabled_);
+  if (!vrr_validation.accepted()) {
+    presented.result = vrr_validation.result;
+    error = vrr_validation.error;
+    return std::nullopt;
+  }
   validated.metadata_only_peer =
       compositor.profile_ == PeerProfile::M6MetadataProtocolServer;
   validated.protocol_server =
@@ -439,7 +482,13 @@ PresentedFrame PresentationTransaction::stage_presentation(
         std::move(validated.candidate), compositor.pending_attachments_,
         std::move(prepared.releases), std::move(prepared.frame),
         std::move(prepared.frame_set), value,
-        presented, std::move(prepared.manifest), 0, compositor.timing_.now());
+        presented, std::move(prepared.manifest), std::move(prepared.vrr),
+        std::move(prepared.vrr_response), 0, compositor.timing_.now());
+    if (!transaction.finalize_vrr(presentation.vrr_feedback, error)) {
+      transaction.presented_.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      transaction.presented_.disposition = PresentedFrame::Disposition::Fatal;
+      return transaction.presented_;
+    }
     if (!transaction.publish_manifest(compositor, error))
       return transaction.presented_;
     return transaction.promote(compositor, presentation.visible_hash);
@@ -457,7 +506,8 @@ PresentedFrame PresentationTransaction::stage_presentation(
             std::move(validated.candidate), compositor.pending_attachments_,
             std::move(prepared.releases), std::move(prepared.frame),
             std::move(prepared.frame_set), value,
-            presented, std::move(prepared.manifest), presentation.token,
+            presented, std::move(prepared.manifest), std::move(prepared.vrr),
+            std::move(prepared.vrr_response), presentation.token,
             compositor.timing_.now() + compositor.timing_.timeout));
   } catch (...) {
     compositor.presenter_->abort_pending(presentation.token);

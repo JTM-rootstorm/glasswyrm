@@ -70,6 +70,8 @@ gw_compositor_geometry_lib = static_library(
     'compositor/damage_region.cpp',
     'compositor/scene.cpp',
     'compositor/scene_validation.cpp',
+    'compositor/scene_vrr_validation.cpp',
+    'compositor/vrr_state.cpp',
     'compositor/buffer.cpp',
   ),
   include_directories: [include_directories('.'), gw_include_dir],
@@ -120,12 +122,14 @@ gw_render_software_dep = declare_dependency(
       'backends/output/software_frame_set.cpp',
       'backends/headless/frame_dump.cpp',
     ),
-    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep],
     include_directories: include_directories('.'),
   )
   gw_output_dep = declare_dependency(
     link_with: gw_output_lib,
-    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
+    dependencies: [gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep],
     include_directories: include_directories('.'),
   )
 
@@ -590,6 +594,8 @@ if get_option('gwcomp')
     'gwcomp/presentation_transaction.cpp',
     'gwcomp/presentation_output_model.cpp',
     'gwcomp/presentation_completion.cpp',
+    'gwcomp/vrr_response_batch.cpp',
+    'gwcomp/vrr_runtime.cpp',
   )
   if get_option('drm_backend')
     gwcomp_options_sources += files('gwcomp/drm_runtime.cpp')
@@ -599,11 +605,13 @@ if get_option('gwcomp')
     gwcomp_options_sources,
     include_directories: [include_directories('.'), gw_generated_include_dir],
     dependencies: [gwipc_dep, gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep,
                    gw_render_software_dep] + gwcomp_backend_dependencies,
   )
   gwcomp_options_dep = declare_dependency(
     link_with: gwcomp_options_lib,
     dependencies: [gwipc_dep, gw_compositor_geometry_dep, gw_output_model_dep,
+                   gw_vrr_model_dep,
                    gw_render_software_dep] + gwcomp_backend_dependencies,
     include_directories: [include_directories('.'), gw_generated_include_dir],
   )

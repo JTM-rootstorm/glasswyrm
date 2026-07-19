@@ -2,6 +2,8 @@
 
 #include "backends/output/software_frame.hpp"
 #include "output/model/types.hpp"
+#include "output/vrr/reasons.hpp"
+#include "output/vrr/types.hpp"
 
 #include <cstdint>
 #include <map>
@@ -9,6 +11,22 @@
 #include <vector>
 
 namespace glasswyrm::output {
+
+// Desired variable-refresh state is presentation metadata. It deliberately
+// lives beside, rather than inside, SoftwareFrame so renderer and pixel hashes
+// remain independent of display cadence policy.
+struct VrrPresentationRequest {
+  bool valid{};
+  vrr::PolicyMode requested_mode{vrr::PolicyMode::Off};
+  vrr::Decision decision{vrr::Decision::Disabled};
+  bool desired_enabled{};
+  std::uint32_t candidate_window_id{};
+  std::uint64_t candidate_surface_id{};
+  vrr::ReasonMask reason_flags{};
+  std::uint64_t state_generation{};
+  std::uint64_t transition_serial{};
+  std::uint64_t target_interval_nanoseconds{};
+};
 
 struct OutputFrameResult {
   OutputSpec output;
@@ -18,6 +36,7 @@ struct OutputFrameResult {
   SoftwareFrame frame;
   std::vector<gw::compositor::Rectangle> damage;
   std::uint64_t visible_hash{};
+  VrrPresentationRequest vrr;
 };
 
 [[nodiscard]] std::uint64_t calculate_frame_set_aggregate_hash(
@@ -57,6 +76,9 @@ public:
                               std::uint64_t commit_id,
                               std::uint64_t generation,
                               std::uint64_t ordinal, std::string &error);
+  [[nodiscard]] bool set_vrr_requests(
+      const std::map<std::uint64_t, VrrPresentationRequest>& requests,
+      std::string& error);
 
   [[nodiscard]] const std::map<std::uint64_t, OutputFrameResult> &
   outputs() const noexcept {
