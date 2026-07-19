@@ -114,7 +114,7 @@ struct Rig {
 
   Rig(DrmPresentationApi policy, bool atomic = true, bool planes = true,
       bool fail_atomic = false, bool with_report = true,
-      bool damage_aware_copy = false)
+      bool damage_aware_copy = false, std::uint64_t output_id = 1)
       : drm({"/dev/dri/card0", DeviceOpenStatus::Success,
              snapshot(atomic, planes), {}}) {
     configure(kms, planes);
@@ -125,7 +125,7 @@ struct Rig {
     presenter = std::make_unique<DrmPresenter>(
         std::move(*device), kms, with_report ? &report : nullptr, &mirror);
     DrmPresenterConfig config;
-    config.output = {1, 2, 2, 60'000};
+    config.output = {output_id, 2, 2, 60'000};
     config.connector = "Virtual-1";
     config.api = policy;
     config.tty_path = "/dev/tty2";
@@ -271,6 +271,22 @@ void frame_set_boundary() {
           event.visible_hash == pending_frames.aggregate_hash() &&
           rig.presenter->finalize_pending(pending.token, rig.error),
       "DRM asynchronous frame-set completion reports the aggregate hash");
+}
+
+void historical_frame_identity_adapter() {
+  Rig rig(DrmPresentationApi::Atomic, true, true, false, true, false, 7);
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  gw::test::require(
+      rig.presenter->present(frame(pixels, 1)).disposition ==
+          output::PresentDisposition::Complete,
+      "historical single-frame presentation keeps its legacy output identity");
+
+  const auto mismatched = frame_set(pixels, 2);
+  gw::test::require(
+      rig.presenter->present(mismatched.view()).disposition ==
+          output::PresentDisposition::Rejected,
+      "output-model frame sets still require the selected DRM output identity");
 }
 
 void accumulated_damage_copy_and_vt_fallback() {
@@ -530,6 +546,7 @@ int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
   frame_set_boundary();
+  historical_frame_identity_adapter();
   accumulated_damage_copy_and_vt_fallback();
   incomplete_damage_recovers_with_full_copy();
   zero_sequence_page_flip_completion();
