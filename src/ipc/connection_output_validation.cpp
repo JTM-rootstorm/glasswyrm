@@ -62,9 +62,14 @@ struct Roles {
       }
       break;
     case GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT:
-      valid = exact_roles(roles, GWIPC_ROLE_PROTOCOL_SERVER,
-                          GWIPC_ROLE_COMPOSITOR);
-      required = GWIPC_CAP_VRR_POLICY;
+      valid = exact_roles(roles, GWIPC_ROLE_COMPOSITOR,
+                          GWIPC_ROLE_PROTOCOL_SERVER);
+      required = GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY;
+      if (!valid) {
+        valid = exact_roles(roles, GWIPC_ROLE_PROTOCOL_SERVER,
+                            GWIPC_ROLE_COMPOSITOR);
+        required = GWIPC_CAP_VRR_POLICY;
+      }
       if (!valid) {
         valid = exact_roles(roles, GWIPC_ROLE_DIAGNOSTIC_TOOL,
                             GWIPC_ROLE_PROTOCOL_SERVER) ||

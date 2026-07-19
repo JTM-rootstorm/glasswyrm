@@ -45,6 +45,23 @@ pid_t launch_output_model(const char* executable, const std::string& socket,
   return child;
 }
 
+pid_t launch_output_model_vrr(const char* executable,
+                              const std::string& socket,
+                              const std::string& dump) {
+  const auto child = ::fork();
+  require(child >= 0, "fork VRR output-model bridge peer");
+  if (child == 0) {
+    ::execl(executable, executable, "--ipc-socket", socket.c_str(),
+            "--dump-dir", dump.c_str(), "--headless-output",
+            "LEFT:800x600@60000", "--headless-output",
+            "RIGHT:640x480@75000", "--headless-vrr",
+            "LEFT=40000-60000", "--headless-vrr", "RIGHT=48000-75000",
+            nullptr);
+    _exit(127);
+  }
+  return child;
+}
+
 void stop(const pid_t child) {
   if (child <= 0) return;
   (void)::kill(child, SIGTERM);
@@ -287,5 +304,62 @@ int main(int argc, char** argv) {
           "layout change without a stale cursor returns the bridge to idle");
   stop(output_compositor_process);
   stop(output_policy_process);
+
+  const std::string vrr_policy_socket = root + "/gwm-vrr-reconnect.sock";
+  const std::string vrr_compositor_socket = root + "/gwcomp-vrr-reconnect.sock";
+  const auto vrr_policy_process = launch(argv[1], vrr_policy_socket);
+  auto vrr_compositor_process = launch_output_model_vrr(
+      argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump");
+  RuntimeBridge vrr_bridge(
+      vrr_policy_socket, vrr_compositor_socket,
+      gw::protocol::x11::kScreenModel, std::chrono::seconds(10), true, false,
+      false, true, true);
+  vrr_bridge.start();
+  drive_until(vrr_bridge, [&] { return vrr_bridge.ready(); },
+              "VRR reconnect bridge bootstrap timed out");
+  const auto* vrr_layout = vrr_bridge.output_layout();
+  auto* vrr_cache = vrr_bridge.vrr_cache();
+  require(vrr_layout && vrr_cache && vrr_cache->outputs().size() == 2,
+          "VRR reconnect bridge exposes complete inventory");
+  const auto changed_output = vrr_layout->output_order.front().value;
+  require(vrr_cache->set_policy(changed_output,
+                                GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE),
+          "stage changed VRR policy before lifecycle transaction");
+  glasswyrm::server::LifecycleSnapshot vrr_snapshot;
+  const auto vrr_policy = glasswyrm::server::project_policy(
+      vrr_snapshot, 20, 20, vrr_layout, vrr_cache);
+  require(vrr_bridge.submit_policy(vrr_policy, error),
+          "submit VRR-changing policy transaction");
+  drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
+              "VRR-changing policy result timed out");
+  const auto evaluated = glasswyrm::server::apply_policy_result(
+      vrr_snapshot, vrr_bridge.policy_result(), vrr_layout, vrr_cache);
+  require(evaluated.has_value(),
+          "VRR-changing policy result stages compositor state");
+  const auto vrr_scene = glasswyrm::server::project_compositor(
+      *evaluated, 21, 21, true, vrr_layout, vrr_cache);
+  require(vrr_bridge.submit_compositor(vrr_scene, error),
+          "submit VRR-changing compositor transaction");
+  stop(vrr_compositor_process);
+  drive_until(vrr_bridge, [&] { return !vrr_bridge.ready(); },
+              "in-flight VRR compositor disconnect was not reported");
+  vrr_compositor_process = launch_output_model_vrr(
+      argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump-2");
+  drive_until(vrr_bridge,
+              [&] { return vrr_bridge.compositor_result_ready(); },
+              "reconnected VRR compositor transaction did not complete");
+  require(vrr_cache->outputs().at(changed_output).policy.mode ==
+              GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE &&
+              vrr_cache->outputs().at(changed_output).compositor_state &&
+              vrr_cache->outputs()
+                      .at(changed_output)
+                      .compositor_state->requested_mode ==
+                  GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE,
+          "reconnect bootstrap and retained VRR transaction stay consistent");
+  vrr_bridge.clear_transaction_result();
+  require(vrr_bridge.ready() && vrr_bridge.transaction_idle(),
+          "reconnected VRR transaction completes without a duplicate replay");
+  stop(vrr_compositor_process);
+  stop(vrr_policy_process);
   return 0;
 }

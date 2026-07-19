@@ -119,6 +119,16 @@ void compositor_and_diagnostic_records() {
           "server relays capability in a diagnostic output snapshot");
 
   const OutputVrrPolicyUpsert policy{kOutput, VrrPolicyMode::Focused, 0};
+  require(validate(GWIPC_ROLE_COMPOSITOR, GWIPC_ROLE_PROTOCOL_SERVER,
+                   metadata, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                   GWIPC_FLAG_SNAPSHOT_ITEM, policy,
+                   snapshot(SnapshotDomain::Outputs)) == GWIPC_STATUS_OK &&
+              validate(GWIPC_ROLE_PROTOCOL_SERVER, GWIPC_ROLE_COMPOSITOR,
+                       metadata, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                       GWIPC_FLAG_SNAPSHOT_ITEM, policy,
+                       snapshot(SnapshotDomain::Outputs),
+                       MessageDirection::Incoming) == GWIPC_STATUS_OK,
+          "compositor publishes current policy in an output inventory snapshot");
   require(validate(GWIPC_ROLE_PROTOCOL_SERVER, GWIPC_ROLE_COMPOSITOR,
                    GWIPC_CAP_VRR_POLICY,
                    GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
@@ -245,6 +255,14 @@ void rejection_boundaries() {
                    snapshot(SnapshotDomain::Outputs)) ==
               GWIPC_STATUS_CAPABILITY_MISMATCH,
           "VRR records require negotiated capabilities");
+  require(validate(GWIPC_ROLE_COMPOSITOR, GWIPC_ROLE_PROTOCOL_SERVER,
+                   GWIPC_CAP_VRR_POLICY,
+                   GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                   GWIPC_FLAG_SNAPSHOT_ITEM,
+                   OutputVrrPolicyUpsert{kOutput, VrrPolicyMode::Off, 0},
+                   snapshot(SnapshotDomain::Outputs)) ==
+              GWIPC_STATUS_CAPABILITY_MISMATCH,
+          "compositor inventory policy requires metadata and policy capabilities");
 
   int descriptor = -1;
   require(validate(GWIPC_ROLE_COMPOSITOR, GWIPC_ROLE_PROTOCOL_SERVER, metadata,
