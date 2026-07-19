@@ -326,17 +326,22 @@ wait_socket() {
   printf 'Timed out waiting for M13 socket: %s\n' "$path" >&2
   return 1
 }
-start_headless_peers() {
+start_headless_compositor() {
   local tree=$1 suffix=$2 renderer_name=$3 renderer_report=$4 scene=$5
-  systemd-run --unit="gwm-m13$suffix" --property=Type=simple --no-block -- \
-    "$tree/src/gwm" --ipc-socket "$runtime/gwm.sock"
-  wait_socket "$runtime/gwm.sock"
   systemd-run --unit="gwcomp-m13$suffix" --property=Type=simple --no-block -- \
     "$tree/src/gwcomp" --backend headless --ipc-socket "$runtime/gwcomp.sock" \
     --dump-dir "$runtime/frames" --headless-output LEFT:640x480@60000 \
     --headless-output RIGHT:800x600@60000 --renderer "$renderer_name" \
     --renderer-report "$renderer_report" --scene-manifest "$scene"
   wait_socket "$runtime/gwcomp.sock"
+}
+start_headless_peers() {
+  local tree=$1 suffix=$2 renderer_name=$3 renderer_report=$4 scene=$5
+  systemd-run --unit="gwm-m13$suffix" --property=Type=simple --no-block -- \
+    "$tree/src/gwm" --ipc-socket "$runtime/gwm.sock"
+  wait_socket "$runtime/gwm.sock"
+  start_headless_compositor "$tree" "$suffix" "$renderer_name" \
+    "$renderer_report" "$scene"
   systemd-run --unit="glasswyrmd-m13$suffix" --property=Type=simple --no-block -- \
     "$tree/src/glasswyrmd" --display 99 --wm-socket "$runtime/gwm.sock" \
     --compositor-socket "$runtime/gwcomp.sock" --software-content \
@@ -815,8 +820,8 @@ find "$runtime/frames" -mindepth 1 -maxdepth 1 \
   -exec mv -t "$control_data/pre-restart-frames" -- {} +
 mv "$artifact_dir/milestone13-renderer-software.jsonl" \
   "$control_data/milestone13-renderer-software-pre-restart.jsonl"
-systemctl start gwcomp-m13.service
-wait_socket "$runtime/gwcomp.sock"
+start_headless_compositor "$software" '' software \
+  "$artifact_dir/milestone13-renderer-software.jsonl" "$scenes/scene.jsonl"
 wait_frames_after 0
 [[ -s $runtime/frames/frame-sets.jsonl ]]
 [[ $(systemctl show gwcomp-m13.service -p ActiveState --value) == active ]]
