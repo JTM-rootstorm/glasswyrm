@@ -56,6 +56,7 @@ class RuntimeReactor final {
       const gwipc_message& message);
   void fail_output_inventory(const char* reason, gwipc_status status);
   void reject_output_inventory_peer(const char* reason, gwipc_status status);
+  [[nodiscard]] bool disconnect_compositor(const char* context);
 
   const Options& options_;
   gwipc_listener* listener_{};
@@ -64,6 +65,7 @@ class RuntimeReactor final {
   OutputInventoryService output_inventory_;
   Connection producer_;
   bool peer_validated_{};
+  bool producer_bootstrapped_{};
   gwipc_role peer_role_{GWIPC_ROLE_UNKNOWN};
   std::optional<gw::compositor::PeerProfile> peer_profile_;
   bool accepted_any_frame_{};

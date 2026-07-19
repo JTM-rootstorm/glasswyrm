@@ -283,7 +283,8 @@ int main() {
   require(rejected.result == GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA,
           "missing policy rejects commit");
   require(read(manifest) == first, "rejected commit does not append manifest");
-  compositor.disconnect();
+  std::string disconnect_error;
+  gw::test::require(compositor.disconnect(disconnect_error), disconnect_error);
   require(compositor.begin_snapshot(), "buffer rejection snapshot begins");
   require(compositor.apply(output()), "buffer rejection output stages");
   require(compositor.apply(surface(1001, 0)),

@@ -1,4 +1,5 @@
 #include "gwcomp/session_state_coordinator.hpp"
+#include "gwcomp/runtime_session_gate.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <chrono>
@@ -53,6 +54,20 @@ int main() {
   compositor::SessionStateCoordinator coordinator(timing);
   FakeSink sink;
   std::string error;
+
+  require(!compositor::may_begin_vt_release(true, true, true, false, false,
+                                            false) &&
+              !compositor::vt_release_blocks_contract_service(true, false),
+          "VT release waits for producer bootstrap while inventory remains "
+          "serviceable");
+  require(compositor::may_begin_vt_release(true, true, true, true, false,
+                                           false) &&
+              compositor::vt_release_blocks_contract_service(true, true),
+          "VT release coordination begins only after producer bootstrap");
+  require(!compositor::may_begin_vt_release(true, false, false, false, false,
+                                            false) &&
+              !compositor::vt_release_blocks_contract_service(true, false),
+          "a pre-connection VT signal cannot suspend compositor bootstrap");
 
   require(compositor::session_wait_message_allowed(
               GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) &&

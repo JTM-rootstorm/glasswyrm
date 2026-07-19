@@ -446,7 +446,11 @@ bool Compositor::shutdown_presentation(std::string& error) noexcept {
          glasswyrm::output::BackendStateResult::Complete;
 }
 
-void Compositor::disconnect() {
+bool Compositor::disconnect(std::string& error) {
+  error.clear();
+  const bool vrr_reset =
+      !vrr_contract_enabled_ || configure_vrr_contract(false, error);
+  if (!vrr_reset) return false;
   PresentationTransaction::abort(*this);
   pending_buffer_readiness_.reset();
   renderer_->disconnect();
@@ -469,7 +473,7 @@ void Compositor::disconnect() {
   snapshot_policy_ids_.clear();
   snapshot_output_ids_.clear();
   snapshot_surface_output_ids_.clear();
-  vrr_contract_enabled_ = false;
+  return true;
 }
 
 } // namespace gw::compositor

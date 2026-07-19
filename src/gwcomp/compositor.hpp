@@ -133,7 +133,7 @@ public:
   [[nodiscard]] bool presentation_suspended() const noexcept {
     return presentation_suspended_;
   }
-  void disconnect();
+  [[nodiscard]] bool disconnect(std::string& error);
 
   [[nodiscard]] const std::map<std::uint64_t, gwipc_buffer_release_reason>&
   releases() const noexcept { return releases_; }
