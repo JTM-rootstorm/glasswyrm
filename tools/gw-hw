@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""Fixed, local-only Glasswyrm hardware validation entrypoint."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+import tomllib
+
+
+SCHEMA_KEYS = {
+    "drm_device",
+    "connector",
+    "mode",
+    "tty",
+    "expected_min_refresh_hz",
+    "expected_max_refresh_hz",
+    "target_refresh_hz",
+    "monitor_model",
+    "edid_sha256",
+    "debugfs_connector_path",
+}
+STRING_KEYS = {
+    "drm_device",
+    "connector",
+    "mode",
+    "tty",
+    "monitor_model",
+    "edid_sha256",
+    "debugfs_connector_path",
+}
+INTEGER_KEYS = SCHEMA_KEYS - STRING_KEYS
+MODE_PATTERN = re.compile(r"([1-9][0-9]*)x([1-9][0-9]*)@([1-9][0-9]*)")
+CONNECTOR_PATTERN = re.compile(r"[A-Za-z0-9]+-[1-9][0-9]*")
+DRM_PATTERN = re.compile(r"/dev/dri/card([0-9]+)")
+TTY_PATTERN = re.compile(r"/dev/tty([1-9][0-9]*)")
+EDID_PATTERN = re.compile(r"[0-9a-f]{64}")
+MAX_CONFIG_BYTES = 16 * 1024
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def _safe_text(name: str, value: str) -> None:
+    if not value or len(value) > 4096 or any(ord(char) < 32 for char in value):
+        raise ConfigError(f"{name} must be nonempty printable text")
+
+
+def parse_config(path: Path) -> dict[str, object]:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except OSError as error:
+        raise ConfigError(f"configuration is unavailable: {error}") from error
+    try:
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode):
+            raise ConfigError("configuration must be a regular non-symlink file")
+        if status.st_mode & 0o022:
+            raise ConfigError("configuration must not be group/world writable")
+        if status.st_size > MAX_CONFIG_BYTES:
+            raise ConfigError("configuration exceeds 16384 bytes")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            contents = stream.read(MAX_CONFIG_BYTES + 1)
+        if len(contents) > MAX_CONFIG_BYTES:
+            raise ConfigError("configuration exceeds 16384 bytes")
+        parsed = tomllib.loads(contents.decode("utf-8"))
+    except ConfigError:
+        raise
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise ConfigError(f"invalid configuration: {error}") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+    keys = set(parsed)
+    if keys != SCHEMA_KEYS:
+        missing = ", ".join(sorted(SCHEMA_KEYS - keys)) or "none"
+        unknown = ", ".join(sorted(keys - SCHEMA_KEYS)) or "none"
+        raise ConfigError(f"schema mismatch; missing: {missing}; unknown: {unknown}")
+    for name in STRING_KEYS:
+        if not isinstance(parsed[name], str):
+            raise ConfigError(f"{name} must be a quoted string")
+        _safe_text(name, parsed[name])
+    for name in INTEGER_KEYS:
+        if isinstance(parsed[name], bool) or not isinstance(parsed[name], int):
+            raise ConfigError(f"{name} must be an integer")
+
+    drm = str(parsed["drm_device"])
+    connector = str(parsed["connector"])
+    mode = str(parsed["mode"])
+    tty = str(parsed["tty"])
+    debugfs = str(parsed["debugfs_connector_path"])
+    if not DRM_PATTERN.fullmatch(drm):
+        raise ConfigError("drm_device must match /dev/dri/cardN")
+    if not CONNECTOR_PATTERN.fullmatch(connector):
+        raise ConfigError("connector has an invalid DRM connector name")
+    mode_match = MODE_PATTERN.fullmatch(mode)
+    if not mode_match:
+        raise ConfigError("mode must match WIDTHxHEIGHT@MILLIHERTZ")
+    width, height, refresh_millihertz = map(int, mode_match.groups())
+    if width > 16_384 or height > 16_384 or refresh_millihertz > 1_000_000:
+        raise ConfigError("mode exceeds bounded dimensions or refresh")
+    if not TTY_PATTERN.fullmatch(tty):
+        raise ConfigError("tty must match /dev/ttyN with N greater than zero")
+    card_index = DRM_PATTERN.fullmatch(drm).group(1)  # type: ignore[union-attr]
+    expected_debugfs = f"/sys/kernel/debug/dri/{card_index}/{connector}"
+    if debugfs != expected_debugfs:
+        raise ConfigError(f"debugfs_connector_path must equal {expected_debugfs}")
+    if not EDID_PATTERN.fullmatch(str(parsed["edid_sha256"])):
+        raise ConfigError("edid_sha256 must be exactly 64 lowercase hex digits")
+    if len(str(parsed["monitor_model"])) > 128:
+        raise ConfigError("monitor_model exceeds 128 characters")
+
+    minimum = int(parsed["expected_min_refresh_hz"])
+    maximum = int(parsed["expected_max_refresh_hz"])
+    target = int(parsed["target_refresh_hz"])
+    if not (1 <= minimum < maximum <= 1000):
+        raise ConfigError("expected refresh range must satisfy 1 <= min < max <= 1000")
+    if not minimum <= target <= maximum:
+        raise ConfigError("target_refresh_hz must lie inside the expected range")
+    return parsed
+
+
+def target_distinguishes_fixed_refresh(config: dict[str, object]) -> bool:
+    mode_match = MODE_PATTERN.fullmatch(str(config["mode"]))
+    assert mode_match
+    fixed_millihertz = int(mode_match.group(3))
+    target_millihertz = int(config["target_refresh_hz"]) * 1000
+    return fixed_millihertz % target_millihertz != 0
+
+
+def _print_check(ok: bool, label: str, detail: str = "") -> bool:
+    suffix = f": {detail}" if detail else ""
+    print(f"[{'ok' if ok else 'failed'}] {label}{suffix}")
+    return ok
+
+
+def doctor(config_path: Path) -> int:
+    try:
+        config = parse_config(config_path)
+    except ConfigError as error:
+        print(f"[failed] configuration: {error}", file=sys.stderr)
+        return 1
+    passed = True
+    passed &= _print_check(True, "strict fixed schema", str(config_path))
+    passed &= _print_check(os.geteuid() == 0, "root privileges")
+
+    drm_path = Path(str(config["drm_device"]))
+    tty_path = Path(str(config["tty"]))
+    try:
+        drm_status = drm_path.stat()
+        drm_ok = stat.S_ISCHR(drm_status.st_mode)
+    except OSError:
+        drm_ok = False
+    passed &= _print_check(drm_ok, "DRM primary node", str(drm_path))
+    try:
+        tty_status = tty_path.stat()
+        tty_ok = stat.S_ISCHR(tty_status.st_mode)
+    except OSError:
+        tty_ok = False
+    passed &= _print_check(tty_ok, "spare VT node", str(tty_path))
+
+    card = drm_path.name
+    connector = str(config["connector"])
+    connector_root = Path("/sys/class/drm") / f"{card}-{connector}"
+    try:
+        connected = (connector_root / "status").read_text(encoding="ascii").strip() == "connected"
+    except OSError:
+        connected = False
+    passed &= _print_check(connected, "connector connected", connector)
+    try:
+        edid = (connector_root / "edid").read_bytes()
+        edid_matches = bool(edid) and hashlib.sha256(edid).hexdigest() == config["edid_sha256"]
+    except OSError:
+        edid_matches = False
+    passed &= _print_check(edid_matches, "EDID identity", str(config["monitor_model"]))
+    passed &= _print_check(Path(str(config["debugfs_connector_path"])).is_dir(),
+                           "debugfs connector path")
+    passed &= _print_check(target_distinguishes_fixed_refresh(config),
+                           "target cadence distinguishes fixed refresh")
+
+    print("[pending] libdrm atomic capability and VRR_ENABLED inspection")
+    print("[pending] competing DRM master and saved-state capture")
+    print("[result] hardware proof is not claimed by this skeleton")
+    return 0 if passed else 1
+
+
+RUN_STEPS = (
+    "capture original KMS, VRR, KD, VT, and getty state",
+    "start GWM",
+    "start DRM gwcomp with VRR report",
+    "start real-input glasswyrmd with output model/control/GW_VRR",
+    "launch m14_vrr_client",
+    "run policy Off cadence",
+    "verify property zero and negative timing",
+    "policy Fullscreen",
+    "enter fullscreen",
+    "verify property one and positive timing",
+    "leave fullscreen",
+    "verify property zero",
+    "enter borderless fullscreen",
+    "verify property one",
+    "policy Focused and windowed focus test",
+    "policy AppRequested no-request/Prefer/Disable",
+    "policy AlwaysEligible",
+    "return policy Off",
+    "run VT release/acquire while eligible",
+    "verify VRR disabled during inactive state",
+    "verify reevaluation after Active",
+    "restart GWM",
+    "restart compositor",
+    "verify candidate/effective state replay",
+    "capture a canonical frame/screenshot to prove pixels remain correct",
+    "stop client/session cleanly",
+    "restore original VRR/KMS/KD/VT/getty state",
+    "verify exact readback",
+    "validate the archive",
+)
+
+
+def milestone14(config_path: Path, confirmed: bool) -> int:
+    if not confirmed:
+        print("gw-hw: milestone14-vrr-test requires the literal --yes", file=sys.stderr)
+        return 2
+    result = doctor(config_path)
+    if result != 0:
+        print("gw-hw: doctor did not reach the integration-ready state", file=sys.stderr)
+        return 1
+    print("Fixed Milestone 14 run order:")
+    for index, step in enumerate(RUN_STEPS, 1):
+        print(f"  {index}. {step}")
+    print("gw-hw: execution remains disabled until the G2 runtime integration lands",
+          file=sys.stderr)
+    return 1
+
+
+def self_test() -> int:
+    valid = '''drm_device = "/dev/dri/card0"
+connector = "DP-1"
+mode = "2560x1440@144000"
+tty = "/dev/tty2"
+expected_min_refresh_hz = 48
+expected_max_refresh_hz = 144
+target_refresh_hz = 73
+monitor_model = "reviewed model"
+edid_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+debugfs_connector_path = "/sys/kernel/debug/dri/0/DP-1"
+'''
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "config.toml"
+        path.write_text(valid, encoding="utf-8")
+        parsed = parse_config(path)
+        if not target_distinguishes_fixed_refresh(parsed):
+            raise AssertionError("valid target did not distinguish fixed refresh")
+        for addition in (
+            'command = "rm -rf /"\n',
+            'password = "secret"\n',
+            'package = "x11-base/glasswyrm"\n',
+        ):
+            path.write_text(valid + addition, encoding="utf-8")
+            try:
+                parse_config(path)
+            except ConfigError:
+                pass
+            else:
+                raise AssertionError("forbidden arbitrary field was accepted")
+        path.write_text(valid.replace("target_refresh_hz = 73", "target_refresh_hz = 47"),
+                        encoding="utf-8")
+        try:
+            parse_config(path)
+        except ConfigError:
+            pass
+        else:
+            raise AssertionError("out-of-range target was accepted")
+        path.write_text(valid, encoding="utf-8")
+        path.chmod(0o666)
+        try:
+            parse_config(path)
+        except ConfigError:
+            pass
+        else:
+            raise AssertionError("group/world-writable configuration was accepted")
+    if (
+        len(RUN_STEPS) != 29
+        or RUN_STEPS[0] != "capture original KMS, VRR, KD, VT, and getty state"
+        or RUN_STEPS[-1] != "validate the archive"
+    ):
+        raise AssertionError("fixed hardware run order changed")
+    print("gw-hw self-test: ok")
+    return 0
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(
+        prog="gw-hw", description="Fixed local Glasswyrm hardware harness")
+    subparsers = result.add_subparsers(dest="command", required=True)
+    doctor_parser = subparsers.add_parser("doctor")
+    doctor_parser.add_argument("--config", required=True, type=Path)
+    milestone_parser = subparsers.add_parser("milestone14-vrr-test")
+    milestone_parser.add_argument("--config", required=True, type=Path)
+    milestone_parser.add_argument("--yes", action="store_true")
+    subparsers.add_parser("self-test", help=argparse.SUPPRESS)
+    return result
+
+
+def main(arguments: list[str] | None = None) -> int:
+    options = parser().parse_args(arguments)
+    if options.command == "doctor":
+        return doctor(options.config)
+    if options.command == "milestone14-vrr-test":
+        return milestone14(options.config, options.yes)
+    return self_test()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
