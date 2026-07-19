@@ -113,6 +113,14 @@ require_text "$library" "{canonical_ordinal,post_vt_ordinal} <= flip_ordinals & 
 require_text "$library" '[[ $logind_socket_enabled_before != masked-runtime ]]'
 require_text "$library" 'printf "screen-capture-failed\n" >"$1"'
 require_text "$library" 'sha256sum -- * >SHA256SUMS'
+require_text "$library" 'legacy_command configure 480 80 320 240'
+require_text "$library" '"$control_data/legacy-spanning-restored-left.ppm"'
+require_text "$library" '"$control_data/legacy-spanning-restored-right.ppm"'
+require_text "$library" 'cmp "$control_data/milestone13-legacy-spanning-left.ppm"'
+require_text "$library" 'cmp "$control_data/milestone13-legacy-spanning-right.ppm"'
+require_text "$library" 'cmp "$control_data/milestone13-flipped.ppm"'
+require_text "$library" '"$control_data/restart-left-before.ppm"'
+require_text "$library" '"$control_data/restart-right-before.ppm"'
 
 (
   unset GW_VM_MILESTONE13_LOADED

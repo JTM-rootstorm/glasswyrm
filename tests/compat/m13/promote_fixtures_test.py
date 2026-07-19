@@ -42,6 +42,20 @@ SOURCE_MAP = {
 COMMIT = "2" * 40
 
 
+def write_checksums(evidence: pathlib.Path) -> None:
+    names = sorted(path.name for path in evidence.iterdir()
+                   if path.name != "SHA256SUMS")
+    (evidence / "SHA256SUMS").write_text("".join(
+        f"{hashlib.sha256((evidence / name).read_bytes()).hexdigest()}  {name}\n"
+        for name in names))
+
+
+def write_archive(evidence: pathlib.Path, destination: pathlib.Path) -> None:
+    with tarfile.open(destination, "w") as archive:
+        for path in evidence.iterdir():
+            archive.add(path, arcname=path.name)
+
+
 def ppm(width: int, height: int, seed: int) -> bytes:
     colors = [bytes(((seed + offset) % 255 + 1,
                      (seed * 3 + offset * 5) % 255 + 1,
@@ -136,10 +150,7 @@ def write_sources(evidence: pathlib.Path) -> None:
     record["aggregate_hash"] = f"{validate_frame_sets.aggregate_hash(record):016x}"
     (evidence / SOURCE_MAP["frame-sets.jsonl"]).write_text(
         json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
-    names = sorted(path.name for path in evidence.iterdir())
-    (evidence / "SHA256SUMS").write_text("".join(
-        f"{hashlib.sha256((evidence / name).read_bytes()).hexdigest()}  {name}\n"
-        for name in names))
+    write_checksums(evidence)
 
 
 with tempfile.TemporaryDirectory() as name:
@@ -155,9 +166,8 @@ with tempfile.TemporaryDirectory() as name:
         "required_base_commit": "d3440d3b8df1533410a9a2c4be46f2eea0cfb88d",
         "tested_commit": COMMIT, "evidence_errors": []}) + "\n")
     write_sources(evidence)
-    with tarfile.open(artifacts / "milestone13-output-scaling-evidence.tar", "w") as archive:
-        for path in evidence.iterdir():
-            archive.add(path, arcname=path.name)
+    archive_path = artifacts / "milestone13-output-scaling-evidence.tar"
+    write_archive(evidence, archive_path)
     command = [sys.argv[1], "--artifact-dir", str(artifacts),
                "--output-dir", str(output)]
     subprocess.run(command, check=True)
@@ -167,17 +177,36 @@ with tempfile.TemporaryDirectory() as name:
         "legacy-spanning-left.ppm", "flipped.ppm"]
     assert not any(path.name.startswith("frame-0") for path in output.iterdir())
 
+    manifest_path = evidence / SOURCE_MAP["frame-sets.jsonl"]
+    manifest = json.loads(manifest_path.read_text())
+    raw_left = evidence / manifest["outputs"][0]["file"]
+    original_raw_left = raw_left.read_bytes()
+    original_manifest = manifest_path.read_text()
+    unmatched = ppm(640, 480, 240)
+    assert all(unmatched != (evidence / source).read_bytes()
+               for destination, source in SOURCE_MAP.items()
+               if destination.endswith(".ppm"))
+    raw_left.write_bytes(unmatched)
+    record = json.loads(original_manifest)
+    _, _, pixels = validate_frame_sets.read_ppm(raw_left)
+    record["outputs"][0]["fnv1a64"] = (
+        f"{validate_frame_sets.fnv1a64(pixels):016x}")
+    record["aggregate_hash"] = f"{validate_frame_sets.aggregate_hash(record):016x}"
+    manifest_path.write_text(
+        json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
+    write_checksums(evidence)
+    write_archive(evidence, archive_path)
+    no_match = subprocess.run(command, check=False, text=True,
+                              capture_output=True)
+    assert no_match.returncode != 0
+    assert "matches 0 named fixture PPMs" in no_match.stdout
+
+    raw_left.write_bytes(original_raw_left)
+    manifest_path.write_text(original_manifest)
     shutil.copyfile(evidence / SOURCE_MAP["legacy-spanning-left.ppm"],
                     evidence / SOURCE_MAP["aware-left.ppm"])
-    names = sorted(path.name for path in evidence.iterdir()
-                   if path.name != "SHA256SUMS")
-    (evidence / "SHA256SUMS").write_text("".join(
-        f"{hashlib.sha256((evidence / name).read_bytes()).hexdigest()}  {name}\n"
-        for name in names))
-    with tarfile.open(artifacts / "milestone13-output-scaling-evidence.tar",
-                      "w") as archive:
-        for path in evidence.iterdir():
-            archive.add(path, arcname=path.name)
+    write_checksums(evidence)
+    write_archive(evidence, archive_path)
     ambiguous = subprocess.run(command, check=False, text=True,
                                capture_output=True)
     assert ambiguous.returncode != 0
