@@ -36,7 +36,8 @@ x11::FramedRequest request(const x11::ByteOrder order,
 
 std::uint16_t u16(const std::vector<std::uint8_t>& bytes,
                   const x11::ByteOrder order, const std::size_t offset) {
-  x11::ByteReader reader(std::span(bytes).subspan(offset), order);
+  x11::ByteReader reader(std::span<const std::uint8_t>(bytes).subspan(offset),
+                         order);
   std::uint16_t value{};
   require(reader.read_u16(value), "decode GW_VRR u16");
   return value;
@@ -44,7 +45,8 @@ std::uint16_t u16(const std::vector<std::uint8_t>& bytes,
 
 std::uint32_t u32(const std::vector<std::uint8_t>& bytes,
                   const x11::ByteOrder order, const std::size_t offset) {
-  x11::ByteReader reader(std::span(bytes).subspan(offset), order);
+  x11::ByteReader reader(std::span<const std::uint8_t>(bytes).subspan(offset),
+                         order);
   std::uint32_t value{};
   require(reader.read_u32(value), "decode GW_VRR u32");
   return value;
@@ -92,7 +94,10 @@ void install_output(ServerState& state) {
   output.physical_width = 800;
   output.physical_height = 600;
   output.refresh_millihertz = 60'000;
+  output.scale = {1, 1};
+  output.transform = OutputTransform::Normal;
   output.primary = true;
+  output.generation = 1;
   OutputLayout layout;
   layout.descriptors.emplace(output_id, std::move(descriptor));
   layout.states.emplace(output_id, output);
@@ -241,7 +246,7 @@ void test_dispatch(const x11::ByteOrder order) {
 }  // namespace
 
 int main() {
-  test_dispatch(x11::ByteOrder::Little);
-  test_dispatch(x11::ByteOrder::Big);
+  test_dispatch(x11::ByteOrder::LittleEndian);
+  test_dispatch(x11::ByteOrder::BigEndian);
   return 0;
 }

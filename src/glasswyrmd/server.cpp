@@ -15,6 +15,8 @@ ExtensionCapability extension_capabilities(const Options& options) noexcept {
                                     : ExtensionCapability::None;
   if (options.scale_protocol)
     result = result | ExtensionCapability::ScaleProtocol;
+  if (options.vrr_protocol)
+    result = result | ExtensionCapability::VrrProtocol;
   return result;
 }
 

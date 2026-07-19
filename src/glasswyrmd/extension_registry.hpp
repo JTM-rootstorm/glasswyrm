@@ -19,12 +19,14 @@ enum class ExtensionKind {
   Composite,
   RandR,
   GwScale,
+  GwVrr,
 };
 
 enum class ExtensionCapability : std::uint32_t {
   None = 0,
   GameCompat = UINT32_C(1) << 0U,
   ScaleProtocol = UINT32_C(1) << 1U,
+  VrrProtocol = UINT32_C(1) << 2U,
 };
 
 [[nodiscard]] constexpr ExtensionCapability operator|(
@@ -54,7 +56,7 @@ struct ExtensionDescriptor {
   std::uint16_t maximum_minor_version{};
 };
 
-inline constexpr std::array<ExtensionDescriptor, 8> kExtensionRegistry{{
+inline constexpr std::array<ExtensionDescriptor, 9> kExtensionRegistry{{
     {"BIG-REQUESTS", ExtensionKind::BigRequests,
      ExtensionCapability::GameCompat, 128, 0, 0, 0, 0, 1, 0},
     {"MIT-SHM", ExtensionKind::MitShm, ExtensionCapability::GameCompat, 129,
@@ -71,6 +73,8 @@ inline constexpr std::array<ExtensionDescriptor, 8> kExtensionRegistry{{
      2, 136, 3, 1, 3},
     {"GW_SCALE", ExtensionKind::GwScale,
      ExtensionCapability::ScaleProtocol, 135, 69, 1, 139, 2, 0, 1},
+    {"GW_VRR", ExtensionKind::GwVrr,
+     ExtensionCapability::VrrProtocol, 136, 70, 1, 141, 2, 0, 1},
 }};
 
 [[nodiscard]] constexpr bool extension_ranges_are_valid() noexcept {

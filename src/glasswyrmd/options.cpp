@@ -23,7 +23,7 @@ void print_usage(std::ostream &output) {
             "[--version] [--wm-socket PATH --compositor-socket PATH] "
             "[--software-content] [--synthetic-input-socket PATH] "
             "[--game-compat] [--output-model] [--control-socket PATH] "
-            "[--scale-protocol] "
+            "[--scale-protocol] [--vrr-protocol] "
             "[--disable-extension NAME]... "
             "[--x11-trace PATH] [--libinput-device PATH]... "
             "[--xkb-rules NAME] [--xkb-model NAME] [--xkb-layout NAME] "
@@ -138,6 +138,14 @@ ArgumentResult parse_base_argument(std::string_view argument, int &index,
       return ArgumentResult::ExitFailure;
     }
     options.scale_protocol = true;
+    return ArgumentResult::Parsed;
+  }
+  if (argument == "--vrr-protocol") {
+    if (options.vrr_protocol) {
+      error << "glasswyrmd: duplicate option: --vrr-protocol\n";
+      return ArgumentResult::ExitFailure;
+    }
+    options.vrr_protocol = true;
     return ArgumentResult::Parsed;
   }
   if (argument == "--disable-extension") {
@@ -320,12 +328,21 @@ ParseOptionsResult validate_options(const Options &options,
     error << "glasswyrmd: --scale-protocol requires --output-model\n";
     return ParseOptionsResult::ExitFailure;
   }
+  if (options.vrr_protocol && !options.output_model) {
+    error << "glasswyrmd: --vrr-protocol requires --output-model\n";
+    return ParseOptionsResult::ExitFailure;
+  }
   if (options.control_socket && !options.output_model) {
     error << "glasswyrmd: --control-socket requires --output-model\n";
     return ParseOptionsResult::ExitFailure;
   }
   if (options.scale_protocol && !GW_HAS_EXPERIMENTAL) {
     error << "glasswyrmd: --scale-protocol is unavailable because this build "
+             "does not include experimental features\n";
+    return ParseOptionsResult::ExitFailure;
+  }
+  if (options.vrr_protocol && !GW_HAS_EXPERIMENTAL) {
+    error << "glasswyrmd: --vrr-protocol is unavailable because this build "
              "does not include experimental features\n";
     return ParseOptionsResult::ExitFailure;
   }

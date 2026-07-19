@@ -273,6 +273,7 @@ DispatchResult destroy_window(ServerState& state,
     (void)state.selections().clear_window(item.xid);
     (void)state.randr().clear_window(item.xid);
     (void)state.composite().remove_window(item.xid);
+    state.vrr().erase_window(item.xid);
   }
   return result;
 }

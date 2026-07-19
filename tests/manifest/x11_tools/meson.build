@@ -116,6 +116,8 @@ if get_option('glasswyrmd')
     ['randr-config', 'randr_config_test.cpp'],
     ['randr-event-wire', 'randr_event_wire_test.cpp'],
     ['gw-scale-dispatch', 'gw_scale_dispatch_test.cpp'],
+    ['gw-vrr-state', 'gw_vrr_state_test.cpp'],
+    ['gw-vrr-integration', 'gw_vrr_integration_test.cpp'],
     ['ewmh-root', 'ewmh_root_test.cpp'],
     ['ewmh-policy', 'ewmh_policy_test.cpp'],
     ['ewmh-client-message', 'ewmh_client_message_test.cpp'],
@@ -130,6 +132,14 @@ if get_option('glasswyrmd')
     )
     test(unit_case[0], unit_program, timeout: 10)
   endforeach
+
+  gw_vrr_dispatch_test = executable(
+    'gw_vrr_dispatch_test',
+    files(tests_source_dir / 'protocol/gw_vrr_dispatch_test.cpp'),
+    dependencies: gw_server_state_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gw-vrr-dispatch', gw_vrr_dispatch_test, timeout: 10)
 
   window_tree_test = executable(
     'window_tree_test',

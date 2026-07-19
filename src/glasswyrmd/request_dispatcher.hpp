@@ -193,6 +193,12 @@ struct DeferredScaleMutation {
   WindowScaleState scale;
 };
 
+struct DeferredVrrMutation {
+  std::uint32_t window{};
+  WindowVrrPreference preference{WindowVrrPreference::Default};
+  std::vector<std::uint8_t> accepted_reply;
+};
+
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
@@ -205,6 +211,7 @@ struct DispatchResult {
   std::optional<bool> deferred_override_redirect;
   std::optional<DeferredPolicyMutation> deferred_policy;
   std::optional<DeferredScaleMutation> deferred_scale;
+  std::optional<DeferredVrrMutation> deferred_vrr;
   std::vector<StructuralTransition> structural_transitions;
   std::vector<DrawableDamage> drawable_damage;
   std::vector<ExposeIntent> expose_intents;
@@ -255,6 +262,13 @@ struct DispatchResult {
     result.kind = DispatchKind::DeferredLifecycle;
     result.deferred_window = change.window;
     result.deferred_scale = std::move(change);
+    return result;
+  }
+  static DispatchResult deferred_vrr_change(DeferredVrrMutation change) {
+    DispatchResult result;
+    result.kind = DispatchKind::DeferredLifecycle;
+    result.deferred_window = change.window;
+    result.deferred_vrr = std::move(change);
     return result;
   }
 };

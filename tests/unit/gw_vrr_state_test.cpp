@@ -12,7 +12,8 @@ using gw::test::require;
 
 std::uint32_t u32(const std::vector<std::uint8_t>& bytes,
                   const x11::ByteOrder order, const std::size_t offset) {
-  x11::ByteReader reader(std::span(bytes).subspan(offset), order);
+  x11::ByteReader reader(std::span<const std::uint8_t>(bytes).subspan(offset),
+                         order);
   std::uint32_t value{};
   require(reader.read_u32(value), "decode GW_VRR u32");
   return value;
@@ -84,7 +85,7 @@ void test_notifications(const x11::ByteOrder order) {
 
 int main() {
   test_store_and_changes();
-  test_notifications(x11::ByteOrder::Little);
-  test_notifications(x11::ByteOrder::Big);
+  test_notifications(x11::ByteOrder::LittleEndian);
+  test_notifications(x11::ByteOrder::BigEndian);
   return 0;
 }
