@@ -105,6 +105,9 @@ require_text "$library" "states.index((48,48),origin+1)"
 require_text "$library" 'STOP_MAIN_IDENTITY_GONE'
 require_text "$library" 'STOP_EVENTFD_COUNT_BEFORE'
 require_text "$library" 'event_fd_closed=eventfd_before>0'
+require_text "$library" "full_copy_reason')=='output-configuration-changed'"
+require_text "$library" "{canonical_ordinal,post_vt_ordinal} <= flip_ordinals & frame_ordinals"
+require_text "$library" '[[ $logind_socket_enabled_before != masked-runtime ]]'
 require_text "$library" 'printf "screen-capture-failed\n" >"$1"'
 require_text "$library" 'wait_cursor_position "$left_id" 100 100'
 require_text "$library" 'wait_cursor_position "$right_id" 700 479'
