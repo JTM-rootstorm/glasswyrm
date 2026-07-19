@@ -220,5 +220,13 @@ vrr_reason_names(std::uint64_t reasons);
 void print_vrr(const Snapshot &snapshot,
                std::optional<std::string_view> selector, bool json,
                std::ostream &output);
+void append_vrr_output_json(const Snapshot &snapshot, std::uint64_t output_id,
+                            std::ostream &output);
+void append_vrr_output_text(const Snapshot &snapshot, std::uint64_t output_id,
+                            std::ostream &output);
+void append_vrr_window_json(const Snapshot &snapshot, std::uint32_t window_id,
+                            std::ostream &output);
+void append_vrr_window_text(const Snapshot &snapshot, std::uint32_t window_id,
+                            std::ostream &output);
 
 } // namespace glasswyrm::tools::output_client

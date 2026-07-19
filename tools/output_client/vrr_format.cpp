@@ -122,6 +122,119 @@ std::vector<std::string_view> vrr_reason_names(const std::uint64_t reasons) {
   return result;
 }
 
+void append_vrr_output_json(const Snapshot &snapshot,
+                            const std::uint64_t output_id,
+                            std::ostream &output) {
+  const auto capability = snapshot.vrr_capabilities.find(output_id);
+  const auto policy = snapshot.vrr_policies.find(output_id);
+  const auto state = snapshot.vrr_outputs.find(output_id);
+  const auto timing = snapshot.vrr_timings.find(output_id);
+  if (capability == snapshot.vrr_capabilities.end() ||
+      policy == snapshot.vrr_policies.end() ||
+      state == snapshot.vrr_outputs.end()) {
+    output << ",\"vrr\":null";
+    return;
+  }
+  output << ",\"vrr\":{\"policy\":\"" << vrr_policy_name(policy->second)
+         << "\",\"property_present\":"
+         << (capability->second.connector_property_present ? "true" : "false")
+         << ",\"hardware_capable\":"
+         << (capability->second.hardware_capable ? "true" : "false")
+         << ",\"kms_controllable\":"
+         << (capability->second.kms_controllable ? "true" : "false")
+         << ",\"simulated\":"
+         << (capability->second.simulated ? "true" : "false")
+         << ",\"range_millihertz\":";
+  if (capability->second.range_available)
+    output << '[' << capability->second.minimum_refresh_millihertz << ','
+           << capability->second.maximum_refresh_millihertz << ']';
+  else
+    output << "null";
+  output << ",\"decision\":\"" << vrr_decision_name(state->second.decision)
+         << "\",\"desired_enabled\":"
+         << (state->second.desired_enabled ? "true" : "false")
+         << ",\"effective_enabled\":"
+         << (state->second.effective_enabled ? "true" : "false")
+         << ",\"candidate_window\":" << state->second.candidate_window_id
+         << ",\"transition_serial\":" << state->second.transition_serial
+         << ",\"flip_timestamp_monotonic_ns\":"
+         << state->second.last_flip_timestamp_nanoseconds
+         << ",\"interval_ns\":" << state->second.last_interval_nanoseconds
+         << ",\"reasons\":";
+  json_reasons(output, state->second.reason_flags);
+  if (timing != snapshot.vrr_timings.end())
+    output << ",\"latest_timing_interval_ns\":"
+           << timing->second.interval_nanoseconds;
+  output << '}';
+}
+
+void append_vrr_output_text(const Snapshot &snapshot,
+                            const std::uint64_t output_id,
+                            std::ostream &output) {
+  const auto capability = snapshot.vrr_capabilities.find(output_id);
+  const auto policy = snapshot.vrr_policies.find(output_id);
+  const auto state = snapshot.vrr_outputs.find(output_id);
+  if (capability == snapshot.vrr_capabilities.end() ||
+      policy == snapshot.vrr_policies.end() ||
+      state == snapshot.vrr_outputs.end()) {
+    output << " vrr=unavailable";
+    return;
+  }
+  output << " vrr-policy=" << vrr_policy_name(policy->second)
+         << " vrr-capable="
+         << (capability->second.hardware_capable ? "true" : "false")
+         << " vrr-controllable="
+         << (capability->second.kms_controllable ? "true" : "false")
+         << " vrr-decision=" << vrr_decision_name(state->second.decision)
+         << " vrr-effective="
+         << (state->second.effective_enabled ? "true" : "false")
+         << " vrr-reasons=";
+  text_reasons(output, state->second.reason_flags);
+}
+
+void append_vrr_window_json(const Snapshot &snapshot,
+                            const std::uint32_t window_id,
+                            std::ostream &output) {
+  const auto state = snapshot.vrr_windows.find(window_id);
+  if (state == snapshot.vrr_windows.end()) {
+    output << ",\"vrr\":null";
+    return;
+  }
+  output << ",\"vrr\":{\"preference\":\""
+         << vrr_preference_name(state->second.preference)
+         << "\",\"policy_eligible\":"
+         << (state->second.policy_eligible ? "true" : "false")
+         << ",\"selected\":"
+         << (state->second.policy_selected ? "true" : "false")
+         << ",\"borderless_fullscreen\":"
+         << (state->second.borderless_fullscreen ? "true" : "false")
+         << ",\"exclusive_output_membership\":"
+         << (state->second.exclusive_output_membership ? "true" : "false")
+         << ",\"policy_generation\":" << state->second.policy_generation
+         << ",\"reasons\":";
+  json_reasons(output, state->second.reason_flags);
+  output << '}';
+}
+
+void append_vrr_window_text(const Snapshot &snapshot,
+                            const std::uint32_t window_id,
+                            std::ostream &output) {
+  const auto state = snapshot.vrr_windows.find(window_id);
+  if (state == snapshot.vrr_windows.end()) {
+    output << " vrr=unavailable";
+    return;
+  }
+  output << " vrr-preference=" << vrr_preference_name(state->second.preference)
+         << " vrr-eligible="
+         << (state->second.policy_eligible ? "true" : "false")
+         << " vrr-selected="
+         << (state->second.policy_selected ? "true" : "false")
+         << " vrr-borderless="
+         << (state->second.borderless_fullscreen ? "true" : "false")
+         << " vrr-reasons=";
+  text_reasons(output, state->second.reason_flags);
+}
+
 void print_vrr(const Snapshot &snapshot,
                const std::optional<std::string_view> selector, const bool json,
                std::ostream &output) {

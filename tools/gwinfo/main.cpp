@@ -10,9 +10,9 @@ namespace {
 
 void usage(std::ostream &output) {
   output << "Usage:\n"
-            "  gwinfo --socket PATH outputs [--json]\n"
-            "  gwinfo --socket PATH windows [--json]\n"
-            "  gwinfo --socket PATH all [--json]\n"
+            "  gwinfo --socket PATH outputs [--vrr] [--json]\n"
+            "  gwinfo --socket PATH windows [--vrr] [--json]\n"
+            "  gwinfo --socket PATH all [--vrr] [--json]\n"
             "  gwinfo --socket PATH vrr [OUTPUT] [--json]\n"
             "  gwinfo --help\n"
             "  gwinfo --version\n";
@@ -34,12 +34,15 @@ int main(const int argc, char **argv) {
   std::string command;
   std::optional<std::string> selector;
   bool json = false;
+  bool include_vrr = false;
   for (int index = 1; index < argc; ++index) {
     const std::string_view argument(argv[index]);
     if (argument == "--socket" && index + 1 < argc)
       socket = argv[++index];
     else if (argument == "--json")
       json = true;
+    else if (argument == "--vrr")
+      include_vrr = true;
     else if (command.empty() &&
              (argument == "outputs" || argument == "windows" ||
               argument == "all" || argument == "vrr"))
@@ -57,6 +60,11 @@ int main(const int argc, char **argv) {
     usage(std::cerr);
     return 2;
   }
+  if (command == "vrr" && include_vrr) {
+    std::cerr << "gwinfo: --vrr modifies outputs, windows, or all\n";
+    usage(std::cerr);
+    return 2;
+  }
   std::uint32_t flags = 0;
   if (command != "windows")
     flags |= GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_MODES |
@@ -66,6 +74,9 @@ int main(const int argc, char **argv) {
   if (command == "vrr")
     flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
             GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
+  else if (include_vrr)
+    flags |= GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
+             GWIPC_OUTPUT_QUERY_VRR;
   Client client(socket);
   Snapshot snapshot;
   std::string error;

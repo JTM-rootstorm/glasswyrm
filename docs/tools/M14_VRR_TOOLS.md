@@ -30,6 +30,9 @@ Inspect all or one output with:
 gwinfo --socket PATH vrr
 gwinfo --socket PATH vrr OUTPUT
 gwinfo --socket PATH vrr OUTPUT --json
+gwinfo --socket PATH outputs --vrr --json
+gwinfo --socket PATH windows --vrr --json
+gwinfo --socket PATH all --vrr --json
 ```
 
 Output includes policy, property presence, hardware capability,
@@ -39,8 +42,18 @@ ordered reason names. JSON also includes per-window surface, preference,
 eligibility, selection, focus, fullscreen/borderless, exclusive membership,
 generation, and reasons.
 
-Historical commands and queries remain unchanged. A historical peer that did
-not negotiate VRR receives no VRR records.
+`--vrr` is an explicit schema opt-in for the historical `outputs`, `windows`,
+and `all` commands. It appends a nested `vrr` object (or `null` when the
+negotiated snapshot has no matching record). Without that modifier, their JSON
+and text bytes remain exactly historical. The dedicated `vrr` command already
+requests that schema and therefore rejects the redundant modifier. A
+historical peer that did not negotiate VRR receives no VRR records.
+
+The C/C++ policy and report vocabulary uses the canonical CamelCase reason
+registry frozen in `vrr-reasons.json`, such as `WindowDidNotRequest`.
+Command-line JSON and text deliberately present the same bits as stable
+kebab-case names, such as `window-did-not-request`. This is a one-to-one
+presentation mapping; bit ordering and precedence do not change.
 
 ## gwcomp diagnostics
 
@@ -50,9 +63,10 @@ simulation is configured with repeatable
 `--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ`; names must be unique and refer
 to configured headless outputs, and the maximum cannot exceed nominal refresh.
 
-The report uses separate capability, decision, timing, summary, and restore
-records. It excludes wall-clock time and does not alter frame manifests or
-pixel hashes.
+The headless report uses separate `capability`, `decision`, `timing`, `summary`,
+and `restore` records. DRM reports use the corresponding names prefixed with
+`vrr-`. Both exclude wall-clock time and do not alter frame manifests or pixel
+hashes.
 
 ## Validation harnesses
 
