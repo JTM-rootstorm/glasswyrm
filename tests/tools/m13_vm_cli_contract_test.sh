@@ -57,6 +57,10 @@ for expected in \
   'scene_line_before=$(wc -l <"$scenes/scene.jsonl")' \
   '--disable' '--enable' validate_frame_sets.py \
   '--backend drm' '--scale 4/3' '--transform rotate-180' \
+  '--setenv="PATH=$software/src:/usr/bin:/bin"' \
+  '--property="DeviceAllow=$keyboard r"' '--property="DeviceAllow=$pointer r"' \
+  '--property=StandardOutput=journal' '--property=StandardError=journal' \
+  '--property=KillMode=mixed' '--property=SuccessExitStatus=143' \
   'drm-screen-ready' 'screen-captured' '--scale 1/1' '--transform normal' \
   milestone13-output-scaling-evidence.tar milestone13-facts.env; do
   require_text "$temporary/guest" "$expected"
@@ -91,6 +95,9 @@ require_text "$repo_root/tests/integration/gwinput_m8.cpp" \
 require_text "$library" '--hold-until "$crossing_release"'
 require_text "$library" '--step-directory "$crossing_steps"'
 require_text "$library" 'synthetic_pid=$!'
+require_text "$library" 'compare_software_pid=0'
+require_text "$library" '"$compare_software_pid"'
+require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]'
 require_text "$library" 'wait_cursor_position "$left_id" 100 100'
 require_text "$library" 'wait_cursor_position "$right_id" 700 479'
 require_text "$library" ': >"$crossing_release"'
