@@ -282,8 +282,8 @@ bool remaining_contracts() {
 
 int main() {
   const auto api = gwipc_get_api_version();
-  const bool ok = check(api.major == 0 && api.minor == 8 && api.patch == 0,
-                        "API version is not 0.8.0") &&
+  const bool ok = check(api.major == 0 && api.minor == 9 && api.patch == 0,
+                        "API version is not 0.9.0") &&
                   descriptor_round_trip() && remaining_contracts();
   return ok ? 0 : 1;
 }

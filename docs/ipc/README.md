@@ -6,6 +6,8 @@ established its transport, Milestone 4 added the compositor contract used by
 window-policy contract used by `gwm`. Milestone 13 extends the same wire-major
 with API 0.8 output inventory, multi-output policy, surface membership, and
 same-UID output-control contracts.
+Milestone 14 adds capability-gated VRR metadata, policy, and presentation
+timing through API 0.9.
 
 - [GWIPC API 0](GWIPC_API_0.md) documents the installed C ABI and C++ wrappers.
 - [GWIPC Wire Version 1](GWIPC_WIRE_V1.md) documents record encoding and the
@@ -23,6 +25,8 @@ same-UID output-control contracts.
   zero-descriptor rules.
 - [Milestone 13 output management](M13_OUTPUT_MANAGEMENT.md) summarizes the
   capability profiles, complete snapshots, control results, and role bounds.
+- [Milestone 14 variable refresh](M14_VRR_CONTRACT.md) freezes the additive
+  VRR records, authority boundaries, validation rules, and response ordering.
 - [Decision 0005](../decisions/0005-versioned-ipc-foundation.md) records the
   architectural boundary.
 - [Decision 0007](../decisions/0007-window-manager-policy-scaffold.md) records

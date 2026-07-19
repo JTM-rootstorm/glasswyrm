@@ -63,3 +63,25 @@ GWIPC_0.8 {
     gwipc_contract_encode_output_configuration_acknowledged;
     gwipc_decoded_output_configuration_acknowledged;
 } GWIPC_0.7;
+
+GWIPC_0.9 {
+  global:
+    gwipc_contract_encode_output_vrr_capability_upsert;
+    gwipc_decoded_output_vrr_capability_upsert;
+    gwipc_contract_encode_output_vrr_policy_upsert;
+    gwipc_decoded_output_vrr_policy_upsert;
+    gwipc_contract_encode_output_vrr_state_upsert;
+    gwipc_decoded_output_vrr_state_upsert;
+    gwipc_contract_encode_surface_vrr_state;
+    gwipc_decoded_surface_vrr_state;
+    gwipc_contract_encode_policy_window_vrr_upsert;
+    gwipc_decoded_policy_window_vrr_upsert;
+    gwipc_contract_encode_policy_output_vrr_upsert;
+    gwipc_decoded_policy_output_vrr_upsert;
+    gwipc_contract_encode_policy_window_vrr_state;
+    gwipc_decoded_policy_window_vrr_state;
+    gwipc_contract_encode_policy_output_vrr_state;
+    gwipc_decoded_policy_output_vrr_state;
+    gwipc_contract_encode_presentation_timing;
+    gwipc_decoded_presentation_timing;
+} GWIPC_0.8;

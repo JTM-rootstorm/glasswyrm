@@ -255,7 +255,7 @@ void test_control_contracts() {
   OutputConfigurationCommit decoded_commit;
   OutputConfigurationAcknowledged decoded_acknowledged;
   require(encode(query).size() == kOutputStateQueryPayloadSize &&
-              encode(query) == hex("31000000000000000f00000000000000") &&
+              encode(query) == hex("31000000000000001f00000000000000") &&
               decode(encode(query), decoded_query) == CodecStatus::Ok,
           "OutputStateQuery matches its exact flag golden");
   require(encode(commit).size() == kOutputConfigurationCommitPayloadSize &&
@@ -273,6 +273,16 @@ void test_control_contracts() {
                   CodecStatus::Ok &&
               decoded_acknowledged.enabled_output_count == 2,
           "OutputConfigurationAcknowledged matches its exact result golden");
+  for (const auto result : {OutputConfigurationResult::UnsupportedVrr,
+                            OutputConfigurationResult::VrrPolicyRejected,
+                            OutputConfigurationResult::VrrPresenterRejected}) {
+    acknowledged.result = result;
+    require(decode(encode(acknowledged), decoded_acknowledged) ==
+                    CodecStatus::Ok &&
+                decoded_acknowledged.result == result,
+            "M14 output configuration results round-trip");
+  }
+  acknowledged.result = OutputConfigurationResult::Accepted;
 
   require_exact_framing(query,
                         "query rejects every truncation and trailing byte");
@@ -288,11 +298,11 @@ void test_control_contracts() {
   commit.base_generation = 0;
   require(decode(encode(commit), decoded_commit) == CodecStatus::InvalidValue,
           "configuration commit requires a base generation");
-  acknowledged.result = static_cast<OutputConfigurationResult>(13);
+  acknowledged.result = static_cast<OutputConfigurationResult>(16);
   require(decode(encode(acknowledged), decoded_acknowledged) ==
               CodecStatus::InvalidValue,
           "acknowledgement rejects unknown results");
-  query = {0x31, UINT32_C(0x10)};
+  query = {0x31, UINT32_C(0x20)};
   require(decode(encode(query), decoded_query) == CodecStatus::InvalidValue,
           "query rejects unknown inventory flags");
   commit = {0x41, 9, output, 1};

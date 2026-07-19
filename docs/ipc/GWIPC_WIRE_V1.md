@@ -64,6 +64,9 @@ The 64-bit capability bits are:
 | 19 | SurfaceOutputMembership |
 | 20 | ScaleAwareSurfaces |
 | 21 | OutputControl |
+| 22 | VrrMetadata |
+| 23 | VrrPolicy |
+| 24 | PresentationTiming |
 
 Unknown offered bits are ignored. Unknown required bits reject the handshake.
 Negotiated capabilities are the offered intersection and must contain the
@@ -99,6 +102,8 @@ each output to 16,777,216 pixels, all enabled outputs to 67,108,864 pixels, and
 the logical root to 32,767 by 32,767. Output scales are reduced rationals from
 1/1 through 4/1 with denominator at most 120. The server accepts at most eight
 active same-UID output-control peers.
+The nine fixed-size M14 VRR payloads and their semantic validation rules are
+defined in [the M14 VRR contract](M14_VRR_CONTRACT.md).
 
 ## Handshake And Control
 

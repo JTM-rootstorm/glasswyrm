@@ -4,6 +4,7 @@
 #include <glasswyrm/ipc/output.h>
 #include <glasswyrm/ipc/policy.h>
 #include <glasswyrm/ipc/session.h>
+#include <glasswyrm/ipc/vrr.h>
 
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
@@ -11,6 +12,7 @@
 #include "ipc/wire/output_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "ipc/wire/session_contract.hpp"
+#include "ipc/wire/vrr_contract.hpp"
 
 #include <algorithm>
 #include <new>
@@ -32,7 +34,12 @@ using ContractValue = std::variant<w::OutputUpsert, w::OutputRemove,
     w::SessionStateAcknowledged, w::OutputDescriptorUpsert,
     w::OutputModeUpsert, w::SurfaceOutputState, w::PolicyOutputUpsert,
     w::PolicyWindowOutputHint, w::OutputStateQuery,
-    w::OutputConfigurationCommit, w::OutputConfigurationAcknowledged>;
+    w::OutputConfigurationCommit, w::OutputConfigurationAcknowledged,
+    w::OutputVrrCapabilityUpsert, w::OutputVrrPolicyUpsert,
+    w::OutputVrrStateUpsert, w::SurfaceVrrState,
+    w::PolicyWindowVrrUpsert, w::PolicyOutputVrrUpsert,
+    w::PolicyWindowVrrState, w::PolicyOutputVrrState,
+    w::PresentationTiming>;
 struct gwipc_decoded_contract {
   std::uint16_t type{};
   ContractValue value{w::OutputRemove{}};
@@ -64,6 +71,15 @@ struct gwipc_decoded_contract {
   gwipc_output_state_query output_state_query{};
   gwipc_output_configuration_commit output_configuration_commit{};
   gwipc_output_configuration_acknowledged output_configuration_acknowledged{};
+  gwipc_output_vrr_capability_upsert output_vrr_capability_upsert{};
+  gwipc_output_vrr_policy_upsert output_vrr_policy_upsert{};
+  gwipc_output_vrr_state_upsert output_vrr_state_upsert{};
+  gwipc_surface_vrr_state surface_vrr_state{};
+  gwipc_policy_window_vrr_upsert policy_window_vrr_upsert{};
+  gwipc_policy_output_vrr_upsert policy_output_vrr_upsert{};
+  gwipc_policy_window_vrr_state policy_window_vrr_state{};
+  gwipc_policy_output_vrr_state policy_output_vrr_state{};
+  gwipc_presentation_timing presentation_timing{};
 };
 
 namespace {
@@ -279,6 +295,137 @@ gwipc_status gwipc_contract_encode_output_configuration_acknowledged(
       out);
 }
 
+gwipc_status gwipc_contract_encode_output_vrr_capability_upsert(
+    const gwipc_output_vrr_capability_upsert* v,
+    gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->connector_property_present > 1 ||
+      v->hardware_capable > 1 || v->kms_controllable > 1 ||
+      v->simulated > 1 || v->range_available > 1 ||
+      v->atomic_required > 1 || v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::OutputVrrCapabilityUpsert{
+          v->output_id, v->connector_property_present != 0,
+          v->hardware_capable != 0, v->kms_controllable != 0,
+          v->simulated != 0, v->range_available != 0,
+          v->atomic_required != 0, v->minimum_refresh_millihertz,
+          v->maximum_refresh_millihertz, v->reason_flags, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_output_vrr_policy_upsert(
+    const gwipc_output_vrr_policy_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out) return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(w::OutputVrrPolicyUpsert{
+                          v->output_id,
+                          static_cast<w::VrrPolicyMode>(v->mode), v->flags},
+                      out);
+}
+
+gwipc_status gwipc_contract_encode_output_vrr_state_upsert(
+    const gwipc_output_vrr_state_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->desired_enabled > 1 ||
+      v->effective_enabled > 1 || v->property_readback_valid > 1 ||
+      v->session_active > 1)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::OutputVrrStateUpsert{
+          v->output_id, static_cast<w::VrrPolicyMode>(v->requested_mode),
+          static_cast<w::VrrDecision>(v->decision), v->desired_enabled != 0,
+          v->effective_enabled != 0, v->property_readback_valid != 0,
+          v->session_active != 0, v->candidate_window_id,
+          v->candidate_surface_id, v->reason_flags, v->state_generation,
+          v->transition_serial, v->last_commit_id,
+          v->last_presented_generation, v->last_flip_sequence, v->flags,
+          v->last_flip_timestamp_nanoseconds, v->last_interval_nanoseconds},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_surface_vrr_state(
+    const gwipc_surface_vrr_state* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->policy_selected > 1 ||
+      v->policy_eligible > 1 || v->focused > 1 || v->fullscreen > 1 ||
+      v->borderless_fullscreen > 1 || v->exclusive_output_membership > 1 ||
+      v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::SurfaceVrrState{
+          v->surface_id, v->window_id, v->output_id,
+          static_cast<w::VrrWindowPreference>(v->preference),
+          v->policy_selected != 0, v->policy_eligible != 0,
+          v->focused != 0, v->fullscreen != 0,
+          v->borderless_fullscreen != 0,
+          v->exclusive_output_membership != 0, v->reason_flags,
+          v->policy_generation, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_policy_window_vrr_upsert(
+    const gwipc_policy_window_vrr_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out) return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyWindowVrrUpsert{
+          v->window_id, static_cast<w::VrrWindowPreference>(v->preference),
+          v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_policy_output_vrr_upsert(
+    const gwipc_policy_output_vrr_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->hardware_capable > 1 ||
+      v->kms_controllable > 1 || v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyOutputVrrUpsert{
+          v->output_id, static_cast<w::VrrPolicyMode>(v->mode),
+          v->hardware_capable != 0, v->kms_controllable != 0, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_policy_window_vrr_state(
+    const gwipc_policy_window_vrr_state* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->selected > 1 || v->eligible > 1 ||
+      v->focused > 1 || v->fullscreen > 1 ||
+      v->borderless_fullscreen > 1 || v->exclusive_output_membership > 1 ||
+      v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyWindowVrrState{
+          v->window_id, v->output_id,
+          static_cast<w::VrrWindowPreference>(v->preference),
+          v->selected != 0, v->eligible != 0, v->focused != 0,
+          v->fullscreen != 0, v->borderless_fullscreen != 0,
+          v->exclusive_output_membership != 0, v->reason_flags, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_policy_output_vrr_state(
+    const gwipc_policy_output_vrr_state* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->desired_enabled > 1 ||
+      v->candidate_required > 1 || v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyOutputVrrState{
+          v->output_id, static_cast<w::VrrPolicyMode>(v->mode),
+          v->selected_window_id, v->desired_enabled != 0,
+          v->candidate_required != 0, v->reason_flags, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_presentation_timing(
+    const gwipc_presentation_timing* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->effective_vrr_enabled > 1 ||
+      v->timestamp_available > 1 || v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PresentationTiming{
+          v->output_id, v->commit_id, v->presented_generation,
+          v->flip_sequence, v->flags, v->kernel_timestamp_nanoseconds,
+          v->interval_nanoseconds, v->effective_vrr_enabled != 0,
+          v->timestamp_available != 0},
+      out);
+}
+
 const uint8_t* gwipc_contract_payload_data(const gwipc_contract_payload* p,size_t* n) { if(n)*n=p?p->bytes.size():0; return !p||p->bytes.empty()?nullptr:p->bytes.data(); }
 void gwipc_contract_payload_destroy(gwipc_contract_payload* p) { delete p; }
 
@@ -311,6 +458,15 @@ gwipc_status gwipc_contract_decode_message(const gwipc_message* m, gwipc_decoded
       DECODE_CASE(GWIPC_MESSAGE_OUTPUT_STATE_QUERY,w::OutputStateQuery)
       DECODE_CASE(GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT,w::OutputConfigurationCommit)
       DECODE_CASE(GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,w::OutputConfigurationAcknowledged)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_VRR_CAPABILITY_UPSERT,w::OutputVrrCapabilityUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,w::OutputVrrPolicyUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT,w::OutputVrrStateUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_SURFACE_VRR_STATE,w::SurfaceVrrState)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT,w::PolicyWindowVrrUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT,w::PolicyOutputVrrUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_WINDOW_VRR_STATE,w::PolicyWindowVrrState)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_OUTPUT_VRR_STATE,w::PolicyOutputVrrState)
+      DECODE_CASE(GWIPC_MESSAGE_PRESENTATION_TIMING,w::PresentationTiming)
       default: delete d; return GWIPC_STATUS_INVALID_ARGUMENT; }
 #undef DECODE_CASE
     if(s!=w::CodecStatus::Ok){delete d;return codec_status(s);}
@@ -350,6 +506,15 @@ SIMPLE_ACCESS(policy_window_output_hint,GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT,
 SIMPLE_ACCESS(output_state_query,GWIPC_MESSAGE_OUTPUT_STATE_QUERY,w::OutputStateQuery,{sizeof(o),v.query_id,v.flags,{}})
 SIMPLE_ACCESS(output_configuration_commit,GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT,w::OutputConfigurationCommit,{sizeof(o),v.configuration_id,v.base_generation,v.primary_output_id,v.flags,{}})
 SIMPLE_ACCESS(output_configuration_acknowledged,GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,w::OutputConfigurationAcknowledged,{sizeof(o),v.request_id,v.applied_generation,(gwipc_output_configuration_result)v.result,v.flags,v.primary_output_id,v.root_logical_width,v.root_logical_height,v.enabled_output_count,0,{}})
+SIMPLE_ACCESS(output_vrr_capability_upsert,GWIPC_MESSAGE_OUTPUT_VRR_CAPABILITY_UPSERT,w::OutputVrrCapabilityUpsert,{sizeof(o),v.output_id,(uint8_t)v.connector_property_present,(uint8_t)v.hardware_capable,(uint8_t)v.kms_controllable,(uint8_t)v.simulated,(uint8_t)v.range_available,(uint8_t)v.atomic_required,0,v.minimum_refresh_millihertz,v.maximum_refresh_millihertz,v.reason_flags,v.flags,{}})
+SIMPLE_ACCESS(output_vrr_policy_upsert,GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,w::OutputVrrPolicyUpsert,{sizeof(o),v.output_id,(gwipc_vrr_policy_mode)v.mode,v.flags,{}})
+SIMPLE_ACCESS(output_vrr_state_upsert,GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT,w::OutputVrrStateUpsert,{sizeof(o),v.output_id,(gwipc_vrr_policy_mode)v.requested_mode,(gwipc_vrr_decision)v.decision,(uint8_t)v.desired_enabled,(uint8_t)v.effective_enabled,(uint8_t)v.property_readback_valid,(uint8_t)v.session_active,v.candidate_window_id,v.candidate_surface_id,v.reason_flags,v.state_generation,v.transition_serial,v.last_commit_id,v.last_presented_generation,v.last_flip_sequence,v.flags,v.last_flip_timestamp_nanoseconds,v.last_interval_nanoseconds,{}})
+SIMPLE_ACCESS(surface_vrr_state,GWIPC_MESSAGE_SURFACE_VRR_STATE,w::SurfaceVrrState,{sizeof(o),v.surface_id,v.window_id,v.output_id,(gwipc_vrr_window_preference)v.preference,(uint8_t)v.policy_selected,(uint8_t)v.policy_eligible,(uint8_t)v.focused,(uint8_t)v.fullscreen,(uint8_t)v.borderless_fullscreen,(uint8_t)v.exclusive_output_membership,0,v.reason_flags,v.policy_generation,v.flags,{}})
+SIMPLE_ACCESS(policy_window_vrr_upsert,GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT,w::PolicyWindowVrrUpsert,{sizeof(o),v.window_id,(gwipc_vrr_window_preference)v.preference,v.flags,{}})
+SIMPLE_ACCESS(policy_output_vrr_upsert,GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT,w::PolicyOutputVrrUpsert,{sizeof(o),v.output_id,(gwipc_vrr_policy_mode)v.mode,(uint8_t)v.hardware_capable,(uint8_t)v.kms_controllable,0,v.flags,{}})
+SIMPLE_ACCESS(policy_window_vrr_state,GWIPC_MESSAGE_POLICY_WINDOW_VRR_STATE,w::PolicyWindowVrrState,{sizeof(o),v.window_id,v.output_id,(gwipc_vrr_window_preference)v.preference,(uint8_t)v.selected,(uint8_t)v.eligible,(uint8_t)v.focused,(uint8_t)v.fullscreen,(uint8_t)v.borderless_fullscreen,(uint8_t)v.exclusive_output_membership,0,v.reason_flags,v.flags,{}})
+SIMPLE_ACCESS(policy_output_vrr_state,GWIPC_MESSAGE_POLICY_OUTPUT_VRR_STATE,w::PolicyOutputVrrState,{sizeof(o),v.output_id,(gwipc_vrr_policy_mode)v.mode,v.selected_window_id,(uint8_t)v.desired_enabled,(uint8_t)v.candidate_required,0,v.reason_flags,v.flags,{}})
+SIMPLE_ACCESS(presentation_timing,GWIPC_MESSAGE_PRESENTATION_TIMING,w::PresentationTiming,{sizeof(o),v.output_id,v.commit_id,v.presented_generation,v.flip_sequence,v.flags,v.kernel_timestamp_nanoseconds,v.interval_nanoseconds,(uint8_t)v.effective_vrr_enabled,(uint8_t)v.timestamp_available,0,{}})
 #undef SIMPLE_ACCESS
 
 const gwipc_output_upsert* gwipc_decoded_output_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_OUTPUT_UPSERT)return nullptr;const auto&v=std::get<w::OutputUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->output_upsert;o={sizeof(o),v.output_id,(uint8_t)v.enabled,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.physical_pixel_width,v.physical_pixel_height,v.refresh_millihertz,v.scale_numerator,v.scale_denominator,(gwipc_transform)v.transform,color(v.color),{}};return&o;}

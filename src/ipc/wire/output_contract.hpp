@@ -39,7 +39,8 @@ inline constexpr std::uint32_t kQueryOutputDescriptors = UINT32_C(1) << 0U;
 inline constexpr std::uint32_t kQueryOutputModes = UINT32_C(1) << 1U;
 inline constexpr std::uint32_t kQueryOutputLayout = UINT32_C(1) << 2U;
 inline constexpr std::uint32_t kQueryOutputWindows = UINT32_C(1) << 3U;
-inline constexpr std::uint32_t kKnownOutputQueryFlags = UINT32_C(0x0f);
+inline constexpr std::uint32_t kQueryOutputVrr = UINT32_C(1) << 4U;
+inline constexpr std::uint32_t kKnownOutputQueryFlags = UINT32_C(0x1f);
 
 enum class OutputKind : std::uint16_t { Headless = 1, Drm = 2 };
 enum class SurfaceScaleMode : std::uint16_t { Legacy = 1, ScaledPixmap = 2 };
@@ -56,6 +57,9 @@ enum class OutputConfigurationResult : std::uint16_t {
   CompositorRejected,
   PresenterRejected,
   InternalError,
+  UnsupportedVrr,
+  VrrPolicyRejected,
+  VrrPresenterRejected,
 };
 
 struct OutputDescriptorUpsert {
