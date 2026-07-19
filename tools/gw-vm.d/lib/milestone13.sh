@@ -125,6 +125,9 @@ for key in "${required_results[@]}"; do result[$key]=failed; done
 clang=unavailable layout_generation=unknown output_ids=unknown
 headless_aggregate_hash=unknown drm_mode=1024x768
 service_checks=0
+STOP_PROCESS_COUNT_BEFORE=0 STOP_EVENTFD_COUNT_BEFORE=0
+STOP_PROCESS_COUNT_AFTER=0 STOP_EVENTFD_COUNT_AFTER=0
+STOP_MAIN_IDENTITY_GONE=false STOP_CGROUP_EMPTY=false
 randr_pid=0 legacy_pid=0 scale_pid=0 synthetic_pid=0 compare_software_pid=0
 gles_legacy_pid=0 drm_legacy_pid=0
 getty_state_captured=false logind_state_captured=false original_vt=
@@ -353,11 +356,64 @@ start_headless_peers() {
   wait_socket /tmp/.X11-unix/X99
 }
 stop_transient_unit() {
-  local unit=$1 main_pid
+  local unit=$1 main_pid control_group cgroup_path pid stat_tail starttime
+  local eventfd_count=0
+  local -a pids=() identities=()
   main_pid=$(systemctl show "$unit" -p MainPID --value)
   [[ $main_pid =~ ^[0-9]+$ && $main_pid -gt 0 ]]
+  control_group=$(systemctl show "$unit" -p ControlGroup --value)
+  [[ $control_group == /* && $control_group != *..* ]]
+  cgroup_path=/sys/fs/cgroup$control_group
+  [[ -r $cgroup_path/cgroup.procs ]]
+  mapfile -t pids <"$cgroup_path/cgroup.procs"
+  ((${#pids[@]} > 0))
+  [[ " ${pids[*]} " == *" $main_pid "* ]]
+  for pid in "${pids[@]}"; do
+    [[ -r /proc/$pid/stat ]]
+    stat_tail=$(</proc/$pid/stat); stat_tail=${stat_tail##*) }
+    set -- $stat_tail
+    starttime=${20}
+    identities+=("$pid:$starttime")
+    while IFS= read -r link; do
+      [[ $link == 'anon_inode:[eventfd]' ]] && eventfd_count=$((eventfd_count + 1))
+    done < <(for link in /proc/"$pid"/fd/*; do readlink "$link" 2>/dev/null || true; done)
+  done
+  STOP_PROCESS_COUNT_BEFORE=${#pids[@]}
+  STOP_EVENTFD_COUNT_BEFORE=$eventfd_count
   systemctl stop "$unit"
-  ! kill -0 "$main_pid" 2>/dev/null
+  for _ in {1..200}; do
+    local alive=0 identity current_tail current_start
+    for identity in "${identities[@]}"; do
+      pid=${identity%%:*}; starttime=${identity#*:}
+      [[ -r /proc/$pid/stat ]] || continue
+      current_tail=$(</proc/$pid/stat); current_tail=${current_tail##*) }
+      set -- $current_tail
+      current_start=${20}
+      [[ $current_start != "$starttime" ]] || alive=$((alive + 1))
+    done
+    local remaining=0
+    if [[ -r $cgroup_path/cgroup.procs ]]; then
+      while IFS= read -r pid; do [[ -z $pid ]] || remaining=$((remaining + 1)); done \
+        <"$cgroup_path/cgroup.procs"
+    fi
+    ((alive == 0 && remaining == 0)) && break
+    sleep .05
+  done
+  STOP_PROCESS_COUNT_AFTER=$((alive + remaining))
+  STOP_EVENTFD_COUNT_AFTER=0
+  STOP_MAIN_IDENTITY_GONE=true
+  for identity in "${identities[@]}"; do
+    [[ ${identity%%:*} != "$main_pid" ]] && continue
+    pid=${identity%%:*}; starttime=${identity#*:}
+    if [[ -r /proc/$pid/stat ]]; then
+      stat_tail=$(</proc/$pid/stat); stat_tail=${stat_tail##*) }
+      set -- $stat_tail
+      [[ ${20} != "$starttime" ]] || STOP_MAIN_IDENTITY_GONE=false
+    fi
+  done
+  ((remaining == 0)) && STOP_CGROUP_EMPTY=true || STOP_CGROUP_EMPTY=false
+  ((STOP_PROCESS_COUNT_AFTER == 0))
+  [[ $STOP_MAIN_IDENTITY_GONE == true && $STOP_CGROUP_EMPTY == true ]]
   service_checks=$((service_checks + 1))
 }
 stop_headless_peers() {
@@ -994,6 +1050,7 @@ systemd-run --unit=glasswyrm-m13-drm --property=Type=simple \
   --input-device "$keyboard" --input-device "$pointer" --output-model \
   --control-socket "$runtime/control.sock" --scale-protocol --game-compat \
   --renderer software --mirror-dump-dir "$drm" \
+  --scene-manifest "$control_data/drm-scene.jsonl" \
   --renderer-report "$artifact_dir/milestone13-renderer-drm.jsonl" \
   --drm-report "$artifact_dir/milestone13-drm-report.jsonl"
 for _ in {1..400}; do [[ -S $runtime/control.sock ]] && break; sleep .05; done
@@ -1065,20 +1122,99 @@ cp "$canonical" "$artifact_dir/milestone13-drm-canonical.ppm"
 cmp "$artifact_dir/milestone13-drm-canonical.ppm" \
   "$artifact_dir/milestone13-drm-screen.ppm"
 result[screenshot_equality]=passed
-drm_frames_before=$(find "$drm" -type f -name '*.ppm' | wc -l)
-chvt 1; chvt 2
-"$uinput_helper" run --control-socket "$control/input.sock" --scenario post-vt \
-  --result-json "$control_data/post-vt-input.json"
-python3 - "$control_data/post-vt-input.json" <<'PY'
+read -r vt_releases_before vt_acquires_before < <(python3 - \
+  "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
 import json,sys
-d=json.load(open(sys.argv[1])); assert d['scenario']=='post-vt'
+r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+print(sum(x.get('record')=='vt' and x.get('transition')=='release' for x in r),
+      sum(x.get('record')=='vt' and x.get('transition')=='acquire' for x in r))
+PY
+)
+chvt 1
+python3 - "$artifact_dir/milestone13-drm-report.jsonl" release \
+  "$vt_releases_before" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); transition=sys.argv[2]; before=int(sys.argv[3])
+deadline=time.monotonic()+10
+while True:
+    try:
+        records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        matches=[r for r in records if r.get('record')=='vt' and
+                 r.get('transition')==transition]
+        assert len(matches)>before and matches[-1]['master_owned'] is False
+        break
+    except (AssertionError,KeyError,json.JSONDecodeError):
+        if time.monotonic()>=deadline: raise SystemExit('VT release was not observed')
+        time.sleep(.05)
+PY
+chvt "${target_vt#/dev/tty}"
+python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
+  "$vt_acquires_before" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); before=int(sys.argv[2]); deadline=time.monotonic()+10
+while True:
+    try:
+        records=[json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        releases=[r for r in records if r.get('record')=='vt' and r.get('transition')=='release']
+        acquires=[r for r in records if r.get('record')=='vt' and r.get('transition')=='acquire']
+        assert len(acquires)>before and releases
+        acquire=acquires[-1]
+        assert acquire['master_owned'] is True and acquire['full_modeset'] is True
+        assert acquire['committed_hash']==releases[-1]['committed_hash']!='0000000000000000'
+        break
+    except (AssertionError,KeyError,json.JSONDecodeError):
+        if time.monotonic()>=deadline: raise SystemExit('VT acquire was not observed')
+        time.sleep(.05)
+PY
+drm_scene_before=$(wc -l <"$control_data/drm-scene.jsonl")
+drm_frames_before=$(find "$drm" -type f -name '*.ppm' | wc -l)
+drm_flip_before=$(python3 - "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
+import json,sys
+r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+print(max(x['ordinal'] for x in r if x.get('record') in ('modeset','flip')))
+PY
+)
+"$uinput_helper" run --control-socket "$control/input.sock" \
+  --scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"
+python3 - "$control_data/post-vt-pointer-anchor.json" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); assert d['scenario']=='pointer-anchor'
 assert d['status']=='completed' and d['event_count']>0
 PY
+python3 - "$control_data/drm-scene.jsonl" "$drm_scene_before" \
+  "$control_data/drm-scaled.json" <<'PY'
+import json,pathlib,sys,time
+path=pathlib.Path(sys.argv[1]); before=int(sys.argv[2])
+output=json.load(open(sys.argv[3]))['outputs'][0]['id']; deadline=time.monotonic()+10
+while True:
+    try:
+        records=[json.loads(line) for line in path.read_text().splitlines()[before:] if line.strip()]
+        states=[]
+        for record in records:
+            for cursor in record.get('cursors',[]):
+                if cursor.get('primary_output_id')==output:
+                    states.append((cursor.get('x'),cursor.get('y')))
+        origin=states.index((0,0)); final=states.index((48,48),origin+1)
+        assert final>origin
+        break
+    except (AssertionError,ValueError,json.JSONDecodeError):
+        if time.monotonic()>=deadline:
+            raise SystemExit('post-VT cursor anchor did not traverse (0,0) to (48,48)')
+        time.sleep(.05)
+PY
 for _ in {1..400}; do
-  (( $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before )) && break
+  drm_flip_after=$(python3 - "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
+import json,sys
+r=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+print(max(x['ordinal'] for x in r if x.get('record') in ('modeset','flip')))
+PY
+)
+  (( drm_flip_after > drm_flip_before && \
+     $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before )) && break
   sleep .05
 done
-(( $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before ))
+(( drm_flip_after > drm_flip_before && \
+   $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before ))
 post_vt_frame=$(find "$drm" -type f -name '*.ppm' -print | sort -V | tail -n1)
 cmp "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame"
 result[vt_replay]=passed
@@ -1096,14 +1232,28 @@ assert (o['scale_numerator'],o['scale_denominator'])==(1,1)
 assert o['transform']=='normal'
 PY
 stop_transient_unit glasswyrm-m13-drm.service
+drm_process_count_before=$STOP_PROCESS_COUNT_BEFORE
+drm_eventfd_count_before=$STOP_EVENTFD_COUNT_BEFORE
+drm_process_count_after=$STOP_PROCESS_COUNT_AFTER
+drm_eventfd_count_after=$STOP_EVENTFD_COUNT_AFTER
+drm_main_identity_gone=$STOP_MAIN_IDENTITY_GONE
+drm_cgroup_empty=$STOP_CGROUP_EMPTY
 python3 - "$artifact_dir/milestone13-drm-report.jsonl" \
   "$artifact_dir/milestone13-renderer-drm.jsonl" \
   "$artifact_dir/milestone13-drm-canonical.ppm" "$post_vt_frame" \
-  "$artifact_dir/milestone13-drm-representation.json" <<'PY'
+  "$artifact_dir/milestone13-drm-representation.json" \
+  "$drm_process_count_before" "$drm_eventfd_count_before" \
+  "$drm_process_count_after" "$drm_eventfd_count_after" \
+  "$drm_main_identity_gone" "$drm_cgroup_empty" <<'PY'
 import hashlib,json,sys
 drm=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 renderer=[json.loads(line) for line in open(sys.argv[2]) if line.strip()]
-assert drm and renderer and not any(item['record']=='fatal' for item in drm)
+process_before,eventfd_before,process_after,eventfd_after=map(int,sys.argv[6:10])
+main_gone=sys.argv[10]=='true'; cgroup_empty=sys.argv[11]=='true'
+no_fatal=(not any(item.get('record')=='fatal' for item in drm) and
+          not any(item.get('disposition')=='fatal' or item.get('error') is not None
+                  for item in renderer))
+assert drm and renderer and no_fatal
 releases=[item for item in drm if item['record']=='vt' and item['transition']=='release']
 acquires=[item for item in drm if item['record']=='vt' and item['transition']=='acquire']
 assert releases and acquires
@@ -1117,16 +1267,24 @@ assert frames and all(item['selected']=='software' and item['error'] is None
 scaled=[output for frame in frames for output in frame['outputs']
         if output['scale_numerator']==4 and output['scale_denominator']==3
         and output['transform']=='rotate-180']
-assert scaled and all(output['texture_cache_bytes']==0 for output in scaled)
+texture_cache_zero=(bool(scaled) and
+                    all(output['texture_cache_bytes']==0 for output in scaled) and
+                    cgroup_empty and process_after==0)
+main_pid_zero=main_gone and cgroup_empty and process_after==0 and process_before>0
+event_fd_closed=eventfd_before>0 and eventfd_after==0 and cgroup_empty
+assert texture_cache_zero and main_pid_zero and event_fd_closed
 canonical=hashlib.sha256(open(sys.argv[3],'rb').read()).hexdigest()
 post_vt=hashlib.sha256(open(sys.argv[4],'rb').read()).hexdigest()
 assert canonical==post_vt
 json.dump({'schema':1,'passed':True,'scale':[4,3],'transform':'rotate-180',
  'canonical_sha256':canonical,'post_vt_sha256':post_vt,
  'vt_release_count':len(releases),'vt_acquire_count':len(acquires),
- 'resource_release':{'main_pid_zero':True,'event_fd_closed':True,
+ 'resource_release':{'main_pid_zero':main_pid_zero,'event_fd_closed':event_fd_closed,
   'framebuffer_cleanup':restore['framebuffer_cleanup'],
-  'master_drop':restore['master_drop'],'texture_cache_zero':True,'no_fatal':True}},
+  'master_drop':restore['master_drop'],'texture_cache_zero':texture_cache_zero,
+  'no_fatal':no_fatal,'process_count_before':process_before,
+  'eventfd_count_before':eventfd_before,'process_count_after':process_after,
+  'eventfd_count_after':eventfd_after,'cgroup_empty':cgroup_empty}},
  open(sys.argv[5],'w'),sort_keys=True)
 PY
 stop_transient_unit gw-uinput-m13.service

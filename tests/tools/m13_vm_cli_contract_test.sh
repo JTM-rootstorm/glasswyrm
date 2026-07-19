@@ -61,6 +61,7 @@ for expected in \
   '--property="DeviceAllow=$keyboard r"' '--property="DeviceAllow=$pointer r"' \
   '--property=StandardOutput=journal' '--property=StandardError=journal' \
   '--property=KillMode=mixed' '--property=SuccessExitStatus=143' \
+  '--scene-manifest "$control_data/drm-scene.jsonl"' \
   'drm-screen-ready' 'screen-captured' '--scale 1/1' '--transform normal' \
   milestone13-output-scaling-evidence.tar milestone13-facts.env; do
   require_text "$temporary/guest" "$expected"
@@ -98,6 +99,12 @@ require_text "$library" 'synthetic_pid=$!'
 require_text "$library" 'compare_software_pid=0'
 require_text "$library" '"$compare_software_pid"'
 require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]'
+require_text "$library" '--scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"'
+require_text "$library" "states.index((0,0))"
+require_text "$library" "states.index((48,48),origin+1)"
+require_text "$library" 'STOP_MAIN_IDENTITY_GONE'
+require_text "$library" 'STOP_EVENTFD_COUNT_BEFORE'
+require_text "$library" 'event_fd_closed=eventfd_before>0'
 require_text "$library" 'wait_cursor_position "$left_id" 100 100'
 require_text "$library" 'wait_cursor_position "$right_id" 700 479'
 require_text "$library" ': >"$crossing_release"'
