@@ -2,7 +2,7 @@
 
 ## Version And ABI
 
-The installed C API is version 0.8.0 and the shared library has SOVERSION 0.
+The installed C API is version 0.9.0 and the shared library has SOVERSION 0.
 `gwipc_get_api_version()` reports the library API version;
 `gwipc_get_max_wire_version()` independently reports the highest supported wire
 version. ABI compatibility must not be inferred from wire compatibility.
@@ -21,7 +21,8 @@ API 0.5 adds synthetic-input contracts; API 0.6 adds session-state and
 interactive-policy contracts plus cursor-surface capability negotiation; and
 API 0.7 adds capability-gated eventfd CPU-buffer synchronization. API 0.8 adds
 output inventory, surface-output membership, multi-output policy, scale-aware
-surface negotiation, and output-control contracts.
+surface negotiation, and output-control contracts. API 0.9 adds variable
+refresh metadata, policy, effective state, and presentation timing.
 Wire 1.0 remains unchanged.
 
 ## Installed Consumer Matrix
@@ -29,14 +30,14 @@ Wire 1.0 remains unchanged.
 `tests/install/gwipc_staged_consumers_test.sh` installs the selected build into
 an isolated `DESTDIR`, resolves `gwipc` only through that staged `pkg-config`
 file, and compiles, links, and runs C and C++ consumers for every additive API
-generation from 0.1 through 0.8. Run it after compiling the build tree:
+generation from 0.1 through 0.9. Run it after compiling the build tree:
 
 ```sh
 tests/install/gwipc_staged_consumers_test.sh "$PWD" "$PWD/build-m13"
 ```
 
 The Milestone 11 VM acceptance invoked the then-current matrix before declaring
-its API consumer result passed; Milestone 13 invokes the expanded 0.1-through-0.8
+its API consumer result passed; Milestone 14 invokes the expanded 0.1-through-0.9
 matrix. The consumer sources intentionally use only the API surface available
 in their named generation; no source-tree include path or build-tree library
 path is accepted by the staged runner.
@@ -58,6 +59,7 @@ binaries.
 | 0.6 | `gwipc_session_c_consumer.c` | `gwipc_session_cpp_consumer.cpp` | session, interactive policy, and cursor capability |
 | 0.7 | `gwipc_sync_c_consumer.c` | `gwipc_sync_cpp_consumer.cpp` | eventfd CPU-buffer synchronization |
 | 0.8 | `gwipc_output_c_consumer.c` | `gwipc_output_cpp_consumer.cpp` | output inventory, membership, policy, and control |
+| 0.9 | `gwipc_vrr_c_consumer.c` | `gwipc_vrr_cpp_consumer.cpp` | VRR metadata, policy, state, and timing |
 
 ## Typed Control And Contracts
 
@@ -124,13 +126,15 @@ output-control peers.
 Descriptor capability flags are Connected, ArbitraryHeadlessMode, ModeFixed,
 ScaleConfigurable, TransformConfigurable, PrimaryEligible, and
 PhysicalDimensionsKnown, exposed as the `GWIPC_OUTPUT_CAP_*` bits. Query flags
-independently request Descriptors, Modes, Layout, and Windows through
+independently request Descriptors, Modes, Layout, Windows, and VRR through
 `GWIPC_OUTPUT_QUERY_*`. Surface scale mode is
 `GWIPC_SURFACE_SCALE_LEGACY` or `GWIPC_SURFACE_SCALE_SCALED_PIXMAP`.
 `gwipc_output_configuration_result` contains Accepted, StaleGeneration, Busy,
 InvalidLayout, UnknownOutput, UnsupportedMode, UnsupportedScale,
 UnsupportedTransform, PolicyRejected, CompositorRejected, PresenterRejected,
 and InternalError.
+API 0.9 appends UnsupportedVrr, VrrPolicyRejected, and VrrPresenterRejected
+without renumbering historical results.
 
 Every API 0.8 record has an encoder and a decoded accessor using the existing
 `gwipc_contract_payload` and `gwipc_decoded_contract` ownership model. Variable
@@ -152,6 +156,12 @@ All public input structures begin with `struct_size` and end with reserved-zero
 storage. Boolean, enum, identifier, dimension, flag, and serial constraints are
 validated before an encoding is returned. Public decoders reject truncated or
 trailing payload data.
+
+API 0.9 installs `<glasswyrm/ipc/vrr.h>`, adds capability bits for VRR
+metadata, VRR policy, and presentation timing, and adds the nine fixed-size
+records documented in [the M14 VRR contract](M14_VRR_CONTRACT.md). The new
+encode/accessor symbols are assigned to `GWIPC_0.9`; all older symbol versions
+are retained. Every M14 record carries zero file descriptors.
 
 ## Object Lifetimes
 

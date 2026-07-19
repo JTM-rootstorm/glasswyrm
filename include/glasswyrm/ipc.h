@@ -12,5 +12,6 @@
 #include <glasswyrm/ipc/policy.h>
 #include <glasswyrm/ipc/session.h>
 #include <glasswyrm/ipc/version.h>
+#include <glasswyrm/ipc/vrr.h>
 
 #endif

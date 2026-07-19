@@ -29,7 +29,7 @@ print("true" if matches[0]["value"] else "false")
 unset PKG_CONFIG_PATH
 export PKG_CONFIG_LIBDIR=${pc_file%/*}
 export PKG_CONFIG_SYSROOT_DIR=$stage
-[[ $(pkg-config --modversion gwipc) == 0.8.0 ]]
+[[ $(pkg-config --modversion gwipc) == 0.9.0 ]]
 read -r -a flags <<<"$(pkg-config --cflags --libs gwipc)"
 [[ " ${flags[*]} " != *"$source_root"* &&
    " ${flags[*]} " != *"$build_root"* ]]
@@ -51,6 +51,8 @@ else
 fi
 
 consumers=(
+  '0.9|gwipc_vrr_c_consumer.c|c'
+  '0.9|gwipc_vrr_cpp_consumer.cpp|c++'
   '0.1|gwipc_transport_c_consumer.c|c'
   '0.1|gwipc_transport_cpp_consumer.cpp|c++'
   '0.2|gwipc_c_consumer.c|c'

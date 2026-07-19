@@ -1,4 +1,19 @@
 if get_option('libgwipc')
+  gwipc_vrr_c_consumer = executable(
+    'gwipc_vrr_c_consumer',
+    files(tests_source_dir / 'install/gwipc_vrr_c_consumer.c'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.9-vrr-c-consumer', gwipc_vrr_c_consumer, timeout: 10)
+  gwipc_vrr_cpp_consumer = executable(
+    'gwipc_vrr_cpp_consumer',
+    files(tests_source_dir / 'install/gwipc_vrr_cpp_consumer.cpp'),
+    dependencies: gwipc_dep,
+    install: false,
+  )
+  test('gwipc-api-0.9-vrr-cpp-consumer', gwipc_vrr_cpp_consumer, timeout: 10)
+
   gwipc_output_c_consumer = executable(
     'gwipc_output_c_consumer',
     files(tests_source_dir / 'install/gwipc_output_c_consumer.c'),
@@ -80,6 +95,14 @@ if get_option('libgwipc')
   )
   test('gwipc-output-contract', gwipc_output_contract_test, timeout: 10)
 
+  gwipc_vrr_contract_test = executable(
+    'gwipc_vrr_contract_test',
+    files(tests_source_dir / 'unit/ipc/vrr_contract_test.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-vrr-contract', gwipc_vrr_contract_test, timeout: 10)
+
   gwipc_buffer_sync_validation_test = executable(
     'gwipc_buffer_sync_validation_test',
     files(
@@ -93,6 +116,20 @@ if get_option('libgwipc')
   )
   test('gwipc-buffer-sync-validation', gwipc_buffer_sync_validation_test,
        timeout: 10)
+
+  gwipc_vrr_connection_validation_test = executable(
+    'gwipc_vrr_connection_validation_test',
+    files(
+      tests_source_dir / 'unit/ipc/vrr_connection_validation_test.cpp',
+      tests_source_dir / '../src/ipc/connection_validation.cpp',
+      tests_source_dir / '../src/ipc/connection_output_validation.cpp',
+      tests_source_dir / '../src/ipc/message.cpp',
+    ),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-vrr-connection-validation',
+       gwipc_vrr_connection_validation_test, timeout: 10)
 
   gwipc_policy_contract_test = executable(
     'gwipc_policy_contract_test',
@@ -132,6 +169,14 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-public-output-api', gwipc_public_output_api_test, timeout: 10)
+
+  gwipc_public_vrr_api_test = executable(
+    'gwipc_public_vrr_api_test',
+    files(tests_source_dir / 'unit/ipc/public_vrr_api_test.cpp'),
+    dependencies: [gwipc_dep, gwipc_wire_dep],
+    include_directories: test_source_root_include,
+  )
+  test('gwipc-public-vrr-api', gwipc_public_vrr_api_test, timeout: 10)
 
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',

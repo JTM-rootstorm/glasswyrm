@@ -5,6 +5,7 @@
 #include "ipc/wire/input_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "ipc/wire/session_contract.hpp"
+#include "ipc/wire/vrr_contract.hpp"
 
 #include <algorithm>
 #include <new>
@@ -168,6 +169,15 @@ gwipc_status prepare_reply(gwipc_connection& connection,
       return GWIPC_STATUS_INVALID_STATE;
     changes.frame_acknowledged = true;
   }
+  if (message.type == GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT) {
+    wire::OutputVrrStateUpsert value;
+    const auto expected = connection.incoming_frame_commits.find(
+        message.reply_to);
+    if (wire::decode(payload, value) != wire::CodecStatus::Ok ||
+        expected == connection.incoming_frame_commits.end() ||
+        expected->second != value.last_commit_id)
+      return GWIPC_STATUS_INVALID_STATE;
+  }
   if (message.type == GWIPC_MESSAGE_POLICY_ACKNOWLEDGED) {
     wire::PolicyAcknowledged value;
     const auto expected = connection.incoming_policy_commits.find(
@@ -274,6 +284,18 @@ gwipc_status validate_incoming_reply(
                               envelope,
                               "frame acknowledgement does not match commit");
     connection.pending_frame_commits.erase(expected);
+  }
+  if (envelope.type == wire::MessageType::OutputVrrStateUpsert) {
+    wire::OutputVrrStateUpsert value;
+    const auto expected =
+        connection.pending_frame_commits.find(envelope.reply_to);
+    if (expected == connection.pending_frame_commits.end() ||
+        wire::decode(payload, value) != wire::CodecStatus::Ok ||
+        value.last_commit_id != expected->second)
+      return protocol_failure(
+          connection, wire::ProtocolErrorCode::UnexpectedReply, envelope,
+          "VRR state does not match pending frame commit");
+    return GWIPC_STATUS_OK;
   }
   if (envelope.type == wire::MessageType::PolicyAcknowledged) {
     wire::PolicyAcknowledged value;

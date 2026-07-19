@@ -445,7 +445,7 @@ CodecStatus decode(const std::span<const std::uint8_t> bytes,
   decoded.result = static_cast<OutputConfigurationResult>(result);
   const auto status = finish(
       reader, decoded.request_id != 0 && decoded.applied_generation != 0 &&
-                  result >= 1 && result <= 12 && decoded.flags == 0 &&
+                  result >= 1 && result <= 15 && decoded.flags == 0 &&
                   decoded.primary_output_id != 0 &&
                   decoded.root_logical_width != 0 &&
                   decoded.root_logical_width <= 32'767 &&
