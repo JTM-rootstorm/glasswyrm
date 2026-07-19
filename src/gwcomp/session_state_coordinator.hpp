@@ -10,11 +10,6 @@
 
 namespace glasswyrm::compositor {
 
-[[nodiscard]] constexpr bool session_wait_message_allowed(
-    const std::uint16_t type) noexcept {
-  return type == GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED;
-}
-
 enum class CoordinatedSessionState {
   Disabled,
   Active,

@@ -367,7 +367,14 @@ void RuntimeReactor::service_session_messages() {
     (void)gwipc_message_payload(message.get(), &size);
     payload_bytes += size;
     ++messages;
-    if (session_wait_message_allowed(gwipc_message_type(message.get()))) {
+    const auto output_query = service_output_inventory_query(*message);
+    if (output_query == OutputInventoryDisposition::RejectPeer ||
+        output_query == OutputInventoryDisposition::Fatal) {
+      break;
+    } else if (output_query == OutputInventoryDisposition::Handled) {
+      continue;
+    } else if (session_wait_message_route(gwipc_message_type(message.get())) ==
+               SessionWaitMessageRoute::Acknowledgement) {
       gwipc_session_state_acknowledged acknowledged{};
       std::uint64_t reply_to = 0;
       std::string error;
@@ -390,10 +397,12 @@ void RuntimeReactor::service_session_messages() {
         }
       }
     } else {
-      std::fprintf(stderr,
-                   "gwcomp: non-session message received while session acknowledgement is pending\n");
-      stopping_ = true;
-      exit_status_ = 1;
+      // The peer may have queued one ordinary transaction before observing the
+      // session request. Drain that FIFO prefix through the normal validator;
+      // the existing turn bounds and session timeout keep this fail-closed.
+      apply_dispatch(dispatch_contract_message(
+          producer_.get(), message.get(), peer_role_, *peer_profile_,
+          options_.max_frames, compositor_));
     }
   }
   if (session_state_.waiting() &&

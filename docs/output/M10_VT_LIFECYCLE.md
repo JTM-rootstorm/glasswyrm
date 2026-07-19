@@ -24,10 +24,12 @@ VT, allocation, logging, or compositor work.
 When SessionState is negotiated for an M11 real-input session, release first
 quiesces presentation and requests Inactive from `glasswyrmd`. DRM master is
 dropped and the VT release acknowledged only after the correlated reply
-confirms that libinput is suspended. Acquire acknowledges the VT, reacquires
-DRM master, restores the committed frame by complete modeset, then requests
-Active. Producer processing resumes only after real input acknowledges a
-successful resume. Timeout, rejection, or malformed correlation is fatal and
+confirms that libinput is suspended. Transactions already queued ahead of that
+reply are drained through the normal validator under the existing per-turn
+bounds; later producer processing remains stopped. Acquire acknowledges the VT,
+reacquires DRM master, restores the committed frame by complete modeset, then
+requests Active. Producer processing resumes only after real input acknowledges
+a successful resume. Timeout, rejection, or malformed correlation is fatal and
 enters restoration.
 
 When SessionState is not negotiated, the exact M10 sequence below remains in
