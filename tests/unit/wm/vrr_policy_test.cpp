@@ -66,8 +66,9 @@ void off_and_fullscreen_modes() {
   require(evaluated && evaluated.policy.outputs.at(10).desired_enabled &&
               evaluated.policy.outputs.at(10).selected_window_id == 1001 &&
               evaluated.policy.windows.at(1001).borderless_fullscreen &&
-              evaluated.policy.windows.at(1001).selected,
-          "Fullscreen selects an exact borderless-fullscreen window");
+              evaluated.policy.windows.at(1001).selected &&
+              evaluated.policy.windows.at(1001).reason_flags == 0,
+          "Fullscreen selects borderless geometry without rejection reasons");
 
   value = fixture();
   value.inputs.outputs.at(10).mode = VrrPolicyMode::Fullscreen;
