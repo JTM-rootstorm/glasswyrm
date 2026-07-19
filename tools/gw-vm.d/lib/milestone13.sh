@@ -67,7 +67,7 @@ verify_milestone13_source_identity() {
   local status unexpected='' line current
   status=$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all) || return
   while IFS= read -r line; do
-    [[ -z $line || $line == '?? Plans/'* || $line == '?? .codex/'* ]] ||
+    [[ -z $line ]] || milestone13_source_status_ignored "$line" ||
       unexpected+="${unexpected:+$'\n'}$line"
   done <<<"$status"
   [[ -z $unexpected ]] || {
@@ -76,6 +76,12 @@ verify_milestone13_source_identity() {
   }
   current=$(git -C "$REPO_ROOT" rev-parse HEAD) || return
   [[ -z $M13_TESTED_COMMIT || $current == "$M13_TESTED_COMMIT" ]]
+}
+
+milestone13_source_status_ignored() {
+  local line=$1
+  [[ $line == '?? Plans/'* || $line == '?? .codex/'* ||
+     $line == '?? tests/'*'/__pycache__/'*.pyc ]]
 }
 
 prepare_milestone13_evidence() {
@@ -1071,7 +1077,10 @@ systemd-run --unit=glasswyrm-m13-drm --property=Type=simple \
   --scene-manifest "$control_data/drm-scene.jsonl" \
   --renderer-report "$artifact_dir/milestone13-renderer-drm.jsonl" \
   --drm-report "$artifact_dir/milestone13-drm-report.jsonl"
-for _ in {1..400}; do [[ -S $runtime/control.sock ]] && break; sleep .05; done
+for _ in {1..400}; do
+  [[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]] && break
+  sleep .05
+done
 [[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]
 "$software/tools/gwout" --socket "$runtime/control.sock" set "$connector" \
   --scale 4/3 --transform rotate-180 --json >>"$artifact_dir/milestone13-gwout.log"
@@ -1541,7 +1550,7 @@ write_milestone13_summary() {
     --tested-commit "${M13_TESTED_COMMIT:-unknown}" \
     --failure-stage "$failure")
   [[ $requested == true ]] && command+=(--require-pass)
-  "${command[@]}"
+  PYTHONDONTWRITEBYTECODE=1 "${command[@]}"
 }
 
 milestone13_runtime_test() {

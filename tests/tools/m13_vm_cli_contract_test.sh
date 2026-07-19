@@ -99,6 +99,8 @@ require_text "$library" 'synthetic_pid=$!'
 require_text "$library" 'compare_software_pid=0'
 require_text "$library" '"$compare_software_pid"'
 require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]'
+require_text "$library" "\$line == '?? tests/'*'/__pycache__/'*.pyc"
+require_text "$library" 'PYTHONDONTWRITEBYTECODE=1 "${command[@]}"'
 require_text "$library" '--scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"'
 require_text "$library" "assert any(state!=baseline for state in states)"
 require_text "$library" 'output=int(output,16) if isinstance(output,str) else output'
@@ -110,6 +112,18 @@ require_text "$library" "full_copy_reason')=='output-configuration-changed'"
 require_text "$library" "{canonical_ordinal,post_vt_ordinal} <= flip_ordinals & frame_ordinals"
 require_text "$library" '[[ $logind_socket_enabled_before != masked-runtime ]]'
 require_text "$library" 'printf "screen-capture-failed\n" >"$1"'
+
+(
+  unset GW_VM_MILESTONE13_LOADED
+  # shellcheck source=/dev/null
+  source "$library"
+  milestone13_source_status_ignored \
+    '?? tests/compat/m13/__pycache__/validate_frame_sets.cpython-314.pyc' ||
+    fail 'Python bytecode cache should not invalidate M13 source identity'
+  if milestone13_source_status_ignored '?? tests/compat/m13/random_probe.cpp'; then
+    fail 'untracked implementation source must invalidate M13 source identity'
+  fi
+)
 require_text "$library" 'wait_cursor_position "$left_id" 100 100'
 require_text "$library" 'wait_cursor_position "$right_id" 700 479'
 require_text "$library" ': >"$crossing_release"'
