@@ -858,6 +858,17 @@ assert d['present_serial']==1 and d['reset_scale']==1
 PY
 result[scaled_pixmap]=passed result[gw_scale_events]=passed
 
+before_frames=$(frame_count); legacy_command configure 480 80 320 240
+wait_frames_after "$before_frames"
+assert_window_memberships "$left_id,$right_id" \
+  "$control_data/legacy-spanning-restored.json"
+copy_latest_output "$left_id" "$control_data/legacy-spanning-restored-left.ppm"
+copy_latest_output "$right_id" "$control_data/legacy-spanning-restored-right.ppm"
+cmp "$control_data/milestone13-legacy-spanning-left.ppm" \
+  "$control_data/legacy-spanning-restored-left.ppm"
+cmp "$control_data/milestone13-legacy-spanning-right.ppm" \
+  "$control_data/legacy-spanning-restored-right.ppm"
+
 before_frames=$(frame_count)
 "$software/tools/gwout" --socket "$runtime/control.sock" set RIGHT \
   --transform rotate-90 --json >>"$artifact_dir/milestone13-gwout.log"
@@ -887,6 +898,10 @@ result[transforms]=passed
   >"$control_data/restart-before.json"
 copy_latest_output "$left_id" "$control_data/restart-left-before.ppm"
 copy_latest_output "$right_id" "$control_data/restart-right-before.ppm"
+cmp "$control_data/milestone13-legacy-spanning-left.ppm" \
+  "$control_data/restart-left-before.ppm"
+cmp "$control_data/milestone13-flipped.ppm" \
+  "$control_data/restart-right-before.ppm"
 systemctl restart gwm-m13.service
 wait_socket "$runtime/gwm.sock"
 [[ $(systemctl show gwm-m13.service -p ActiveState --value) == active ]]
