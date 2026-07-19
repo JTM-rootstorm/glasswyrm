@@ -655,7 +655,9 @@ decision, timing, summary, and restore records without changing pixel output.
 `glasswyrmd --output-model --control-socket PATH --vrr-protocol` enables the
 server side; `--vrr-protocol` without the output model is rejected. `gwout set
 OUTPUT --vrr MODE` changes policy through the complete-layout transaction, and
-`gwinfo vrr [OUTPUT]` reports state, reasons, and timing.
+`gwinfo vrr [OUTPUT]` reports state, reasons, and timing. Historical
+`gwinfo outputs`, `windows`, and `all` preserve their exact schema unless the
+caller explicitly adds `--vrr`, which appends nested per-object VRR state.
 
 The physical path is deliberately narrower: one reviewed atomic-KMS connector,
 one CRTC, the composited primary-plane XRGB8888 path, scale 1, transform Normal,
