@@ -47,6 +47,21 @@ gw_output_model_dep = declare_dependency(
   include_directories: include_directories('.'),
 )
 
+gw_vrr_model_lib = static_library(
+  'gw-vrr-model',
+  files(
+    'output/vrr/decision.cpp',
+    'output/vrr/reasons.cpp',
+    'output/vrr/timing_stats.cpp',
+    'output/vrr/types.cpp',
+  ),
+  include_directories: include_directories('.'),
+)
+gw_vrr_model_dep = declare_dependency(
+  link_with: gw_vrr_model_lib,
+  include_directories: include_directories('.'),
+)
+
 if get_option('gwcomp')
 gw_compositor_geometry_lib = static_library(
   'gwcomp-geometry',
@@ -146,6 +161,7 @@ if get_option('drm_backend')
       'backends/drm/mode_selector.cpp',
       'backends/drm/pipeline_selector.cpp',
       'backends/drm/property_cache.cpp',
+      'backends/drm/vrr_capability.cpp',
     ),
     dependencies: [gw_compositor_geometry_dep, gw_output_model_dep],
     include_directories: include_directories('.'),
@@ -166,6 +182,8 @@ if get_option('drm_backend')
       'backends/drm/kms_state.cpp',
       'backends/drm/real_drm_api.cpp',
       'backends/drm/real_kms_api.cpp',
+      'backends/drm/vrr_property.cpp',
+      'backends/drm/vrr_timing.cpp',
     ),
     dependencies: [gw_drm_model_dep, libdrm_dep],
     include_directories: include_directories('.'),
@@ -507,6 +525,9 @@ if get_option('gwm')
       'wm/policy_output.cpp',
       'wm/policy_validation.cpp',
       'wm/transaction.cpp',
+      'wm/vrr_hash.cpp',
+      'wm/vrr_policy.cpp',
+      'wm/vrr_validation.cpp',
     ),
     include_directories: include_directories('.'),
   )

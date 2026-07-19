@@ -28,6 +28,20 @@ if get_option('gwm')
     include_directories: test_source_root_include,
   )
   test('interactive-policy', interactive_policy_test, timeout: 10)
+
+  foreach wm_vrr_test : [
+    ['wm-vrr-policy', 'vrr_policy_test.cpp'],
+    ['wm-vrr-validation', 'vrr_validation_test.cpp'],
+    ['wm-vrr-hash', 'vrr_hash_test.cpp'],
+  ]
+    wm_vrr_test_executable = executable(
+      wm_vrr_test[0].underscorify(),
+      files(tests_source_dir / 'unit/wm' / wm_vrr_test[1]),
+      dependencies: gw_wm_policy_dep,
+      include_directories: test_source_root_include,
+    )
+    test(wm_vrr_test[0], wm_vrr_test_executable, timeout: 10)
+  endforeach
   if get_option('glasswyrmd')
     interactive_close_test = executable(
       'interactive_close_test',
