@@ -169,7 +169,8 @@ gwipc_status prepare_reply(gwipc_connection& connection,
       return GWIPC_STATUS_INVALID_STATE;
     changes.frame_acknowledged = true;
   }
-  if (message.type == GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT) {
+  if (message.type == GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT &&
+      (message.flags & GWIPC_FLAG_REPLY) != 0) {
     wire::OutputVrrStateUpsert value;
     const auto expected = connection.incoming_frame_commits.find(
         message.reply_to);
