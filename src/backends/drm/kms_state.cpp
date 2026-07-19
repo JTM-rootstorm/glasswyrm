@@ -98,7 +98,8 @@ std::vector<AtomicPropertyValue>
 atomic_initial_request(PipelineIds ids, const AtomicPropertyCache &p,
                        std::uint32_t blob, std::uint32_t fb,
                        std::uint32_t width, std::uint32_t height) {
-  return {{ids.connector, p.connector.crtc_id.id, ids.crtc},
+  std::vector<AtomicPropertyValue> request{
+      {ids.connector, p.connector.crtc_id.id, ids.crtc},
           {ids.crtc, p.crtc.mode_id.id, blob},
           {ids.crtc, p.crtc.active.id, 1},
           {ids.primary_plane, p.primary_plane.fb_id.id, fb},
@@ -112,7 +113,10 @@ atomic_initial_request(PipelineIds ids, const AtomicPropertyCache &p,
           {ids.primary_plane, p.primary_plane.crtc_x.id, 0},
           {ids.primary_plane, p.primary_plane.crtc_y.id, 0},
           {ids.primary_plane, p.primary_plane.crtc_w.id, width},
-          {ids.primary_plane, p.primary_plane.crtc_h.id, height}};
+      {ids.primary_plane, p.primary_plane.crtc_h.id, height}};
+  if (p.crtc.vrr_enabled)
+    request.push_back({ids.crtc, p.crtc.vrr_enabled->id, 0});
+  return request;
 }
 std::vector<AtomicPropertyValue>
 atomic_flip_request(PipelineIds ids, const AtomicPropertyCache &p,
@@ -153,6 +157,28 @@ bool verify_saved_state(KmsApi &api, int fd, const SavedKmsState &saved,
       error = "restored DRM primary-plane state does not match the saved state";
       return false;
     }
+    if (saved.properties.crtc.vrr_enabled) {
+      std::vector<ObjectProperty> properties;
+      if (!api.object_properties(fd, KmsObjectType::Crtc,
+                                 saved.pipeline.crtc, properties, error))
+        return false;
+      const ObjectProperty* restored = nullptr;
+      for (const auto &property : properties) {
+        if (property.name != "VRR_ENABLED")
+          continue;
+        if (restored != nullptr) {
+          error = "restored DRM VRR_ENABLED property is duplicated";
+          return false;
+        }
+        restored = &property;
+      }
+      const auto &expected = *saved.properties.crtc.vrr_enabled;
+      if (restored == nullptr || restored->id != expected.id ||
+          restored->value != expected.value) {
+        error = "restored DRM VRR_ENABLED state does not match the saved state";
+        return false;
+      }
+    }
   }
   error.clear();
   return true;
@@ -170,7 +196,7 @@ bool restore_saved_state(KmsApi &api, int fd, const SavedKmsState &saved,
     return false;
   const auto &p = saved.properties;
   const auto ids = saved.pipeline;
-  const std::vector<AtomicPropertyValue> values{
+  std::vector<AtomicPropertyValue> values{
       {ids.connector, p.connector.crtc_id.id, saved.connector_crtc_id},
       {ids.crtc, p.crtc.mode_id.id, blob.id()},
       {ids.crtc, p.crtc.active.id, saved.crtc.active ? 1U : 0U},
@@ -192,6 +218,9 @@ bool restore_saved_state(KmsApi &api, int fd, const SavedKmsState &saved,
        saved.primary_plane.crtc_w},
       {ids.primary_plane, p.primary_plane.crtc_h.id,
        saved.primary_plane.crtc_h}};
+  if (p.crtc.vrr_enabled)
+    values.push_back(
+        {ids.crtc, p.crtc.vrr_enabled->id, p.crtc.vrr_enabled->value});
   if (!api.atomic_commit(fd, values, AtomicAllowModeset, nullptr, error))
     return false;
   return verify_saved_state(api, fd, saved, error);

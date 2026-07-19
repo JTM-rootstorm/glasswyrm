@@ -1,4 +1,6 @@
 #include "backends/drm/kms_api.hpp"
+#include <algorithm>
+#include <bit>
 #include <cerrno>
 #include <cstring>
 #include <memory>
@@ -205,7 +207,15 @@ bool RealKmsApi::object_properties(int fd, KmsObjectType type, std::uint32_t id,
     Prop p(drmModeGetProperty(fd, props->props[i]));
     if (!p)
       return fail(e, "property query failed");
-    result.push_back({p->prop_id, p->name, props->prop_values[i], 64});
+    std::optional<PropertyValueRange> range;
+    std::uint8_t width = 64;
+    if ((p->flags & DRM_MODE_PROP_RANGE) != 0 && p->count_values == 2) {
+      range = PropertyValueRange{p->values[0], p->values[1]};
+      width = static_cast<std::uint8_t>(
+          std::max(1, std::bit_width(p->values[1])));
+    }
+    result.push_back(
+        {p->prop_id, p->name, props->prop_values[i], width, range});
   }
   out = std::move(result);
   e.clear();

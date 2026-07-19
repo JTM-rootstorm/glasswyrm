@@ -1,21 +1,30 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 
 namespace glasswyrm::drm {
+
+struct PropertyValueRange {
+  std::uint64_t minimum{};
+  std::uint64_t maximum{};
+};
 
 struct ObjectProperty {
   std::uint32_t id{};
   std::string name;
   std::uint64_t value{};
   std::uint8_t value_width_bits{64};
+  std::optional<PropertyValueRange> range{};
 };
 
 struct PropertyBinding {
   std::uint32_t id{};
   std::uint64_t value{};
+  std::uint8_t value_width_bits{64};
+  std::optional<PropertyValueRange> range{};
 };
 
 struct ConnectorPropertyCache {
@@ -25,6 +34,7 @@ struct ConnectorPropertyCache {
 struct CrtcPropertyCache {
   PropertyBinding mode_id;
   PropertyBinding active;
+  std::optional<PropertyBinding> vrr_enabled;
 };
 
 struct PlanePropertyCache {
@@ -55,6 +65,7 @@ enum class PropertyCacheStatus {
   InvalidPropertyId,
   InvalidValueWidth,
   ValueOutOfRange,
+  InvalidPropertyRange,
 };
 
 struct PropertyCacheResult {

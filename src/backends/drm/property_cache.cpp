@@ -42,7 +42,8 @@ PropertyCacheStatus cache_required(
       failed_name = requirement.name;
       return PropertyCacheStatus::ValueOutOfRange;
     }
-    *requirement.destination = {found->id, found->value};
+    *requirement.destination = {found->id, found->value,
+                                found->value_width_bits, found->range};
   }
   return PropertyCacheStatus::Success;
 }
@@ -68,6 +69,26 @@ PropertyCacheResult build_atomic_property_cache(
   result.status =
       cache_required(crtc_properties, crtc_required, result.property_name);
   if (result.status != PropertyCacheStatus::Success) return result;
+
+  const ObjectProperty* vrr_enabled = nullptr;
+  bool duplicate_vrr_enabled = false;
+  for (const auto& property : crtc_properties) {
+    if (property.name != "VRR_ENABLED") continue;
+    if (vrr_enabled != nullptr) {
+      duplicate_vrr_enabled = true;
+      break;
+    }
+    vrr_enabled = &property;
+  }
+  if (!duplicate_vrr_enabled && vrr_enabled != nullptr &&
+      vrr_enabled->id != 0 && vrr_enabled->value_width_bits != 0 &&
+      vrr_enabled->value_width_bits <= 64 && vrr_enabled->range &&
+      vrr_enabled->range->minimum == 0 &&
+      vrr_enabled->range->maximum == 1 && vrr_enabled->value <= 1) {
+    result.cache.crtc.vrr_enabled =
+        PropertyBinding{vrr_enabled->id, vrr_enabled->value,
+                        vrr_enabled->value_width_bits, vrr_enabled->range};
+  }
 
   result.object_type = PropertyObjectType::PrimaryPlane;
   const std::array plane_required{

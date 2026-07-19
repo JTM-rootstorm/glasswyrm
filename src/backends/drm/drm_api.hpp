@@ -32,6 +32,7 @@ struct DeviceSnapshot {
   std::vector<Connector> connectors;
   std::vector<Crtc> crtcs;
   std::vector<Plane> planes;
+  bool timestamp_monotonic{};
 };
 
 struct DeviceOpenOptions {
@@ -66,6 +67,8 @@ struct DrmEvent {
   std::uint32_t crtc_id{};
   std::uint32_t sequence{};
   std::string error;
+  std::uint64_t kernel_timestamp_nanoseconds{};
+  bool timestamp_available{};
 };
 
 struct PageFlipCookie {
@@ -77,6 +80,9 @@ struct PageFlipCookie {
   std::uint32_t completed_crtc_id{};
   std::uint32_t completed_sequence{};
   bool completed{};
+  std::uint64_t kernel_timestamp_nanoseconds{};
+  bool timestamp_available{};
+  bool timestamp_invalid{};
 };
 
 class DrmApi {

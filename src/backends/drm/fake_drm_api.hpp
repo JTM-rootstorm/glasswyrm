@@ -3,6 +3,7 @@
 #include "backends/drm/drm_api.hpp"
 
 #include <deque>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -39,7 +40,9 @@ public:
   [[nodiscard]] DrmEvent service_events(int handle, short revents) override;
 
   void queue_page_flip(std::uint64_t token, std::uint32_t crtc_id,
-                       std::uint32_t sequence);
+                       std::uint32_t sequence,
+                       std::uint64_t kernel_timestamp_nanoseconds = 0,
+                       bool timestamp_available = false);
   void queue_error(std::string error);
 
   [[nodiscard]] bool open() const noexcept { return open_; }
@@ -72,6 +75,7 @@ private:
   std::shared_ptr<PageFlipCookie> event_cookie_;
   bool event_cookie_armed_{};
   std::deque<DrmEvent> events_;
+  std::optional<std::uint64_t> last_page_flip_timestamp_;
 };
 
 } // namespace glasswyrm::drm

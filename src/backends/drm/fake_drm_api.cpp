@@ -82,6 +82,7 @@ void FakeDrmApi::close_device(const int handle) noexcept {
     return;
   event_cookie_.reset();
   event_cookie_armed_ = false;
+  last_page_flip_timestamp_.reset();
   if (owns_active_handle_)
     (void)::close(active_handle_);
   last_closed_handle_ = active_handle_;
@@ -124,6 +125,9 @@ bool FakeDrmApi::arm_page_flip(const int handle,
   cookie->completed = false;
   cookie->completed_crtc_id = 0;
   cookie->completed_sequence = 0;
+  cookie->kernel_timestamp_nanoseconds = 0;
+  cookie->timestamp_available = false;
+  cookie->timestamp_invalid = false;
   event_cookie_ = cookie;
   event_cookie_armed_ = true;
   error.clear();
@@ -160,9 +164,23 @@ DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
   auto event = std::move(events_.front());
   events_.pop_front();
   if (event.kind == DrmEventKind::PageFlip && event_cookie_) {
+    if (event.timestamp_available && last_page_flip_timestamp_ &&
+        event.kernel_timestamp_nanoseconds < *last_page_flip_timestamp_) {
+      const bool armed = event_cookie_armed_;
+      event_cookie_.reset();
+      event_cookie_armed_ = false;
+      return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
+                              "fake DRM page-flip timestamp regressed"}
+                   : DrmEvent{};
+    }
     event_cookie_->completed_crtc_id = event.crtc_id;
     event_cookie_->completed_sequence = event.sequence;
+    event_cookie_->kernel_timestamp_nanoseconds =
+        event.kernel_timestamp_nanoseconds;
+    event_cookie_->timestamp_available = event.timestamp_available;
     event_cookie_->completed = true;
+    if (event.timestamp_available)
+      last_page_flip_timestamp_ = event.kernel_timestamp_nanoseconds;
     if (event_cookie_armed_)
       event.token = event_cookie_->token;
     else
@@ -175,8 +193,11 @@ DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
 
 void FakeDrmApi::queue_page_flip(const std::uint64_t token,
                                  const std::uint32_t crtc_id,
-                                 const std::uint32_t sequence) {
-  events_.push_back({DrmEventKind::PageFlip, token, crtc_id, sequence, {}});
+                                 const std::uint32_t sequence,
+                                 const std::uint64_t timestamp,
+                                 const bool timestamp_available) {
+  events_.push_back({DrmEventKind::PageFlip, token, crtc_id, sequence, {},
+                     timestamp, timestamp_available});
   signal_event();
 }
 

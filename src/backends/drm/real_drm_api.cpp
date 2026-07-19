@@ -1,5 +1,7 @@
 #include "backends/drm/drm_api.hpp"
 #include "backends/drm/edid_digest.hpp"
+#include "backends/drm/vrr_capability.hpp"
+#include "backends/drm/vrr_timing.hpp"
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -18,6 +20,7 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace glasswyrm::drm {
 namespace {
@@ -118,6 +121,38 @@ std::optional<std::uint64_t> property_value(const int fd,
       return properties->prop_values[index];
   }
   return std::nullopt;
+}
+
+bool discover_connector_vrr_capability(const int fd,
+                                       const std::uint32_t connector_id,
+                                       Connector &connector,
+                                       std::string &error) {
+  const std::unique_ptr<drmModeObjectProperties, ObjectPropertiesDeleter>
+      properties(drmModeObjectGetProperties(fd, connector_id,
+                                            DRM_MODE_OBJECT_CONNECTOR));
+  if (!properties) {
+    connector.vrr_property_present = false;
+    connector.vrr_capable = false;
+    return true;
+  }
+  std::vector<std::uint64_t> values;
+  for (std::uint32_t index = 0; index < properties->count_props; ++index) {
+    const std::unique_ptr<drmModePropertyRes, PropertyDeleter> property(
+        drmModeGetProperty(fd, properties->props[index]));
+    if (!property) {
+      continue;
+    }
+    if (std::string_view(property->name) == "vrr_capable")
+      values.push_back(properties->prop_values[index]);
+  }
+  const auto capability = classify_connector_vrr_capability(values);
+  if (capability.status == ConnectorVrrCapabilityStatus::Malformed) {
+    error = "DRM connector vrr_capable property is duplicated or not zero/one";
+    return false;
+  }
+  connector.vrr_property_present = capability.property_present;
+  connector.vrr_capable = capability.capable;
+  return true;
 }
 
 std::optional<std::vector<std::uint8_t>> property_blob(
@@ -253,6 +288,9 @@ bool enumerate_connectors(const int fd, const drmModeRes &resources,
         property_value(fd, connector->connector_id, DRM_MODE_OBJECT_CONNECTOR,
                        "non-desktop")
             .value_or(0) != 0;
+    if (!discover_connector_vrr_capability(
+            fd, connector->connector_id, discovered, error))
+      return false;
     for (int mode_index = 0; mode_index < connector->count_modes;
          ++mode_index) {
       const auto &mode = connector->modes[mode_index];
@@ -385,6 +423,11 @@ DeviceOpenResult inspect_device(const int fd, std::string path,
                    "DRM device does not support dumb buffers");
   snapshot.dumb_buffer = true;
 
+  std::uint64_t timestamp_monotonic{};
+  snapshot.timestamp_monotonic =
+      drmGetCap(fd, DRM_CAP_TIMESTAMP_MONOTONIC, &timestamp_monotonic) == 0 &&
+      timestamp_monotonic != 0;
+
   if (options.request_universal_planes)
     snapshot.universal_planes =
         drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) == 0;
@@ -408,14 +451,20 @@ DeviceOpenResult inspect_device(const int fd, std::string path,
   return {DeviceOpenStatus::Success, fd, std::move(snapshot), {}};
 }
 
-void page_flip_complete(int, const unsigned int sequence, unsigned int,
-                        unsigned int, const unsigned int crtc_id,
+void page_flip_complete(int, const unsigned int sequence,
+                        const unsigned int seconds,
+                        const unsigned int microseconds,
+                        const unsigned int crtc_id,
                         void *user_data) {
   if (!user_data)
     return;
   auto &cookie = *static_cast<PageFlipCookie *>(user_data);
   cookie.completed_crtc_id = crtc_id;
   cookie.completed_sequence = sequence;
+  const auto timestamp = convert_page_flip_timestamp(seconds, microseconds);
+  cookie.kernel_timestamp_nanoseconds = timestamp.nanoseconds;
+  cookie.timestamp_available = timestamp.status == VrrTimestampStatus::Success;
+  cookie.timestamp_invalid = timestamp.status != VrrTimestampStatus::Success;
   cookie.completed = true;
 }
 
@@ -444,6 +493,8 @@ private:
     bool armed{};
   };
   std::unordered_map<int, EventCookie> event_cookies_;
+  std::unordered_map<int, std::uint64_t> last_page_flip_timestamps_;
+  std::unordered_map<int, bool> timestamp_monotonic_;
 };
 
 DeviceOpenResult RealDrmApi::open_device(const std::string_view path,
@@ -463,8 +514,10 @@ DeviceOpenResult RealDrmApi::open_device(const std::string_view path,
                        std::strerror(errno));
   UniqueFd fd(raw_fd);
   auto result = inspect_device(raw_fd, canonical.string(), options);
-  if (result.status == DeviceOpenStatus::Success)
+  if (result.status == DeviceOpenStatus::Success) {
+    timestamp_monotonic_[raw_fd] = result.snapshot.timestamp_monotonic;
     result.handle = fd.release();
+  }
   return result;
 }
 
@@ -478,8 +531,10 @@ DeviceOpenResult RealDrmApi::adopt_device(const int inherited_fd,
   UniqueFd fd(duplicate);
   auto result =
       inspect_device(duplicate, inherited_device_path(inherited_fd), options);
-  if (result.status == DeviceOpenStatus::Success)
+  if (result.status == DeviceOpenStatus::Success) {
+    timestamp_monotonic_[duplicate] = result.snapshot.timestamp_monotonic;
     result.handle = fd.release();
+  }
   return result;
 }
 
@@ -487,6 +542,8 @@ void RealDrmApi::close_device(const int handle) noexcept {
   if (handle >= 0)
     (void)::close(handle);
   event_cookies_.erase(handle);
+  last_page_flip_timestamps_.erase(handle);
+  timestamp_monotonic_.erase(handle);
 }
 
 int RealDrmApi::poll_fd(const int handle) const noexcept { return handle; }
@@ -515,6 +572,9 @@ bool RealDrmApi::arm_page_flip(const int handle,
   cookie->completed = false;
   cookie->completed_crtc_id = 0;
   cookie->completed_sequence = 0;
+  cookie->kernel_timestamp_nanoseconds = 0;
+  cookie->timestamp_available = false;
+  cookie->timestamp_invalid = false;
   event_cookies_.emplace(handle, EventCookie{cookie, true});
   error.clear();
   return true;
@@ -551,11 +611,33 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
             std::string("DRM event handling failed: ") + std::strerror(errno)};
   if (cookie && cookie->completed) {
     const bool armed = registered->second.armed;
+    if (cookie->timestamp_invalid) {
+      event_cookies_.erase(registered);
+      return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
+                              "DRM page-flip timestamp is malformed"}
+                   : DrmEvent{};
+    }
+    cookie->timestamp_available =
+        cookie->timestamp_available && timestamp_monotonic_[handle];
+    if (cookie->timestamp_available) {
+      const auto previous = last_page_flip_timestamps_.find(handle);
+      if (previous != last_page_flip_timestamps_.end() &&
+          cookie->kernel_timestamp_nanoseconds < previous->second) {
+        event_cookies_.erase(registered);
+        return armed ? DrmEvent{DrmEventKind::Error, 0, 0, 0,
+                                "DRM page-flip timestamp regressed"}
+                     : DrmEvent{};
+      }
+      last_page_flip_timestamps_[handle] =
+          cookie->kernel_timestamp_nanoseconds;
+    }
     const DrmEvent event{DrmEventKind::PageFlip,
                          cookie->token,
                          cookie->completed_crtc_id,
                          cookie->completed_sequence,
-                         {}};
+                         {},
+                         cookie->kernel_timestamp_nanoseconds,
+                         cookie->timestamp_available};
     event_cookies_.erase(registered);
     return armed ? event : DrmEvent{};
   }
