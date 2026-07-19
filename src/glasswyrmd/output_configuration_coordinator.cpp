@@ -99,9 +99,20 @@ void update_layout_metadata(output::OutputLayout &layout) {
 } // namespace
 
 OutputConfigurationCoordinator::OutputConfigurationCoordinator(
-    output::OutputLayout inventory)
-    : inventory_(std::move(inventory)), committed_layout_(inventory_) {
+    output::OutputLayout inventory,
+    std::map<std::uint64_t, gwipc_vrr_policy_mode> vrr_policies)
+    : inventory_(std::move(inventory)), committed_layout_(inventory_),
+      committed_vrr_policies_(std::move(vrr_policies)) {
   valid_ = static_cast<bool>(output::validate_layout(inventory_));
+  if (!committed_vrr_policies_.empty()) {
+    if (committed_vrr_policies_.size() != inventory_.descriptors.size())
+      valid_ = false;
+    for (const auto& [id, mode] : committed_vrr_policies_)
+      if (!inventory_.descriptors.contains(output::OutputId{id}) ||
+          mode < GWIPC_VRR_POLICY_OFF ||
+          mode > GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE)
+        valid_ = false;
+  }
 }
 
 OutputConfigurationSnapshotStatus
@@ -112,12 +123,36 @@ OutputConfigurationCoordinator::begin_snapshot(
     return OutputConfigurationSnapshotStatus::Busy;
   if (stage_ != OutputConfigurationStage::Idle || snapshot_id == 0 ||
       expected_item_count == 0 ||
-      expected_item_count > output::kMaximumOutputs)
+      expected_item_count > output::kMaximumOutputs * 2U)
     return OutputConfigurationSnapshotStatus::InvalidState;
   clear_staging();
   snapshot_id_ = snapshot_id;
   expected_item_count_ = expected_item_count;
   stage_ = OutputConfigurationStage::Collecting;
+  return OutputConfigurationSnapshotStatus::Accepted;
+}
+
+OutputConfigurationSnapshotStatus
+OutputConfigurationCoordinator::stage_vrr_policy(
+    const gwipc_output_vrr_policy_upsert& value) {
+  if (stage_ != OutputConfigurationStage::Collecting)
+    return transaction_ ? OutputConfigurationSnapshotStatus::Busy
+                        : OutputConfigurationSnapshotStatus::InvalidState;
+  if (!vrr_profile() || value.struct_size < sizeof(value) ||
+      !inventory_.descriptors.contains(output::OutputId{value.output_id}) ||
+      value.mode < GWIPC_VRR_POLICY_OFF ||
+      value.mode > GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE || value.flags != 0 ||
+      !staged_vrr_policies_.emplace(value.output_id, value.mode).second) {
+    snapshot_failure_ = OutputConfigurationSnapshotStatus::InvalidRecord;
+    staged_result_ = Result::UnsupportedVrr;
+    return snapshot_failure_;
+  }
+  if (item_count_ == std::numeric_limits<std::uint32_t>::max()) {
+    snapshot_failure_ = OutputConfigurationSnapshotStatus::CountMismatch;
+    staged_result_ = Result::InvalidLayout;
+    return snapshot_failure_;
+  }
+  ++item_count_;
   return OutputConfigurationSnapshotStatus::Accepted;
 }
 
@@ -158,7 +193,9 @@ OutputConfigurationSnapshotStatus OutputConfigurationCoordinator::end_snapshot(
     return OutputConfigurationSnapshotStatus::InvalidState;
   if (actual_item_count != item_count_ ||
       item_count_ != expected_item_count_ ||
-      staged_outputs_.size() != inventory_.descriptors.size()) {
+      staged_outputs_.size() != inventory_.descriptors.size() ||
+      (vrr_profile() &&
+       staged_vrr_policies_.size() != inventory_.descriptors.size())) {
     snapshot_failure_ = OutputConfigurationSnapshotStatus::CountMismatch;
     if (staged_result_ != Result::UnknownOutput)
       staged_result_ = Result::InvalidLayout;
@@ -212,7 +249,8 @@ OutputConfigurationCoordinator::submit(
     return rejected;
   }
   transaction_ = OutputConfigurationTransaction{
-      request.configuration_id, committed_layout_, std::move(candidate)};
+      request.configuration_id, committed_layout_, std::move(candidate),
+      committed_vrr_policies_, staged_vrr_policies_};
   clear_staging();
   stage_ = OutputConfigurationStage::PolicyPending;
   return std::nullopt;
@@ -226,11 +264,13 @@ bool OutputConfigurationCoordinator::accept_policy() noexcept {
 }
 
 std::optional<gw::ipc::wire::OutputConfigurationAcknowledged>
-OutputConfigurationCoordinator::reject_policy() noexcept {
-  if (stage_ != OutputConfigurationStage::PolicyPending || !transaction_)
+OutputConfigurationCoordinator::reject_policy(const Result rejection) noexcept {
+  if (stage_ != OutputConfigurationStage::PolicyPending || !transaction_ ||
+      (rejection != Result::PolicyRejected &&
+       rejection != Result::VrrPolicyRejected))
     return std::nullopt;
   const auto result = acknowledgement(transaction_->configuration_id,
-                                      Result::PolicyRejected);
+                                      rejection);
   clear_transaction();
   return result;
 }
@@ -246,7 +286,8 @@ bool OutputConfigurationCoordinator::begin_rollback(
     const Result rejection) noexcept {
   if (stage_ != OutputConfigurationStage::CompositorPending || !transaction_ ||
       (rejection != Result::CompositorRejected &&
-       rejection != Result::PresenterRejected))
+       rejection != Result::PresenterRejected &&
+       rejection != Result::VrrPresenterRejected))
     return false;
   rollback_result_ = rejection;
   stage_ = OutputConfigurationStage::RollbackPending;
@@ -269,6 +310,7 @@ OutputConfigurationCoordinator::commit() noexcept {
   if (stage_ != OutputConfigurationStage::CommitReady || !transaction_)
     return std::nullopt;
   committed_layout_ = std::move(transaction_->proposed_layout);
+  committed_vrr_policies_ = std::move(transaction_->proposed_vrr_policies);
   const auto request_id = transaction_->configuration_id;
   clear_transaction();
   return acknowledgement(request_id, Result::Accepted);
@@ -399,6 +441,7 @@ void OutputConfigurationCoordinator::clear_staging() noexcept {
   snapshot_failure_ = OutputConfigurationSnapshotStatus::Accepted;
   staged_result_ = Result::InvalidLayout;
   staged_outputs_.clear();
+  staged_vrr_policies_.clear();
   if (!transaction_)
     stage_ = OutputConfigurationStage::Idle;
 }

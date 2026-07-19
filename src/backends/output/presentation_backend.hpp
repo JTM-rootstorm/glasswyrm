@@ -93,6 +93,22 @@ class PresentationBackend {
  public:
   virtual ~PresentationBackend() = default;
 
+  // Optional presentation contracts are activated only after peer
+  // negotiation. Historical peers must not cause optional KMS discovery.
+  [[nodiscard]] virtual bool configure_vrr_contract(bool enabled,
+                                                    std::string& error) {
+    static_cast<void>(enabled);
+    error.clear();
+    return true;
+  }
+
+  // A resumed backend remains session-inactive until the coordinating peer
+  // acknowledges the Active transition.
+  [[nodiscard]] virtual bool activate_session(std::string& error) {
+    error.clear();
+    return true;
+  }
+
   [[nodiscard]] virtual std::optional<VrrPresentationCapability>
   vrr_capability(std::uint64_t output_id) const noexcept {
     static_cast<void>(output_id);

@@ -64,6 +64,20 @@ if get_option('gwm')
     depends: gwm_program,
     timeout: 15,
   )
+  gwm_vrr_process_test = executable(
+    'gwm_vrr_process_test',
+    files(tests_source_dir / 'integration/gwm_vrr_process_test.cpp'),
+    dependencies: gwipc_dep,
+    include_directories: [test_source_root_include,
+                          include_directories('../../../../src')],
+  )
+  test(
+    'gwm-vrr-process',
+    gwm_vrr_process_test,
+    args: [gwm_program.full_path()],
+    depends: gwm_program,
+    timeout: 15,
+  )
   test('gwm-help', gwm_program, args: ['--help'], depends: gwm_program,
        timeout: 10)
   test('gwm-version', gwm_program, args: ['--version'], depends: gwm_program,

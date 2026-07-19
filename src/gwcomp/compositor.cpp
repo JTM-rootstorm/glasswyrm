@@ -86,6 +86,94 @@ Compositor::~Compositor() {
   (void)shutdown_presentation(ignored);
 }
 
+bool Compositor::configure_vrr_contract(const bool enabled,
+                                        std::string& error) {
+  if (presentation_pending() || presentation_suspended_ ||
+      !presenter_->configure_vrr_contract(enabled, error))
+    return false;
+  vrr_contract_enabled_ = enabled;
+  error.clear();
+  return true;
+}
+
+std::optional<VrrInventorySnapshot> Compositor::vrr_inventory(
+    const glasswyrm::output::OutputLayout& layout,
+    std::string& error) const {
+  if (!vrr_contract_enabled_ || !presenter_) {
+    error = "VRR inventory was requested without a negotiated contract";
+    return std::nullopt;
+  }
+  VrrInventorySnapshot result;
+  result.capabilities.reserve(layout.output_order.size());
+  result.policies.reserve(layout.output_order.size());
+  result.states.reserve(layout.output_order.size());
+  result.timings.reserve(layout.output_order.size());
+  const auto& scene = scene_.committed();
+  for (const auto output_id : layout.output_order) {
+    const auto capability = presenter_->vrr_capability(output_id.value);
+    if (!capability) {
+      error = "presentation backend omitted an output VRR capability";
+      return std::nullopt;
+    }
+    gwipc_output_vrr_capability_upsert capability_record{};
+    capability_record.struct_size = sizeof(capability_record);
+    capability_record.output_id = output_id.value;
+    capability_record.connector_property_present =
+        capability->connector_property_present;
+    capability_record.hardware_capable = capability->hardware_capable;
+    capability_record.kms_controllable = capability->kms_controllable;
+    capability_record.simulated = capability->simulated;
+    capability_record.range_available = capability->range_available;
+    capability_record.atomic_required = capability->atomic_required;
+    capability_record.minimum_refresh_millihertz =
+        capability->minimum_refresh_millihertz;
+    capability_record.maximum_refresh_millihertz =
+        capability->maximum_refresh_millihertz;
+    capability_record.reason_flags = capability->reason_flags;
+    result.capabilities.push_back(capability_record);
+
+    gwipc_output_vrr_policy_upsert policy{};
+    policy.struct_size = sizeof(policy);
+    policy.output_id = output_id.value;
+    policy.mode = GWIPC_VRR_POLICY_OFF;
+    if (const auto current =
+            scene.vrr.output_policies.find(output_id.value);
+        current != scene.vrr.output_policies.end())
+      policy = current->second;
+    result.policies.push_back(policy);
+
+    const auto committed = committed_vrr_.outputs().find(output_id.value);
+    if (committed != committed_vrr_.outputs().end()) {
+      if (committed->second.requested_mode != policy.mode) {
+        error = "committed VRR state does not match its output policy";
+        return std::nullopt;
+      }
+      result.states.push_back(committed->second);
+      if (const auto timing =
+              committed_vrr_.timings().find(output_id.value);
+          timing != committed_vrr_.timings().end())
+        result.timings.push_back(timing->second);
+      continue;
+    }
+
+    gwipc_output_vrr_state_upsert state{};
+    state.struct_size = sizeof(state);
+    state.output_id = output_id.value;
+    state.requested_mode = policy.mode;
+    state.decision = GWIPC_VRR_DECISION_DISABLED;
+    state.session_active = capability->session_active;
+    state.reason_flags = capability->reason_flags;
+    if (!layout.states.at(output_id).enabled)
+      state.reason_flags |= GWIPC_VRR_REASON_OUTPUT_DISABLED;
+    if (policy.mode == GWIPC_VRR_POLICY_OFF)
+      state.reason_flags |= GWIPC_VRR_REASON_POLICY_OFF;
+    state.state_generation = layout.generation;
+    result.states.push_back(state);
+  }
+  error.clear();
+  return result;
+}
+
 bool Compositor::configure_scene_profile(
     const SceneProfile profile, const std::uint64_t primary_output_id,
     const std::uint64_t output_layout_generation) noexcept {
@@ -334,6 +422,14 @@ bool Compositor::resume_presentation(std::string& error) {
   presentation_suspended_ = false;
   error.clear();
   return true;
+}
+
+bool Compositor::activate_presentation_session(std::string& error) {
+  if (presentation_suspended_) {
+    error = "presentation backend is still suspended";
+    return false;
+  }
+  return presenter_->activate_session(error);
 }
 
 bool Compositor::shutdown_presentation(std::string& error) noexcept {

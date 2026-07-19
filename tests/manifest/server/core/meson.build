@@ -130,6 +130,19 @@ if get_option('glasswyrmd')
       include_directories: test_source_root_include,
     )
     test('screen-geometry', screen_geometry_test, timeout: 10)
+    foreach server_vrr_test : [
+      ['server-vrr-state-cache', 'server_vrr_state_cache_test.cpp'],
+      ['server-vrr-projection', 'server_vrr_projection_test.cpp'],
+      ['server-vrr-transaction', 'server_vrr_transaction_test.cpp'],
+    ]
+      server_vrr_test_executable = executable(
+        server_vrr_test[0].underscorify(),
+        files(tests_source_dir / 'unit' / server_vrr_test[1]),
+        dependencies: gw_server_core_dep,
+        include_directories: test_source_root_include,
+      )
+      test(server_vrr_test[0], server_vrr_test_executable, timeout: 10)
+    endforeach
   endif
   compatibility_trace_test = executable(
     'compatibility_trace_test',

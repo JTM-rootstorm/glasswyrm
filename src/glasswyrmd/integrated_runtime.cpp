@@ -75,7 +75,8 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
       *server_.options_.wm_socket, *server_.options_.compositor_socket,
       server_.state_.screen(), std::chrono::seconds(10),
       server_.options_.software_content, server_.options_.real_input_enabled(),
-      server_.options_.game_compat, server_.options_.output_model);
+      server_.options_.game_compat, server_.options_.output_model,
+      server_.options_.vrr_protocol);
   if (server_.options_.software_content) {
     content_presenter_ = std::make_unique<ContentPresenter>(
         server_.options_.game_compat ? GWIPC_SYNCHRONIZATION_EVENTFD
@@ -139,7 +140,8 @@ int ServerRuntime::initialize_integrated(SignalRuntime& signals) {
     if (server_.options_.control_socket) {
       output_control_peer_ = std::make_unique<OutputControlPeer>(
           *server_.options_.control_socket, *layout,
-          [this] { return server_.state_.lifecycle_snapshot(); });
+          [this] { return server_.state_.lifecycle_snapshot(); },
+          server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
       std::string error;
       if (!output_control_peer_->start(error)) {
         std::fprintf(stderr, "glasswyrmd: %s\n", error.c_str());

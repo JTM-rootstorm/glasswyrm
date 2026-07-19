@@ -34,12 +34,21 @@ struct OutputInventoryWindow {
   std::vector<std::uint64_t> output_ids;
 };
 
+struct OutputInventoryVrr {
+  std::span<const gwipc_output_vrr_capability_upsert> capabilities;
+  std::span<const gwipc_output_vrr_policy_upsert> policies;
+  std::span<const gwipc_output_vrr_state_upsert> states;
+  std::span<const gwipc_presentation_timing> timings;
+  std::span<const gwipc_surface_vrr_state> windows;
+};
+
 // Builds one atomic reply to an already validated compositor OutputStateQuery.
 // The caller owns snapshot identity and enqueues the returned messages in
 // order.
 [[nodiscard]] OutputInventoryPublication build_output_inventory_publication(
     const gwipc_output_state_query &query, std::uint64_t query_sequence,
     std::uint64_t snapshot_id, const output::OutputLayout &layout,
-    std::span<const OutputInventoryWindow> windows = {});
+    std::span<const OutputInventoryWindow> windows = {},
+    const OutputInventoryVrr* vrr = nullptr);
 
 } // namespace glasswyrm::compositor

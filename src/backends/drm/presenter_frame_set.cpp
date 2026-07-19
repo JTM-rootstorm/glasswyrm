@@ -37,7 +37,7 @@ output::PresentResult DrmPresenter::present_validated(
   const output::VrrPresentationRequest historical_request;
   const auto& request = vrr_request ? *vrr_request : historical_request;
   const auto vrr_plan =
-      vrr_state_initialized_
+      vrr_contract_enabled_ && vrr_state_initialized_
           ? vrr_state_.plan(request, config_.reaffirm_vrr_on_flip)
           : PresenterVrrPlan{true, false, false, true, {}};
   if (!vrr_plan.accepted)

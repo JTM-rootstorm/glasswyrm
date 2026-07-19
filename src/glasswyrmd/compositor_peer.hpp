@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/compositor_output_inventory.hpp"
 #include "glasswyrmd/peer_transport.hpp"
+#include "glasswyrmd/vrr_state_cache.hpp"
 #include "protocol/x11/screen_model.hpp"
 
 #include <optional>
@@ -46,6 +47,8 @@ struct CompositorSnapshotSubmission {
   std::vector<Damage> damages;
   std::vector<gwipc_output_upsert> outputs;
   std::vector<SurfaceOutput> surface_outputs;
+  std::vector<gwipc_output_vrr_policy_upsert> output_vrr_policies;
+  std::vector<gwipc_surface_vrr_state> surface_vrr_states;
 };
 
 struct CompositorContentSubmission {
@@ -78,7 +81,7 @@ public:
                  bool software_content = false,
                  bool session_state = false,
                  bool cpu_buffer_synchronization = false,
-                 bool output_model = false);
+                 bool output_model = false, bool vrr_profile = false);
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] PeerProcessOutcome process(short revents, std::string &error);
   [[nodiscard]] int fd() const noexcept { return transport_.fd(); }
@@ -96,6 +99,15 @@ public:
   [[nodiscard]] std::vector<CompositorBufferRelease> take_releases();
   [[nodiscard]] std::vector<CompositorSessionStateChange>
   take_session_state_changes();
+  [[nodiscard]] const VrrResponseBatch& vrr_response() const noexcept {
+    return vrr_response_;
+  }
+  [[nodiscard]] VrrStateCache* vrr_cache() noexcept {
+    return vrr_profile_ ? &vrr_cache_ : nullptr;
+  }
+  [[nodiscard]] const VrrStateCache* vrr_cache() const noexcept {
+    return vrr_profile_ ? &vrr_cache_ : nullptr;
+  }
   [[nodiscard]] bool acknowledge_session_state(
       const CompositorSessionStateChange& request,
       gwipc_session_state_result result, std::string& error);
@@ -136,6 +148,10 @@ private:
   [[nodiscard]] bool enqueue_snapshot_completion_records(
       const CompositorSnapshotSubmission& submission,
       std::uint32_t item_count, std::string& error);
+  [[nodiscard]] bool validate_vrr_submission(
+      const CompositorSnapshotSubmission& submission,
+      std::string& error) const;
+  [[nodiscard]] PeerProcessOutcome finish_vrr_response(std::string& error);
   [[nodiscard]] PeerProcessOutcome drain(std::string &error);
 
   PeerTransport transport_;
@@ -149,6 +165,10 @@ private:
   bool software_content_{};
   bool session_state_{};
   bool output_model_{};
+  bool vrr_profile_{};
+  bool frame_acknowledged_{};
+  VrrResponseBatch vrr_response_;
+  VrrStateCache vrr_cache_;
   bool content_submission_{};
   std::vector<CompositorSessionStateChange> session_state_changes_;
   std::unique_ptr<CompositorOutputInventory> pending_output_inventory_;

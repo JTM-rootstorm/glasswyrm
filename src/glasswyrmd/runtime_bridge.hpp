@@ -19,7 +19,7 @@ public:
                 bool software_content = false,
                 bool session_state = false,
                 bool cpu_buffer_synchronization = false,
-                bool output_model = false);
+                bool output_model = false, bool vrr_profile = false);
 
   void start(Clock::time_point now = Clock::now()) noexcept;
   [[nodiscard]] bool service(short policy_revents, short compositor_revents,
@@ -44,6 +44,13 @@ public:
   }
   [[nodiscard]] const PolicySnapshotResult& policy_result() const noexcept {
     return policy_.result();
+  }
+  [[nodiscard]] VrrStateCache* vrr_cache() noexcept {
+    return compositor_.vrr_cache();
+  }
+  [[nodiscard]] const VrrResponseBatch& compositor_vrr_response()
+      const noexcept {
+    return compositor_.vrr_response();
   }
   [[nodiscard]] const output::OutputLayout *output_layout() const noexcept {
     return compositor_.output_layout();
@@ -117,6 +124,7 @@ private:
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
   bool output_model_{};
+  bool vrr_profile_{};
   bool output_scene_submitted_{};
   bool recovering_{};
   bool compositor_reset_{};

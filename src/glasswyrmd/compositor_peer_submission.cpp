@@ -3,6 +3,7 @@
 #include "glasswyrmd/compositor_buffer_replay.hpp"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -240,6 +241,68 @@ bool CompositorPeer::validate_surface_policy_links(
   return true;
 }
 
+bool CompositorPeer::validate_vrr_submission(
+    const CompositorSnapshotSubmission& submission, std::string& error) const {
+  if (!vrr_profile_) {
+    if (!submission.output_vrr_policies.empty() ||
+        !submission.surface_vrr_states.empty()) {
+      error = "historical compositor snapshot contains M14 VRR records";
+      return false;
+    }
+    return true;
+  }
+  const auto negotiated =
+      gwipc_connection_peer_info(transport_.connection()).capabilities;
+  constexpr auto required = GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY |
+                            GWIPC_CAP_PRESENTATION_TIMING;
+  if ((negotiated & required) != required) {
+    error = "compositor did not negotiate the complete M14 VRR profile";
+    return false;
+  }
+  if (!output_model_ || submission.output_vrr_policies.size() !=
+                            submission.outputs.size()) {
+    error = "M14 compositor snapshot lacks an exact output VRR policy map";
+    return false;
+  }
+  std::set<std::uint64_t> output_ids;
+  for (const auto& output : submission.outputs)
+    output_ids.insert(output.output_id);
+  std::set<std::uint64_t> policy_ids;
+  for (const auto& policy : submission.output_vrr_policies)
+    if (policy.struct_size < sizeof(policy) || policy.output_id == 0 ||
+        !output_ids.contains(policy.output_id) ||
+        !policy_ids.insert(policy.output_id).second) {
+      error = "M14 compositor snapshot contains an invalid output VRR policy";
+      return false;
+    }
+  std::set<std::uint64_t> expected_surfaces;
+  std::map<std::uint64_t, std::uint32_t> window_ids;
+  for (const auto& surface : submission.surfaces)
+    if (surface.presentation_flags != GWIPC_SURFACE_PRESENTATION_CURSOR &&
+        surface.presentation_flags !=
+            GWIPC_SURFACE_PRESENTATION_METADATA_ONLY) {
+      expected_surfaces.insert(surface.surface_id);
+      window_ids.emplace(surface.surface_id, surface.x11_window_id);
+    }
+  std::set<std::uint64_t> actual_surfaces;
+  for (const auto& state : submission.surface_vrr_states) {
+    const auto window = window_ids.find(state.surface_id);
+    if (state.struct_size < sizeof(state) || state.surface_id == 0 ||
+        window == window_ids.end() || state.window_id != window->second ||
+        !output_ids.contains(state.output_id) ||
+        state.policy_generation != vrr_cache_.generation() ||
+        !actual_surfaces.insert(state.surface_id).second) {
+      error = "M14 compositor snapshot contains an invalid surface VRR state";
+      return false;
+    }
+  }
+  if (actual_surfaces != expected_surfaces) {
+    error = "M14 compositor snapshot lacks exact surface VRR state";
+    return false;
+  }
+  return true;
+}
+
 bool CompositorPeer::enqueue_output_records(
     const CompositorSnapshotSubmission& submission,
     const std::uint32_t item_count, std::string& error) {
@@ -289,6 +352,13 @@ bool CompositorPeer::enqueue_output_records(
       return false;
     }
   }
+  for (const auto& policy : submission.output_vrr_policies)
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, policy,
+                          gwipc_contract_encode_output_vrr_policy_upsert)) {
+      error = "could not queue compositor output VRR policy";
+      return false;
+    }
   return true;
 }
 
@@ -320,6 +390,13 @@ bool CompositorPeer::enqueue_surface_membership_records(
       return false;
     }
   }
+  for (const auto& state : submission.surface_vrr_states)
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_VRR_STATE,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, state,
+                          gwipc_contract_encode_surface_vrr_state)) {
+      error = "could not queue compositor surface VRR state";
+      return false;
+    }
   return true;
 }
 
@@ -414,24 +491,43 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission& submission,
       !validate_buffer_damage_records(complete, error) ||
       !compositor_buffer_replay::rearm_snapshot(complete, replay_input_,
                                                 error) ||
-      !validate_surface_policy_links(complete, error))
+      !validate_surface_policy_links(complete, error) ||
+      !validate_vrr_submission(complete, error))
     return false;
   const auto output_count = output_model_ ? complete.outputs.size() : 1U;
   const auto item_count = static_cast<std::uint32_t>(
       output_count + complete.surfaces.size() + complete.policies.size() +
-      complete.surface_outputs.size() +
+      complete.surface_outputs.size() + complete.output_vrr_policies.size() +
+      complete.surface_vrr_states.size() +
       complete.buffers.size() + complete.damages.size());
+  if (vrr_profile_) {
+    VrrResponseExpectation expectation;
+    expectation.commit_id = complete.commit_id;
+    expectation.presented_generation = complete.generation;
+    for (const auto& output : complete.outputs)
+      if (output.enabled) expectation.output_ids.insert(output.output_id);
+    for (const auto& buffer : complete.buffers)
+      expectation.release_buffer_ids.insert(buffer.attach.buffer_id);
+    if (!vrr_cache_.expect_response(std::move(expectation))) {
+      error = "could not stage the M14 compositor response expectation";
+      return false;
+    }
+  }
   if (!enqueue_output_records(complete, item_count, error) ||
       !enqueue_surface_membership_records(complete, error) ||
       !enqueue_buffer_damage_records(complete, error) ||
-      !enqueue_snapshot_completion_records(complete, item_count, error))
+      !enqueue_snapshot_completion_records(complete, item_count, error)) {
+    if (vrr_profile_) vrr_cache_.cancel_expectation();
     return false;
+  }
   for (auto& membership : complete.surface_outputs) {
     membership.state.output_ids = nullptr;
     membership.state.output_count = membership.output_ids.size();
   }
   pending_ = std::move(complete);
   content_submission_ = false;
+  frame_acknowledged_ = false;
+  vrr_response_ = {};
   state_ = PeerBootstrapState::AwaitingReply;
   return true;
 }
@@ -479,10 +575,24 @@ bool CompositorPeer::submit_content(
   if (!validate_buffer_damage_records(staged, error) ||
       !compositor_buffer_replay::rearm_snapshot(staged, replay_input_, error))
     return false;
+  if (vrr_profile_) {
+    VrrResponseExpectation expectation;
+    expectation.commit_id = submission.commit_id;
+    expectation.presented_generation = submission.generation;
+    for (const auto& output : replay_input_.outputs)
+      if (output.enabled) expectation.output_ids.insert(output.output_id);
+    for (const auto& buffer : submission.buffers)
+      expectation.release_buffer_ids.insert(buffer.attach.buffer_id);
+    if (!vrr_cache_.expect_response(std::move(expectation))) {
+      error = "could not stage the M14 content response expectation";
+      return false;
+    }
+  }
   auto* connection = transport_.connection();
   for (const auto& buffer : submission.buffers)
     if (!enqueue_buffer(connection, buffer)) {
       error = "could not queue incremental compositor buffer";
+      if (vrr_profile_) vrr_cache_.cancel_expectation();
       return false;
     }
   for (const auto& damage : submission.damages) {
@@ -496,6 +606,7 @@ bool CompositorPeer::submit_content(
         !enqueue_contract(connection, GWIPC_MESSAGE_SURFACE_DAMAGE, 0, value,
                           gwipc_contract_encode_surface_damage)) {
       error = "could not queue incremental compositor damage";
+      if (vrr_profile_) vrr_cache_.cancel_expectation();
       return false;
     }
   }
@@ -509,10 +620,13 @@ bool CompositorPeer::submit_content(
                         gwipc_contract_encode_frame_commit,
                         &commit_sequence_)) {
     error = "could not queue incremental compositor frame";
+    if (vrr_profile_) vrr_cache_.cancel_expectation();
     return false;
   }
   pending_content_ = submission;
   content_submission_ = true;
+  frame_acknowledged_ = false;
+  vrr_response_ = {};
   state_ = PeerBootstrapState::AwaitingReply;
   return true;
 }

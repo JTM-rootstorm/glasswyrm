@@ -51,6 +51,11 @@ public:
   [[nodiscard]] unsigned previous_active_terminal() const noexcept {
     return saved_state_.active;
   }
+  [[nodiscard]] bool previous_terminal_restored() const noexcept {
+    return state_ == DirectSessionState::Restored &&
+           (!have_state_ || saved_state_.active == terminal_number_ ||
+            !activated_);
+  }
 
 private:
   void append_api_error(std::string_view operation, std::string &error) const;

@@ -3,6 +3,7 @@
 #ifdef GW_SERVER_HAS_IPC
 
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "glasswyrmd/extensions/gw_vrr.hpp"
 #include "glasswyrmd/output_configuration_events.hpp"
 #include "glasswyrmd/screen_geometry.hpp"
 #include "input/input_router.hpp"
@@ -22,11 +23,33 @@ bool ServerRuntime::submit_output_policy(
     const LifecycleSnapshot& snapshot, const output::OutputLayout& layout,
     const bool rollback) {
   std::string error;
+  auto* vrr = server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr;
+  if (vrr) {
+    const auto* transaction = output_control_peer_
+                                  ? output_control_peer_->coordinator()
+                                        .transaction()
+                                  : nullptr;
+    if (!transaction)
+      return false;
+    const auto& policies = rollback ? transaction->old_vrr_policies
+                                    : transaction->proposed_vrr_policies;
+    if (policies.size() != layout.states.size())
+      return false;
+    for (const auto& [output_id, mode] : policies)
+      if (!vrr->set_policy(output_id, mode))
+        return false;
+    synchronize_vrr_windows(snapshot, server_.state_.vrr(), *vrr);
+  }
   policy_commit_ = next_policy_commit_++;
   policy_generation_ = next_policy_generation_++;
   if (!bridge_->submit_policy(
-          project_policy(snapshot, policy_commit_, policy_generation_, &layout),
+          project_policy(snapshot, policy_commit_, policy_generation_, &layout,
+                         vrr),
           error)) {
+    if (vrr && !rollback) {
+      if (output_configuration_vrr_before_)
+        *vrr = *output_configuration_vrr_before_;
+    }
     std::fprintf(stderr,
                  "glasswyrmd: output configuration policy submission failed: "
                  "%s\n",
@@ -45,7 +68,8 @@ bool ServerRuntime::submit_output_compositor(
   std::string error;
   auto submission = project_compositor(
       snapshot, next_compositor_commit_++, next_compositor_generation_++,
-      server_.options_.software_content, &layout);
+      server_.options_.software_content, &layout,
+      server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
   if (submission.outputs.size() != layout.descriptors.size()) {
     std::fprintf(stderr,
                  "glasswyrmd: output configuration scene projection failed\n");
@@ -108,6 +132,22 @@ bool ServerRuntime::promote_output_configuration() {
       lifecycle_->phase() != CoordinatorPhase::Idle || lifecycle_->active())
     return false;
 
+  std::optional<VrrEventBatch> vrr_events;
+  if (server_.options_.vrr_protocol) {
+    const auto* cache = bridge_->vrr_cache();
+    std::map<std::uint64_t, std::uint32_t> output_xids;
+    for (const auto& output : server_.state_.randr().outputs())
+      output_xids.emplace(output.internal_id, output.xid);
+    if (!cache || output_xids.size() != cache->outputs().size())
+      return false;
+    auto batch = prepare_vrr_event_batch(*cache, server_.state_.vrr(),
+                                         output_xids);
+    if (batch.outputs.size() != cache->outputs().size() ||
+        batch.windows.size() != cache->windows().size())
+      return false;
+    vrr_events = std::move(batch);
+  }
+
   if (!output_control_peer_->coordinator().can_accept_compositor() ||
       !install_output_configuration(*output_configuration_evaluated_,
                                     transaction->proposed_layout, true))
@@ -123,6 +163,27 @@ bool ServerRuntime::promote_output_configuration() {
     (void)install_output_configuration(*output_configuration_before_,
                                        transaction->old_layout, false);
     return false;
+  }
+  if (vrr_events) {
+    const auto transitions = vrr_events->windows;
+    apply_vrr_event_batch(server_.state_.vrr(), *vrr_events);
+    for (const auto& transition : transitions) {
+      const auto* after = server_.state_.vrr().find_window(transition.window_id);
+      if (!after)
+        continue;
+      const auto changed = vrr_change_mask(transition.before, *after);
+      for (const auto& client : server_.clients_) {
+        const auto selection =
+            after->event_selections.find(client->identifier());
+        if (selection == after->event_selections.end())
+          continue;
+        const auto selected = changed & selection->second & kKnownVrrEventMask;
+        if (selected != 0)
+          (void)client->enqueue_server_packet(extensions::encode_gw_vrr_notify(
+              client->byte_order(), client->last_request_sequence(), selected,
+              transition.window_id, *after, transition.output_policy));
+      }
+    }
   }
   if (server_.protocol_event_handler_)
     server_.protocol_event_handler_(output_configuration_events_);
@@ -208,6 +269,7 @@ bool ServerRuntime::finish_output_configuration() {
   output_configuration_stage_ = OutputConfigurationRuntimeStage::Idle;
   output_configuration_before_.reset();
   output_configuration_evaluated_.reset();
+  output_configuration_vrr_before_.reset();
   output_configuration_events_.clear();
   output_configuration_peer_reset_ = false;
   if (lifecycle_ && lifecycle_->phase() == CoordinatorPhase::Idle &&
@@ -240,6 +302,12 @@ bool ServerRuntime::service_output_control_work() {
         (cursor_presenter_ && cursor_presenter_->in_flight()))
       return true;
     output_configuration_before_ = lifecycle_->committed();
+    if (server_.options_.vrr_protocol) {
+      const auto* cache = bridge_->vrr_cache();
+      if (!cache)
+        return false;
+      output_configuration_vrr_before_ = *cache;
+    }
     return submit_output_policy(*output_configuration_before_,
                                 transaction->proposed_layout, false);
   }
@@ -252,6 +320,8 @@ bool ServerRuntime::service_output_control_work() {
       OutputConfigurationRuntimeStage::AwaitingPolicy) {
     if (bridge_->policy_rejected_ready()) {
       bridge_->clear_transaction_result();
+      if (server_.options_.vrr_protocol && output_configuration_vrr_before_)
+        *bridge_->vrr_cache() = *output_configuration_vrr_before_;
       if (!output_control_peer_->acknowledge_policy_rejected())
         return false;
       return finish_output_configuration();
@@ -260,7 +330,10 @@ bool ServerRuntime::service_output_control_work() {
       return true;
     auto evaluated = apply_policy_result(*output_configuration_before_,
                                          bridge_->policy_result(),
-                                         &transaction->proposed_layout);
+                                         &transaction->proposed_layout,
+                                         server_.options_.vrr_protocol
+                                             ? bridge_->vrr_cache()
+                                             : nullptr);
     if (!evaluated || !coordinator.accept_policy())
       return false;
     output_configuration_evaluated_ = std::move(*evaluated);
@@ -305,7 +378,10 @@ bool ServerRuntime::service_output_control_work() {
       return true;
     auto rollback = apply_policy_result(*output_configuration_before_,
                                         bridge_->policy_result(),
-                                        &transaction->old_layout);
+                                        &transaction->old_layout,
+                                        server_.options_.vrr_protocol
+                                            ? bridge_->vrr_cache()
+                                            : nullptr);
     if (!rollback ||
         !submit_output_compositor(*rollback, transaction->old_layout, true))
       return false;

@@ -1,4 +1,5 @@
 #include "glasswyrmd/policy_peer.hpp"
+#include "ipc/vrr_membership_hint.hpp"
 
 #include <algorithm>
 #include <map>
@@ -14,6 +15,7 @@ constexpr gwipc_capabilities kCapabilities =
     GWIPC_CAP_INTERACTIVE_POLICY;
 constexpr gwipc_capabilities kOutputModelCapabilities =
     GWIPC_CAP_MULTI_OUTPUT_POLICY | GWIPC_CAP_SCALE_METADATA;
+constexpr gwipc_capabilities kVrrCapabilities = GWIPC_CAP_VRR_POLICY;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -178,7 +180,8 @@ canonical_policy_hash(const PolicySnapshotResult &result,
 }
 bool valid_policy_result(const PolicySnapshotSubmission &input,
                          const PolicySnapshotResult &result,
-                         const bool interactive, const bool output_model) {
+                         const bool interactive, const bool output_model,
+                         const bool vrr_profile) {
   if (result.bindings.has_value() != interactive)
     return false;
   std::set<std::uint32_t> expected;
@@ -210,22 +213,42 @@ bool valid_policy_result(const PolicySnapshotSubmission &input,
   for (std::size_t index = 0; index < stacks.size(); ++index)
     if (!stacks.contains(static_cast<std::int32_t>(index)))
       return false;
+  if (!vrr_profile)
+    return true;
+  if (!validate_vrr_policy_result(input.vrr, result.vrr_outputs,
+                                  result.vrr_windows))
+    return false;
+  std::map<std::uint32_t, std::uint64_t> base_outputs;
+  for (const auto& state : result.windows)
+    base_outputs.emplace(state.window_id, state.output_id);
+  for (const auto& state : result.vrr_windows) {
+    const auto base = base_outputs.find(state.window_id);
+    if (base == base_outputs.end() || base->second != state.output_id)
+      return false;
+  }
   return true;
 }
 
 bool valid_submission_profile(const PolicySnapshotSubmission &submission,
-                              const bool output_model) {
+                              const bool output_model,
+                              const bool vrr_profile) {
   if (!output_model)
-    return submission.outputs.empty() && submission.output_hints.empty();
+    return submission.outputs.empty() && submission.output_hints.empty() &&
+           submission.vrr.outputs.empty() && submission.vrr.windows.empty() &&
+           submission.vrr.memberships.empty();
   if (submission.outputs.empty() || submission.outputs.size() > 8 ||
       submission.output_hints.size() > submission.windows.size())
     return false;
   std::set<std::uint64_t> output_ids;
   std::set<std::uint32_t> window_ids;
+  std::set<std::uint32_t> vrr_candidate_ids;
   std::set<std::uint32_t> hint_ids;
   unsigned primary_count = 0;
-  for (const auto &window : submission.windows)
+  for (const auto &window : submission.windows) {
     window_ids.insert(window.window.window_id);
+    if (!window.window.override_redirect)
+      vrr_candidate_ids.insert(window.window.window_id);
+  }
   for (const auto &output : submission.outputs) {
     if (output.output_id == 0 || !output_ids.insert(output.output_id).second)
       return false;
@@ -233,15 +256,48 @@ bool valid_submission_profile(const PolicySnapshotSubmission &submission,
   }
   if (primary_count != 1)
     return false;
+  const std::vector<std::uint64_t> canonical_outputs(output_ids.begin(),
+                                                     output_ids.end());
   for (const auto &hint : submission.output_hints) {
     if (hint.window_id == 0 || !hint_ids.insert(hint.window_id).second ||
         !window_ids.contains(hint.window_id) ||
         (hint.previous_output_id != 0 &&
-         !output_ids.contains(hint.previous_output_id)) ||
-        (hint.preferred_output_id != 0 &&
-         !output_ids.contains(hint.preferred_output_id)))
+         !output_ids.contains(hint.previous_output_id)))
       return false;
+    if (vrr_profile) {
+      const auto membership =
+          glasswyrm::ipc::internal::decode_vrr_membership_hint(
+              canonical_outputs, hint.preferred_output_id);
+      if (!membership) return false;
+      const auto expected = submission.vrr.memberships.find(hint.window_id);
+      if (expected != submission.vrr.memberships.end() &&
+          *membership != expected->second)
+        return false;
+    } else if (hint.preferred_output_id != 0 &&
+               !output_ids.contains(hint.preferred_output_id)) {
+      return false;
+    }
   }
+  if (!vrr_profile)
+    return submission.vrr.outputs.empty() && submission.vrr.windows.empty() &&
+           submission.vrr.memberships.empty();
+  if (submission.vrr.outputs.size() != submission.outputs.size() ||
+      submission.vrr.windows.size() != vrr_candidate_ids.size() ||
+      submission.vrr.memberships.size() != vrr_candidate_ids.size())
+    return false;
+  std::set<std::uint64_t> vrr_outputs;
+  for (const auto& output : submission.vrr.outputs)
+    if (output.struct_size < sizeof(output) || output.output_id == 0 ||
+        !output_ids.contains(output.output_id) ||
+        !vrr_outputs.insert(output.output_id).second)
+      return false;
+  std::set<std::uint32_t> vrr_windows;
+  for (const auto& window : submission.vrr.windows)
+    if (window.struct_size < sizeof(window) || window.window_id == 0 ||
+        !vrr_candidate_ids.contains(window.window_id) ||
+        !vrr_windows.insert(window.window_id).second ||
+        !submission.vrr.memberships.contains(window.window_id))
+      return false;
   return true;
 }
 
@@ -287,14 +343,16 @@ bool enqueue_control(gwipc_connection *connection, std::uint16_t type,
 PolicyPeer::PolicyPeer(std::string path,
                        const gw::protocol::x11::ScreenModel screen,
                        const bool interactive_policy,
-                       const bool output_model)
+                       const bool output_model, const bool vrr_profile)
     : transport_(std::move(path), GWIPC_ROLE_WINDOW_MANAGER,
                  (interactive_policy
                       ? kCapabilities
                       : kCapabilities & ~GWIPC_CAP_INTERACTIVE_POLICY) |
-                     (output_model ? kOutputModelCapabilities : 0),
+                     (output_model ? kOutputModelCapabilities : 0) |
+                     (vrr_profile ? kVrrCapabilities : 0),
                  "glasswyrmd-policy"),
-      screen_(screen), output_model_profile_(output_model) {}
+      screen_(screen), output_model_profile_(output_model),
+      vrr_profile_(vrr_profile) {}
 
 bool PolicyPeer::connect(std::string &error) {
   disconnect();
@@ -308,6 +366,12 @@ bool PolicyPeer::send_bootstrap(std::string &error) {
   interactive_profile_ =
       (gwipc_connection_peer_info(transport_.connection()).capabilities &
        GWIPC_CAP_INTERACTIVE_POLICY) != 0;
+  if (vrr_profile_ &&
+      (gwipc_connection_peer_info(transport_.connection()).capabilities &
+       GWIPC_CAP_VRR_POLICY) == 0) {
+    error = "window manager did not negotiate the M14 VRR policy profile";
+    return false;
+  }
   if (output_model_profile_ && replay_input_.commit_id == 0)
     return true;
   const bool replay = replay_input_.commit_id != 0;
@@ -328,14 +392,16 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
     error = "policy peer is not ready for a snapshot";
     return false;
   }
-  if (!valid_submission_profile(submission, output_model_profile_)) {
+  if (!valid_submission_profile(submission, output_model_profile_,
+                                vrr_profile_)) {
     error = "policy snapshot does not match the negotiated output profile";
     return false;
   }
   auto *connection = transport_.connection();
   const auto count = static_cast<std::uint32_t>(
       submission.windows.size() + submission.outputs.size() +
-      submission.output_hints.size() + 1);
+      submission.output_hints.size() + submission.vrr.outputs.size() +
+      submission.vrr.windows.size() + 1);
   gwipc_snapshot_begin begin{sizeof(begin),
                              submission.commit_id,
                              GWIPC_SNAPSHOT_WINDOW_POLICY,
@@ -384,6 +450,22 @@ bool PolicyPeer::submit(const PolicySnapshotSubmission &submission,
       return false;
     }
   }
+  for (const auto& output : submission.vrr.outputs) {
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, output,
+                          gwipc_contract_encode_policy_output_vrr_upsert)) {
+      error = "could not queue policy output VRR metadata";
+      return false;
+    }
+  }
+  for (const auto& window : submission.vrr.windows) {
+    if (!enqueue_contract(connection, GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT,
+                          GWIPC_FLAG_SNAPSHOT_ITEM, window,
+                          gwipc_contract_encode_policy_window_vrr_upsert)) {
+      error = "could not queue policy window VRR metadata";
+      return false;
+    }
+  }
   if (!enqueue_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
                        gwipc_control_encode_snapshot_end) ||
       !enqueue_contract(
@@ -425,7 +507,8 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
             value->domain != GWIPC_SNAPSHOT_WINDOW_POLICY ||
             value->generation != pending_.generation ||
             value->expected_item_count !=
-                pending_.windows.size() + (interactive_profile_ ? 1U : 0U)) {
+                pending_.windows.size() + (interactive_profile_ ? 1U : 0U) +
+                    pending_.vrr.outputs.size() + pending_.vrr.windows.size()) {
           error = "invalid policy bootstrap snapshot";
           return PeerProcessOutcome::Fatal;
         }
@@ -436,9 +519,12 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
             value->snapshot_id != pending_.commit_id ||
             value->generation != pending_.generation ||
             value->actual_item_count !=
-                pending_.windows.size() + (interactive_profile_ ? 1U : 0U) ||
+                pending_.windows.size() + (interactive_profile_ ? 1U : 0U) +
+                    pending_.vrr.outputs.size() + pending_.vrr.windows.size() ||
             result_.windows.size() != pending_.windows.size() ||
-            result_.bindings.has_value() != interactive_profile_) {
+            result_.bindings.has_value() != interactive_profile_ ||
+            result_.vrr_outputs.size() != pending_.vrr.outputs.size() ||
+            result_.vrr_windows.size() != pending_.vrr.windows.size()) {
           error = "invalid policy bootstrap snapshot end";
           return PeerProcessOutcome::Fatal;
         }
@@ -474,6 +560,28 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
       result_.bindings = *value;
       continue;
     }
+    if (type == GWIPC_MESSAGE_POLICY_OUTPUT_VRR_STATE ||
+        type == GWIPC_MESSAGE_POLICY_WINDOW_VRR_STATE) {
+      gwipc_decoded_contract* raw_vrr = nullptr;
+      if (!vrr_profile_ || !reply_snapshot_active_ ||
+          gwipc_contract_decode_message(message.get(), &raw_vrr) !=
+              GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedContractDelete> decoded_vrr(
+          raw_vrr);
+      if (type == GWIPC_MESSAGE_POLICY_OUTPUT_VRR_STATE) {
+        const auto* value =
+            gwipc_decoded_policy_output_vrr_state(decoded_vrr.get());
+        if (!value) return PeerProcessOutcome::Fatal;
+        result_.vrr_outputs.push_back(*value);
+      } else {
+        const auto* value =
+            gwipc_decoded_policy_window_vrr_state(decoded_vrr.get());
+        if (!value) return PeerProcessOutcome::Fatal;
+        result_.vrr_windows.push_back(*value);
+      }
+      continue;
+    }
     if (type != GWIPC_MESSAGE_POLICY_ACKNOWLEDGED) {
       error = "unexpected policy bootstrap message";
       return PeerProcessOutcome::Fatal;
@@ -505,9 +613,15 @@ PeerProcessOutcome PolicyPeer::drain(std::string &error) {
     }
     result_.generation = ack->applied_generation;
     result_.hash = ack->policy_hash;
+    const auto base_hash = canonical_policy_hash(result_, pending_, screen_);
+    const auto expected_hash =
+        vrr_profile_ ? canonical_vrr_policy_hash(
+                           base_hash, pending_.vrr, result_.vrr_outputs,
+                           result_.vrr_windows)
+                     : base_hash;
     if (!valid_policy_result(pending_, result_, interactive_profile_,
-                             output_model_profile_) ||
-        canonical_policy_hash(result_, pending_, screen_) != ack->policy_hash ||
+                             output_model_profile_, vrr_profile_) ||
+        expected_hash != ack->policy_hash ||
         (replaying_ && policy_hash_ != 0 && policy_hash_ != ack->policy_hash)) {
       error = "policy acknowledgement hash does not match returned snapshot";
       return PeerProcessOutcome::Fatal;

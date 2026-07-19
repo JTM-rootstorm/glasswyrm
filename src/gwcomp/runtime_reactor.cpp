@@ -39,7 +39,7 @@ RuntimeReactor::RuntimeReactor(const Options& options, gwipc_listener* listener,
       listener_(listener),
       signals_(signals),
       compositor_(compositor),
-      output_inventory_(output_layout) {}
+      output_inventory_(output_layout, &compositor) {}
 
 void RuntimeReactor::ConnectionDeleter::operator()(
     gwipc_connection* value) const {
@@ -226,7 +226,14 @@ void RuntimeReactor::service_virtual_terminal() {
   } else if (!session_state_.waiting() &&
              (!session_state_.enabled() ||
               session_state_.state() == CoordinatedSessionState::Active)) {
-    vt_acquire_requested_ = false;
+    if (!compositor_.activate_presentation_session(error)) {
+      std::fprintf(stderr, "gwcomp: VT activation failed: %s\n",
+                   error.c_str());
+      stopping_ = true;
+      exit_status_ = 1;
+    } else {
+      vt_acquire_requested_ = false;
+    }
   }
 }
 
@@ -297,8 +304,18 @@ void RuntimeReactor::validate_producer() {
   compositor_.set_peer_profile(*peer_profile_);
   compositor_.set_cpu_buffer_synchronization(
       (info.capabilities & GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION) != 0);
-  compositor_.set_vrr_contract_enabled(
-      (info.capabilities & kVrrCapabilities) == kVrrCapabilities);
+  std::string contract_error;
+  if (!compositor_.configure_vrr_contract(
+          (info.capabilities & kVrrCapabilities) == kVrrCapabilities,
+          contract_error)) {
+    std::fprintf(stderr, "gwcomp: could not configure VRR contract: %s\n",
+                 contract_error.c_str());
+    compositor_.disconnect();
+    producer_.reset();
+    peer_role_ = GWIPC_ROLE_UNKNOWN;
+    peer_profile_.reset();
+    return;
+  }
   peer_validated_ = true;
   session_state_.configure(
       peer_role_ == GWIPC_ROLE_PROTOCOL_SERVER &&
@@ -321,15 +338,7 @@ void RuntimeReactor::service_session_messages() {
     (void)gwipc_message_payload(message.get(), &size);
     payload_bytes += size;
     ++messages;
-    const auto output_query =
-        service_output_inventory_query(*message);
-    if (output_query == OutputInventoryDisposition::RejectPeer ||
-        output_query == OutputInventoryDisposition::Fatal) {
-      break;
-    } else if (output_query == OutputInventoryDisposition::Handled) {
-      continue;
-    } else if (gwipc_message_type(message.get()) ==
-        GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED) {
+    if (session_wait_message_allowed(gwipc_message_type(message.get()))) {
       gwipc_session_state_acknowledged acknowledged{};
       std::uint64_t reply_to = 0;
       std::string error;
@@ -342,12 +351,20 @@ void RuntimeReactor::service_session_messages() {
         exit_status_ = 1;
       } else if (vt_acquire_requested_ &&
                  session_state_.state() == CoordinatedSessionState::Active) {
-        vt_acquire_requested_ = false;
+        if (!compositor_.activate_presentation_session(error)) {
+          std::fprintf(stderr, "gwcomp: VT activation failed: %s\n",
+                       error.c_str());
+          stopping_ = true;
+          exit_status_ = 1;
+        } else {
+          vt_acquire_requested_ = false;
+        }
       }
     } else {
-      apply_dispatch(dispatch_contract_message(
-          producer_.get(), message.get(), peer_role_, *peer_profile_,
-          options_.max_frames, compositor_));
+      std::fprintf(stderr,
+                   "gwcomp: non-session message received while session acknowledgement is pending\n");
+      stopping_ = true;
+      exit_status_ = 1;
     }
   }
   if (session_state_.waiting() &&

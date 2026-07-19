@@ -2,6 +2,7 @@
 
 #include "glasswyrmd/lifecycle_types.hpp"
 #include "glasswyrmd/output_configuration_coordinator.hpp"
+#include "glasswyrmd/vrr_state_cache.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -34,7 +35,8 @@ public:
   using WindowSnapshotProvider = std::function<LifecycleSnapshot()>;
 
   OutputControlPeer(std::string path, output::OutputLayout inventory,
-                    WindowSnapshotProvider windows = {});
+                    WindowSnapshotProvider windows = {},
+                    VrrStateCache* vrr = nullptr);
   ~OutputControlPeer();
   OutputControlPeer(const OutputControlPeer &) = delete;
   OutputControlPeer &operator=(const OutputControlPeer &) = delete;
@@ -76,6 +78,7 @@ private:
     std::uint32_t expected_count{};
     std::uint32_t actual_count{};
     std::vector<gw::ipc::wire::OutputUpsert> outputs;
+    std::vector<gwipc_output_vrr_policy_upsert> vrr_policies;
     bool reading{};
     bool complete{};
   };
@@ -96,6 +99,8 @@ private:
   [[nodiscard]] bool consume(Peer &peer, const gwipc_message *message);
   [[nodiscard]] bool consume_begin(Peer &peer, const gwipc_message *message);
   [[nodiscard]] bool consume_output(Peer &peer, const gwipc_message *message);
+  [[nodiscard]] bool consume_vrr_policy(Peer& peer,
+                                        const gwipc_message* message);
   [[nodiscard]] bool consume_end(Peer &peer, const gwipc_message *message);
   [[nodiscard]] bool consume_query(Peer &peer, const gwipc_message *message);
   [[nodiscard]] bool consume_commit(Peer &peer, const gwipc_message *message);
@@ -109,6 +114,7 @@ private:
 
   std::string path_;
   WindowSnapshotProvider window_snapshot_provider_;
+  VrrStateCache* vrr_{};
   std::unique_ptr<gwipc_listener, ListenerDeleter> listener_;
   std::map<std::uint64_t, Peer> peers_;
   OutputConfigurationCoordinator coordinator_;

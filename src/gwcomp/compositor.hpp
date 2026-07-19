@@ -8,6 +8,7 @@
 #include "compositor/scene.hpp"
 #include "gwcomp/scene_manifest.hpp"
 #include "gwcomp/vrr_response_batch.hpp"
+#include "output/model/layout.hpp"
 #include "render/scene_renderer.hpp"
 #include "render/output_scene_renderer.hpp"
 
@@ -60,6 +61,13 @@ struct PresentationCompletion {
   PresentedFrame frame;
 };
 
+struct VrrInventorySnapshot {
+  std::vector<gwipc_output_vrr_capability_upsert> capabilities;
+  std::vector<gwipc_output_vrr_policy_upsert> policies;
+  std::vector<gwipc_output_vrr_state_upsert> states;
+  std::vector<gwipc_presentation_timing> timings;
+};
+
 class PresentationTransaction;
 
 class Compositor final {
@@ -82,9 +90,11 @@ public:
   void set_cpu_buffer_synchronization(const bool enabled) noexcept {
     cpu_buffer_synchronization_ = enabled;
   }
-  void set_vrr_contract_enabled(const bool enabled) noexcept {
-    vrr_contract_enabled_ = enabled;
-  }
+  [[nodiscard]] bool configure_vrr_contract(bool enabled,
+                                            std::string& error);
+  [[nodiscard]] std::optional<VrrInventorySnapshot> vrr_inventory(
+      const glasswyrm::output::OutputLayout& layout,
+      std::string& error) const;
   [[nodiscard]] bool configure_scene_profile(
       SceneProfile profile, std::uint64_t primary_output_id = 0,
       std::uint64_t output_layout_generation = 0) noexcept;
@@ -118,6 +128,7 @@ public:
       short revents, std::string& error);
   [[nodiscard]] bool suspend_presentation(std::string& error);
   [[nodiscard]] bool resume_presentation(std::string& error);
+  [[nodiscard]] bool activate_presentation_session(std::string& error);
   [[nodiscard]] bool shutdown_presentation(std::string& error) noexcept;
   [[nodiscard]] bool presentation_suspended() const noexcept {
     return presentation_suspended_;

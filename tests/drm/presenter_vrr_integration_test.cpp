@@ -161,6 +161,17 @@ std::string contents(const std::filesystem::path &path) {
   return {std::istreambuf_iterator<char>(input), {}};
 }
 
+std::optional<std::uint64_t> property_value(
+    const AtomicCommitRecord& commit, const std::uint32_t property_id) {
+  const auto found = std::ranges::find_if(
+      commit.properties, [&](const AtomicPropertyValue& value) {
+        return value.property_id == property_id;
+      });
+  return found == commit.properties.end()
+             ? std::nullopt
+             : std::optional<std::uint64_t>{found->value};
+}
+
 struct Rig {
   std::filesystem::path directory{temporary_directory()};
   FakeDrmApi drm;
@@ -171,7 +182,8 @@ struct Rig {
   std::string error;
 
   explicit Rig(const DrmPresentationApi api = DrmPresentationApi::Atomic,
-               const bool atomic = true, const bool reject_vrr_on = false)
+               const bool atomic = true, const bool reject_vrr_on = false,
+               const bool negotiate_vrr = true)
       : drm({"/dev/dri/card0", DeviceOpenStatus::Success, snapshot(atomic), {}}) {
     configure(kms);
     if (reject_vrr_on)
@@ -189,6 +201,8 @@ struct Rig {
     config.vt_signals = {SIGUSR1, SIGUSR2};
     config.vrr_reporting = true;
     gw::test::require(presenter->initialize(config, &vt, error), error);
+    if (negotiate_vrr)
+      gw::test::require(presenter->configure_vrr_contract(true, error), error);
   }
 
   ~Rig() {
@@ -267,9 +281,12 @@ void atomic_transition_suspend_restore() {
   gw::test::require(
       rig.presenter->resume(committed).disposition ==
               output::PresentDisposition::Complete &&
-          rig.kms.master && rig.presenter->vrr_capability(1)->session_active &&
+          rig.kms.master && !rig.presenter->vrr_capability(1)->session_active &&
           rig.kms.atomic_commits.back().properties.back().value == 0,
-      "VT acquire re-modesets the committed frame with VRR still off");
+      "VT acquire re-modesets off but remains inactive before peer ack");
+  gw::test::require(rig.presenter->activate_session(rig.error) &&
+                        rig.presenter->vrr_capability(1)->session_active,
+                    "peer acknowledgement activates the presentation session");
 
   const auto reevaluated = frame_set(pixels, 4, true);
   pending = rig.presenter->present(reevaluated.view());
@@ -291,8 +308,48 @@ void atomic_transition_suspend_restore() {
               std::string::npos &&
           report.find("\"record\":\"vrr-timing\"") != std::string::npos &&
           report.find("\"record\":\"vrr-summary\"") != std::string::npos &&
-          report.find("\"record\":\"vrr-restore\"") != std::string::npos,
+          report.find("\"record\":\"vrr-restore\"") != std::string::npos &&
+          report.find("\"getty_restore\":true") != std::string::npos,
       "DRM report contains deterministic VRR capability through restore proof");
+}
+
+void initial_enable_waits_for_real_flip() {
+  Rig rig;
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto enabled = frame_set(pixels, 1, true);
+  const auto pending = rig.presenter->present(enabled.view());
+  const auto count = rig.kms.atomic_commits.size();
+  gw::test::require(
+      pending.disposition == output::PresentDisposition::Pending && count >= 2 &&
+          rig.kms.atomic_commits[count - 2].flags == AtomicAllowModeset &&
+          rig.kms.atomic_commits[count - 2].properties.back().property_id == 22 &&
+          rig.kms.atomic_commits[count - 2].properties.back().value == 0 &&
+          rig.kms.atomic_commits.back().flags ==
+              (AtomicNonblock | AtomicPageFlipEvent) &&
+          rig.kms.atomic_commits.back().properties.back().property_id == 22 &&
+          rig.kms.atomic_commits.back().properties.back().value == 1,
+      "initial enable remains pending until a real off-to-on page flip");
+  complete_flip(rig, pending, 1, 1'000'000'000);
+}
+
+void historical_profile_does_not_probe_vrr() {
+  Rig rig(DrmPresentationApi::Atomic, true, false, false);
+  const auto property_reads = std::ranges::count(rig.kms.calls,
+                                                 std::string{"properties:40"});
+  const auto probe_commits = rig.kms.atomic_commits.size();
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const output::SoftwareFrameView frame{{1, 2, 2, 60'000}, pixels, {}, 1, 1, 1};
+  const auto presented = rig.presenter->present(frame);
+  gw::test::require(
+      !rig.presenter->vrr_capability(1) && property_reads == 1 &&
+          probe_commits == 1 &&
+          presented.disposition == output::PresentDisposition::Complete &&
+          std::ranges::count(rig.kms.calls, std::string{"properties:40"}) ==
+              property_reads &&
+          rig.kms.atomic_commits.back().properties.back().property_id != 22,
+      "historical presentation neither probes nor appends the optional VRR property");
 }
 
 void legacy_and_test_rejection() {
@@ -337,20 +394,49 @@ void readback_mismatch_is_fatal() {
                     "readback mismatch fixture initializes");
   const auto enabled = frame_set(pixels, 2, true);
   const auto pending = rig.presenter->present(enabled.view());
+  const auto commits_before = rig.kms.atomic_commits.size();
   rig.kms.property_readback_overrides[{40, 22}] = 0;
   rig.drm.queue_page_flip(pending.token, 40, 20, 2'000'000'000, true);
   const auto event = rig.presenter->service(POLLIN);
   gw::test::require(
       event.kind == output::BackendEventKind::Fatal &&
-          event.error.find("readback") != std::string::npos,
-      "post-completion VRR readback mismatch is a fatal divergence");
+          event.error.find("readback") != std::string::npos &&
+          rig.kms.atomic_commits.size() == commits_before + 2 &&
+          property_value(rig.kms.atomic_commits[commits_before], 22) == 0 &&
+          property_value(rig.kms.atomic_commits.back(), 22) == 1,
+      "readback divergence attempts VRR-off before saved-state restore");
+}
+
+void invalid_timing_restores_saved_state() {
+  Rig rig;
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto off = frame_set(pixels, 1, false, output::vrr::Decision::Disabled);
+  gw::test::require(rig.presenter->present(off.view()).disposition ==
+                        output::PresentDisposition::Complete,
+                    "invalid timing fixture initializes");
+  const auto enabled = frame_set(pixels, 2, true);
+  const auto pending = rig.presenter->present(enabled.view());
+  const auto commits_before = rig.kms.atomic_commits.size();
+  rig.drm.queue_page_flip(pending.token, 40, 0, 0, false);
+  const auto event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Fatal &&
+          event.error.find("timing") != std::string::npos &&
+          rig.kms.atomic_commits.size() == commits_before + 2 &&
+          property_value(rig.kms.atomic_commits[commits_before], 22) == 0 &&
+          property_value(rig.kms.atomic_commits.back(), 22) == 1,
+      "invalid page-flip timing disables VRR before saved-state restore");
 }
 
 } // namespace
 
 int main() {
   atomic_transition_suspend_restore();
+  initial_enable_waits_for_real_flip();
+  historical_profile_does_not_probe_vrr();
   legacy_and_test_rejection();
   readback_mismatch_is_fatal();
+  invalid_timing_restores_saved_state();
   return 0;
 }

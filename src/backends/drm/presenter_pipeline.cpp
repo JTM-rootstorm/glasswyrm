@@ -103,20 +103,6 @@ bool DrmPresenter::try_atomic(std::string& error) {
     mode_blob_.reset();
     return false;
   }
-  const auto connector = std::ranges::find_if(
-      snapshot.connectors,
-      [&](const Connector &value) { return value.id == pipeline_.connector; });
-  if (connector == snapshot.connectors.end()) {
-    error = "selected DRM connector disappeared during VRR discovery";
-    mode_blob_.reset();
-    return false;
-  }
-  auto vrr = probe_kms_vrr_state(kms_, device_.borrowed_kms_fd(), *connector,
-                                 pipeline_, saved_, request);
-  vrr_state_.initialize(config_.output.output_id, std::move(vrr),
-                        snapshot.timestamp_monotonic,
-                        selected_mode_.refresh_millihz);
-  vrr_state_initialized_ = true;
   selected_api_ = ReportApiPath::Atomic;
   return true;
 }
@@ -126,21 +112,37 @@ bool DrmPresenter::capture_legacy(std::string& error) {
   if (!live_connector_ids(connectors, error) ||
       !capture_saved_state(kms_, device_.borrowed_kms_fd(), pipeline_,
                            connectors, false, saved_, error)) return false;
-  const auto &snapshot = device_.snapshot();
+  selected_api_ = ReportApiPath::Legacy;
+  return true;
+}
+
+bool DrmPresenter::initialize_vrr_controller(std::string& error) {
+  if (vrr_state_initialized_) {
+    error.clear();
+    return true;
+  }
+  const auto& snapshot = device_.snapshot();
   const auto connector = std::ranges::find_if(
       snapshot.connectors,
-      [&](const Connector &value) { return value.id == pipeline_.connector; });
+      [&](const Connector& value) { return value.id == pipeline_.connector; });
   if (connector == snapshot.connectors.end()) {
     error = "selected DRM connector disappeared during VRR discovery";
     return false;
   }
+  const auto selected =
+      selected_api_ == ReportApiPath::Atomic
+          ? atomic_initial_request(
+                pipeline_, saved_.properties, mode_blob_.id(),
+                buffers_.front().framebuffer_id(), config_.output.width,
+                config_.output.height, false)
+          : std::vector<AtomicPropertyValue>{};
   auto vrr = probe_kms_vrr_state(kms_, device_.borrowed_kms_fd(), *connector,
-                                 pipeline_, saved_, {});
+                                 pipeline_, saved_, selected);
   vrr_state_.initialize(config_.output.output_id, std::move(vrr),
                         snapshot.timestamp_monotonic,
                         selected_mode_.refresh_millihz);
   vrr_state_initialized_ = true;
-  selected_api_ = ReportApiPath::Legacy;
+  error.clear();
   return true;
 }
 
@@ -180,7 +182,7 @@ bool DrmPresenter::initialize_report(std::string& error) {
         !report_->commit(staged, error))
       return false;
   }
-  return !vrr_report_ || append_vrr_capability_report(error);
+  return true;
 }
 
 bool DrmPresenter::append_vrr_capability_report(std::string& error) {

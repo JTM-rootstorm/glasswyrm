@@ -15,6 +15,15 @@ namespace {
 constexpr std::uint32_t kMaximumPayload = 4096;
 constexpr std::uint32_t kMaximumQueuedBytes = 2U * 1024U * 1024U;
 constexpr std::uint16_t kMaximumQueuedMessages = 2048;
+constexpr gwipc_capabilities kVrrCapabilities =
+    GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY |
+    GWIPC_CAP_PRESENTATION_TIMING;
+
+bool vrr_negotiated(const gwipc_connection* connection) noexcept {
+  return connection &&
+         (gwipc_connection_peer_info(connection).capabilities &
+          kVrrCapabilities) == kVrrCapabilities;
+}
 
 struct DecodedControlDeleter {
   void operator()(gwipc_decoded_control *value) const noexcept {
@@ -104,9 +113,18 @@ void OutputControlPeer::ConnectionDeleter::operator()(
 
 OutputControlPeer::OutputControlPeer(std::string path,
                                      output::OutputLayout inventory,
-                                     WindowSnapshotProvider windows)
+                                     WindowSnapshotProvider windows,
+                                     VrrStateCache* vrr)
     : path_(std::move(path)), window_snapshot_provider_(std::move(windows)),
-      coordinator_(std::move(inventory)) {}
+      vrr_(vrr), coordinator_(
+                     std::move(inventory),
+                     [&] {
+                       std::map<std::uint64_t, gwipc_vrr_policy_mode> values;
+                       if (vrr)
+                         for (const auto& [id, state] : vrr->outputs())
+                           values.emplace(id, state.policy.mode);
+                       return values;
+                     }()) {}
 
 OutputControlPeer::~OutputControlPeer() = default;
 
@@ -124,7 +142,10 @@ bool OutputControlPeer::start(std::string &error) {
   options.offered_capabilities =
       GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_OUTPUT_CONTROL |
       GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_WINDOW_LIFECYCLE |
-      GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP | GWIPC_CAP_SCALE_METADATA;
+      GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP | GWIPC_CAP_SCALE_METADATA |
+      (vrr_ ? GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY |
+                  GWIPC_CAP_PRESENTATION_TIMING
+            : 0);
   options.required_peer_capabilities = GWIPC_CAP_OUTPUT_CONTROL;
   options.maximum_payload = kMaximumPayload;
   options.maximum_fd_count = 0;
@@ -255,6 +276,8 @@ bool OutputControlPeer::consume(Peer &peer, const gwipc_message *message) {
     return consume_begin(peer, message);
   case GWIPC_MESSAGE_OUTPUT_UPSERT:
     return consume_output(peer, message);
+  case GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT:
+    return consume_vrr_policy(peer, message);
   case GWIPC_MESSAGE_SNAPSHOT_END:
     return consume_end(peer, message);
   case GWIPC_MESSAGE_OUTPUT_STATE_QUERY:
@@ -276,7 +299,7 @@ bool OutputControlPeer::consume_begin(Peer &peer,
       begin->domain != GWIPC_SNAPSHOT_OUTPUTS || begin->flags != 0 ||
       begin->snapshot_id == 0 || begin->generation == 0 ||
       begin->expected_item_count == 0 ||
-      begin->expected_item_count > GWIPC_MAXIMUM_OUTPUTS ||
+      begin->expected_item_count > GWIPC_MAXIMUM_OUTPUTS * 2U ||
       peer.staged.reading || peer.staged.complete)
     return false;
   peer.staged = {};
@@ -285,6 +308,24 @@ bool OutputControlPeer::consume_begin(Peer &peer,
   peer.staged.expected_count = begin->expected_item_count;
   peer.staged.outputs.reserve(begin->expected_item_count);
   peer.staged.reading = true;
+  return true;
+}
+
+bool OutputControlPeer::consume_vrr_policy(
+    Peer& peer, const gwipc_message* message) {
+  if (!vrr_ || !vrr_negotiated(peer.connection.get()) ||
+      !peer.staged.reading || peer.staged.complete ||
+      peer.staged.outputs.size() + peer.staged.vrr_policies.size() >=
+          peer.staged.expected_count ||
+      gwipc_message_flags(message) != GWIPC_FLAG_SNAPSHOT_ITEM ||
+      gwipc_message_reply_to(message) != 0)
+    return false;
+  const auto decoded = decode_contract(message);
+  const auto* value = decoded
+                          ? gwipc_decoded_output_vrr_policy_upsert(decoded.get())
+                          : nullptr;
+  if (!value) return false;
+  peer.staged.vrr_policies.push_back(*value);
   return true;
 }
 
@@ -314,7 +355,8 @@ bool OutputControlPeer::consume_end(Peer &peer,
       gwipc_message_reply_to(message) != 0 ||
       end->snapshot_id != peer.staged.snapshot_id ||
       end->generation != peer.staged.generation ||
-      end->actual_item_count != peer.staged.outputs.size() ||
+      end->actual_item_count !=
+          peer.staged.outputs.size() + peer.staged.vrr_policies.size() ||
       end->actual_item_count != peer.staged.expected_count)
     return false;
   peer.staged.actual_count = end->actual_item_count;
@@ -340,10 +382,56 @@ bool OutputControlPeer::consume_query(Peer &peer,
       return false;
     windows = std::move(*built);
   }
+
+  std::vector<gwipc_output_vrr_capability_upsert> vrr_capabilities;
+  std::vector<gwipc_output_vrr_policy_upsert> vrr_policies;
+  std::vector<gwipc_output_vrr_state_upsert> vrr_states;
+  std::vector<gwipc_presentation_timing> vrr_timings;
+  std::vector<gwipc_surface_vrr_state> vrr_windows;
+  std::optional<glasswyrm::compositor::OutputInventoryVrr> vrr_inventory;
+  if ((query->flags & GWIPC_OUTPUT_QUERY_VRR) != 0) {
+    if (!vrr_ || !vrr_negotiated(peer.connection.get()))
+      return false;
+    const auto& layout = coordinator_.committed_layout();
+    const auto& committed_policies = coordinator_.committed_vrr_policies();
+    vrr_capabilities.reserve(layout.output_order.size());
+    vrr_policies.reserve(layout.output_order.size());
+    vrr_states.reserve(layout.output_order.size());
+    vrr_timings.reserve(layout.output_order.size());
+    for (const auto output_id : layout.output_order) {
+      const auto cached = vrr_->outputs().find(output_id.value);
+      const auto mode = committed_policies.find(output_id.value);
+      if (cached == vrr_->outputs().end() || mode == committed_policies.end() ||
+          !cached->second.compositor_state)
+        return false;
+      vrr_capabilities.push_back(cached->second.capability);
+      auto policy = cached->second.policy;
+      policy.mode = mode->second;
+      vrr_policies.push_back(policy);
+      vrr_states.push_back(*cached->second.compositor_state);
+      if (cached->second.timing)
+        vrr_timings.push_back(*cached->second.timing);
+    }
+    if ((query->flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0) {
+      vrr_windows.reserve(windows.size());
+      for (const auto& window : windows) {
+        const auto cached =
+            vrr_->windows().find(window.surface.x11_window_id);
+        if (cached == vrr_->windows().end() ||
+            !cached->second.compositor_state)
+          return false;
+        vrr_windows.push_back(*cached->second.compositor_state);
+      }
+    }
+    vrr_inventory.emplace(glasswyrm::compositor::OutputInventoryVrr{
+        vrr_capabilities, vrr_policies, vrr_states, vrr_timings,
+        vrr_windows});
+  }
   const auto publication =
       glasswyrm::compositor::build_output_inventory_publication(
           *query, gwipc_message_sequence(message), snapshot_id,
-          coordinator_.committed_layout(), windows);
+          coordinator_.committed_layout(), windows,
+          vrr_inventory ? &*vrr_inventory : nullptr);
   if (!publication)
     return false;
   for (const auto &item : publication.messages) {
@@ -378,13 +466,32 @@ bool OutputControlPeer::consume_commit(Peer &peer,
   if (coordinator_.transaction()) {
     result = coordinator_.submit(request);
   } else if (peer.staged.complete) {
+    const bool legacy_vrr_snapshot =
+        vrr_ && peer.staged.vrr_policies.empty() &&
+        !vrr_negotiated(peer.connection.get());
+    const auto synthesized_count = static_cast<std::uint32_t>(
+        legacy_vrr_snapshot ? coordinator_.committed_vrr_policies().size()
+                            : 0U);
     const auto begin = coordinator_.begin_snapshot(
-        peer.staged.snapshot_id, peer.staged.expected_count);
+        peer.staged.snapshot_id,
+        peer.staged.expected_count + synthesized_count);
     if (begin == OutputConfigurationSnapshotStatus::Accepted) {
       for (const auto &output : peer.staged.outputs)
         (void)coordinator_.stage_output(output);
+      for (const auto& policy : peer.staged.vrr_policies)
+        (void)coordinator_.stage_vrr_policy(policy);
+      if (legacy_vrr_snapshot)
+        for (const auto& [output_id, mode] :
+             coordinator_.committed_vrr_policies()) {
+          gwipc_output_vrr_policy_upsert policy{};
+          policy.struct_size = sizeof(policy);
+          policy.output_id = output_id;
+          policy.mode = mode;
+          (void)coordinator_.stage_vrr_policy(policy);
+        }
       (void)coordinator_.end_snapshot(peer.staged.snapshot_id,
-                                      peer.staged.actual_count);
+                                      peer.staged.actual_count +
+                                          synthesized_count);
     }
     result = coordinator_.submit(request);
   } else {
@@ -443,12 +550,24 @@ bool OutputControlPeer::transaction_owner_connected() const noexcept {
 }
 
 bool OutputControlPeer::acknowledge_policy_rejected() {
-  return finish_transaction(coordinator_.reject_policy());
+  const auto* transaction = coordinator_.transaction();
+  const auto result =
+      transaction && transaction->old_vrr_policies !=
+                         transaction->proposed_vrr_policies
+          ? gw::ipc::wire::OutputConfigurationResult::VrrPolicyRejected
+          : gw::ipc::wire::OutputConfigurationResult::PolicyRejected;
+  return finish_transaction(coordinator_.reject_policy(result));
 }
 
 bool OutputControlPeer::acknowledge_compositor_rejected(
     const gw::ipc::wire::OutputConfigurationResult result) {
-  return coordinator_.begin_rollback(result);
+  const auto* transaction = coordinator_.transaction();
+  const auto reported =
+      transaction && transaction->old_vrr_policies !=
+                         transaction->proposed_vrr_policies
+          ? gw::ipc::wire::OutputConfigurationResult::VrrPresenterRejected
+          : result;
+  return coordinator_.begin_rollback(reported);
 }
 
 bool OutputControlPeer::acknowledge_rollback(const bool succeeded) {

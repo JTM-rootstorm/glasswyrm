@@ -54,6 +54,9 @@ class DrmPresenter final : public output::PresentationBackend,
 
   [[nodiscard]] std::optional<output::VrrPresentationCapability>
   vrr_capability(std::uint64_t output_id) const noexcept override;
+  [[nodiscard]] bool configure_vrr_contract(bool enabled,
+                                            std::string& error) override;
+  [[nodiscard]] bool activate_session(std::string& error) override;
 
   [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameView& frame) override;
@@ -102,6 +105,7 @@ class DrmPresenter final : public output::PresentationBackend,
                                         std::string& error);
   [[nodiscard]] bool try_atomic(std::string& error);
   [[nodiscard]] bool capture_legacy(std::string& error);
+  [[nodiscard]] bool initialize_vrr_controller(std::string& error);
   [[nodiscard]] bool initialize_report(std::string& error);
   [[nodiscard]] bool stage_mirror(const output::SoftwareFrameView& frame,
                                   headless::StagedFrameDump& staged,
@@ -112,6 +116,9 @@ class DrmPresenter final : public output::PresentationBackend,
                                      std::string& error);
   [[nodiscard]] bool blocking_modeset(DumbBuffer& buffer, std::string& error);
   [[nodiscard]] bool set_vrr_off_on_current_frame(std::string& error);
+  [[nodiscard]] bool set_vrr_off_on_frame(std::uint32_t framebuffer_id,
+                                          std::string& error);
+  void recover_vrr_divergence(std::string& error) noexcept;
   [[nodiscard]] bool verify_vrr_state(bool expected, std::string& error);
   [[nodiscard]] bool append_vrr_capability_report(std::string& error);
   [[nodiscard]] DrmVrrDecisionReport vrr_decision_report(
@@ -130,6 +137,10 @@ class DrmPresenter final : public output::PresentationBackend,
       const output::SoftwareFrameView& frame, std::uint64_t hash,
       FullCopyReason forced_reason, std::uint64_t layout_generation,
       const output::VrrPresentationRequest* vrr_request,
+      const PresenterVrrPlan& vrr_plan);
+  [[nodiscard]] output::PresentResult present_initial_vrr_followup(
+      const output::SoftwareFrameView& frame, std::uint64_t hash,
+      const output::VrrPresentationRequest& vrr_request,
       const PresenterVrrPlan& vrr_plan);
   [[nodiscard]] output::PresentResult present_validated(
       const output::SoftwareFrameView& frame, FullCopyReason forced_reason,
@@ -185,6 +196,8 @@ class DrmPresenter final : public output::PresentationBackend,
   std::size_t front_index_{};
   PresenterVrrState vrr_state_;
   bool vrr_state_initialized_{};
+  bool vrr_contract_enabled_{};
+  bool vrr_capability_reported_{};
   bool initialized_{};
   bool initial_modeset_{};
   bool display_taken_{};

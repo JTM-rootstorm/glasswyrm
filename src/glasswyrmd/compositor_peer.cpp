@@ -18,6 +18,9 @@ constexpr gwipc_capabilities kContentCapabilities =
 constexpr gwipc_capabilities kOutputModelCapabilities =
     GWIPC_CAP_OUTPUT_MANAGEMENT | GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP |
     GWIPC_CAP_SCALE_METADATA;
+constexpr gwipc_capabilities kVrrCapabilities =
+    GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY |
+    GWIPC_CAP_PRESENTATION_TIMING;
 struct ContractDelete {
   void operator()(gwipc_contract_payload *p) const {
     gwipc_contract_payload_destroy(p);
@@ -115,6 +118,21 @@ bool same_inventory_identity(const output::OutputLayout &left,
   return true;
 }
 
+bool same_vrr_capability(
+    const gwipc_output_vrr_capability_upsert& left,
+    const gwipc_output_vrr_capability_upsert& right) noexcept {
+  return left.output_id == right.output_id &&
+         left.connector_property_present == right.connector_property_present &&
+         left.hardware_capable == right.hardware_capable &&
+         left.kms_controllable == right.kms_controllable &&
+         left.simulated == right.simulated &&
+         left.range_available == right.range_available &&
+         left.atomic_required == right.atomic_required &&
+         left.minimum_refresh_millihertz == right.minimum_refresh_millihertz &&
+         left.maximum_refresh_millihertz == right.maximum_refresh_millihertz &&
+         left.reason_flags == right.reason_flags && left.flags == right.flags;
+}
+
 } // namespace
 
 CompositorPeer::CompositorPeer(std::string path,
@@ -122,7 +140,8 @@ CompositorPeer::CompositorPeer(std::string path,
                                const bool software_content,
                                const bool session_state,
                                const bool cpu_buffer_synchronization,
-                               const bool output_model)
+                               const bool output_model,
+                               const bool vrr_profile)
     : transport_(std::move(path), GWIPC_ROLE_COMPOSITOR,
                  (software_content ? kContentCapabilities
                                    : kMetadataCapabilities) |
@@ -130,10 +149,12 @@ CompositorPeer::CompositorPeer(std::string path,
                      (cpu_buffer_synchronization
                           ? GWIPC_CAP_CPU_BUFFER_SYNCHRONIZATION
                           : 0) |
-                     (output_model ? kOutputModelCapabilities : 0),
+                     (output_model ? kOutputModelCapabilities : 0) |
+                     (vrr_profile ? kVrrCapabilities : 0),
                  "glasswyrmd-compositor"),
       screen_(screen), software_content_(software_content),
-      session_state_(session_state), output_model_(output_model) {}
+      session_state_(session_state), output_model_(output_model),
+      vrr_profile_(vrr_profile) {}
 
 bool CompositorPeer::connect(std::string &error) {
   disconnect();
@@ -170,7 +191,8 @@ bool CompositorPeer::begin_output_inventory(std::string &error) {
     error = "compositor output inventory query identity was exhausted";
     return false;
   }
-  pending_output_inventory_ = std::make_unique<CompositorOutputInventory>();
+  pending_output_inventory_ =
+      std::make_unique<CompositorOutputInventory>(vrr_profile_);
   const auto query_id = next_output_query_id_++;
   if (!pending_output_inventory_->start(transport_.connection(), query_id,
                                         error)) {
@@ -200,6 +222,44 @@ bool CompositorPeer::accept_output_inventory(std::string &error) {
   // Preserve the committed configuration so bootstrap replays it into the
   // fresh compositor instead of silently reverting to backend defaults.
   if (!output_layout_) output_layout_ = *layout;
+  if (vrr_profile_) {
+    const auto& capabilities = pending_output_inventory_->vrr_capabilities();
+    const auto& policies = pending_output_inventory_->vrr_policies();
+    const auto& states = pending_output_inventory_->vrr_states();
+    const auto& timings = pending_output_inventory_->timings();
+    if (vrr_cache_.outputs().empty()) {
+      if (!vrr_cache_.replace_inventory(capabilities, policies) ||
+          !vrr_cache_.seed_compositor_state(states, timings)) {
+        error = "compositor output inventory contained an invalid M14 VRR state";
+        return false;
+      }
+    } else {
+      VrrStateCache validated;
+      if (!validated.replace_inventory(capabilities, policies) ||
+          !validated.seed_compositor_state(states, timings) ||
+          validated.outputs().size() != vrr_cache_.outputs().size()) {
+        error = "reconnected compositor returned an invalid M14 VRR inventory";
+        return false;
+      }
+      bool policies_match = true;
+      for (const auto& [output_id, incoming] : validated.outputs()) {
+        const auto current = vrr_cache_.outputs().find(output_id);
+        if (current == vrr_cache_.outputs().end() ||
+            !same_vrr_capability(current->second.capability,
+                                 incoming.capability)) {
+          error = "compositor VRR inventory changed across reconnect";
+          return false;
+        }
+        policies_match = policies_match &&
+                         current->second.policy.mode == incoming.policy.mode;
+      }
+      if (policies_match &&
+          !vrr_cache_.seed_compositor_state(states, timings)) {
+        error = "reconnected compositor VRR state could not be restored";
+        return false;
+      }
+    }
+  }
   pending_output_inventory_.reset();
   state_ = PeerBootstrapState::Synchronized;
   error.clear();
@@ -263,7 +323,48 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       }
       continue;
     }
-    if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
+    const auto type = gwipc_message_type(message.get());
+    if (vrr_profile_ && type == GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT) {
+      if (frame_acknowledged_) {
+        error = "compositor VRR state arrived after the frame acknowledgement";
+        return PeerProcessOutcome::Fatal;
+      }
+      gwipc_decoded_contract* raw_state = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw_state) !=
+          GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedDelete> decoded_state(
+          raw_state);
+      const auto* state =
+          gwipc_decoded_output_vrr_state_upsert(decoded_state.get());
+      if (!state) {
+        error = "invalid compositor VRR output state";
+        return PeerProcessOutcome::Fatal;
+      }
+      vrr_response_.output_states.push_back(*state);
+      continue;
+    }
+    if (vrr_profile_ && type == GWIPC_MESSAGE_PRESENTATION_TIMING) {
+      if (frame_acknowledged_) {
+        error = "compositor presentation timing arrived after the frame acknowledgement";
+        return PeerProcessOutcome::Fatal;
+      }
+      gwipc_decoded_contract* raw_timing = nullptr;
+      if (gwipc_contract_decode_message(message.get(), &raw_timing) !=
+          GWIPC_STATUS_OK)
+        return PeerProcessOutcome::Fatal;
+      std::unique_ptr<gwipc_decoded_contract, DecodedDelete> decoded_timing(
+          raw_timing);
+      const auto* timing =
+          gwipc_decoded_presentation_timing(decoded_timing.get());
+      if (!timing) {
+        error = "invalid compositor presentation timing";
+        return PeerProcessOutcome::Fatal;
+      }
+      vrr_response_.timings.push_back(*timing);
+      continue;
+    }
+    if (type == GWIPC_MESSAGE_SESSION_STATE_CHANGE &&
         session_state_) {
       gwipc_decoded_contract* raw_change = nullptr;
       if (gwipc_contract_decode_message(message.get(), &raw_change) !=
@@ -281,7 +382,7 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
           {*change, gwipc_message_sequence(message.get())});
       continue;
     }
-    if (gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE &&
+    if (type == GWIPC_MESSAGE_BUFFER_RELEASE &&
         software_content_) {
       gwipc_decoded_contract* raw_release = nullptr;
       if (gwipc_contract_decode_message(message.get(), &raw_release) !=
@@ -295,11 +396,26 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
         error = "invalid compositor buffer release";
         return PeerProcessOutcome::Fatal;
       }
+      if (vrr_profile_ && !frame_acknowledged_) {
+        error = "M14 compositor buffer release arrived before frame acknowledgement";
+        return PeerProcessOutcome::Fatal;
+      }
       releases_.push_back({release->buffer_id, release->reason});
+      if (vrr_profile_ && frame_acknowledged_) {
+        vrr_response_.released_buffer_ids.push_back(release->buffer_id);
+        const auto expected = content_submission_ ? pending_content_.buffers.size()
+                                                  : pending_.buffers.size();
+        if (vrr_response_.released_buffer_ids.size() == expected)
+          return finish_vrr_response(error);
+        if (vrr_response_.released_buffer_ids.size() > expected) {
+          error = "M14 compositor returned too many buffer releases";
+          return PeerProcessOutcome::Fatal;
+        }
+      }
       continue;
     }
-    if (gwipc_message_type(message.get()) != GWIPC_MESSAGE_FRAME_ACKNOWLEDGED) {
-      error = gwipc_message_type(message.get()) == GWIPC_MESSAGE_BUFFER_RELEASE
+    if (type != GWIPC_MESSAGE_FRAME_ACKNOWLEDGED) {
+      error = type == GWIPC_MESSAGE_BUFFER_RELEASE
                   ? "metadata-only compositor sent a buffer release"
                   : "unexpected compositor bootstrap message";
       return PeerProcessOutcome::Fatal;
@@ -321,6 +437,7 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
         ack->result <= GWIPC_FRAME_DROPPED &&
         (gwipc_message_flags(message.get()) & GWIPC_FLAG_REPLY) != 0 &&
         gwipc_message_reply_to(message.get()) == commit_sequence_) {
+      if (vrr_profile_) vrr_cache_.cancel_expectation();
       state_ = PeerBootstrapState::Synchronized;
       return PeerProcessOutcome::SemanticRejected;
     }
@@ -333,6 +450,15 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       error = "invalid compositor bootstrap acknowledgement";
       return PeerProcessOutcome::Fatal;
     }
+    if (vrr_profile_) {
+      vrr_response_.acknowledgement = *ack;
+      frame_acknowledged_ = true;
+      const auto expected_releases = content_submission_
+                                         ? pending_content_.buffers.size()
+                                         : pending_.buffers.size();
+      if (expected_releases == 0) return finish_vrr_response(error);
+      continue;
+    }
     if (!content_submission_)
       compositor_buffer_replay::promote(pending_, replay_input_);
     else
@@ -341,6 +467,84 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     content_submission_ = false;
     state_ = PeerBootstrapState::Synchronized;
   }
+}
+
+PeerProcessOutcome CompositorPeer::finish_vrr_response(std::string& error) {
+  if (!frame_acknowledged_ || !vrr_response_.acknowledgement) {
+    error = "M14 compositor response completed without a frame acknowledgement";
+    return PeerProcessOutcome::Fatal;
+  }
+  const auto& scene = content_submission_ ? replay_input_ : pending_;
+  const auto commit_id = content_submission_ ? pending_content_.commit_id
+                                             : pending_.commit_id;
+  const auto generation = content_submission_ ? pending_content_.generation
+                                              : pending_.generation;
+  std::map<std::uint64_t, gwipc_vrr_policy_mode> expected_outputs;
+  for (const auto& output : scene.outputs) {
+    if (!output.enabled) continue;
+    const auto policy = std::ranges::find_if(
+        scene.output_vrr_policies, [&](const auto& value) {
+          return value.output_id == output.output_id;
+        });
+    if (policy == scene.output_vrr_policies.end() ||
+        !expected_outputs.emplace(output.output_id, policy->mode).second) {
+      error = "M14 compositor response has no policy for a presented output";
+      return PeerProcessOutcome::Fatal;
+    }
+  }
+  std::set<std::uint64_t> states;
+  for (const auto& state : vrr_response_.output_states) {
+    const auto expected = expected_outputs.find(state.output_id);
+    if (expected == expected_outputs.end() ||
+        !states.insert(state.output_id).second ||
+        state.requested_mode != expected->second ||
+        state.last_commit_id != commit_id ||
+        state.last_presented_generation != generation) {
+      error = "M14 compositor returned an invalid VRR output state batch";
+      return PeerProcessOutcome::Fatal;
+    }
+  }
+  std::set<std::uint64_t> timings;
+  for (const auto& timing : vrr_response_.timings)
+    if (!expected_outputs.contains(timing.output_id) ||
+        !timings.insert(timing.output_id).second ||
+        timing.commit_id != commit_id ||
+        timing.presented_generation != generation) {
+      error = "M14 compositor returned an invalid presentation timing batch";
+      return PeerProcessOutcome::Fatal;
+    }
+  std::set<std::uint64_t> expected_ids;
+  for (const auto& [id, mode] : expected_outputs) {
+    static_cast<void>(mode);
+    expected_ids.insert(id);
+  }
+  std::set<std::uint64_t> expected_releases;
+  const auto& buffers = content_submission_ ? pending_content_.buffers
+                                            : pending_.buffers;
+  for (const auto& buffer : buffers)
+    expected_releases.insert(buffer.attach.buffer_id);
+  const std::set<std::uint64_t> actual_releases(
+      vrr_response_.released_buffer_ids.begin(),
+      vrr_response_.released_buffer_ids.end());
+  if (states != expected_ids || timings != expected_ids ||
+      actual_releases.size() != vrr_response_.released_buffer_ids.size() ||
+      actual_releases != expected_releases) {
+    error = "M14 compositor response batch is incomplete";
+    return PeerProcessOutcome::Fatal;
+  }
+  if (vrr_cache_.promote(vrr_response_) != VrrResponseStatus::Accepted) {
+    error = "M14 compositor response failed server promotion preflight";
+    return PeerProcessOutcome::Fatal;
+  }
+  if (content_submission_)
+    compositor_buffer_replay::promote_content(pending_content_, replay_input_);
+  else
+    compositor_buffer_replay::promote(pending_, replay_input_);
+  content_submission_ = false;
+  frame_acknowledged_ = false;
+  state_ = PeerBootstrapState::Synchronized;
+  error.clear();
+  return PeerProcessOutcome::Progress;
 }
 
 PeerProcessOutcome CompositorPeer::process(const short revents, std::string &error) {
@@ -378,6 +582,9 @@ void CompositorPeer::disconnect() noexcept {
   state_ = PeerBootstrapState::Disconnected;
   commit_sequence_ = 0;
   content_submission_ = false;
+  frame_acknowledged_ = false;
+  vrr_response_ = {};
+  vrr_cache_.cancel_expectation();
   releases_.clear();
   session_state_changes_.clear();
   pending_output_inventory_.reset();

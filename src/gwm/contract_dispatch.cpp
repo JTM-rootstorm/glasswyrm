@@ -1,5 +1,6 @@
 #include "gwm/contract_dispatch.hpp"
 
+#include "gwm/contract_vrr.hpp"
 #include "wm/interactive_policy.hpp"
 
 #include <glasswyrm/ipc.h>
@@ -189,9 +190,13 @@ bool enqueue_control(gwipc_connection* connection, std::uint16_t type,
   return gwipc_connection_enqueue(connection, &outgoing) == GWIPC_STATUS_OK;
 }
 
-bool preflight_policy(const glasswyrm::wm::PolicyState& policy) {
-  if (policy.windows.size() > kMaximumQueuedMessages - 3U) return false;
-  std::size_t bytes = (policy.windows.size() + 3U) * 40U;
+bool preflight_policy(const glasswyrm::wm::PolicyState& policy,
+                      const glasswyrm::wm::VrrPolicyState* vrr = nullptr) {
+  const auto item_count = policy.windows.size() +
+                          (vrr ? vrr->outputs.size() + vrr->windows.size()
+                               : 0U);
+  if (item_count > kMaximumQueuedMessages - 3U) return false;
+  std::size_t bytes = (item_count + 3U) * 40U;
   for (const auto id : policy.output_order) {
     const auto state = state_from(policy.windows.at(id));
     gwipc_contract_payload* raw = nullptr;
@@ -204,6 +209,7 @@ bool preflight_policy(const glasswyrm::wm::PolicyState& policy) {
     if (size > kMaximumQueuedBytes - bytes) return false;
     bytes += size;
   }
+  if (vrr && !preflight_vrr_policy(*vrr, bytes)) return false;
   return bytes <= kMaximumQueuedBytes;
 }
 
@@ -224,17 +230,25 @@ gwipc_policy_bindings_upsert default_bindings() {
   return result;
 }
 
-bool preflight_interactive_policy(const glasswyrm::wm::PolicyState& policy) {
-  if (!preflight_policy(policy)) return false;
-  return policy.windows.size() + 4U <= kMaximumQueuedMessages;
+bool preflight_interactive_policy(
+    const glasswyrm::wm::PolicyState& policy,
+    const glasswyrm::wm::VrrPolicyState* vrr = nullptr) {
+  if (!preflight_policy(policy, vrr)) return false;
+  return policy.windows.size() + (vrr ? vrr->outputs.size() +
+                                            vrr->windows.size()
+                                      : 0U) +
+             4U <=
+         kMaximumQueuedMessages;
 }
 
 bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_message,
                     const gwipc_policy_commit& commit,
                     const glasswyrm::wm::PolicyState& policy,
-                    const bool interactive) {
+                    const bool interactive,
+                    const glasswyrm::wm::VrrPolicyState* vrr = nullptr) {
   const auto count = static_cast<std::uint32_t>(
-      policy.output_order.size() + (interactive ? 1U : 0U));
+      policy.output_order.size() + (interactive ? 1U : 0U) +
+      (vrr ? vrr->outputs.size() + vrr->windows.size() : 0U));
   gwipc_snapshot_begin begin{};
   begin.struct_size = sizeof(begin);
   begin.snapshot_id = commit.commit_id;
@@ -266,6 +280,7 @@ bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_me
                           gwipc_contract_encode_policy_window_state))
       return false;
   }
+  if (vrr && !enqueue_vrr_policy(connection, *vrr)) return false;
   gwipc_snapshot_end end{};
   end.struct_size = sizeof(end);
   end.snapshot_id = begin.snapshot_id;
@@ -279,7 +294,7 @@ bool enqueue_policy(gwipc_connection* connection, const gwipc_message* commit_me
   ack.commit_id = commit.commit_id;
   ack.producer_generation = commit.producer_generation;
   ack.applied_generation = policy.generation;
-  ack.policy_hash = policy.hash;
+  ack.policy_hash = vrr ? vrr->hash : policy.hash;
   ack.window_count = static_cast<std::uint32_t>(policy.output_order.size());
   ack.result = GWIPC_POLICY_ACCEPTED;
   return enqueue_contract(connection, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
@@ -292,19 +307,113 @@ bool enqueue_rejection(gwipc_connection* connection,
                        const gwipc_message* commit_message,
                        const gwipc_policy_commit& commit,
                        const glasswyrm::wm::PolicyState& previous,
-                       gwipc_policy_result result) {
+                       gwipc_policy_result result,
+                       const std::uint64_t previous_hash = 0) {
   gwipc_policy_acknowledged ack{};
   ack.struct_size = sizeof(ack);
   ack.commit_id = commit.commit_id;
   ack.producer_generation = commit.producer_generation;
   ack.applied_generation = previous.generation;
-  ack.policy_hash = previous.hash;
+  ack.policy_hash = previous_hash != 0 ? previous_hash : previous.hash;
   ack.window_count = static_cast<std::uint32_t>(previous.windows.size());
   ack.result = result;
   return enqueue_contract(connection, GWIPC_MESSAGE_POLICY_ACKNOWLEDGED,
                           GWIPC_FLAG_REPLY,
                           gwipc_message_sequence(commit_message), ack,
                           gwipc_contract_encode_policy_acknowledged);
+}
+
+bool dispatch_commit(PeerState& peer, gwipc_connection* connection,
+                     const gwipc_message* message,
+                     const gwipc_policy_commit& commit, bool& accepted) {
+  const bool negotiated_vrr = negotiated_vrr_profile(connection);
+  const auto previous_hash = negotiated_vrr && peer.committed_vrr.hash != 0
+                                 ? peer.committed_vrr.hash
+                                 : peer.transaction.committed_policy().hash;
+  if (commit.commit_id <= peer.last_commit_id ||
+      commit.producer_generation < peer.last_generation)
+    return enqueue_rejection(connection, message, commit,
+                             peer.transaction.committed_policy(),
+                             GWIPC_POLICY_REJECTED_INVALID_WINDOW,
+                             previous_hash);
+  peer.last_commit_id = commit.commit_id;
+  peer.last_generation = commit.producer_generation;
+  const bool interactive =
+      (gwipc_connection_peer_info(connection).capabilities &
+       GWIPC_CAP_INTERACTIVE_POLICY) != 0;
+  if (multi_output_profile(connection) &&
+      peer.transaction.pending().outputs.empty())
+    return enqueue_rejection(connection, message, commit,
+                             peer.transaction.committed_policy(),
+                             GWIPC_POLICY_REJECTED_INCOMPLETE_SNAPSHOT,
+                             previous_hash);
+
+  auto candidate_transaction = peer.transaction;
+  auto evaluation = candidate_transaction.commit(commit.producer_generation);
+  if (!evaluation) {
+    const auto result = result_from(evaluation.error);
+    if (!enqueue_rejection(connection, message, commit,
+                           peer.transaction.committed_policy(), result,
+                           previous_hash))
+      return false;
+    std::fprintf(stderr, "gwm: policy rejected commit=%llu result=%u\n",
+                 static_cast<unsigned long long>(commit.commit_id),
+                 static_cast<unsigned>(result));
+    return true;
+  }
+  if (interactive) {
+    const glasswyrm::wm::InteractiveBindings bindings;
+    evaluation.policy.hash =
+        glasswyrm::wm::interactive_policy_hash(evaluation.policy, bindings);
+    candidate_transaction.set_committed_policy_hash(evaluation.policy.hash);
+  }
+
+  glasswyrm::wm::VrrPolicyState vrr_policy;
+  const glasswyrm::wm::VrrPolicyState* vrr_output = nullptr;
+  if (negotiated_vrr) {
+    auto inputs = peer.pending_vrr;
+    glasswyrm::wm::VrrEvaluation vrr_evaluation;
+    if (!populate_vrr_memberships(candidate_transaction.committed_raw(),
+                                  inputs))
+      vrr_evaluation.error = glasswyrm::wm::VrrEvaluationError::InvalidWindow;
+    else
+      vrr_evaluation = glasswyrm::wm::evaluate_vrr_policy(
+          candidate_transaction.committed_raw(), evaluation.policy, inputs);
+    if (!vrr_evaluation) {
+      const auto result = vrr_result_from(vrr_evaluation.error);
+      if (!enqueue_rejection(connection, message, commit,
+                             peer.transaction.committed_policy(), result,
+                             previous_hash))
+        return false;
+      std::fprintf(stderr,
+                   "gwm: VRR policy rejected commit=%llu result=%u\n",
+                   static_cast<unsigned long long>(commit.commit_id),
+                   static_cast<unsigned>(result));
+      return true;
+    }
+    vrr_policy = std::move(vrr_evaluation.policy);
+    vrr_output = &vrr_policy;
+  }
+  const bool preflight =
+      interactive
+          ? preflight_interactive_policy(evaluation.policy, vrr_output)
+          : preflight_policy(evaluation.policy, vrr_output);
+  if (!preflight || !enqueue_policy(connection, message, commit,
+                                    evaluation.policy, interactive,
+                                    vrr_output))
+    return false;
+  peer.transaction = std::move(candidate_transaction);
+  if (negotiated_vrr) peer.committed_vrr = std::move(vrr_policy);
+  accepted = true;
+  std::fprintf(stderr,
+               "gwm: policy accepted commit=%llu generation=%llu windows=%zu hash=%016llx\n",
+               static_cast<unsigned long long>(commit.commit_id),
+               static_cast<unsigned long long>(evaluation.policy.generation),
+               evaluation.policy.windows.size(),
+               static_cast<unsigned long long>(
+                   negotiated_vrr ? peer.committed_vrr.hash
+                                  : evaluation.policy.hash));
+  return true;
 }
 
 }  // namespace
@@ -320,6 +429,8 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
       if (!value || value->domain != GWIPC_SNAPSHOT_WINDOW_POLICY ||
           !peer.transaction.begin_snapshot())
         return false;
+      peer.pre_snapshot_vrr = peer.pending_vrr;
+      peer.pending_vrr = {};
       peer.snapshot_id = value->snapshot_id;
       peer.snapshot_generation = value->generation;
       std::fprintf(stderr, "gwm: snapshot begin id=%llu generation=%llu\n",
@@ -333,6 +444,8 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
                          value->generation == peer.snapshot_generation &&
                          peer.transaction.end_snapshot();
       if (valid) {
+        peer.pending_vrr.complete = true;
+        peer.pre_snapshot_vrr.reset();
         peer.snapshot_id = 0;
         peer.snapshot_generation = 0;
       }
@@ -341,8 +454,11 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
     case GWIPC_MESSAGE_SNAPSHOT_ABORT: {
       const auto* value = gwipc_decoded_snapshot_abort(control.get());
       const bool valid = value && value->snapshot_id == peer.snapshot_id &&
+                         peer.pre_snapshot_vrr &&
                          peer.transaction.abort_snapshot();
       if (valid) {
+        peer.pending_vrr = std::move(*peer.pre_snapshot_vrr);
+        peer.pre_snapshot_vrr.reset();
         peer.snapshot_id = 0;
         peer.snapshot_generation = 0;
       }
@@ -415,62 +531,22 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
       return multi_output_profile(connection) && value &&
              peer.transaction.upsert(hint_from(*value));
     }
+    case GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT: {
+      return consume_vrr_contract(peer, connection, contract.get(),
+                                  gwipc_message_type(message));
+    }
+    case GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT: {
+      return consume_vrr_contract(peer, connection, contract.get(),
+                                  gwipc_message_type(message));
+    }
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE: {
       const auto* value = gwipc_decoded_policy_window_remove(contract.get());
       return value && peer.transaction.remove(value->window_id);
     }
     case GWIPC_MESSAGE_POLICY_COMMIT: {
       const auto* value = gwipc_decoded_policy_commit(contract.get());
-      if (!value) return false;
-      if (value->commit_id <= peer.last_commit_id ||
-          value->producer_generation < peer.last_generation) {
-        return enqueue_rejection(connection, message, *value,
-                                 peer.transaction.committed_policy(),
-                                 GWIPC_POLICY_REJECTED_INVALID_WINDOW);
-      }
-      peer.last_commit_id = value->commit_id;
-      peer.last_generation = value->producer_generation;
-      const bool interactive =
-          (gwipc_connection_peer_info(connection).capabilities &
-           GWIPC_CAP_INTERACTIVE_POLICY) != 0;
-      if (multi_output_profile(connection) &&
-          peer.transaction.pending().outputs.empty()) {
-        return enqueue_rejection(connection, message, *value,
-                                 peer.transaction.committed_policy(),
-                                 GWIPC_POLICY_REJECTED_INCOMPLETE_SNAPSHOT);
-      }
-      auto evaluation = peer.transaction.commit(
-          value->producer_generation,
-          interactive ? preflight_interactive_policy : preflight_policy);
-      if (!evaluation) {
-        if (evaluation.error == glasswyrm::wm::EvaluationError::OutputFailure)
-          return false;
-        const auto result = result_from(evaluation.error);
-        if (!enqueue_rejection(connection, message, *value,
-                               peer.transaction.committed_policy(), result))
-          return false;
-        std::fprintf(stderr, "gwm: policy rejected commit=%llu result=%u\n",
-                     static_cast<unsigned long long>(value->commit_id),
-                     static_cast<unsigned>(result));
-        return true;
-      }
-      if (interactive) {
-        const glasswyrm::wm::InteractiveBindings bindings;
-        evaluation.policy.hash = glasswyrm::wm::interactive_policy_hash(
-            evaluation.policy, bindings);
-        peer.transaction.set_committed_policy_hash(evaluation.policy.hash);
-      }
-      if (!enqueue_policy(connection, message, *value, evaluation.policy,
-                          interactive))
-        return false;
-      accepted = true;
-      std::fprintf(stderr,
-                   "gwm: policy accepted commit=%llu generation=%llu windows=%zu hash=%016llx\n",
-                   static_cast<unsigned long long>(value->commit_id),
-                   static_cast<unsigned long long>(evaluation.policy.generation),
-                   evaluation.policy.windows.size(),
-                   static_cast<unsigned long long>(evaluation.policy.hash));
-      return true;
+      return value &&
+             dispatch_commit(peer, connection, message, *value, accepted);
     }
     default: return false;
   }

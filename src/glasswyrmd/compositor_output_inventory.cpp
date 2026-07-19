@@ -12,7 +12,7 @@ constexpr std::uint32_t kQueryFlags =
     GWIPC_OUTPUT_QUERY_LAYOUT;
 constexpr std::uint32_t kMaximumInventoryItems =
     static_cast<std::uint32_t>(output::kMaximumOutputs *
-                               (output::kMaximumModesPerOutput + 2U));
+                               (output::kMaximumModesPerOutput + 6U));
 
 struct ContractPayloadDelete {
   void operator()(gwipc_contract_payload *value) const {
@@ -122,7 +122,9 @@ bool CompositorOutputInventory::start(CompositorInventoryQuerySink &sink,
   gwipc_output_state_query query{};
   query.struct_size = sizeof(query);
   query.query_id = query_id;
-  query.flags = kQueryFlags;
+  query.flags =
+      kQueryFlags |
+      (vrr_profile_ ? static_cast<std::uint32_t>(GWIPC_OUTPUT_QUERY_VRR) : 0U);
   gwipc_contract_payload *raw_payload = nullptr;
   const auto encode_status =
       gwipc_contract_encode_output_state_query(&query, &raw_payload);
@@ -189,12 +191,119 @@ bool CompositorOutputInventory::consume(const gwipc_message *message,
     return consume_mode(message, error);
   case GWIPC_MESSAGE_OUTPUT_UPSERT:
     return consume_state(message, error);
+  case GWIPC_MESSAGE_OUTPUT_VRR_CAPABILITY_UPSERT:
+    return consume_vrr_capability(message, error);
+  case GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT:
+    return consume_vrr_policy(message, error);
+  case GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT:
+    return consume_vrr_state(message, error);
+  case GWIPC_MESSAGE_PRESENTATION_TIMING:
+    return consume_timing(message, error);
   case GWIPC_MESSAGE_SNAPSHOT_END:
     return consume_end(message, error);
   default:
     return fail(CompositorInventoryFailure::UnexpectedMessage,
                 "output inventory contained an unexpected record", error);
   }
+}
+
+bool CompositorOutputInventory::consume_vrr_capability(
+    const gwipc_message* message, std::string& error) {
+  if (!vrr_profile_ ||
+      (state_ != CompositorInventoryState::ReadingLayout &&
+       state_ != CompositorInventoryState::ReadingVrrCapabilities))
+    return fail(CompositorInventoryFailure::InvalidOrder,
+                "output VRR capability arrived out of order", error);
+  if (!consume_item_envelope(message, error)) return false;
+  const auto decoded = decode_contract(message);
+  const auto* record = decoded
+                           ? gwipc_decoded_output_vrr_capability_upsert(
+                                 decoded.get())
+                           : nullptr;
+  const auto index = vrr_capabilities_.size();
+  if (!record || index >= descriptor_order_.size() ||
+      record->output_id != descriptor_order_[index].value)
+    return fail(CompositorInventoryFailure::InvalidRecord,
+                "output VRR capability did not match inventory order", error);
+  vrr_capabilities_.push_back(*record);
+  state_ = CompositorInventoryState::ReadingVrrCapabilities;
+  error.clear();
+  return true;
+}
+
+bool CompositorOutputInventory::consume_vrr_policy(
+    const gwipc_message* message, std::string& error) {
+  if (!vrr_profile_ ||
+      (state_ != CompositorInventoryState::ReadingVrrCapabilities &&
+       state_ != CompositorInventoryState::ReadingVrrPolicies))
+    return fail(CompositorInventoryFailure::InvalidOrder,
+                "output VRR policy arrived out of order", error);
+  if (!consume_item_envelope(message, error)) return false;
+  const auto decoded = decode_contract(message);
+  const auto* record = decoded
+                           ? gwipc_decoded_output_vrr_policy_upsert(
+                                 decoded.get())
+                           : nullptr;
+  const auto index = vrr_policies_.size();
+  if (!record || vrr_capabilities_.size() != descriptor_order_.size() ||
+      index >= descriptor_order_.size() ||
+      record->output_id != descriptor_order_[index].value)
+    return fail(CompositorInventoryFailure::InvalidRecord,
+                "output VRR policy did not match inventory order", error);
+  vrr_policies_.push_back(*record);
+  state_ = CompositorInventoryState::ReadingVrrPolicies;
+  error.clear();
+  return true;
+}
+
+bool CompositorOutputInventory::consume_vrr_state(
+    const gwipc_message* message, std::string& error) {
+  if (!vrr_profile_ ||
+      (state_ != CompositorInventoryState::ReadingVrrPolicies &&
+       state_ != CompositorInventoryState::ReadingVrrStates))
+    return fail(CompositorInventoryFailure::InvalidOrder,
+                "output VRR state arrived out of order", error);
+  if (!consume_item_envelope(message, error)) return false;
+  const auto decoded = decode_contract(message);
+  const auto* record = decoded
+                           ? gwipc_decoded_output_vrr_state_upsert(decoded.get())
+                           : nullptr;
+  const auto index = vrr_states_.size();
+  if (!record || vrr_policies_.size() != descriptor_order_.size() ||
+      index >= descriptor_order_.size() ||
+      record->output_id != descriptor_order_[index].value)
+    return fail(CompositorInventoryFailure::InvalidRecord,
+                "output VRR state did not match inventory order", error);
+  vrr_states_.push_back(*record);
+  state_ = CompositorInventoryState::ReadingVrrStates;
+  error.clear();
+  return true;
+}
+
+bool CompositorOutputInventory::consume_timing(
+    const gwipc_message* message, std::string& error) {
+  if (!vrr_profile_ ||
+      (state_ != CompositorInventoryState::ReadingVrrStates &&
+       state_ != CompositorInventoryState::ReadingPresentationTiming))
+    return fail(CompositorInventoryFailure::InvalidOrder,
+                "presentation timing arrived out of order", error);
+  if (!consume_item_envelope(message, error)) return false;
+  const auto decoded = decode_contract(message);
+  const auto* record =
+      decoded ? gwipc_decoded_presentation_timing(decoded.get()) : nullptr;
+  if (!record || vrr_states_.size() != descriptor_order_.size() ||
+      std::ranges::find(descriptor_order_,
+                        output::OutputId{record->output_id}) ==
+          descriptor_order_.end() ||
+      std::ranges::any_of(timings_, [&](const auto& value) {
+        return value.output_id == record->output_id;
+      }))
+    return fail(CompositorInventoryFailure::InvalidRecord,
+                "presentation timing did not match inventory order", error);
+  timings_.push_back(*record);
+  state_ = CompositorInventoryState::ReadingPresentationTiming;
+  error.clear();
+  return true;
 }
 
 bool CompositorOutputInventory::consume_item_envelope(
@@ -405,7 +514,11 @@ bool CompositorOutputInventory::consume_end(const gwipc_message *message,
   if (item_count_ != expected_item_count_ ||
       end->actual_item_count != item_count_ || descriptor_order_.empty() ||
       state_index_ != descriptor_order_.size() ||
-      pending_layout_.states.size() != pending_layout_.descriptors.size())
+      pending_layout_.states.size() != pending_layout_.descriptors.size() ||
+      (vrr_profile_ &&
+       (vrr_capabilities_.size() != descriptor_order_.size() ||
+        vrr_policies_.size() != descriptor_order_.size() ||
+        vrr_states_.size() != descriptor_order_.size())))
     return fail(CompositorInventoryFailure::CountMismatch,
                 "output inventory item counts were incomplete", error);
   state_ = CompositorInventoryState::AwaitingAcknowledgement;
