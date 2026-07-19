@@ -15,6 +15,13 @@ if get_option('tools') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('output-client-unit', output_client_unit_test, timeout: 10)
+  vrr_tool_unit_test = executable(
+    'vrr_tool_unit_test',
+    files(tests_source_dir / 'tools/vrr_tool_unit_test.cpp'),
+    dependencies: output_client_dep,
+    include_directories: test_source_root_include,
+  )
+  test('vrr-tool-unit', vrr_tool_unit_test, timeout: 10)
   output_tools_fake_server = executable(
     'output_tools_fake_server',
     files(tests_source_dir / 'tools/output_tools_fake_server.cpp'),
