@@ -86,8 +86,13 @@ require_text "$library" "record.get('schema')=='glasswyrm-scene-v2'"
 require_text "$library" "record.get('cursors',[])"
 require_text "$repo_root/tests/integration/gwinput_m8.cpp" \
   '--hold-until PATH'
+require_text "$repo_root/tests/integration/gwinput_m8.cpp" \
+  '--step-directory PATH'
 require_text "$library" '--hold-until "$crossing_release"'
+require_text "$library" '--step-directory "$crossing_steps"'
 require_text "$library" 'synthetic_pid=$!'
+require_text "$library" 'wait_cursor_position "$left_id" 100 100'
+require_text "$library" 'wait_cursor_position "$right_id" 700 479'
 require_text "$library" ': >"$crossing_release"'
 legacy_line=$(grep -n -m1 'm13_legacy_client.py' "$library" | cut -d: -f1)
 crossing_line=$(grep -n -m1 'scene_line_before=$(wc -l' "$library" | cut -d: -f1)
