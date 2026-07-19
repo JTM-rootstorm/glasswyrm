@@ -134,6 +134,17 @@ class PersistentX11Client final {
     synchronize();
   }
 
+  void begin_unmap() {
+    const std::array<std::uint8_t, 4> window_bytes{
+        static_cast<std::uint8_t>(window_),
+        static_cast<std::uint8_t>(window_ >> 8U),
+        static_cast<std::uint8_t>(window_ >> 16U),
+        static_cast<std::uint8_t>(window_ >> 24U)};
+    client_.send_all(wire_.raw(
+        static_cast<std::uint8_t>(x11::CoreOpcode::UnmapWindow), 0,
+        window_bytes));
+  }
+
  private:
   void synchronize() {
     client_.send_all(wire_.get_input_focus());
@@ -253,9 +264,10 @@ struct Reply {
   std::vector<gwipc_output_upsert> outputs;
 };
 
-Reply receive_reply(gwipc_connection* connection) {
+Reply receive_reply(gwipc_connection* connection,
+                    const unsigned maximum_attempts = 800) {
   Reply reply;
-  for (unsigned attempt = 0; attempt < 800; ++attempt) {
+  for (unsigned attempt = 0; attempt < maximum_attempts; ++attempt) {
     require(pump(connection), "drive output configuration reply");
     while (true) {
       gwipc_message* raw = nullptr;
@@ -315,8 +327,8 @@ Reply query(gwipc_connection* connection, const std::uint64_t id) {
   return receive_reply(connection);
 }
 
-Reply configure(gwipc_connection* connection, const std::uint64_t id,
-                const Reply& initial) {
+void send_configuration(gwipc_connection* connection, const std::uint64_t id,
+                        const Reply& initial) {
   require(initial.outputs.size() == 2, "fixture exposes two outputs");
   auto outputs = initial.outputs;
   outputs[0].logical_x = 0;
@@ -351,6 +363,11 @@ Reply configure(gwipc_connection* connection, const std::uint64_t id,
   send_contract(connection, GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT,
                 GWIPC_FLAG_ACK_REQUIRED, commit,
                 gwipc_contract_encode_output_configuration_commit);
+}
+
+Reply configure(gwipc_connection* connection, const std::uint64_t id,
+                const Reply& initial) {
+  send_configuration(connection, id, initial);
   return receive_reply(connection);
 }
 
@@ -392,12 +409,24 @@ int main(int argc, char** argv) {
               initial.root_height == 480,
           "initial query reports the horizontal two-output layout");
   PersistentX11Client persistent(x11_dir + "/X91");
-  const auto accepted = configure(tool.get(), 102, initial);
+  require(::kill(server.pid, SIGSTOP) == 0,
+          "pause server before queuing concurrent work");
+  int stop_status = 0;
+  require(::waitpid(server.pid, &stop_status, WUNTRACED) == server.pid &&
+              WIFSTOPPED(stop_status),
+          "server reaches the stopped state");
+  persistent.begin_unmap();
+  send_configuration(tool.get(), 102, initial);
+  for (unsigned attempt = 0; attempt < 4; ++attempt)
+    require(pump(tool.get()), "flush queued output configuration");
+  require(::kill(server.pid, SIGCONT) == 0,
+          "resume server with concurrent work queued");
+  const auto accepted = receive_reply(tool.get(), 100);
   require(accepted.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
               accepted.generation == 2 && accepted.root_width == 640 &&
               accepted.root_height == 960 &&
               accepted.primary_output == initial.outputs[1].output_id,
-          "tool is acknowledged only after policy and compositor commit");
+          "queued output work starts when the preceding lifecycle completes");
   persistent.require_usable();
   auto historical_probe =
       launch(argv[4], {"--socket-dir", x11_dir, "--display", "91", "--basic"});

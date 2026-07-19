@@ -188,7 +188,8 @@ bool ServerRuntime::service_integrated(const short policy_events,
     return false;
   std::string error;
   if (!service_peer_replay(error) || !service_output_control_work() ||
-      !service_lifecycle_work(compositor_releases))
+      !service_lifecycle_work(compositor_releases) ||
+      !service_output_control_work())
     return false;
   if (!service_cursor()) return false;
   submit_pending_content(error);
