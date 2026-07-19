@@ -335,7 +335,8 @@ int main() {
               json.find("\"scale_mode\":2") != std::string::npos,
           "M13 scene manifest records output geometry and scale membership");
 
-  compositor.disconnect();
+  std::string disconnect_error;
+  gw::test::require(compositor.disconnect(disconnect_error), disconnect_error);
   require(compositor.begin_snapshot(), "cursor replay snapshot begins");
   attach_scene(compositor, cursor_surface(0, 2), error, 101, 201);
   require(compositor.end_snapshot(), "cursor replay snapshot ends");

@@ -1,5 +1,7 @@
 #include "gwcomp/runtime_reactor.hpp"
 
+#include "gwcomp/runtime_session_gate.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
@@ -88,7 +90,13 @@ void RuntimeReactor::service_signals(const short revents) {
 }
 
 void RuntimeReactor::apply_dispatch(const ContractDispatchResult& dispatch) {
+  const bool completed_bootstrap =
+      dispatch.accepted_frame && !producer_bootstrapped_;
   accepted_any_frame_ = accepted_any_frame_ || dispatch.accepted_frame;
+  producer_bootstrapped_ =
+      producer_bootstrapped_ || dispatch.accepted_frame;
+  if (completed_bootstrap && vt_release_requested_)
+    buffered_work_pending_ = true;
   stop_after_flush_ = stop_after_flush_ || dispatch.stop_after_flush;
   if (dispatch.pending_frame)
     pending_reply_sequence_ = dispatch.reply_sequence;
@@ -98,14 +106,25 @@ void RuntimeReactor::apply_dispatch(const ContractDispatchResult& dispatch) {
   }
 }
 
+bool RuntimeReactor::disconnect_compositor(const char* context) {
+  std::string error;
+  if (compositor_.disconnect(error)) return true;
+  std::fprintf(stderr, "gwcomp: %s VRR teardown failed: %s\n", context,
+               error.c_str());
+  stopping_ = true;
+  exit_status_ = 1;
+  return false;
+}
+
 void RuntimeReactor::fail_output_inventory(const char* reason,
                                            const gwipc_status status) {
   std::fprintf(stderr, "gwcomp: output inventory failed: %s: %s\n", reason,
                gwipc_status_string(status));
   session_state_.peer_disconnected();
-  compositor_.disconnect();
+  (void)disconnect_compositor("output inventory failure");
   producer_.reset();
   peer_validated_ = false;
+  producer_bootstrapped_ = false;
   peer_role_ = GWIPC_ROLE_UNKNOWN;
   peer_profile_.reset();
   stopping_ = true;
@@ -117,9 +136,10 @@ void RuntimeReactor::reject_output_inventory_peer(
   std::fprintf(stderr, "gwcomp: rejected output inventory peer: %s: %s\n",
                reason, gwipc_status_string(status));
   session_state_.peer_disconnected();
-  compositor_.disconnect();
+  (void)disconnect_compositor("output inventory peer rejection");
   producer_.reset();
   peer_validated_ = false;
+  producer_bootstrapped_ = false;
   peer_role_ = GWIPC_ROLE_UNKNOWN;
   peer_profile_.reset();
 }
@@ -168,8 +188,13 @@ void RuntimeReactor::service_presentation(const short revents) {
 }
 
 void RuntimeReactor::service_virtual_terminal() {
-  if (vt_release_requested_ && !compositor_.presentation_pending() &&
-      !compositor_.presentation_suspended()) {
+  // A fresh protocol server consumes output inventory and the initial scene as
+  // a strict bootstrap stream.  Do not inject an unsolicited session request
+  // until its first frame proves that bootstrap has completed.
+  if (may_begin_vt_release(
+          vt_release_requested_, producer_ != nullptr, peer_validated_,
+          producer_bootstrapped_, compositor_.presentation_pending(),
+          compositor_.presentation_suspended())) {
     std::string error;
     if (session_state_.enabled() &&
         session_state_.state() == CoordinatedSessionState::Active) {
@@ -246,6 +271,7 @@ void RuntimeReactor::accept_producer(const short revents) {
   std::fprintf(stderr, "gwcomp: producer connected pid=%d uid=%u\n", peer.pid,
                peer.uid);
   peer_validated_ = false;
+  producer_bootstrapped_ = false;
   peer_role_ = GWIPC_ROLE_UNKNOWN;
   peer_profile_.reset();
 }
@@ -274,8 +300,9 @@ void RuntimeReactor::validate_producer() {
         stderr,
         "gwcomp: peer role=%u has invalid role capability profile\n",
         static_cast<unsigned>(peer_role_));
-    compositor_.disconnect();
+    (void)disconnect_compositor("invalid producer profile");
     producer_.reset();
+    producer_bootstrapped_ = false;
     peer_role_ = GWIPC_ROLE_UNKNOWN;
     return;
   }
@@ -295,8 +322,9 @@ void RuntimeReactor::validate_producer() {
           scene_profile, primary_output_id, output_layout_generation)) {
     std::fprintf(stderr,
                  "gwcomp: could not configure negotiated scene profile\n");
-    compositor_.disconnect();
+    (void)disconnect_compositor("scene-profile negotiation");
     producer_.reset();
+    producer_bootstrapped_ = false;
     peer_role_ = GWIPC_ROLE_UNKNOWN;
     peer_profile_.reset();
     return;
@@ -310,8 +338,9 @@ void RuntimeReactor::validate_producer() {
           contract_error)) {
     std::fprintf(stderr, "gwcomp: could not configure VRR contract: %s\n",
                  contract_error.c_str());
-    compositor_.disconnect();
+    (void)disconnect_compositor("VRR contract negotiation");
     producer_.reset();
+    producer_bootstrapped_ = false;
     peer_role_ = GWIPC_ROLE_UNKNOWN;
     peer_profile_.reset();
     return;
@@ -374,14 +403,20 @@ void RuntimeReactor::service_session_messages() {
 }
 
 void RuntimeReactor::service_contract_messages() {
+  // A pending VT release must not starve the inventory/initial-scene stream.
+  // Once bootstrapped, stop ordinary contracts before requesting Inactive.
+  const bool release_blocks_contracts = vt_release_blocks_contract_service(
+      vt_release_requested_, producer_bootstrapped_);
   if (!producer_ || !peer_validated_ || compositor_.presentation_pending() ||
-      compositor_.presentation_suspended() || vt_release_requested_ ||
+      compositor_.presentation_suspended() || release_blocks_contracts ||
       session_state_.waiting())
     return;
   std::size_t messages = 0;
   std::size_t payload_bytes = 0;
   while (producer_ && peer_validated_ && !compositor_.presentation_pending() &&
-         !compositor_.presentation_suspended() && !vt_release_requested_ &&
+         !compositor_.presentation_suspended() &&
+         !vt_release_blocks_contract_service(vt_release_requested_,
+                                             producer_bootstrapped_) &&
          !session_state_.waiting() && messages < kMaximumMessagesPerTurn &&
          payload_bytes < kMaximumPayloadBytesPerTurn) {
     gwipc_message* raw_message = nullptr;
@@ -405,7 +440,9 @@ void RuntimeReactor::service_contract_messages() {
     if (stopping_) break;
   }
   if (producer_ && peer_validated_ && !compositor_.presentation_pending() &&
-      !compositor_.presentation_suspended() && !vt_release_requested_ &&
+      !compositor_.presentation_suspended() &&
+      !vt_release_blocks_contract_service(vt_release_requested_,
+                                          producer_bootstrapped_) &&
       !session_state_.waiting() &&
       (messages == kMaximumMessagesPerTurn ||
        payload_bytes >= kMaximumPayloadBytesPerTurn))
@@ -436,9 +473,10 @@ void RuntimeReactor::service_disconnect() {
     stopping_ = true;
     exit_status_ = 1;
   }
-  compositor_.disconnect();
+  (void)disconnect_compositor("producer disconnect");
   producer_.reset();
   peer_validated_ = false;
+  producer_bootstrapped_ = false;
   peer_role_ = GWIPC_ROLE_UNKNOWN;
   peer_profile_.reset();
   if ((options_.once && accepted_any_frame_) || stop_after_flush_)

@@ -138,7 +138,7 @@ void m4_async_ipc_ordering_and_vt() {
                         rig.report_contents().find("\"transition\":\"acquire\"") !=
                             std::string::npos,
                     "VT release and acquire re-present committed M4 pixels");
-  rig.compositor->disconnect();
+  gw::test::require(rig.compositor->disconnect(error), error);
   require_clean_restore(rig);
 }
 
@@ -236,7 +236,7 @@ void timeout_hup_and_disconnect_restore() {
   gw::test::require(disconnect_ipc.server_closed() &&
                         disconnect_rig.compositor->presentation_pending(),
                     "producer disconnect is detected while scanout is pending");
-  disconnect_rig.compositor->disconnect();
+  gw::test::require(disconnect_rig.compositor->disconnect(error), error);
   gw::test::require(!std::filesystem::exists(disconnect_rig.mirror_frame(2)),
                     "producer disconnect aborts staged mirror evidence");
   require_clean_restore(disconnect_rig);

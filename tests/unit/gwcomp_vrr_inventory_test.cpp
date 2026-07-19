@@ -6,6 +6,16 @@ namespace {
 
 class FakePresenter final : public glasswyrm::output::PresentationBackend {
  public:
+  bool configure_vrr_contract(const bool enabled,
+                              std::string& error) override {
+    configuration_history.push_back(enabled);
+    if (!enabled && reject_disable) {
+      error = "injected VRR disable failure";
+      return false;
+    }
+    error.clear();
+    return true;
+  }
   std::optional<glasswyrm::output::VrrPresentationCapability>
   vrr_capability(const std::uint64_t output_id) const noexcept override {
     if (output_id != 5)
@@ -39,6 +49,9 @@ class FakePresenter final : public glasswyrm::output::PresentationBackend {
       std::string&) noexcept override {
     return glasswyrm::output::BackendStateResult::Complete;
   }
+
+  std::vector<bool> configuration_history;
+  bool reject_disable{};
 };
 
 glasswyrm::output::OutputLayout layout() {
@@ -86,6 +99,7 @@ glasswyrm::output::OutputLayout layout() {
 
 void test_bootstrap_inventory() {
   auto presenter = std::make_unique<FakePresenter>();
+  auto* presenter_observer = presenter.get();
   gw::compositor::Compositor compositor(std::move(presenter));
   std::string error;
   gw::test::require(compositor.configure_vrr_contract(true, error), error);
@@ -126,8 +140,32 @@ void test_bootstrap_inventory() {
           query, 11, 13, outputs);
   gw::test::require(historical && historical.messages.size() == 4,
                     "historical query remains byte-shaped without VRR records");
+
+  gw::test::require(
+      compositor.disconnect(error) && error.empty() &&
+          presenter_observer->configuration_history ==
+              std::vector<bool>({true, false}),
+      "producer disconnect disables the negotiated presenter VRR contract");
+}
+
+void test_disconnect_disable_failure() {
+  auto presenter = std::make_unique<FakePresenter>();
+  auto* presenter_observer = presenter.get();
+  gw::compositor::Compositor compositor(std::move(presenter));
+  std::string error;
+  gw::test::require(compositor.configure_vrr_contract(true, error), error);
+  presenter_observer->reject_disable = true;
+  gw::test::require(
+      !compositor.disconnect(error) &&
+          error == "injected VRR disable failure" &&
+          presenter_observer->configuration_history ==
+              std::vector<bool>({true, false}),
+      "producer disconnect exposes a presenter VRR teardown failure");
 }
 
 }  // namespace
 
-int main() { test_bootstrap_inventory(); }
+int main() {
+  test_bootstrap_inventory();
+  test_disconnect_disable_failure();
+}
