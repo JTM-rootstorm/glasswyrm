@@ -15,9 +15,11 @@ struct Options {
   std::uint16_t display{};
   std::string backend = "drm";
   std::vector<std::string> headless_outputs;
+  std::vector<std::string> headless_vrr;
   bool output_model{};
   std::optional<std::string> control_socket;
   bool scale_protocol{};
+  bool vrr_protocol{};
   std::string drm_device;
   std::string tty;
   std::string connector;
@@ -31,6 +33,7 @@ struct Options {
   std::optional<std::string> mirror_dump_dir;
   std::optional<std::string> scene_manifest;
   std::optional<std::string> drm_report;
+  std::optional<std::string> vrr_report;
   std::optional<std::string> x11_trace;
   std::string renderer = "software";
   std::optional<std::string> renderer_report;

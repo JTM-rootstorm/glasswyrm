@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backends/headless/inventory.hpp"
+#include "backends/headless/vrr_simulation.hpp"
 #include "render/scene_renderer.hpp"
 
 #include <cstdint>
@@ -25,6 +26,7 @@ struct Options {
   std::string ipc_socket;
   std::string dump_dir;
   std::vector<headless::OutputRequest> headless_outputs;
+  std::vector<headless::VrrSimulationRequest> headless_vrr;
   std::optional<std::string> drm_device;
   std::optional<int> drm_fd;
   bool external_session{false};
@@ -34,6 +36,7 @@ struct Options {
   DrmApiMode drm_api{DrmApiMode::Auto};
   std::optional<std::string> mirror_dump_dir;
   std::optional<std::string> drm_report;
+  std::optional<std::string> vrr_report;
   std::optional<std::string> scene_manifest;
   gw::render::RendererRequest renderer{gw::render::RendererRequest::Software};
   std::optional<std::string> renderer_report;

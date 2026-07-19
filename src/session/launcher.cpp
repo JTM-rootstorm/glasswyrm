@@ -23,6 +23,7 @@ struct Seen {
   bool output_model{};
   bool control_socket{};
   bool scale_protocol{};
+  bool vrr_protocol{};
   bool drm_device{};
   bool tty{};
   bool connector{};
@@ -35,6 +36,7 @@ struct Seen {
   bool mirror_dump_dir{};
   bool scene_manifest{};
   bool drm_report{};
+  bool vrr_report{};
   bool x11_trace{};
   bool renderer{};
   bool renderer_report{};
@@ -44,14 +46,15 @@ struct Seen {
 void print_usage(std::ostream &output) {
   output << "Usage: glasswyrm-session --runtime-dir PATH --display N\n"
             "  [--backend drm|headless] [--output-model]\n"
-            "  [--control-socket PATH] [--scale-protocol]\n"
+            "  [--control-socket PATH] [--scale-protocol] [--vrr-protocol]\n"
             "  drm: --drm-device PATH --tty PATH --connector NAME\n"
             "       --mode WIDTHxHEIGHT[@MILLIHZ] --input-device PATH ...\n"
             "  headless: [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n"
+            "            [--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ]...\n"
             "  [--xkb-layout NAME] [--xkb-model NAME] [--xkb-variant NAME]\n"
             "  [--xkb-options LIST] [--drm-api auto|atomic|legacy]\n"
             "  [--mirror-dump-dir PATH] [--scene-manifest PATH]\n"
-            "  [--drm-report PATH] [--x11-trace PATH]\n"
+            "  [--drm-report PATH] [--vrr-report PATH] [--x11-trace PATH]\n"
             "  [--game-compat] [--disable-extension NAME] ...\n"
             "  [--renderer software|gles|auto] [--renderer-report PATH]\n"
             "  [--client PROGRAM ARG...] [--help] [--version]\n";
@@ -122,9 +125,9 @@ bool validate(const Options &options, const Seen &seen, std::ostream &error) {
       print_usage(error);
       return false;
     }
-    if (!options.headless_outputs.empty()) {
-      error << "glasswyrm-session: --headless-output requires --backend "
-               "headless\n";
+    if (!options.headless_outputs.empty() || !options.headless_vrr.empty()) {
+      error << "glasswyrm-session: --headless-output and --headless-vrr "
+               "require --backend headless\n";
       return false;
     }
   } else if (seen.drm_device || seen.tty || seen.connector || seen.mode ||
@@ -140,10 +143,14 @@ bool validate(const Options &options, const Seen &seen, std::ostream &error) {
     error << "glasswyrm-session: --scale-protocol requires --output-model\n";
     return false;
   }
+  if (options.vrr_protocol && !options.output_model) {
+    error << "glasswyrm-session: --vrr-protocol requires --output-model\n";
+    return false;
+  }
 #if !GW_HAS_EXPERIMENTAL
-  if (options.scale_protocol) {
-    error << "glasswyrm-session: --scale-protocol is unavailable in this "
-             "build\n";
+  if (options.scale_protocol || options.vrr_protocol) {
+    error << "glasswyrm-session: experimental protocols are unavailable in "
+             "this build\n";
     return false;
   }
 #endif
@@ -247,6 +254,14 @@ ParseOptionsResult parse_options(int argc, char **argv, Options &options,
       if (!parsed)
         error << "glasswyrm-session: --headless-output requires a non-empty "
                  "specification\n";
+    } else if (argument == "--headless-vrr") {
+      if (++index >= argc || argv[index][0] == '\0')
+        parsed = false;
+      else
+        options.headless_vrr.emplace_back(argv[index]);
+      if (!parsed)
+        error << "glasswyrm-session: --headless-vrr requires a non-empty "
+                 "specification\n";
     } else if (argument == "--output-model") {
       if (seen.output_model) {
         error << "glasswyrm-session: duplicate option: --output-model\n";
@@ -265,6 +280,13 @@ ParseOptionsResult parse_options(int argc, char **argv, Options &options,
       }
       seen.scale_protocol = true;
       options.scale_protocol = true;
+    } else if (argument == "--vrr-protocol") {
+      if (seen.vrr_protocol) {
+        error << "glasswyrm-session: duplicate option: --vrr-protocol\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      seen.vrr_protocol = true;
+      options.vrr_protocol = true;
     } else if (argument == "--drm-device")
       parsed = take_value(argc, argv, index, argument, options.drm_device,
                           seen.drm_device, error);
@@ -311,6 +333,9 @@ ParseOptionsResult parse_options(int argc, char **argv, Options &options,
     else if (argument == "--drm-report")
       parsed = take_optional(argc, argv, index, argument, options.drm_report,
                              seen.drm_report, error);
+    else if (argument == "--vrr-report")
+      parsed = take_optional(argc, argv, index, argument, options.vrr_report,
+                             seen.vrr_report, error);
     else if (argument == "--x11-trace")
       parsed = take_optional(argc, argv, index, argument, options.x11_trace,
                              seen.x11_trace, error);
@@ -389,6 +414,10 @@ CommandPlan build_command_plan(const Options &options,
       compositor.argv.emplace_back("--headless-output");
       compositor.argv.push_back(output);
     }
+    for (const auto &vrr : options.headless_vrr) {
+      compositor.argv.emplace_back("--headless-vrr");
+      compositor.argv.push_back(vrr);
+    }
   } else {
     compositor.argv.insert(
         compositor.argv.end(),
@@ -401,6 +430,7 @@ CommandPlan build_command_plan(const Options &options,
   append_option(compositor.argv, "--mirror-dump-dir", options.mirror_dump_dir);
   append_option(compositor.argv, "--scene-manifest", options.scene_manifest);
   append_option(compositor.argv, "--drm-report", options.drm_report);
+  append_option(compositor.argv, "--vrr-report", options.vrr_report);
   append_option(compositor.argv, "--renderer-report", options.renderer_report);
   compositor.readiness_socket = paths.compositor_socket;
 
@@ -425,6 +455,8 @@ CommandPlan build_command_plan(const Options &options,
   }
   if (options.scale_protocol)
     server.argv.emplace_back("--scale-protocol");
+  if (options.vrr_protocol)
+    server.argv.emplace_back("--vrr-protocol");
   if (options.game_compat)
     server.argv.emplace_back("--game-compat");
   for (const auto &name : options.disabled_extensions) {

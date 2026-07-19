@@ -183,6 +183,22 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
     )
     test('headless-inventory', headless_inventory_test, timeout: 10)
 
+    headless_vrr_simulation_test = executable(
+      'headless_vrr_simulation_test',
+      files(tests_source_dir / 'output/headless_vrr_simulation_test.cpp'),
+      dependencies: gw_headless_dep,
+      include_directories: test_source_root_include,
+    )
+    test('headless-vrr-simulation', headless_vrr_simulation_test, timeout: 10)
+
+    headless_vrr_presenter_test = executable(
+      'headless_vrr_presenter_test',
+      files(tests_source_dir / 'output/headless_vrr_presenter_test.cpp'),
+      dependencies: [gw_headless_dep, gw_vrr_model_dep],
+      include_directories: test_source_root_include,
+    )
+    test('headless-vrr-presenter', headless_vrr_presenter_test, timeout: 10)
+
     headless_output_test = executable(
     'headless_output_test',
     files(tests_source_dir / 'unit/headless_output_test.cpp'),
