@@ -125,7 +125,7 @@ for key in "${required_results[@]}"; do result[$key]=failed; done
 clang=unavailable layout_generation=unknown output_ids=unknown
 headless_aggregate_hash=unknown drm_mode=1024x768
 service_checks=0
-randr_pid=0 legacy_pid=0 scale_pid=0 synthetic_pid=0
+randr_pid=0 legacy_pid=0 scale_pid=0 synthetic_pid=0 compare_software_pid=0
 gles_legacy_pid=0 drm_legacy_pid=0
 getty_state_captured=false logind_state_captured=false original_vt=
 getty_unit='' getty_active_before='' getty_enabled_before=''
@@ -164,7 +164,7 @@ cleanup() {
   set +e
   local pid
   for pid in "$randr_pid" "$legacy_pid" "$scale_pid" "$synthetic_pid" \
-    "$gles_legacy_pid" "$drm_legacy_pid"; do
+    "$compare_software_pid" "$gles_legacy_pid" "$drm_legacy_pid"; do
     if ((pid > 0)); then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" >/dev/null 2>&1 || true
@@ -980,10 +980,14 @@ capture_vt_state "$artifact_dir/milestone13-vt-before.json"
 [[ $getty_active_before != active ]] || systemctl stop "$getty_unit"
 systemctl mask --runtime --now "$logind_socket" "$logind_unit"
 systemd-run --unit=glasswyrm-m13-drm --property=Type=simple \
+  --setenv="PATH=$software/src:/usr/bin:/bin" \
   --property=PrivateDevices=no --property=DevicePolicy=closed \
   --property="DeviceAllow=$drm_device rw" --property="DeviceAllow=$target_vt rw" \
+  --property="DeviceAllow=$keyboard r" --property="DeviceAllow=$pointer r" \
   --property=StandardInput=tty-force --property="TTYPath=$target_vt" \
+  --property=StandardOutput=journal --property=StandardError=journal \
   --property=TTYReset=yes --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
+  --property=KillMode=mixed --property=SuccessExitStatus=143 \
   --no-block -- "$software/src/glasswyrm-session" --runtime-dir "$runtime" \
   --display 99 --backend drm --drm-device "$drm_device" --tty "$target_vt" \
   --connector "$connector" --mode 1024x768 --drm-api auto \
@@ -993,6 +997,7 @@ systemd-run --unit=glasswyrm-m13-drm --property=Type=simple \
   --renderer-report "$artifact_dir/milestone13-renderer-drm.jsonl" \
   --drm-report "$artifact_dir/milestone13-drm-report.jsonl"
 for _ in {1..400}; do [[ -S $runtime/control.sock ]] && break; sleep .05; done
+[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]
 "$software/tools/gwout" --socket "$runtime/control.sock" set "$connector" \
   --scale 4/3 --transform rotate-180 --json >>"$artifact_dir/milestone13-gwout.log"
 "$software/tools/gwinfo" --socket "$runtime/control.sock" outputs --json \
