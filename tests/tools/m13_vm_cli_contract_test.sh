@@ -98,8 +98,8 @@ compositor_stop_line=$(grep -n -m1 'systemctl stop gwcomp-m13.service' \
   "$library" | cut -d: -f1)
 report_rotate_line=$(grep -n -m1 \
   'milestone13-renderer-software-pre-restart.jsonl' "$library" | cut -d: -f1)
-compositor_start_line=$(grep -n -m1 'systemctl start gwcomp-m13.service' \
-  "$library" | cut -d: -f1)
+compositor_start_line=$(grep -n -m1 \
+  'start_headless_compositor "$software"' "$library" | cut -d: -f1)
 ((compositor_stop_line < report_rotate_line &&
   report_rotate_line < compositor_start_line)) ||
   fail 'compositor report is not rotated between stop and start'
