@@ -2,10 +2,12 @@
 
 #include "config.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <limits>
 #include <ostream>
 #include <string_view>
+#include <utility>
 
 namespace glasswyrm::compositor {
 namespace {
@@ -13,7 +15,9 @@ namespace {
 void print_usage(std::ostream& output) {
   output <<
       "Usage: gwcomp [--backend headless|drm] --ipc-socket PATH\n"
-      "  headless: --dump-dir PATH [--scene-manifest PATH]\n"
+      "  headless: --dump-dir PATH [--headless-output "
+      "NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n"
+      "            [--scene-manifest PATH]\n"
       "  drm direct: --drm-device PATH|auto --tty /dev/ttyN\n"
       "  drm external: --drm-fd N --external-session\n"
       "  drm options: [--connector NAME] [--mode WIDTHxHEIGHT[@MILLIHZ]]\n"
@@ -79,6 +83,33 @@ bool parse_mode(std::string_view text, RequestedMode& mode) {
   return true;
 }
 
+bool parse_headless_output(std::string_view text,
+                           headless::OutputRequest& request) {
+  const auto separator = text.find(':');
+  const auto name_end =
+      separator == std::string_view::npos ? text.size() : separator;
+  const auto name = text.substr(0, name_end);
+  if (!headless::valid_output_name(name))
+    return false;
+  request.name = std::string(name);
+  if (separator == std::string_view::npos)
+    return true;
+
+  RequestedMode mode;
+  if (!parse_mode(text.substr(separator + 1), mode))
+    return false;
+  const auto pixels = static_cast<std::uint64_t>(mode.width) * mode.height;
+  if (mode.width > output::kMaximumPhysicalExtent ||
+      mode.height > output::kMaximumPhysicalExtent ||
+      pixels > output::kMaximumPhysicalPixels)
+    return false;
+  request.width = mode.width;
+  request.height = mode.height;
+  request.refresh_millihertz =
+      mode.refresh_millihz.value_or(headless::kDefaultOutputRefreshMillihertz);
+  return true;
+}
+
 bool take_optional_path(int argc, char** argv, int& index,
                         std::optional<std::string>& destination,
                         std::string_view option, std::ostream& error) {
@@ -111,6 +142,10 @@ bool validate_backend_options(const Options& options, std::ostream& error) {
       return false;
     }
     return true;
+  }
+  if (!options.headless_outputs.empty()) {
+    error << "gwcomp: --headless-output requires --backend headless\n";
+    return false;
   }
   if (!options.dump_dir.empty()) {
     error << "gwcomp: --dump-dir is headless-only; use --mirror-dump-dir for DRM\n";
@@ -170,6 +205,31 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
     if (argument == "--dump-dir") {
       if (!take_path(argc, argv, index, options.dump_dir, argument, error))
         return ParseOptionsResult::ExitFailure;
+      continue;
+    }
+    if (argument == "--headless-output") {
+      std::string value;
+      if (!take_path(argc, argv, index, value, argument, error))
+        return ParseOptionsResult::ExitFailure;
+      headless::OutputRequest request;
+      if (!parse_headless_output(value, request)) {
+        error << "gwcomp: --headless-output requires "
+                 "NAME[:WIDTHxHEIGHT[@MILLIHZ]]; NAME is a 1-63 byte ASCII "
+                 "identifier and dimensions are bounded to 4096x4096\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      if (options.headless_outputs.size() >= output::kMaximumOutputs) {
+        error << "gwcomp: --headless-output may be specified at most 8 times\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      if (std::ranges::any_of(options.headless_outputs,
+                              [&request](const auto& existing) {
+                                return existing.name == request.name;
+                              })) {
+        error << "gwcomp: --headless-output names must be unique\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      options.headless_outputs.push_back(std::move(request));
       continue;
     }
     if (argument == "--drm-device") {

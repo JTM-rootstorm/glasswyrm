@@ -48,7 +48,8 @@ bool ServerRuntime::initialize_interactive_policy() {
 }
 
 bool ServerRuntime::begin_interactive_pointer(const RealInputEvent &event) {
-  if (!interactive_bindings_ || !interactive_policy_ || !event.pressed)
+  if (output_configuration_active() || !interactive_bindings_ ||
+      !interactive_policy_ || !event.pressed)
     return false;
   const auto modifiers = static_cast<std::uint16_t>(event.state_before & 0xffU);
   glasswyrm::wm::InteractionKind kind = glasswyrm::wm::InteractionKind::None;
@@ -97,7 +98,9 @@ bool ServerRuntime::begin_interactive_pointer(const RealInputEvent &event) {
   operation.window = target;
   operation.proposed = std::move(proposed);
   pending_real_focus_ = PendingRealFocus{server_.state_.focused_window()};
-  const auto status = content_presenter_ && !bridge_->transaction_idle()
+  const auto status = output_configuration_active() ||
+                              (content_presenter_ &&
+                               !bridge_->transaction_idle())
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status != EnqueueStatus::Queued) {
@@ -133,9 +136,10 @@ bool ServerRuntime::update_interactive_geometry() {
   operation.proposed = std::move(proposed);
   interactive_geometry_token_ = operation.token;
   const auto status =
-      content_presenter_ &&
+      output_configuration_active() ||
+              (content_presenter_ &&
               (content_presenter_->frame_in_flight() ||
-               (cursor_presenter_ && !bridge_->transaction_idle()))
+               (cursor_presenter_ && !bridge_->transaction_idle())))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status != EnqueueStatus::Queued) {
@@ -210,9 +214,10 @@ bool ServerRuntime::handle_interactive_close(const RealInputEvent &event) {
       pending_mutations_.emplace(operation.token, std::move(mutation));
       const auto token = operation.token;
       const auto status =
-          content_presenter_ &&
+          output_configuration_active() ||
+                  (content_presenter_ &&
                   (content_presenter_->frame_in_flight() ||
-                   (cursor_presenter_ && !bridge_->transaction_idle()))
+                   (cursor_presenter_ && !bridge_->transaction_idle())))
               ? lifecycle_->enqueue_paused(std::move(operation))
               : lifecycle_->enqueue(std::move(operation));
       if (status != EnqueueStatus::Queued)
@@ -269,30 +274,6 @@ void ServerRuntime::abort_interactive() noexcept {
     (void)interactive_policy_->abort();
   interactive_geometry_token_.reset();
   mark_cursor_dirty();
-}
-
-std::shared_ptr<const glasswyrm::input::CursorImage>
-ServerRuntime::current_cursor_image() const noexcept {
-  if (interactive_policy_) {
-    if (interactive_policy_->cursor() ==
-        glasswyrm::wm::InteractionCursor::FleurMove)
-      return move_cursor_;
-    if (interactive_policy_->cursor() ==
-        glasswyrm::wm::InteractionCursor::BottomRightResize)
-      return resize_cursor_;
-  }
-  if (const auto& grab = server_.state_.grabs().pointer_grab(); grab) {
-    if (grab->cursor != 0)
-      if (const auto* cursor =
-              server_.state_.resources().find_cursor(grab->cursor))
-        return cursor->image;
-    if (grab->cursor_image)
-      return grab->cursor_image;
-  }
-  const auto target = glasswyrm::input::hit_test_deepest_viewable(
-      server_.state_.resources(), input_state_.pointer_x(),
-      input_state_.pointer_y());
-  return server_.state_.resources().effective_cursor(target);
 }
 
 } // namespace glasswyrm::server

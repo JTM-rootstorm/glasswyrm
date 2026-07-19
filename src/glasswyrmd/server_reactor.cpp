@@ -62,6 +62,8 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
     std::optional<std::size_t> compositor_index;
     std::optional<std::size_t> input_listener_index;
     std::optional<std::size_t> input_connection_index;
+    std::vector<OutputControlPollDescriptor> output_control_descriptors;
+    std::size_t output_control_offset{};
 #if GW_HAS_LIBINPUT_BACKEND
     std::optional<std::size_t> real_input_index;
     std::optional<std::size_t> repeat_index;
@@ -86,6 +88,12 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
       descriptors.push_back(pollfd{input_peer_->connection_fd(),
                                    input_peer_->connection_events(), 0});
     }
+    if (output_control_peer_) {
+      output_control_descriptors = output_control_peer_->poll_descriptors();
+      output_control_offset = descriptors.size();
+      for (const auto &entry : output_control_descriptors)
+        descriptors.push_back(pollfd{entry.descriptor, entry.events, 0});
+    }
 #if GW_HAS_LIBINPUT_BACKEND
     if (real_input_) {
       real_input_index = descriptors.size();
@@ -109,14 +117,14 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
     pending_work = pending_work ||
                    (input_peer_ && input_peer_->has_records() &&
                     !pending_focus_input_);
-#if GW_HAS_LIBINPUT_BACKEND
     pending_work = pending_work ||
+#if GW_HAS_LIBINPUT_BACKEND
                    (real_input_ &&
                     (real_input_->has_events() ||
                      real_input_->backend_work_pending()) &&
                     !pending_real_focus_) ||
-                   (cursor_presenter_ && cursor_dirty_);
 #endif
+                   (cursor_presenter_ && cursor_dirty_);
 #endif
     int poll_timeout = pending_work ? 0 : -1;
 #ifdef GW_SERVER_HAS_IPC
@@ -133,19 +141,26 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
     }
     const std::size_t polled_client_count = server_.clients_.size();
     for (std::size_t index = 0; index < polled_client_count; ++index) {
-#if GW_HAS_LIBINPUT_BACKEND
+#ifdef GW_SERVER_HAS_IPC
       const auto request_sequence =
           server_.clients_[index]->last_request_sequence();
 #endif
       server_.clients_[index]->handle_events(
           descriptors[index + client_offset].revents);
-#if GW_HAS_LIBINPUT_BACKEND
+#ifdef GW_SERVER_HAS_IPC
       if (cursor_presenter_ &&
           server_.clients_[index]->last_request_sequence() != request_sequence)
         mark_cursor_dirty();
 #endif
     }
 #ifdef GW_SERVER_HAS_IPC
+    if (output_control_peer_) {
+      for (std::size_t index = 0; index < output_control_descriptors.size();
+           ++index)
+        output_control_descriptors[index].revents =
+            descriptors[output_control_offset + index].revents;
+      output_control_peer_->service(output_control_descriptors);
+    }
     if (bridge_ &&
         !service_integrated(descriptors[*policy_index].revents,
                             descriptors[*compositor_index].revents))
@@ -160,11 +175,11 @@ int ServerRuntime::event_loop(SignalRuntime& signals) {
       return 1;
 #endif
 #endif
-#if GW_HAS_LIBINPUT_BACKEND
+#ifdef GW_SERVER_HAS_IPC
     const auto client_count = server_.clients_.size();
 #endif
     server_.remove_closed_clients();
-#if GW_HAS_LIBINPUT_BACKEND
+#ifdef GW_SERVER_HAS_IPC
     if (cursor_presenter_ && server_.clients_.size() != client_count)
       mark_cursor_dirty();
 #endif

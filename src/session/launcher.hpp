@@ -13,6 +13,11 @@ namespace glasswyrm::session {
 struct Options {
   std::string runtime_dir;
   std::uint16_t display{};
+  std::string backend = "drm";
+  std::vector<std::string> headless_outputs;
+  bool output_model{};
+  std::optional<std::string> control_socket;
+  bool scale_protocol{};
   std::string drm_device;
   std::string tty;
   std::string connector;
@@ -39,6 +44,7 @@ enum class ParseOptionsResult { Run, ExitSuccess, ExitFailure };
 struct RuntimePaths {
   std::string wm_socket;
   std::string compositor_socket;
+  std::optional<std::string> control_socket;
   std::string x11_socket;
 };
 

@@ -35,6 +35,26 @@ enum class PolicyWindowType : std::uint8_t {
   Utility = 3,
 };
 enum class PolicyDecoration : std::uint8_t { Unknown = 0, False = 1, True = 2 };
+enum class WindowScalePresentationState : std::uint8_t {
+  Legacy,
+  ScaleAwareAwaitingPixmap,
+  ScaleAwareActive,
+};
+
+struct WindowScaleState {
+  std::uint32_t primary_output{};
+  std::uint32_t preferred_scale_numerator{1};
+  std::uint32_t preferred_scale_denominator{1};
+  std::uint32_t accepted_buffer_scale{1};
+  std::uint64_t layout_generation{1};
+  std::vector<std::uint32_t> output_memberships;
+  bool has_output_state{};
+  WindowScalePresentationState presentation{
+      WindowScalePresentationState::Legacy};
+  std::shared_ptr<PixelStorage> scaled_pixmap_storage;
+  std::uint32_t presentation_serial{};
+  std::unordered_map<std::uint64_t, std::uint32_t> event_selections;
+};
 
 struct SavedWindowGeometry {
   std::int32_t x{}, y{};
@@ -97,6 +117,11 @@ struct WindowResource {
   std::uint32_t transient_for{};
   PolicyWindowType policy_window_type{PolicyWindowType::Normal};
   PolicyDecoration decoration_preference{PolicyDecoration::Unknown};
+  std::uint8_t policy_applied_state{1};
+  bool policy_managed{true};
+  bool policy_decoration_eligible{true};
+  std::uint8_t policy_fullscreen_eligible{1};
+  std::uint8_t policy_direct_scanout_eligible{};
   bool fullscreen_requested{};
   bool maximized_requested{};
   bool above_requested{};
@@ -106,6 +131,9 @@ struct WindowResource {
   std::uint32_t minimum_width{}, minimum_height{};
   std::uint32_t maximum_width{}, maximum_height{};
   std::optional<SavedWindowGeometry> saved_normal_geometry;
+  std::uint64_t assigned_output_id{};
+  std::vector<std::uint64_t> output_memberships;
+  WindowScaleState scale;
 };
 
 struct WindowCreateSpec {

@@ -1,12 +1,14 @@
 #include <glasswyrm/ipc/contracts.h>
 #include <glasswyrm/ipc/lifecycle.h>
 #include <glasswyrm/ipc/input.h>
+#include <glasswyrm/ipc/output.h>
 #include <glasswyrm/ipc/policy.h>
 #include <glasswyrm/ipc/session.h>
 
 #include "ipc/wire/compositor_contract.hpp"
 #include "ipc/wire/lifecycle_contract.hpp"
 #include "ipc/wire/input_contract.hpp"
+#include "ipc/wire/output_contract.hpp"
 #include "ipc/wire/policy_contract.hpp"
 #include "ipc/wire/session_contract.hpp"
 
@@ -27,7 +29,10 @@ using ContractValue = std::variant<w::OutputUpsert, w::OutputRemove,
     w::SyntheticMotion, w::SyntheticButton, w::SyntheticKey,
     w::SyntheticBarrier, w::SyntheticInputAcknowledged,
     w::PolicyBindingsUpsert, w::SessionStateChange,
-    w::SessionStateAcknowledged>;
+    w::SessionStateAcknowledged, w::OutputDescriptorUpsert,
+    w::OutputModeUpsert, w::SurfaceOutputState, w::PolicyOutputUpsert,
+    w::PolicyWindowOutputHint, w::OutputStateQuery,
+    w::OutputConfigurationCommit, w::OutputConfigurationAcknowledged>;
 struct gwipc_decoded_contract {
   std::uint16_t type{};
   ContractValue value{w::OutputRemove{}};
@@ -51,6 +56,14 @@ struct gwipc_decoded_contract {
   gwipc_policy_bindings_upsert policy_bindings_upsert{};
   gwipc_session_state_change session_state_change{};
   gwipc_session_state_acknowledged session_state_acknowledged{};
+  gwipc_output_descriptor_upsert output_descriptor_upsert{};
+  gwipc_output_mode_upsert output_mode_upsert{};
+  gwipc_surface_output_state surface_output_state{};
+  gwipc_policy_output_upsert policy_output_upsert{};
+  gwipc_policy_window_output_hint policy_window_output_hint{};
+  gwipc_output_state_query output_state_query{};
+  gwipc_output_configuration_commit output_configuration_commit{};
+  gwipc_output_configuration_acknowledged output_configuration_acknowledged{};
 };
 
 namespace {
@@ -149,6 +162,123 @@ gwipc_status gwipc_contract_encode_policy_bindings_upsert(const gwipc_policy_bin
   if(!valid_input(v)||!out||v->reserved16||v->reserved_buttons||v->reserved_flags||v->raise_on_focus>1||v->consume_wm_bindings>1)return GWIPC_STATUS_INVALID_ARGUMENT;
   return make_payload(w::PolicyBindingsUpsert{v->move_modifiers,v->resize_modifiers,v->close_modifiers,v->move_button,v->resize_button,v->close_keysym,v->minimum_width,v->minimum_height,v->raise_on_focus!=0,v->consume_wm_bindings!=0},out); }
 
+gwipc_status gwipc_contract_encode_output_descriptor_upsert(
+    const gwipc_output_descriptor_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || !v->name || v->name_length == 0 ||
+      v->name_length > GWIPC_MAXIMUM_OUTPUT_NAME_BYTES)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  try {
+    return make_payload(
+        w::OutputDescriptorUpsert{
+            v->output_id, static_cast<w::OutputKind>(v->kind),
+            v->capability_flags, std::string(v->name, v->name_length),
+            v->physical_width_millimeters, v->physical_height_millimeters,
+            v->supported_transform_mask, v->minimum_scale_numerator,
+            v->minimum_scale_denominator, v->maximum_scale_numerator,
+            v->maximum_scale_denominator,
+            v->maximum_scale_denominator_value, v->maximum_physical_width,
+            v->maximum_physical_height},
+        out);
+  } catch (const std::bad_alloc&) {
+    return GWIPC_STATUS_OUT_OF_MEMORY;
+  } catch (...) {
+    return GWIPC_STATUS_SYSTEM_ERROR;
+  }
+}
+
+gwipc_status gwipc_contract_encode_output_mode_upsert(
+    const gwipc_output_mode_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->preferred > 1 || v->current > 1 ||
+      v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::OutputModeUpsert{v->output_id, v->mode_id, v->physical_width,
+                          v->physical_height, v->refresh_millihertz,
+                          v->preferred != 0, v->current != 0, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_surface_output_state(
+    const gwipc_surface_output_state* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out ||
+      (v->output_count != 0 && v->output_ids == nullptr) ||
+      v->output_count > GWIPC_MAXIMUM_OUTPUTS)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  try {
+    w::SurfaceOutputState value{
+        v->surface_id,
+        v->primary_output_id,
+        {},
+        v->preferred_scale_numerator,
+        v->preferred_scale_denominator,
+        v->client_buffer_scale,
+        static_cast<w::SurfaceScaleMode>(v->scale_mode),
+        v->layout_generation,
+        v->flags};
+    if (v->output_count != 0)
+      value.output_ids.assign(v->output_ids, v->output_ids + v->output_count);
+    return make_payload(std::move(value), out);
+  } catch (const std::bad_alloc&) {
+    return GWIPC_STATUS_OUT_OF_MEMORY;
+  } catch (...) {
+    return GWIPC_STATUS_SYSTEM_ERROR;
+  }
+}
+
+gwipc_status gwipc_contract_encode_policy_output_upsert(
+    const gwipc_policy_output_upsert* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->enabled > 1 || v->primary > 1 ||
+      v->reserved16 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyOutputUpsert{
+          v->output_id, v->logical_x, v->logical_y, v->logical_width,
+          v->logical_height, v->work_x, v->work_y, v->work_width,
+          v->work_height, v->scale_numerator, v->scale_denominator,
+          static_cast<w::Transform>(v->transform), v->enabled != 0,
+          v->primary != 0, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_policy_window_output_hint(
+    const gwipc_policy_window_output_hint* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out) return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::PolicyWindowOutputHint{v->window_id, v->previous_output_id,
+                                v->preferred_output_id, v->flags},
+      out);
+}
+
+gwipc_status gwipc_contract_encode_output_state_query(
+    const gwipc_output_state_query* v, gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out) return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(w::OutputStateQuery{v->query_id, v->flags}, out);
+}
+
+gwipc_status gwipc_contract_encode_output_configuration_commit(
+    const gwipc_output_configuration_commit* v,
+    gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out) return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(w::OutputConfigurationCommit{
+                          v->configuration_id, v->base_generation,
+                          v->primary_output_id, v->flags},
+                      out);
+}
+
+gwipc_status gwipc_contract_encode_output_configuration_acknowledged(
+    const gwipc_output_configuration_acknowledged* v,
+    gwipc_contract_payload** out) {
+  if (!valid_input(v) || !out || v->reserved32 != 0)
+    return GWIPC_STATUS_INVALID_ARGUMENT;
+  return make_payload(
+      w::OutputConfigurationAcknowledged{
+          v->request_id, v->applied_generation,
+          static_cast<w::OutputConfigurationResult>(v->result), v->flags,
+          v->primary_output_id, v->root_logical_width,
+          v->root_logical_height, v->enabled_output_count},
+      out);
+}
+
 const uint8_t* gwipc_contract_payload_data(const gwipc_contract_payload* p,size_t* n) { if(n)*n=p?p->bytes.size():0; return !p||p->bytes.empty()?nullptr:p->bytes.data(); }
 void gwipc_contract_payload_destroy(gwipc_contract_payload* p) { delete p; }
 
@@ -173,6 +303,14 @@ gwipc_status gwipc_contract_decode_message(const gwipc_message* m, gwipc_decoded
       DECODE_CASE(GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,w::PolicyBindingsUpsert)
       DECODE_CASE(GWIPC_MESSAGE_SESSION_STATE_CHANGE,w::SessionStateChange)
       DECODE_CASE(GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,w::SessionStateAcknowledged)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_DESCRIPTOR_UPSERT,w::OutputDescriptorUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_MODE_UPSERT,w::OutputModeUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_SURFACE_OUTPUT_STATE,w::SurfaceOutputState)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT,w::PolicyOutputUpsert)
+      DECODE_CASE(GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT,w::PolicyWindowOutputHint)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_STATE_QUERY,w::OutputStateQuery)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT,w::OutputConfigurationCommit)
+      DECODE_CASE(GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,w::OutputConfigurationAcknowledged)
       default: delete d; return GWIPC_STATUS_INVALID_ARGUMENT; }
 #undef DECODE_CASE
     if(s!=w::CodecStatus::Ok){delete d;return codec_status(s);}
@@ -206,12 +344,20 @@ SIMPLE_ACCESS(synthetic_input_acknowledged,GWIPC_MESSAGE_SYNTHETIC_INPUT_ACKNOWL
 SIMPLE_ACCESS(policy_bindings_upsert,GWIPC_MESSAGE_POLICY_BINDINGS_UPSERT,w::PolicyBindingsUpsert,{sizeof(o),v.move_modifiers,v.resize_modifiers,v.close_modifiers,0,v.move_button,v.resize_button,0,v.close_keysym,v.minimum_width,v.minimum_height,(uint8_t)v.raise_on_focus,(uint8_t)v.consume_wm_bindings,0,{}})
 SIMPLE_ACCESS(session_state_change,GWIPC_MESSAGE_SESSION_STATE_CHANGE,w::SessionStateChange,{sizeof(o),v.generation,(gwipc_session_state)v.state,v.flags,{}})
 SIMPLE_ACCESS(session_state_acknowledged,GWIPC_MESSAGE_SESSION_STATE_ACKNOWLEDGED,w::SessionStateAcknowledged,{sizeof(o),v.generation,(gwipc_session_state)v.state,(gwipc_session_state_result)v.result,v.flags,{}})
+SIMPLE_ACCESS(output_mode_upsert,GWIPC_MESSAGE_OUTPUT_MODE_UPSERT,w::OutputModeUpsert,{sizeof(o),v.output_id,v.mode_id,v.physical_width,v.physical_height,v.refresh_millihertz,(uint8_t)v.preferred,(uint8_t)v.current,0,v.flags,{}})
+SIMPLE_ACCESS(policy_output_upsert,GWIPC_MESSAGE_POLICY_OUTPUT_UPSERT,w::PolicyOutputUpsert,{sizeof(o),v.output_id,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.work_x,v.work_y,v.work_width,v.work_height,v.scale_numerator,v.scale_denominator,(gwipc_transform)v.transform,(uint8_t)v.enabled,(uint8_t)v.primary,0,v.flags,{}})
+SIMPLE_ACCESS(policy_window_output_hint,GWIPC_MESSAGE_POLICY_WINDOW_OUTPUT_HINT,w::PolicyWindowOutputHint,{sizeof(o),v.window_id,v.previous_output_id,v.preferred_output_id,v.flags,{}})
+SIMPLE_ACCESS(output_state_query,GWIPC_MESSAGE_OUTPUT_STATE_QUERY,w::OutputStateQuery,{sizeof(o),v.query_id,v.flags,{}})
+SIMPLE_ACCESS(output_configuration_commit,GWIPC_MESSAGE_OUTPUT_CONFIGURATION_COMMIT,w::OutputConfigurationCommit,{sizeof(o),v.configuration_id,v.base_generation,v.primary_output_id,v.flags,{}})
+SIMPLE_ACCESS(output_configuration_acknowledged,GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,w::OutputConfigurationAcknowledged,{sizeof(o),v.request_id,v.applied_generation,(gwipc_output_configuration_result)v.result,v.flags,v.primary_output_id,v.root_logical_width,v.root_logical_height,v.enabled_output_count,0,{}})
 #undef SIMPLE_ACCESS
 
 const gwipc_output_upsert* gwipc_decoded_output_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_OUTPUT_UPSERT)return nullptr;const auto&v=std::get<w::OutputUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->output_upsert;o={sizeof(o),v.output_id,(uint8_t)v.enabled,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.physical_pixel_width,v.physical_pixel_height,v.refresh_millihertz,v.scale_numerator,v.scale_denominator,(gwipc_transform)v.transform,color(v.color),{}};return&o;}
 const gwipc_surface_upsert* gwipc_decoded_surface_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_SURFACE_UPSERT)return nullptr;const auto&v=std::get<w::SurfaceUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->surface_upsert;o={sizeof(o),v.surface_id,v.x11_window_id,v.parent_surface_id,v.output_id,v.logical_x,v.logical_y,v.logical_width,v.logical_height,v.stacking,(uint8_t)v.visible,(uint8_t)v.clipping,v.clip_x,v.clip_y,v.clip_width,v.clip_height,(gwipc_transform)v.transform,v.opacity,v.scale_numerator,v.scale_denominator,color(v.color),v.presentation_flags,(gwipc_tri_state)v.fullscreen_eligible,(gwipc_tri_state)v.direct_scanout_eligible,{}};return&o;}
 const gwipc_buffer_attach* gwipc_decoded_buffer_attach(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_BUFFER_ATTACH)return nullptr;const auto&v=std::get<w::BufferAttach>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->buffer_attach;o={sizeof(o),v.buffer_id,v.surface_id,v.width,v.height,v.stride,v.byte_offset,v.storage_size,(gwipc_pixel_format)v.pixel_format,v.modifier,(gwipc_alpha_semantics)v.alpha_semantics,color(v.color),(gwipc_synchronization_mode)v.synchronization,v.flags,{}};return&o;}
 const gwipc_surface_damage* gwipc_decoded_surface_damage(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_SURFACE_DAMAGE)return nullptr;const auto&v=std::get<w::SurfaceDamage>(d->value);auto*x=const_cast<gwipc_decoded_contract*>(d);x->surface_damage={sizeof(x->surface_damage),v.surface_id,x->rectangles.data(),x->rectangles.size(),{}};return&x->surface_damage;}
+const gwipc_output_descriptor_upsert* gwipc_decoded_output_descriptor_upsert(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_OUTPUT_DESCRIPTOR_UPSERT)return nullptr;const auto&v=std::get<w::OutputDescriptorUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->output_descriptor_upsert;o={sizeof(o),v.output_id,(gwipc_output_kind)v.kind,v.capability_flags,v.name.data(),v.name.size(),v.physical_width_millimeters,v.physical_height_millimeters,v.supported_transform_mask,v.minimum_scale_numerator,v.minimum_scale_denominator,v.maximum_scale_numerator,v.maximum_scale_denominator,v.maximum_scale_denominator_value,v.maximum_physical_width,v.maximum_physical_height,{}};return&o;}
+const gwipc_surface_output_state* gwipc_decoded_surface_output_state(const gwipc_decoded_contract* d){if(!d||d->type!=GWIPC_MESSAGE_SURFACE_OUTPUT_STATE)return nullptr;const auto&v=std::get<w::SurfaceOutputState>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->surface_output_state;o={sizeof(o),v.surface_id,v.primary_output_id,v.output_ids.data(),v.output_ids.size(),v.preferred_scale_numerator,v.preferred_scale_denominator,v.client_buffer_scale,(gwipc_surface_scale_mode)v.scale_mode,v.layout_generation,v.flags,{}};return&o;}
 const gwipc_policy_window_upsert* gwipc_decoded_policy_window_upsert(const gwipc_decoded_contract*d){if(!d||d->type!=GWIPC_MESSAGE_POLICY_WINDOW_UPSERT)return nullptr;const auto&v=std::get<w::PolicyWindowUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->policy_window_upsert;o={sizeof(o),v.window_id,v.parent_window_id,v.transient_for,v.workspace_id,v.requested_x,v.requested_y,v.requested_width,v.requested_height,v.border_width,(gwipc_policy_window_type)v.window_type,(gwipc_policy_map_intent)v.map_intent,(uint8_t)v.override_redirect,(gwipc_tri_state)v.decoration_preference,(uint8_t)v.fullscreen_requested,(uint8_t)v.maximized_requested,(uint8_t)v.minimized_requested,(uint8_t)v.attention_requested,v.creation_serial,v.map_serial,v.focus_serial,v.flags,{}};return&o;}
 const gwipc_policy_window_state* gwipc_decoded_policy_window_state(const gwipc_decoded_contract*d){if(!d||d->type!=GWIPC_MESSAGE_POLICY_WINDOW_STATE)return nullptr;const auto&v=std::get<w::PolicyWindowState>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->policy_window_state;o={sizeof(o),v.window_id,v.transient_for,v.workspace_id,v.output_id,v.final_x,v.final_y,v.final_width,v.final_height,v.stacking,(gwipc_policy_window_type)v.window_type,(gwipc_policy_applied_state)v.applied_state,(uint8_t)v.visible,(uint8_t)v.focused,(uint8_t)v.managed,(uint8_t)v.decoration_eligible,(uint8_t)v.override_redirect,(uint8_t)v.attention_requested,(gwipc_tri_state)v.fullscreen_eligible,(gwipc_tri_state)v.direct_scanout_eligible,v.flags,{}};return&o;}
 const gwipc_policy_lifecycle_window_upsert* gwipc_decoded_policy_lifecycle_window_upsert(const gwipc_decoded_contract*d){if(!d||d->type!=GWIPC_MESSAGE_POLICY_LIFECYCLE_WINDOW_UPSERT)return nullptr;const auto&v=std::get<w::PolicyLifecycleWindowUpsert>(d->value);auto&o=const_cast<gwipc_decoded_contract*>(d)->policy_lifecycle_window_upsert;const auto&x=v.window;o={sizeof(o),{sizeof(o.window),x.window_id,x.parent_window_id,x.transient_for,x.workspace_id,x.requested_x,x.requested_y,x.requested_width,x.requested_height,x.border_width,(gwipc_policy_window_type)x.window_type,(gwipc_policy_map_intent)x.map_intent,(uint8_t)x.override_redirect,(gwipc_tri_state)x.decoration_preference,(uint8_t)x.fullscreen_requested,(uint8_t)x.maximized_requested,(uint8_t)x.minimized_requested,(uint8_t)x.attention_requested,x.creation_serial,x.map_serial,x.focus_serial,x.flags,{}},v.geometry_serial,v.stack_serial,v.stack_sibling,(gwipc_policy_stack_mode)v.stack_mode,v.flags,{}};return&o;}

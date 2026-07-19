@@ -20,5 +20,7 @@ namespace glasswyrm::server::compositor_buffer_replay {
 
 void promote(const CompositorSnapshotSubmission& pending,
              CompositorSnapshotSubmission& replay);
+void promote_content(const CompositorContentSubmission& pending,
+                     CompositorSnapshotSubmission& replay);
 
 } // namespace glasswyrm::server::compositor_buffer_replay

@@ -148,6 +148,25 @@ output::SoftwareFrameView frame(std::span<const std::uint32_t> pixels,
   return {{1, 2, 2, refresh}, pixels, damage, ordinal, ordinal, ordinal};
 }
 
+output::SoftwareFrameSet frame_set(
+    const std::span<const std::uint32_t> pixels, const std::uint64_t ordinal,
+    const bool second_output = false) {
+  output::SoftwareFrameSet result;
+  std::string error;
+  for (std::uint64_t id = 1; id <= (second_output ? 2U : 1U); ++id) {
+    output::OutputFrameResult item;
+    gw::test::require(item.frame.configure(id, 2, 2, error), error);
+    std::ranges::copy(pixels, item.frame.pixels().begin());
+    item.output = item.frame.spec(60'000);
+    item.logical = {static_cast<std::int32_t>((id - 1U) * 2U), 0, 2, 2};
+    item.damage = {{0, 0, 2, 2}};
+    gw::test::require(result.append(std::move(item), error), error);
+  }
+  gw::test::require(result.finalize(1, 1, ordinal, ordinal, ordinal, error),
+                    error);
+  return result;
+}
+
 std::string contents(const std::filesystem::path& path) {
   std::ifstream input(path);
   return {std::istreambuf_iterator<char>(input), {}};
@@ -215,6 +234,43 @@ void presentation_refresh_tolerance() {
       rig.presenter->present(frame(pixels, 2, 61'001)).disposition ==
           output::PresentDisposition::Rejected,
       "presentation rejects refresh outside the selected mode tolerance");
+}
+
+void frame_set_boundary() {
+  Rig rig(DrmPresentationApi::Atomic);
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto unsupported = frame_set(pixels, 1, true);
+  const auto commits_before = rig.kms.atomic_commits.size();
+  const auto calls_before = rig.kms.calls.size();
+  const auto rejected = rig.presenter->present(unsupported.view());
+  gw::test::require(
+      rejected.disposition == output::PresentDisposition::Rejected &&
+          rig.kms.atomic_commits.size() == commits_before &&
+          rig.kms.calls.size() == calls_before,
+      "DRM rejects multi-output frame sets before any KMS mutation");
+
+  const auto initial_frames = frame_set(pixels, 2);
+  const auto initial = rig.presenter->present(initial_frames.view());
+  gw::test::require(
+      initial.disposition == output::PresentDisposition::Complete &&
+          initial.visible_hash == initial_frames.aggregate_hash() &&
+          rig.kms.atomic_commits.size() == commits_before + 1,
+      "DRM frame-set adapter preserves the blocking one-output path");
+
+  const std::array changed{0xff111111U, 0xff222222U, 0xff333333U,
+                           0xff444444U};
+  const auto pending_frames = frame_set(changed, 3);
+  const auto pending = rig.presenter->present(pending_frames.view());
+  gw::test::require(pending.disposition == output::PresentDisposition::Pending,
+                    "one-output frame-set flip becomes pending normally");
+  rig.drm.queue_page_flip(pending.token, 40, 3);
+  const auto event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.visible_hash == pending_frames.aggregate_hash() &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      "DRM asynchronous frame-set completion reports the aggregate hash");
 }
 
 void accumulated_damage_copy_and_vt_fallback() {
@@ -473,6 +529,7 @@ void external_session_never_manages_master() {
 int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
+  frame_set_boundary();
   accumulated_damage_copy_and_vt_fallback();
   incomplete_damage_recovers_with_full_copy();
   zero_sequence_page_flip_completion();

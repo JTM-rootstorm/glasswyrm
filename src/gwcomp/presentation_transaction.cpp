@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <limits>
-#include <poll.h>
 
 namespace gw::compositor {
 namespace {
@@ -32,13 +30,16 @@ std::optional<Rectangle> surface_bounds(const gwipc_surface_upsert& surface,
 
 PresentationTransaction::PresentationTransaction(
     SceneModel candidate, AttachmentMap attachments, ReleaseMap releases,
-    glasswyrm::output::SoftwareFrame frame, gwipc_frame_commit commit,
+    glasswyrm::output::SoftwareFrame frame,
+    std::optional<glasswyrm::output::SoftwareFrameSet> frame_set,
+    gwipc_frame_commit commit,
     PresentedFrame presented, std::optional<PreparedSceneManifest> manifest,
     const std::uint64_t token,
     const std::chrono::steady_clock::time_point deadline)
     : candidate_(std::move(candidate)), attachments_(std::move(attachments)),
-      releases_(std::move(releases)), frame_(std::move(frame)), commit_(commit),
-      presented_(presented), manifest_(std::move(manifest)), token_(token),
+      releases_(std::move(releases)), frame_(std::move(frame)),
+      frame_set_(std::move(frame_set)), commit_(commit), presented_(presented),
+      manifest_(std::move(manifest)), token_(token),
       deadline_(deadline) {}
 
 PresentationTransaction::ReleaseMap
@@ -91,6 +92,7 @@ PresentedFrame PresentationTransaction::promote(
   compositor.scene_ = std::move(candidate_);
   compositor.committed_attachments_ = std::move(attachments_);
   compositor.output_ = std::move(frame_);
+  compositor.output_set_ = std::move(frame_set_);
   ++compositor.frame_ordinal_;
   compositor.last_generation_ = commit_.producer_generation;
   presented_.disposition = PresentedFrame::Disposition::Complete;
@@ -112,240 +114,314 @@ bool PresentationTransaction::publish_manifest(Compositor& compositor,
   return true;
 }
 
-PresentedFrame PresentationTransaction::commit(
-    Compositor& compositor, const gwipc_frame_commit& value,
-    std::string& error) {
-  auto& scene_ = compositor.scene_;
-  auto& mappings_ = compositor.mappings_;
-  auto& pending_attachments_ = compositor.pending_attachments_;
-  auto& committed_attachments_ = compositor.committed_attachments_;
-  auto& output_ = compositor.output_;
-  auto& renderer_ = compositor.renderer_;
-  auto& presenter_ = compositor.presenter_;
-  auto& scene_manifest_ = compositor.scene_manifest_;
-  auto& frame_ordinal_ = compositor.frame_ordinal_;
-  auto& last_commit_id_ = compositor.last_commit_id_;
-  auto& last_generation_ = compositor.last_generation_;
-  const auto snapshot_invalid_ = compositor.snapshot_invalid_;
-  const auto profile_ = compositor.profile_;
-
-  PresentedFrame presented;
-  if (snapshot_invalid_) {
+std::optional<PresentationTransaction::ValidatedCommit>
+PresentationTransaction::validate_scene(Compositor& compositor,
+                                        const gwipc_frame_commit& value,
+                                        PresentedFrame& presented,
+                                        std::string& error) {
+  if (compositor.snapshot_invalid_) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     error = "complete snapshot contains duplicate surface records";
-    return presented;
+    return std::nullopt;
   }
-  if (value.commit_id <= last_commit_id_ ||
-      value.producer_generation < last_generation_) {
+  if (value.commit_id <= compositor.last_commit_id_ ||
+      value.producer_generation < compositor.last_generation_) {
     error = "commit IDs must increase and generations must not decrease";
-    return presented;
+    return std::nullopt;
   }
-  last_commit_id_ = value.commit_id;
+  compositor.last_commit_id_ = value.commit_id;
 
-  SceneModel candidate = scene_;
-  auto result = candidate.commit(value);
-  presented.result = result.result;
-  presented.generation = result.presented_generation;
-  if (!result.accepted()) return presented;
+  ValidatedCommit validated{compositor.scene_, {},
+                            compositor.scene_.pending_damage_surface_ids(),
+                            false, false};
+  validated.result = validated.candidate.commit(value);
+  presented.result = validated.result.result;
+  presented.generation = validated.result.presented_generation;
+  if (!validated.result.accepted())
+    return std::nullopt;
+  validated.metadata_only_peer =
+      compositor.profile_ == PeerProfile::M6MetadataProtocolServer;
+  validated.protocol_server =
+      compositor.profile_ != PeerProfile::M4TestProducer;
+  return validated;
+}
 
-  const auto& staged = candidate.committed();
-  const bool metadata_only_peer =
-      profile_ == PeerProfile::M6MetadataProtocolServer;
-  const bool protocol_server = profile_ != PeerProfile::M4TestProducer;
+bool PresentationTransaction::validate_scene_surface(
+    const Compositor& compositor, const Scene& staged,
+    const std::uint64_t surface_id, const gwipc_surface_upsert& surface,
+    const ValidatedCommit& validated, std::size_t& policy_surface_count,
+    PresentedFrame& presented, std::string& error) {
+  const bool metadata_only =
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  const bool cursor =
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  if (cursor && compositor.profile_ != PeerProfile::M7BufferedProtocolServer) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = "cursor surfaces require a buffered ProtocolServer peer";
+    return false;
+  }
+  if (validated.metadata_only_peer != metadata_only) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = validated.metadata_only_peer
+                ? "ProtocolServer supplied a buffered surface"
+                : "TestProducer supplied a metadata-only surface";
+    return false;
+  }
+  const auto policy = staged.surface_policies.find(surface_id);
+  if (cursor && policy != staged.surface_policies.end()) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = "cursor surfaces cannot carry policy metadata";
+    return false;
+  }
+  if (!cursor && validated.protocol_server &&
+      (policy == staged.surface_policies.end() ||
+       policy->second.x11_window_id != surface.x11_window_id)) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = "ProtocolServer surface is missing matching policy metadata";
+    return false;
+  }
+  if (!cursor)
+    ++policy_surface_count;
+  if (!validated.protocol_server && policy != staged.surface_policies.end()) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = "TestProducer surfaces cannot carry policy metadata";
+    return false;
+  }
+  return true;
+}
+
+bool PresentationTransaction::validate_surface_attachment(
+    const Compositor& compositor, const std::uint64_t surface_id,
+    const gwipc_surface_upsert& surface, PresentedFrame& presented,
+    std::string& error) {
+  const bool metadata_only =
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
+  const bool cursor =
+      surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
+  const auto attachment = compositor.pending_attachments_.find(surface_id);
+  const bool new_buffered_protocol_surface =
+      compositor.profile_ == PeerProfile::M7BufferedProtocolServer &&
+      !compositor.scene_.committed().surfaces.contains(surface_id);
+  const bool requires_attachment =
+      !metadata_only &&
+      (surface.visible || (new_buffered_protocol_surface && !cursor));
+  if (requires_attachment &&
+      attachment == compositor.pending_attachments_.end()) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    error = new_buffered_protocol_surface
+                ? "new buffered ProtocolServer surface has no attached buffer"
+                : "visible surface has no attached buffer";
+    return false;
+  }
+  if (metadata_only && attachment != compositor.pending_attachments_.end()) {
+    presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
+    error = "metadata-only surface has an attached buffer";
+    return false;
+  }
+  if (attachment == compositor.pending_attachments_.end())
+    return true;
+  const auto mapping = compositor.mappings_.find(attachment->second);
+  const auto client_scale =
+      compositor.scene_.profile() == SceneProfile::OutputModel
+          ? surface.scale_numerator
+          : 1U;
+  const auto expected_width =
+      static_cast<std::uint64_t>(surface.logical_width) * client_scale;
+  const auto expected_height =
+      static_cast<std::uint64_t>(surface.logical_height) * client_scale;
+  if (mapping == compositor.mappings_.end() ||
+      mapping->second->width() != expected_width ||
+      mapping->second->height() != expected_height) {
+    presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
+    error = "surface and buffer dimensions do not match";
+    return false;
+  }
+  const auto required_format =
+      cursor ? GWIPC_PIXEL_FORMAT_ARGB8888 : GWIPC_PIXEL_FORMAT_XRGB8888;
+  if (compositor.profile_ == PeerProfile::M7BufferedProtocolServer &&
+      mapping->second->pixel_format() != required_format) {
+    presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
+    error = cursor ? "cursor surfaces require premultiplied ARGB8888"
+                   : "buffered ProtocolServer surfaces require XRGB8888";
+    return false;
+  }
+  return true;
+}
+
+bool PresentationTransaction::validate_attachments(
+    const Compositor& compositor, const Scene& staged,
+    const ValidatedCommit& validated, PresentedFrame& presented,
+    std::string& error) {
   std::size_t policy_surface_count = 0;
   for (const auto& [surface_id, surface] : staged.surfaces) {
-    const bool metadata_only =
-        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_METADATA_ONLY;
-    const bool cursor =
-        surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
-    if (cursor && profile_ != PeerProfile::M7BufferedProtocolServer) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "cursor surfaces require a buffered ProtocolServer peer";
-      return presented;
-    }
-    if (metadata_only_peer != metadata_only) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = metadata_only_peer
-                  ? "ProtocolServer supplied a buffered surface"
-                  : "TestProducer supplied a metadata-only surface";
-      return presented;
-    }
-    const auto policy = staged.surface_policies.find(surface_id);
-    if (cursor && policy != staged.surface_policies.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "cursor surfaces cannot carry policy metadata";
-      return presented;
-    }
-    if (!cursor && protocol_server &&
-        (policy == staged.surface_policies.end() ||
-         policy->second.x11_window_id != surface.x11_window_id)) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "ProtocolServer surface is missing matching policy metadata";
-      return presented;
-    }
-    if (!cursor) ++policy_surface_count;
-    if (!protocol_server && policy != staged.surface_policies.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = "TestProducer surfaces cannot carry policy metadata";
-      return presented;
-    }
-    const auto attachment = pending_attachments_.find(surface_id);
-    const bool new_buffered_protocol_surface =
-        profile_ == PeerProfile::M7BufferedProtocolServer &&
-        !scene_.committed().surfaces.contains(surface_id);
-    const bool requires_attachment =
-        !metadata_only &&
-        (surface.visible || (new_buffered_protocol_surface && !cursor));
-    if (requires_attachment &&
-        attachment == pending_attachments_.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      error = new_buffered_protocol_surface
-                  ? "new buffered ProtocolServer surface has no attached buffer"
-                  : "visible surface has no attached buffer";
-      return presented;
-    }
-    if (metadata_only && attachment != pending_attachments_.end()) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "metadata-only surface has an attached buffer";
-      return presented;
-    }
-    if (attachment == pending_attachments_.end()) continue;
-    const auto mapping = mappings_.find(attachment->second);
-    if (mapping == mappings_.end() ||
-        mapping->second->width() != surface.logical_width ||
-        mapping->second->height() != surface.logical_height) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = "surface and buffer dimensions do not match";
-      return presented;
-    }
-    const auto required_format = cursor ? GWIPC_PIXEL_FORMAT_ARGB8888
-                                        : GWIPC_PIXEL_FORMAT_XRGB8888;
-    if (profile_ == PeerProfile::M7BufferedProtocolServer &&
-        mapping->second->pixel_format() != required_format) {
-      presented.result = GWIPC_FRAME_REJECTED_INVALID_BUFFER;
-      error = cursor
-                  ? "cursor surfaces require premultiplied ARGB8888"
-                  : "buffered ProtocolServer surfaces require XRGB8888";
-      return presented;
-    }
+    if (!validate_scene_surface(compositor, staged, surface_id, surface,
+                                validated, policy_surface_count, presented,
+                                error) ||
+        !validate_surface_attachment(compositor, surface_id, surface, presented,
+                                     error))
+      return false;
   }
-  if (protocol_server && staged.surface_policies.size() != policy_surface_count) {
+  if (validated.protocol_server &&
+      staged.surface_policies.size() != policy_surface_count) {
     presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
     error = "surface policy references an unknown surface";
-    return presented;
+    return false;
   }
+  return true;
+}
 
-  if (!staged.output || !staged.output->enabled) {
-    if (!metadata_only_peer) release_retired_buffers(compositor, staged);
-    scene_ = std::move(candidate);
-    committed_attachments_ = pending_attachments_;
-    output_.disable();
-    last_generation_ = value.producer_generation;
-    presented.disposition = PresentedFrame::Disposition::Complete;
-    return presented;
-  }
+PresentedFrame PresentationTransaction::promote_disabled_output(
+    Compositor& compositor, ValidatedCommit&& validated,
+    const gwipc_frame_commit& value, PresentedFrame presented) {
+  const auto& staged = validated.candidate.committed();
+  if (!validated.metadata_only_peer)
+    release_retired_buffers(compositor, staged);
+  compositor.scene_ = std::move(validated.candidate);
+  compositor.committed_attachments_ = compositor.pending_attachments_;
+  compositor.output_.disable();
+  compositor.output_set_.reset();
+  compositor.last_generation_ = value.producer_generation;
+  presented.disposition = PresentedFrame::Disposition::Complete;
+  return presented;
+}
 
-  if (metadata_only_peer) {
-    PreparedSceneManifest manifest;
-    if (!SceneManifest::prepare(value.commit_id, value.producer_generation,
-                                staged, manifest, error)) {
-      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      return presented;
-    }
-    if (scene_manifest_) {
-      if (!scene_manifest_->publish(manifest, error)) {
-        presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-        return presented;
-      }
-    }
-    scene_ = std::move(candidate);
-    committed_attachments_.clear();
-    output_.disable();
-    ++frame_ordinal_;
-    last_generation_ = value.producer_generation;
-    presented.ordinal = frame_ordinal_;
-    presented.hash = manifest.result.hash;
-    presented.disposition = PresentedFrame::Disposition::Complete;
+PresentedFrame PresentationTransaction::promote_metadata_only(
+    Compositor& compositor, ValidatedCommit&& validated,
+    const gwipc_frame_commit& value, PresentedFrame presented,
+    std::string& error) {
+  PreparedSceneManifest manifest;
+  const auto prepared =
+      validated.candidate.profile() == SceneProfile::OutputModel
+          ? SceneManifest::prepare_output_model(
+                value.commit_id, value.producer_generation,
+                validated.candidate.committed(), manifest, error)
+          : SceneManifest::prepare(value.commit_id, value.producer_generation,
+                                   validated.candidate.committed(), manifest,
+                                   error);
+  if (!prepared) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     return presented;
   }
-  for (const auto& [surface_id, buffer_id] : pending_attachments_) {
+  if (compositor.scene_manifest_ &&
+      !compositor.scene_manifest_->publish(manifest, error)) {
+    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    return presented;
+  }
+  compositor.scene_ = std::move(validated.candidate);
+  compositor.committed_attachments_.clear();
+  compositor.output_.disable();
+  compositor.output_set_.reset();
+  ++compositor.frame_ordinal_;
+  compositor.last_generation_ = value.producer_generation;
+  presented.ordinal = compositor.frame_ordinal_;
+  presented.hash = manifest.result.hash;
+  presented.disposition = PresentedFrame::Disposition::Complete;
+  return presented;
+}
+
+std::optional<PresentationTransaction::PreparedOutputFrame>
+PresentationTransaction::prepare_output_frame(Compositor& compositor,
+                                              ValidatedCommit& validated,
+                                              const gwipc_frame_commit& value,
+                                              PresentedFrame& presented,
+                                              std::string& error) {
+  const auto& staged = validated.candidate.committed();
+  for (const auto& [surface_id, buffer_id] : compositor.pending_attachments_) {
     (void)buffer_id;
     if (!staged.surfaces.contains(surface_id)) {
       presented.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
       error = "buffer references an unknown surface";
-      return presented;
+      return std::nullopt;
     }
+  }
+
+  if (validated.candidate.profile() == SceneProfile::OutputModel) {
+    return prepare_output_frame_set(compositor, validated, value, presented,
+                                    error);
   }
 
   DamageRegion attachment_damage(Rectangle{0, 0, staged.output->logical_width,
                                            staged.output->logical_height});
-  for (const auto& rectangle : result.damage) attachment_damage.add(rectangle);
+  for (const auto& rectangle : validated.result.damage)
+    attachment_damage.add(rectangle);
   for (const auto& [surface_id, surface] : staged.surfaces) {
-    if (!surface.visible) continue;
-    const auto old = committed_attachments_.find(surface_id);
-    const auto now = pending_attachments_.find(surface_id);
-    const bool changed = old == committed_attachments_.end()
-                             ? now != pending_attachments_.end()
-                             : now == pending_attachments_.end() ||
+    if (!surface.visible)
+      continue;
+    const auto old = compositor.committed_attachments_.find(surface_id);
+    const auto now = compositor.pending_attachments_.find(surface_id);
+    const bool changed = old == compositor.committed_attachments_.end()
+                             ? now != compositor.pending_attachments_.end()
+                             : now == compositor.pending_attachments_.end() ||
                                    old->second != now->second;
     if (changed) {
       if (const auto bounds = surface_bounds(surface, *staged.output))
         attachment_damage.add(*bounds);
     }
   }
-  result.damage = attachment_damage.rectangles();
+  validated.result.damage = attachment_damage.rectangles();
 
-  const auto stacking_order = candidate.stacking_order();
+  const auto stacking_order = validated.candidate.stacking_order();
   const gw::render::RenderFrameRequest render_request{
       staged,
       stacking_order,
-      mappings_,
-      pending_attachments_,
-      result.damage,
-      &output_,
+      compositor.mappings_,
+      compositor.pending_attachments_,
+      validated.result.damage,
+      &compositor.output_,
       value.commit_id,
       value.producer_generation,
-      frame_ordinal_ + 1U};
-  auto rendered = renderer_->render(render_request);
+      compositor.frame_ordinal_ + 1U};
+  auto rendered = compositor.renderer_->render(render_request);
   if (!rendered.complete()) {
-    presented.result = rendered.disposition ==
-                               gw::render::RenderDisposition::InvalidBuffer
-                           ? GWIPC_FRAME_REJECTED_INVALID_BUFFER
-                           : GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+    presented.result =
+        rendered.disposition == gw::render::RenderDisposition::InvalidBuffer
+            ? GWIPC_FRAME_REJECTED_INVALID_BUFFER
+            : GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     if (rendered.disposition == gw::render::RenderDisposition::Fatal)
       presented.disposition = PresentedFrame::Disposition::Fatal;
     error = rendered.error.empty() ? "scene renderer rejected the frame"
                                    : std::move(rendered.error);
-    return presented;
+    return std::nullopt;
   }
-  auto scratch = std::move(rendered.frame);
-
-  const glasswyrm::output::SoftwareFrameView frame{
-      scratch.spec(staged.output->refresh_millihertz),
-      scratch.pixels(),
-      result.damage,
-      value.commit_id,
-      value.producer_generation,
-      frame_ordinal_ + 1U};
-  const auto canonical_hash = scratch.visible_hash();
-  const auto releases = calculate_retired_buffers(compositor, staged);
-  std::optional<PreparedSceneManifest> manifest;
-  if (protocol_server && scene_manifest_) {
-    manifest.emplace();
+  PreparedOutputFrame prepared;
+  prepared.frame = std::move(rendered.frame);
+  prepared.damage = validated.result.damage;
+  prepared.canonical_hash = prepared.frame.visible_hash();
+  prepared.releases = calculate_retired_buffers(compositor, staged);
+  if (validated.protocol_server && compositor.scene_manifest_) {
+    prepared.manifest.emplace();
     if (!SceneManifest::prepare(value.commit_id, value.producer_generation,
-                                staged, *manifest, error)) {
+                                staged, *prepared.manifest, error)) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-      return presented;
+      return std::nullopt;
     }
   }
-  const auto presentation = presenter_->present(frame);
+  return prepared;
+}
+
+PresentedFrame PresentationTransaction::stage_presentation(
+    Compositor& compositor, ValidatedCommit&& validated,
+    PreparedOutputFrame&& prepared, const gwipc_frame_commit& value,
+    PresentedFrame presented, std::string& error) {
+  glasswyrm::output::PresentResult presentation;
+  if (prepared.frame_set) {
+    presentation = compositor.presenter_->present(prepared.frame_set->view());
+  } else {
+    const auto& output = *validated.candidate.committed().output;
+    const glasswyrm::output::SoftwareFrameView frame{
+        prepared.frame.spec(output.refresh_millihertz),
+        prepared.frame.pixels(), prepared.damage, value.commit_id,
+        value.producer_generation, compositor.frame_ordinal_ + 1U};
+    presentation = compositor.presenter_->present(frame);
+  }
   if (presentation.disposition ==
       glasswyrm::output::PresentDisposition::Rejected) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     error = presentation.error;
     return presented;
   }
-  if (presentation.disposition == glasswyrm::output::PresentDisposition::Fatal) {
+  if (presentation.disposition ==
+      glasswyrm::output::PresentDisposition::Fatal) {
     presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
     presented.disposition = PresentedFrame::Disposition::Fatal;
     error = presentation.error;
@@ -353,16 +429,17 @@ PresentedFrame PresentationTransaction::commit(
   }
   if (presentation.disposition ==
       glasswyrm::output::PresentDisposition::Complete) {
-    if (presentation.visible_hash != canonical_hash) {
+    if (presentation.visible_hash != prepared.canonical_hash) {
       presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
       presented.disposition = PresentedFrame::Disposition::Fatal;
       error = "presentation hash differs from the canonical software frame";
       return presented;
     }
     PresentationTransaction transaction(
-        std::move(candidate), pending_attachments_, releases,
-        std::move(scratch), value, presented, std::move(manifest), 0,
-        compositor.timing_.now());
+        std::move(validated.candidate), compositor.pending_attachments_,
+        std::move(prepared.releases), std::move(prepared.frame),
+        std::move(prepared.frame_set), value,
+        presented, std::move(prepared.manifest), 0, compositor.timing_.now());
     if (!transaction.publish_manifest(compositor, error))
       return transaction.presented_;
     return transaction.promote(compositor, presentation.visible_hash);
@@ -377,9 +454,10 @@ PresentedFrame PresentationTransaction::commit(
   try {
     compositor.pending_presentation_ =
         std::unique_ptr<PresentationTransaction>(new PresentationTransaction(
-            std::move(candidate), pending_attachments_, releases,
-            std::move(scratch), value, presented, std::move(manifest),
-            presentation.token,
+            std::move(validated.candidate), compositor.pending_attachments_,
+            std::move(prepared.releases), std::move(prepared.frame),
+            std::move(prepared.frame_set), value,
+            presented, std::move(prepared.manifest), presentation.token,
             compositor.timing_.now() + compositor.timing_.timeout));
   } catch (...) {
     compositor.presenter_->abort_pending(presentation.token);
@@ -390,75 +468,29 @@ PresentedFrame PresentationTransaction::commit(
   return presented;
 }
 
-int PresentationTransaction::timeout_ms(const Compositor& compositor) {
-  if (!compositor.pending_presentation_) return -1;
-  const auto remaining = compositor.pending_presentation_->deadline_ -
-                         compositor.timing_.now();
-  if (remaining <= std::chrono::steady_clock::duration::zero()) return 0;
-  auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
-      remaining);
-  if (milliseconds < remaining) ++milliseconds;
-  if (milliseconds.count() > std::numeric_limits<int>::max())
-    return std::numeric_limits<int>::max();
-  return static_cast<int>(milliseconds.count());
-}
-
-void PresentationTransaction::abort(Compositor& compositor,
-                                    const std::string_view reason) noexcept {
-  if (!compositor.pending_presentation_) return;
-  compositor.presenter_->abort_pending(
-      compositor.pending_presentation_->token_, reason);
-  compositor.pending_presentation_.reset();
-}
-
-PresentationCompletion PresentationTransaction::service(
-    Compositor& compositor, const short revents, std::string& error) {
-  PresentationCompletion completion;
-  if (!compositor.pending_presentation_) return completion;
-  auto fatal = [&](std::string message) {
-    completion.kind = PresentationCompletionKind::Fatal;
-    completion.commit = compositor.pending_presentation_->commit_;
-    completion.frame = compositor.pending_presentation_->presented_;
-    completion.frame.disposition = PresentedFrame::Disposition::Fatal;
-    abort(compositor, message);
-    error = std::move(message);
-    return completion;
-  };
-  if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
-    return fatal("presentation backend became unusable during a pending frame");
-  if (revents != 0) {
-    const auto event = compositor.presenter_->service(revents);
-    if (event.kind == glasswyrm::output::BackendEventKind::Fatal)
-      return fatal(event.error);
-    if (event.kind == glasswyrm::output::BackendEventKind::Complete) {
-      if (event.token != compositor.pending_presentation_->token_)
-        return fatal("presentation completion token does not match pending frame");
-      const auto canonical_hash =
-          compositor.pending_presentation_->frame_.visible_hash();
-      if (event.visible_hash != canonical_hash)
-        return fatal(
-            "completed presentation hash differs from canonical software frame");
-      std::string finalize_error;
-      if (!compositor.presenter_->finalize_pending(event.token,
-                                                   finalize_error))
-        return fatal(finalize_error.empty()
-                         ? "could not finalize pending presentation diagnostics"
-                         : finalize_error);
-      if (!compositor.pending_presentation_->publish_manifest(compositor,
-                                                              error))
-        return fatal(error);
-      auto pending = std::move(compositor.pending_presentation_);
-      completion.kind = PresentationCompletionKind::Complete;
-      completion.commit = pending->commit_;
-      completion.frame = pending->promote(compositor, event.visible_hash);
-      error.clear();
-      return completion;
-    }
-  }
-  if (compositor.timing_.now() >=
-      compositor.pending_presentation_->deadline_)
-    return fatal("pending presentation exceeded its completion timeout");
-  return completion;
+PresentedFrame PresentationTransaction::commit(Compositor& compositor,
+                                               const gwipc_frame_commit& value,
+                                               std::string& error) {
+  PresentedFrame presented;
+  auto validated = validate_scene(compositor, value, presented, error);
+  if (!validated)
+    return presented;
+  const auto& staged = validated->candidate.committed();
+  if (!validate_attachments(compositor, staged, *validated, presented, error))
+    return presented;
+  if (validated->candidate.profile() == SceneProfile::Historical &&
+      (!staged.output || !staged.output->enabled))
+    return promote_disabled_output(compositor, std::move(*validated), value,
+                                   presented);
+  if (validated->metadata_only_peer)
+    return promote_metadata_only(compositor, std::move(*validated), value,
+                                 presented, error);
+  auto prepared =
+      prepare_output_frame(compositor, *validated, value, presented, error);
+  if (!prepared)
+    return presented;
+  return stage_presentation(compositor, std::move(*validated),
+                            std::move(*prepared), value, presented, error);
 }
 
 } // namespace gw::compositor

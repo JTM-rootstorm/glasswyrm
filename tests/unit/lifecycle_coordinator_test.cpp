@@ -99,6 +99,20 @@ void test_priority_cleanup_runs_after_active_before_fifo() {
           "priority cleanup starts before ordinary pending FIFO work");
 }
 
+void test_replace_committed_requires_idle_boundary() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
+  require(coordinator.can_replace_committed() &&
+              coordinator.replace_committed(snapshot(2)) &&
+              coordinator.committed().focused_window == 2,
+          "output configuration may replace lifecycle truth while idle");
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              !coordinator.can_replace_committed() &&
+              !coordinator.replace_committed(snapshot(3)) &&
+              coordinator.committed().focused_window == 2,
+          "failed lifecycle promotion preserves the exact old snapshot");
+}
+
 void test_compositor_rejection_rolls_back_both_peers() {
   Recorder recorder;
   LifecycleCoordinator coordinator(snapshot(1), 4, recorder.callbacks());
@@ -125,14 +139,23 @@ void test_cancellation_before_policy_result() {
   LifecycleCoordinator coordinator(snapshot(1), 2, recorder.callbacks());
   require(coordinator.enqueue(operation(10, 7, 10)) == EnqueueStatus::Queued,
           "queue cancellable operation");
+  require(coordinator.pending_policy_snapshot() != nullptr &&
+              coordinator.pending_policy_snapshot()->focused_window == 10,
+          "active proposal is the expected policy result");
   coordinator.cancel_client(7);
   require(coordinator.policy_accepted(snapshot(10)) &&
               coordinator.phase() == CoordinatorPhase::RollingBackPolicy &&
               recorder.compositor.empty() && recorder.policy.back() == 1 &&
               recorder.rollbacks_prepared == 1,
           "canceled accepted policy is never projected to compositor");
+  require(coordinator.pending_policy_snapshot() != nullptr &&
+              coordinator.pending_policy_snapshot()->focused_window == 1,
+          "committed snapshot is the expected rollback policy result");
   require(coordinator.policy_accepted(snapshot(1)) &&
-              coordinator.compositor_accepted() &&
+              coordinator.pending_policy_snapshot() == nullptr,
+          "compositor rollback does not retain an expected policy result");
+  require(coordinator.compositor_accepted() &&
+              coordinator.pending_policy_snapshot() == nullptr &&
               recorder.completed.back() ==
                   std::pair<std::uint64_t, bool>{10, false},
           "canceled operation completes only after rollback");
@@ -313,6 +336,7 @@ void test_create_destroy_rebase_latest_snapshot() {
 int main() {
   test_capacity_and_successful_fifo();
   test_priority_cleanup_runs_after_active_before_fifo();
+  test_replace_committed_requires_idle_boundary();
   test_compositor_rejection_rolls_back_both_peers();
   test_cancellation_before_policy_result();
   test_disconnect_replays_each_phase();

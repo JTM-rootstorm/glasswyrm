@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema",
+    "byte_order",
+    "window",
+    "logical_geometry",
+    "buffer_geometry",
+    "initial",
+    "output",
+    "notification",
+    "moved",
+    "present_serial",
+    "reset_scale"
+  ],
+  "properties": {
+    "schema": { "const": "glasswyrm.m13-scale-client.v1" },
+    "byte_order": { "enum": ["little", "big"] },
+    "window": { "type": "integer", "minimum": 1 },
+    "logical_geometry": {
+      "const": { "width": 320, "height": 240 }
+    },
+    "buffer_geometry": {
+      "const": { "width": 640, "height": 480 }
+    },
+    "initial": { "$ref": "#/$defs/windowScale" },
+    "output": {
+      "type": "object",
+      "required": ["id", "logical", "physical", "scale"]
+    },
+    "notification": {
+      "type": "object",
+      "required": ["reasons", "primary"]
+    },
+    "moved": { "$ref": "#/$defs/windowScale" },
+    "present_serial": { "const": 1 },
+    "reset_scale": { "const": 1 }
+  },
+  "$defs": {
+    "windowScale": {
+      "type": "object",
+      "required": ["primary", "preferred", "memberships"],
+      "properties": {
+        "primary": { "type": "integer", "minimum": 0 },
+        "preferred": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "integer", "minimum": 1 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "memberships": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}

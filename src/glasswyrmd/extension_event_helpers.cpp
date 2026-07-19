@@ -133,4 +133,46 @@ std::vector<std::uint8_t> encode_randr_output_property_notify(
              : std::vector<std::uint8_t>{};
 }
 
+std::vector<std::uint8_t> encode_gw_scale_notify(
+    const x11::ByteOrder order, const std::uint64_t sequence,
+    const GwScaleNotifyEvent& event) {
+  x11::ByteWriter body(order);
+  body.write_u32(event.window);
+  body.write_u32(event.primary_output);
+  body.write_u32(event.preferred_scale_numerator);
+  body.write_u32(event.preferred_scale_denominator);
+  body.write_u32(event.accepted_buffer_scale);
+  body.write_u32(static_cast<std::uint32_t>(event.layout_generation >> 32U));
+  body.write_u32(static_cast<std::uint32_t>(event.layout_generation));
+  const auto* extension = find_extension(ExtensionKind::GwScale);
+  return extension
+             ? encode_extension_event(order, *extension, 0, sequence,
+                                      event.reason_mask,
+                                      std::move(body).take())
+                   .value_or(std::vector<std::uint8_t>{})
+             : std::vector<std::uint8_t>{};
+}
+
+void append_gw_scale_notifications(DispatchResult& result,
+                                   const WindowResource& window,
+                                   const std::uint32_t xid,
+                                   const std::uint8_t reason_mask) {
+  if ((reason_mask & 0x7U) == 0) return;
+  for (const auto& [client, selection] : window.scale.event_selections) {
+    const auto selected_reason =
+        static_cast<std::uint8_t>(reason_mask & selection & 0x7U);
+    if (selected_reason == 0) continue;
+    ProtocolEventIntent intent;
+    intent.delivery = ProtocolEventDelivery::DirectClient;
+    intent.client = client;
+    intent.event = GwScaleNotifyEvent{
+        selected_reason, xid, window.scale.primary_output,
+        window.scale.preferred_scale_numerator,
+        window.scale.preferred_scale_denominator,
+        window.scale.accepted_buffer_scale,
+        window.scale.layout_generation};
+    result.protocol_events.push_back(std::move(intent));
+  }
+}
+
 }  // namespace glasswyrm::server

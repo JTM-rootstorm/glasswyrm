@@ -128,3 +128,7 @@ The profile is considered proven only when the following tests pass:
 
 These tests establish only this fixed one-output reporting contract. They are
 not evidence of general RANDR output-management compatibility.
+
+The additive Milestone 13 output-model profile is documented separately in
+[`M13_RANDR.md`](M13_RANDR.md). The profile described here remains the exact
+historical behavior when output-model mode is disabled.

@@ -139,6 +139,7 @@ void ClientConnection::prepare_setup_reply() {
       x11::SetupReplyConfig config;
       config.resource_id_base = resource_id_base_;
       config.resource_id_mask = server_state_.screen().resource_id_mask;
+      config.screen = server_state_.screen();
       config.game_compat = game_compat_;
       (void)enqueue(x11::encode_setup_success(request.byte_order, config));
       request_framer_.emplace(request.byte_order,

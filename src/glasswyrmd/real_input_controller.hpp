@@ -77,6 +77,14 @@ public:
   void warp_pointer(std::int32_t x, std::int32_t y) noexcept {
     backend_.warp_pointer(x, y);
   }
+  [[nodiscard]] bool update_root_bounds(std::uint32_t width,
+                                        std::uint32_t height) noexcept {
+    return backend_.update_root_bounds(width, height);
+  }
+  [[nodiscard]] bool can_update_root_bounds(
+      std::uint32_t width, std::uint32_t height) const noexcept {
+    return backend_.can_update_root_bounds(width, height);
+  }
   [[nodiscard]] bool global_auto_repeat() const noexcept {
     return global_auto_repeat_;
   }

@@ -38,6 +38,28 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
                                     FontResource{}});
 }
 
+bool ResourceTable::update_screen_geometry(const ScreenModel screen) noexcept {
+  if (screen.root_window != screen_.root_window ||
+      screen.default_colormap != screen_.default_colormap ||
+      screen.root_visual != screen_.root_visual ||
+      screen.root_depth != screen_.root_depth ||
+      screen.red_mask != screen_.red_mask ||
+      screen.green_mask != screen_.green_mask ||
+      screen.blue_mask != screen_.blue_mask ||
+      screen.maximum_request_length != screen_.maximum_request_length ||
+      screen.resource_id_mask != screen_.resource_id_mask ||
+      screen.width_pixels == 0 || screen.height_pixels == 0 ||
+      screen.width_millimeters == 0 || screen.height_millimeters == 0 ||
+      screen.refresh_millihertz == 0)
+    return false;
+  auto* root = find_window(screen_.root_window);
+  if (root == nullptr) return false;
+  screen_ = screen;
+  root->width = screen.width_pixels;
+  root->height = screen.height_pixels;
+  return true;
+}
+
 const ResourceRecord* ResourceTable::find(const std::uint32_t xid) const noexcept {
   const auto iterator = resources_.find(xid);
   return iterator == resources_.end() ? nullptr : &iterator->second;

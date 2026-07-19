@@ -18,6 +18,7 @@ enum class FullCopyReason {
   DamageUnavailable,
   CanonicalMismatch,
   VirtualTerminalResume,
+  OutputConfigurationChanged,
 };
 
 [[nodiscard]] std::string_view full_copy_reason_name(

@@ -939,7 +939,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone11-interactive-rerun; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone13-runtime-test milestone11-interactive-rerun; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -1971,6 +1971,18 @@ run_failure "$work_dir/milestone12-wrapper-gate.out" \
 assert_contains "$work_dir/milestone12-wrapper-gate.out" \
   "Action 'milestone12-runtime-test' requires --yes"
 
+(
+  unset GW_VM_MILESTONE12_LOADED
+  # shellcheck source=/dev/null
+  source "$repo_root/tools/gw-vm.d/lib/milestone12.sh"
+  milestone12_source_status_ignored \
+    '?? tests/compat/m12/__pycache__/validate_result.cpython-314.pyc' ||
+    fail 'Python bytecode cache should not invalidate M12 source identity'
+  if milestone12_source_status_ignored '?? tests/compat/m12/random_probe.cpp'; then
+    fail 'untracked implementation source must invalidate M12 source identity'
+  fi
+)
+
 : >"$command_log"
 run_failure "$work_dir/milestone12-dirty.out" \
   env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" milestone12-runtime-test --yes
@@ -2290,6 +2302,72 @@ assert_contains "$m12_lib" \
 assert_before "$m12_lib" \
   'run_started=$(date +%s)' \
   'systemd-run --unit=gw-uinput-m12.service'
+
+m13_lib=$repo_root/tools/gw-vm.d/lib/milestone13.sh
+run_success "$work_dir/milestone13-guest-exit.out" bash -c '
+  source "$1"
+  artifact_dir=$2
+  require_approval() { :; }
+  require_vm_domain() { :; }
+  is_true() { [[ $1 == true ]]; }
+  note() { :; }
+  init_artifacts() { mkdir -p "$artifact_dir"; ARTIFACTS_PATH_ABS=$artifact_dir; }
+  prepare_milestone13_evidence() { M13_TESTED_COMMIT=test-commit; }
+  vm_boot() { :; }
+  verify_milestone13_source_identity() { :; }
+  push_source() { :; }
+  collect_milestone13_artifacts() { :; }
+  write_milestone13_summary() { printf "%s\n" "$2" >"$artifact_dir/failure-stage"; }
+  print_artifacts() { :; }
+  guest_run_script() {
+    if [[ $1 == *"M13 requires /dev/uinput"* ]]; then
+      printf "%s\n" \
+        drm_primary_node=/dev/dri/card0 \
+        drm_connector=Virtual-1 \
+        target_vt=/dev/tty2
+    elif [[ $1 == *"test -f \"\$1\"; cat \"\$1\""* ]]; then
+      return 1
+    elif [[ $1 == *"rm -rf -- \"\$1\""* ]]; then
+      return 0
+    else
+      printf "%s\n" "injected M13 guest runtime failure" >&2
+      return 42
+    fi
+  }
+  SNAPSHOT_ENABLED=true
+  M13_SCREENSHOT_WAIT_SECONDS=2
+  GUEST_SOURCE_PATH=/source
+  if milestone13_runtime_test true; then
+    printf "%s\n" "M13 guest failure was accepted" >&2
+    exit 1
+  fi
+  [[ $(<"$artifact_dir/failure-stage") == guest-runtime ]]
+' _ "$m13_lib" "$work_dir/m13-guest-exit-artifacts"
+assert_contains "$work_dir/milestone13-guest-exit.out" \
+  'M13 guest runtime exited before screenshot marker drm-screen-ready.'
+assert_contains "$work_dir/milestone13-guest-exit.out" \
+  'failed during: guest-runtime'
+assert_not_contains "$work_dir/milestone13-guest-exit.out" \
+  'failed during: drm-screenshot'
+
+run_success "$work_dir/milestone13-best-effort-collection.out" bash -c '
+  source "$1"
+  artifact_dir=$2
+  transfer_log=$3
+  init_artifacts() { mkdir -p "$artifact_dir"; ARTIFACTS_PATH_ABS=$artifact_dir; }
+  guest_run_script() { return 1; }
+  scp() { printf "scp\n" >>"$transfer_log"; return 47; }
+  M13_TEXT_ARTIFACTS=(missing-diagnostic.log)
+  M13_BINARY_ARTIFACTS=(missing-evidence.tar)
+  collect_milestone13_artifacts false
+  [[ ! -e $artifact_dir/missing-diagnostic.log && ! -s $transfer_log ]]
+  if collect_milestone13_artifacts true; then
+    printf "%s\n" "required M13 collection accepted missing artifacts" >&2
+    exit 1
+  fi
+  [[ -s $transfer_log ]]
+' _ "$m13_lib" "$work_dir/m13-collection-artifacts" \
+  "$work_dir/m13-collection-transfers.log"
 
 assert_not_contains "$work_dir/help.out" 'ssh COMMAND'
 

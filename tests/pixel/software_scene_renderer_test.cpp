@@ -279,7 +279,7 @@ int main() {
       "ARGB cursor clipping and opacity match software within one channel unit");
 
   const gw::render::RendererCreateOptions constrained_gles{
-      gw::render::RendererRequest::Gles, std::nullopt, std::nullopt, 15};
+      gw::render::RendererRequest::Gles, std::nullopt, std::nullopt, 15, {}};
   gw::test::require(
       gw::render::create_scene_renderer(constrained_gles, unavailable, error),
       error);
@@ -289,7 +289,7 @@ int main() {
           rejected_cache.error == "GLES texture cache limit exceeded",
       "forced GLES rejects a frame before exceeding its injected cache limit");
   const gw::render::RendererCreateOptions constrained_auto{
-      gw::render::RendererRequest::Auto, std::nullopt, std::nullopt, 15};
+      gw::render::RendererRequest::Auto, std::nullopt, std::nullopt, 15, {}};
   gw::test::require(
       gw::render::create_scene_renderer(constrained_auto, unavailable, error),
       error);

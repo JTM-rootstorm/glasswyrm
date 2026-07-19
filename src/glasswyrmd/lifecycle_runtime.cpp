@@ -3,6 +3,8 @@
 #ifdef GW_SERVER_HAS_IPC
 
 #include "glasswyrmd/lifecycle_projection.hpp"
+#include "glasswyrmd/extension_event_helpers.hpp"
+#include "glasswyrmd/gw_scale_state.hpp"
 #include "glasswyrmd/protocol_event_router.hpp"
 #include "input/input_router.hpp"
 #include "protocol/x11/event_mask.hpp"
@@ -65,7 +67,10 @@ bool ServerRuntime::send_policy(const LifecycleSnapshot& snapshot) {
   policy_commit_ = next_policy_commit_++;
   policy_generation_ = next_policy_generation_++;
   const bool sent = bridge_->submit_policy(
-      project_policy(snapshot, policy_commit_, policy_generation_), error);
+      project_policy(snapshot, policy_commit_, policy_generation_,
+                     server_.options_.output_model ? bridge_->output_layout()
+                                                   : nullptr),
+      error);
   if (!sent)
     std::fprintf(stderr, "glasswyrmd: policy submission failed: %s\n",
                  error.c_str());
@@ -76,7 +81,8 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
   std::string error;
   auto submission = project_compositor(
       snapshot, next_compositor_commit_++, next_compositor_generation_++,
-      server_.options_.software_content);
+      server_.options_.software_content,
+      server_.options_.output_model ? bridge_->output_layout() : nullptr);
   if (content_presenter_ && !content_presenter_->prepare_lifecycle(
                                 snapshot, server_.state_.resources(), submission))
     return false;
@@ -88,11 +94,15 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
 
 bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   transition_before_.reset();
+  scale_transition_before_.reset();
   input_transition_before_.reset();
   const auto* active = lifecycle_ ? lifecycle_->active() : nullptr;
   if (active) {
     EventRouter router(server_.state_.resources());
     transition_before_ = router.capture(active->window);
+    if (const auto* window =
+            server_.state_.resources().find_window(active->window))
+      scale_transition_before_ = window->scale;
     if (input_peer_
 #if GW_HAS_LIBINPUT_BACKEND
         || real_input_
@@ -146,6 +156,14 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
     }
     committed = property_committed && staged.commit_lifecycle(snapshot);
     if (committed) server_.state_ = std::move(staged);
+  } else if (active && mutation != pending_mutations_.end() &&
+             mutation->second.scale) {
+    auto staged = server_.state_;
+    auto* window = staged.resources().find_window(active->window);
+    committed = window != nullptr;
+    if (committed) window->scale = *mutation->second.scale;
+    committed = committed && staged.commit_lifecycle(snapshot);
+    if (committed) server_.state_ = std::move(staged);
   } else {
     committed = server_.state_.commit_lifecycle(snapshot);
   }
@@ -155,9 +173,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
   }
   if (content_presenter_)
     content_presenter_->accept_lifecycle(snapshot, server_.state_.resources());
-#if GW_HAS_LIBINPUT_BACKEND
   if (cursor_presenter_) mark_cursor_dirty();
-#endif
   return true;
 }
 
@@ -178,6 +194,19 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
     for (const auto& client : server_.clients_)
       recipients.push_back(client.get());
     EventRouter router(server_.state_.resources());
+    if (scale_transition_before_) {
+      if (const auto* window =
+              server_.state_.resources().find_window(operation->window)) {
+        DispatchResult scale_events;
+        append_gw_scale_notifications(
+            scale_events, *window, operation->window,
+            scale_notification_reasons(*scale_transition_before_,
+                                       window->scale));
+        ProtocolEventRouter protocol_router(server_.state_.resources());
+        for (const auto& intent : scale_events.protocol_events)
+          (void)protocol_router.route(intent, recipients);
+      }
+    }
     if (mutation != pending_mutations_.end() && mutation->second.property)
       route_property_notification(*mutation->second.property,
                                   server_.state_.resources(), recipients);
@@ -206,7 +235,9 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
       }
     } else {
       const auto committed = router.capture(operation->window);
-      if (operation->kind != LifecycleOperationKind::Create) {
+      if (operation->kind != LifecycleOperationKind::Create &&
+          operation->kind != LifecycleOperationKind::ScaleChange &&
+          operation->kind != LifecycleOperationKind::Focus) {
         const auto kind = operation->kind == LifecycleOperationKind::Map
                               ? StructuralTransitionKind::Map
                           : operation->kind == LifecycleOperationKind::Unmap
@@ -380,6 +411,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
           found->second.requested_height != old_height)
         found->second.geometry_serial = *serial;
       mutation.property = result.deferred_policy->property;
+    } else if (result.deferred_scale) {
+      operation.kind = LifecycleOperationKind::ScaleChange;
+      found->second.scale = result.deferred_scale->scale;
+      mutation.scale = result.deferred_scale->scale;
     } else if (result.deferred_configure) {
       operation.kind = LifecycleOperationKind::Configure;
       const auto& request = *result.deferred_configure;
@@ -409,9 +444,10 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
   const auto token = operation.token;
   pending_mutations_.emplace(token, std::move(mutation));
   const auto status =
-      content_presenter_ &&
+      output_configuration_active() ||
+              (content_presenter_ &&
               (content_presenter_->frame_in_flight() ||
-               (cursor_presenter_ && !bridge_->transaction_idle()))
+               (cursor_presenter_ && !bridge_->transaction_idle())))
                           ? lifecycle_->enqueue_paused(std::move(operation))
                           : lifecycle_->enqueue(std::move(operation));
   if (status == EnqueueStatus::Queued) {
@@ -433,6 +469,8 @@ bool ServerRuntime::defer_lifecycle(ClientConnection& client,
                  ? gw::protocol::x11::CoreOpcode::ChangeProperty
              : result.deferred_policy
                  ? gw::protocol::x11::CoreOpcode::SendEvent
+             : result.deferred_scale
+                 ? static_cast<gw::protocol::x11::CoreOpcode>(135)
              : result.deferred_map ? gw::protocol::x11::CoreOpcode::MapWindow
                                    : gw::protocol::x11::CoreOpcode::UnmapWindow),
          0}));
@@ -478,9 +516,10 @@ void ServerRuntime::cancel_client_lifecycle(
   mutation.cleanup = std::move(plan);
   pending_mutations_.emplace(token, std::move(mutation));
   const auto cleanup_status =
-      content_presenter_ &&
+      output_configuration_active() ||
+              (content_presenter_ &&
               (content_presenter_->frame_in_flight() ||
-               (cursor_presenter_ && !bridge_->transaction_idle()))
+               (cursor_presenter_ && !bridge_->transaction_idle())))
           ? lifecycle_->enqueue_priority_paused(std::move(operation))
           : lifecycle_->enqueue_priority(std::move(operation));
   if (cleanup_status != EnqueueStatus::Queued) {

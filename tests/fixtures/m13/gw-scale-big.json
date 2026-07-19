@@ -1,0 +1,68 @@
+{
+  "byte_order": "big",
+  "checks": {
+    "enabled": true,
+    "one_primary": true,
+    "same_generation": true,
+    "stable_ids": true,
+    "stable_registry": true,
+    "two_outputs": true,
+    "version_0_1": true
+  },
+  "errors": [],
+  "evidence": {
+    "error_base": 139,
+    "event_base": 69,
+    "outputs": [
+      {
+        "enabled": true,
+        "generation": 6,
+        "id": "ca9eec49a3943406",
+        "logical": [
+          0,
+          0,
+          640,
+          480
+        ],
+        "physical": [
+          640,
+          480
+        ],
+        "primary": true,
+        "randr_xid": 256,
+        "scale": [
+          1,
+          1
+        ],
+        "transform": 0
+      },
+      {
+        "enabled": true,
+        "generation": 6,
+        "id": "d845a06805b6577b",
+        "logical": [
+          640,
+          0,
+          640,
+          480
+        ],
+        "physical": [
+          800,
+          600
+        ],
+        "primary": false,
+        "randr_xid": 259,
+        "scale": [
+          5,
+          4
+        ],
+        "transform": 0
+      }
+    ],
+    "version": "0.1"
+  },
+  "passed": true,
+  "probe": "m13_raw_output_probe",
+  "scenario": "gw-scale",
+  "schema": 1
+}

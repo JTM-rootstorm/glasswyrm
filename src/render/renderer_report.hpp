@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/output_scene_renderer.hpp"
 #include "render/scene_renderer.hpp"
 
 #include <filesystem>
@@ -36,10 +37,14 @@ public:
 
   [[nodiscard]] bool initialize(const RendererSelectionReport& selection,
                                 std::string& error);
+  [[nodiscard]] bool initialized() const noexcept { return descriptor_ >= 0; }
   [[nodiscard]] bool append_frame(const RenderFrameRequest& request,
                                   const RenderFrameResult& result,
                                   std::string_view selected,
                                   std::string& error);
+  [[nodiscard]] bool append_output_frame(
+      const software::SoftwareFrameSetRenderRequest& request,
+      const OutputSceneRenderResult& result, std::string& error);
 
 private:
   [[nodiscard]] bool append(std::string_view line, std::string& error);

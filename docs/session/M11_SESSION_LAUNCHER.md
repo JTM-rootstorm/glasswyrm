@@ -10,6 +10,11 @@ Milestone 12 extends the same launcher with opt-in game-profile and renderer
 arguments. It does not create a second session mode or change device
 ownership, readiness, supervision, or shutdown semantics.
 
+Milestone 13 adds an explicit headless backend and output-model forwarding.
+The default backend remains DRM, so an invocation that omits all M13 options
+produces the historical DRM child command lines. The launcher still resolves
+executables through `PATH`, calls them directly, and never invokes a shell.
+
 The launcher is installed only when all three runtime components are enabled.
 It does not acquire devices, change ownership or permissions, or act as a
 session broker. Its caller must already be able to open the selected DRM
@@ -21,11 +26,13 @@ primary node, VT, and input devices.
 glasswyrm-session
   --runtime-dir PATH
   --display N
-  --drm-device PATH
-  --tty PATH
-  --connector NAME
-  --mode WIDTHxHEIGHT[@MILLIHZ]
-  --input-device PATH ...
+  [--backend drm|headless]
+  [--output-model]
+  [--control-socket PATH]
+  [--scale-protocol]
+  drm: --drm-device PATH --tty PATH --connector NAME
+       --mode WIDTHxHEIGHT[@MILLIHZ] --input-device PATH ...
+  headless: [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]] ...
   [--xkb-layout NAME]
   [--xkb-model NAME]
   [--xkb-variant NAME]
@@ -57,6 +64,18 @@ new-file rules.
 without `--game-compat`. The server itself validates names against the static
 registry. These arguments require an experimental build; historical launcher
 invocations continue to start the software-content profile without extensions.
+
+`--backend headless` forbids DRM device, TTY, connector, mode, DRM API, mirror
+dump, and DRM report options. Repeatable `--headless-output` values are
+forwarded in order to `gwcomp`; without one, the compositor selects its
+historical default output. Headless sessions do not require input devices.
+
+`--output-model` forwards the M13 profile to `glasswyrmd`. Unless
+`--control-socket` supplies an absolute or otherwise valid explicit Unix-socket
+path, the launcher uses `PATH/control.sock` inside its private runtime
+directory. `--control-socket` and `--scale-protocol` both require
+`--output-model`; the scale protocol additionally requires an experimental
+build. `--game-compat` may be combined with the M13 options.
 
 For example:
 
@@ -100,6 +119,22 @@ The fixed acceptance harness also launches a forced-GLES session and a
 `--disable-extension MIT-SHM` fallback session. Those are evidence profiles,
 not a recommendation to disable extensions in ordinary development runs.
 
+An M13 two-output headless development session can be launched without DRM,
+TTY, or input-device access:
+
+```sh
+glasswyrm-session \
+  --runtime-dir /run/glasswyrm-headless \
+  --display 99 \
+  --backend headless \
+  --headless-output LEFT:800x600@60000 \
+  --headless-output RIGHT:800x600@60000 \
+  --output-model \
+  --scale-protocol \
+  --renderer software \
+  --client /path/to/x11-client
+```
+
 ## Runtime and readiness
 
 The absolute runtime directory is created with mode `0700`. An existing
@@ -110,14 +145,18 @@ private peer paths are:
 ```text
 PATH/gwm.sock
 PATH/gwcomp.sock
+PATH/control.sock    # generated for --output-model unless overridden
 ```
 
 Startup proceeds only after each dependency exposes its socket:
 
 1. start `gwm`, then wait for `PATH/gwm.sock`;
-2. start DRM `gwcomp`, then wait for `PATH/gwcomp.sock`;
-3. start real-input, software-content `glasswyrmd` (with the game profile when
-   requested), then wait for `/tmp/.X11-unix/XN`;
+2. start the selected headless or DRM `gwcomp`, then wait for
+   `PATH/gwcomp.sock`; in output-model mode, compositor readiness follows its
+   validated inventory publication;
+3. start software-content `glasswyrmd`, adding real input for a DRM session and
+   requested game/output/scale profiles, then wait for the generated or
+   explicit control socket when enabled and `/tmp/.X11-unix/XN`;
 4. start the optional initial client.
 
 Each readiness wait has a ten-second monotonic deadline. A process exit,

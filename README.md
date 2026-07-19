@@ -19,6 +19,15 @@ abstraction with optional EGL/GLES composition, and damage-aware DRM copies.
 The exact SDL 2.32.10 software-X11 profile and official workloads are pinned,
 and their narrow external-client claim is accepted by the clean M11-to-M12
 Gentoo VM sequence with complete evidence.
+Milestone 13 implementation adds an opt-in compositor-authoritative output
+model, stable headless and DRM output identities, atomic layout changes,
+several logical headless outputs, rational compositor scaling and all output
+transforms, one-workspace multi-output policy, GWIPC API 0.8, read-mostly
+multi-output RANDR, experimental `GW_SCALE` 0.1, and real `gwinfo`/`gwout`
+clients. Software remains canonical and the DRM boundary remains exactly one
+physical connector. The bounded M13 profile is accepted by the clean
+M12-to-M13 Gentoo VM sequence with validated headless, single-QXL DRM,
+VT/input recovery, restoration, cleanup, and archive evidence.
 `glasswyrmd` retains its standalone
 Milestone 2 mode and can also connect explicitly to `gwm` and `gwcomp` for a
 headless top-level lifecycle. The accepted M6 metadata-only mode remains the
@@ -50,8 +59,9 @@ inherited session ownership. Headless remains the default. Milestone 11 builds
 the first real-device and interactive baseline on those boundaries. M12 keeps
 software rendering as the default and adds only a constrained compositor-side
 GLES path; broad X11 application support, the XKB extension, client graphics
-APIs, direct scanout, and multi-output policy remain absent.
-Runtime tools remain placeholders.
+APIs, and direct scanout remain absent. M13 adds multi-output policy only for
+one workspace and does not claim broad toolkit scaling or physical
+multi-connector support.
 
 ## Build
 
@@ -162,6 +172,8 @@ glasswyrmd [--display N] [--socket-dir PATH]
             [--wm-socket PATH --compositor-socket PATH]
             [--software-content] [--synthetic-input-socket PATH]
             [--game-compat] [--disable-extension NAME]...
+            [--output-model] [--control-socket PATH]
+            [--scale-protocol]
             [--x11-trace PATH]
             [--libinput-device PATH]...
             [--xkb-rules NAME] [--xkb-model NAME]
@@ -405,6 +417,33 @@ GWM/compositor/VT replay, KMS/KD/VT/getty restoration, cleanup, and evidence
 archive integrity. The [SDL profile](docs/compatibility/M12_SDL.md) records the
 exact accepted boundary; it is not a general SDL or game compatibility claim.
 
+## Milestone 13 output and scaling profile
+
+The M13 profile is explicit: start `gwcomp` with repeated headless outputs and
+start `glasswyrmd` with `--output-model`, a private `--control-socket`, and
+optionally `--scale-protocol`. `glasswyrm-session --backend headless` forwards
+that topology without DRM, TTY, or input devices. See the
+[output model](docs/output/M13_OUTPUT_MODEL.md),
+[rendering contract](docs/rendering/M13_SCALE_AND_TRANSFORM.md), and
+[session launcher](docs/session/M11_SESSION_LAUNCHER.md).
+
+Acceptance uses the historical gate first and does not treat host tests as a
+substitute:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone12-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone13-runtime-test --yes
+```
+
+The accepted sequence proves the two-output headless layout, deterministic
+`gwinfo`/`gwout`, RANDR and `GW_SCALE` wire paths, software/GLES equivalence,
+restart and accepted reconfiguration, then the fixed one-output QXL scale and
+transform path with VT/input recovery, restoration, cleanup, and validated
+evidence. This is the bounded profile described below, not a broader toolkit
+scaling or physical multi-connector compatibility claim.
+
 ## Setup probes
 
 The repository-owned raw probe covers both client byte orders:
@@ -452,30 +491,34 @@ core error. It never maps or displays the window.
 - `glasswyrmd`: owns X11 protocol, resource, input, cursor, grab, and selection
   truth; implements standalone M2, the integrated lifecycle, M8 synthetic
   input, the opt-in M11 real-input profile, and the opt-in M12 extension/EWMH
-  game profile.
+  game profile. M13 adds the opt-in dynamic screen, output transaction, RANDR,
+  `GW_SCALE`, and same-UID output-control paths.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
-  complete policy snapshots from `glasswyrmd`.
+  complete policy snapshots from `glasswyrmd`, including M13 per-output work
+  areas and deterministic output assignment in one workspace.
 - `gwcomp`: owns software composition and final display authority; it retains
   the default headless path and can present the identical canonical frame
   through the opt-in M10 DRM/KMS backend. It accepts M6 metadata-only scenes
   without fake buffers and buffered ProtocolServer surfaces in M7
   software-content mode and capability-gated software cursor/session state.
   M12 adds independent software/GLES renderer selection, eventfd readiness,
-  and damage-aware DRM copies without moving presentation authority.
+  and damage-aware DRM copies without moving presentation authority. M13 adds
+  stable inventory and atomic native per-output frame sets.
 - `glasswyrm-session`: unprivileged three-process and optional-client
   orchestrator for the M11 development session with additive M12 game-profile
-  and renderer argument forwarding.
+  and renderer argument forwarding plus M13 headless/output-model profiles.
 - `gwctl`: future runtime control utility.
-- `gwinfo`: future diagnostics utility.
+- `gwinfo`: deterministic M13 output and window diagnostics client.
 - `gwtrace`: future protocol/event tracing utility.
-- `gwout`: future output configuration utility.
+- `gwout`: complete-layout M13 output configuration client.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.7 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.8 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and compositor,
 window-policy, lifecycle, synthetic-input, session-state, interactive-policy,
-and eventfd CPU-buffer synchronization vocabularies. Wire 1.0 and
+eventfd CPU-buffer synchronization, and output-management vocabularies. Wire
+1.0 and
 SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
 control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
@@ -610,16 +653,19 @@ QXL guest meets that boundary and the command validates atomic scanout,
 graphical-console screenshots, VT switching, input-driven repaint, restoration,
 and the required binary evidence archive.
 
-The Milestone 11 and Milestone 12 acceptance commands are:
+The Milestone 11 through Milestone 13 acceptance commands are:
 
 ```sh
 ./tools/gw-vm milestone11-runtime-test --yes
 ./tools/gw-vm milestone12-runtime-test --yes
+./tools/gw-vm milestone13-runtime-test --yes
 ```
 
 M12 must be preceded by the documented reset/M11/reset sequence so the
 historical dependency-absence and pinned xterm boundary are re-proven before
 Mesa, X11 extension libraries, and SDL build dependencies are installed.
+M13 must likewise follow the documented reset/M12/reset sequence so the
+accepted historical profile is re-proven before output-model validation.
 
 ## Compatibility
 
@@ -640,3 +686,31 @@ The [Milestone 12 profile](docs/protocols/x11-milestone-12.md) records the
 implemented opt-in extension and efficient-buffer boundary. Its
 [SDL 2.32.10 profile](docs/compatibility/M12_SDL.md) records the narrow claim
 accepted by the clean Gentoo VM evidence gate.
+The [Milestone 13 profile](docs/protocols/x11-milestone-13.md) records the
+opt-in output and scale protocol boundary without widening those external
+client claims.
+
+The exact Milestone 13 compatibility statement is:
+
+Supported:
+
+- several logical headless outputs
+- one physical DRM output
+- stable output inventory and capabilities
+- integer and fractional compositor scaling
+- all output transforms
+- legacy client fallback scaling
+- repository GW_SCALE v0.1 client
+- multi-output RANDR reporting
+- gwout/gwinfo control and diagnostics
+- one workspace
+
+Unsupported:
+
+- several physical DRM connectors
+- hotplug recovery
+- physical mode setting through gwout/RANDR
+- toolkit GW_SCALE integration
+- Xft DPI integration
+- output persistence
+- VRR/HDR/color management

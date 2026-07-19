@@ -1,5 +1,7 @@
 #include "glasswyrmd/runtime_bridge.hpp"
 
+#include "glasswyrmd/output_scene_projection.hpp"
+
 #include <algorithm>
 #include <array>
 #include <limits>
@@ -29,6 +31,82 @@ void forget_cursor(CompositorSnapshotSubmission& submission) {
   std::erase_if(submission.damages, [&](const auto& damage) {
     return is_cursor(damage.surface_id);
   });
+  std::erase_if(submission.surface_outputs, [&](const auto& state) {
+    return is_cursor(state.state.surface_id);
+  });
+}
+
+PolicySnapshotSubmission
+initial_output_policy(const output::OutputLayout &layout) {
+  PolicySnapshotSubmission submission;
+  submission.commit_id = 1;
+  submission.generation = 1;
+  submission.outputs.reserve(layout.output_order.size());
+  for (const auto id : layout.output_order) {
+    const auto &state = layout.states.at(id);
+    gwipc_policy_output_upsert record{};
+    record.struct_size = sizeof(record);
+    record.output_id = id.value;
+    record.logical_x = state.logical_x;
+    record.logical_y = state.logical_y;
+    record.logical_width = state.logical_width;
+    record.logical_height = state.logical_height;
+    record.work_x = state.logical_x;
+    record.work_y = state.logical_y;
+    record.work_width = state.logical_width;
+    record.work_height = state.logical_height;
+    record.scale_numerator = state.scale.numerator;
+    record.scale_denominator = state.scale.denominator;
+    record.transform = static_cast<gwipc_transform>(state.transform);
+    record.enabled = state.enabled;
+    record.primary = state.primary;
+    submission.outputs.push_back(record);
+  }
+  return submission;
+}
+
+gwipc_sdr_color_metadata color_record(const output::SdrMetadata& color) {
+  return {static_cast<gwipc_sdr_color_space>(color.color_space),
+          static_cast<gwipc_transfer_function>(color.transfer_function),
+          static_cast<gwipc_color_primaries>(color.primaries),
+          static_cast<std::uint8_t>(color.luminance_available),
+          color.minimum_luminance_millinit,
+          color.maximum_luminance_millinit,
+          color.max_frame_average_luminance_millinit};
+}
+
+CompositorSnapshotSubmission
+initial_compositor_scene(const output::OutputLayout& layout) {
+  CompositorSnapshotSubmission submission;
+  submission.commit_id = 1;
+  submission.generation = layout.generation;
+  submission.primary_output_id = layout.primary_output_id.value;
+  submission.output_layout_generation = layout.generation;
+  submission.outputs.reserve(layout.output_order.size());
+  const auto append = [&](const output::OutputId id) {
+    const auto& state = layout.states.at(id);
+    gwipc_output_upsert record{};
+    record.struct_size = sizeof(record);
+    record.output_id = id.value;
+    record.enabled = state.enabled;
+    record.logical_x = state.logical_x;
+    record.logical_y = state.logical_y;
+    record.logical_width = state.logical_width;
+    record.logical_height = state.logical_height;
+    record.physical_pixel_width = state.physical_width;
+    record.physical_pixel_height = state.physical_height;
+    record.refresh_millihertz = state.refresh_millihertz;
+    record.scale_numerator = state.scale.numerator;
+    record.scale_denominator = state.scale.denominator;
+    record.transform = static_cast<gwipc_transform>(state.transform);
+    record.color = color_record(state.color);
+    submission.outputs.push_back(record);
+  };
+  append(layout.primary_output_id);
+  for (const auto id : layout.output_order)
+    if (id != layout.primary_output_id)
+      append(id);
+  return submission;
 }
 }
 
@@ -38,16 +116,17 @@ RuntimeBridge::RuntimeBridge(std::string policy_path,
                              const std::chrono::milliseconds deadline,
                              const bool software_content,
                              const bool session_state,
-                             const bool cpu_buffer_synchronization)
-    : policy_(std::move(policy_path), screen),
+                             const bool cpu_buffer_synchronization,
+                             const bool output_model)
+    : policy_(std::move(policy_path), screen, true, output_model),
       compositor_(std::move(compositor_path), screen, software_content,
-                  session_state, cpu_buffer_synchronization),
-      deadline_duration_(deadline) {}
+                  session_state, cpu_buffer_synchronization, output_model),
+      deadline_duration_(deadline), output_model_(output_model) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
   policy_.disconnect();
   compositor_.disconnect();
-  stage_ = Stage::Policy;
+  stage_ = output_model_ ? Stage::Compositor : Stage::Policy;
   deadline_ = now + deadline_duration_;
   retry_at_ = now;
   retry_index_ = 0;
@@ -55,6 +134,7 @@ void RuntimeBridge::start(const Clock::time_point now) noexcept {
   resume_transaction_stage_ = TransactionStage::None;
   recovering_ = false;
   compositor_reset_ = false;
+  output_scene_submitted_ = false;
 }
 
 void RuntimeBridge::schedule_retry(const Clock::time_point now) noexcept {
@@ -98,6 +178,7 @@ bool RuntimeBridge::service(const short policy_revents,
       recovering_ = true;
       if (policy_disconnected) policy_.disconnect();
       if (compositor_disconnected) compositor_.disconnect();
+      if (compositor_disconnected) output_scene_submitted_ = false;
 
       // Preserve an unaffected peer across an idle peer restart.  An in-flight
       // transaction still uses the conservative paired reconnect so its reply
@@ -108,7 +189,11 @@ bool RuntimeBridge::service(const short policy_revents,
       }
       if (compositor_disconnected && policy_in_flight) policy_.disconnect();
       compositor_reset_ = compositor_reset_ || compositor_disconnected;
-      stage_ = policy_.state() == PeerBootstrapState::Disconnected
+      stage_ = output_model_ &&
+                       compositor_.state() ==
+                           PeerBootstrapState::Disconnected
+                   ? Stage::Compositor
+               : policy_.state() == PeerBootstrapState::Disconnected
                    ? Stage::Policy
                    : Stage::Compositor;
       deadline_ = now + deadline_duration_;
@@ -165,7 +250,20 @@ bool RuntimeBridge::service(const short policy_revents,
         schedule_retry(now);
       }
     }
-    if (policy_.state() == PeerBootstrapState::Synchronized) {
+    if (output_model_ && policy_.ready_for_snapshot()) {
+      const auto *layout = compositor_.output_layout();
+      if (layout == nullptr) {
+        stage_ = Stage::Failed;
+        error = "output-model policy bootstrap has no compositor inventory";
+        return false;
+      }
+      auto bootstrap = initial_output_policy(*layout);
+      if (!policy_.submit(bootstrap, error)) {
+        stage_ = Stage::Failed;
+        if (error.empty()) error = "could not submit output policy bootstrap";
+        return false;
+      }
+    } else if (policy_.state() == PeerBootstrapState::Synchronized) {
       stage_ = Stage::Compositor;
       retry_at_ = now;
       retry_index_ = 0;
@@ -192,6 +290,33 @@ bool RuntimeBridge::service(const short policy_revents,
       }
     }
     if (compositor_.state() == PeerBootstrapState::Synchronized) {
+      if (output_model_ &&
+          policy_.state() == PeerBootstrapState::Disconnected) {
+        stage_ = Stage::Policy;
+        retry_at_ = now;
+        retry_index_ = 0;
+        return true;
+      }
+      if (output_model_ && !output_scene_submitted_) {
+        const auto* layout = compositor_.output_layout();
+        if (layout == nullptr) {
+          stage_ = Stage::Failed;
+          error = "output-model scene bootstrap has no compositor inventory";
+          return false;
+        }
+        const auto& replay = compositor_.replay_input();
+        const auto submission = replay.commit_id != 0
+                                    ? replay
+                                    : initial_compositor_scene(*layout);
+        if (!compositor_.submit(submission, error)) {
+          stage_ = Stage::Failed;
+          if (error.empty())
+            error = "could not submit output-model scene bootstrap";
+          return false;
+        }
+        output_scene_submitted_ = true;
+        return true;
+      }
       stage_ = Stage::Ready;
       if (recovering_) {
         transaction_stage_ = TransactionStage::None;
@@ -290,7 +415,15 @@ bool RuntimeBridge::submit_cursor(
     error = "cursor submission attempted while transaction stage is busy";
     return false;
   }
-  if (!compositor_.submit_cursor(submission, commit_id, generation, error))
+  auto projected = submission;
+  if (output_model_) {
+    const auto* layout = compositor_.output_layout();
+    if (!layout || !populate_cursor_output_state(projected, *layout)) {
+      error = "cursor output membership could not be projected";
+      return false;
+    }
+  }
+  if (!compositor_.submit_cursor(projected, commit_id, generation, error))
     return false;
   pending_compositor_ = compositor_.replay_input();
   pending_compositor_.commit_id = commit_id;
@@ -298,11 +431,18 @@ bool RuntimeBridge::submit_cursor(
   std::erase_if(pending_compositor_.surfaces, [](const auto& surface) {
     return surface.presentation_flags == GWIPC_SURFACE_PRESENTATION_CURSOR;
   });
-  pending_compositor_.surfaces.push_back(submission.surface);
+  std::erase_if(pending_compositor_.surface_outputs,
+                [&](const auto& membership) {
+                  return membership.state.surface_id ==
+                         projected.surface.surface_id;
+                });
+  pending_compositor_.surfaces.push_back(projected.surface);
+  if (output_model_)
+    pending_compositor_.surface_outputs.push_back(projected.surface_output);
   pending_compositor_.buffers.clear();
   pending_compositor_.damages.clear();
-  if (submission.buffer) pending_compositor_.buffers.push_back(*submission.buffer);
-  if (submission.damage) pending_compositor_.damages.push_back(*submission.damage);
+  if (projected.buffer) pending_compositor_.buffers.push_back(*projected.buffer);
+  if (projected.damage) pending_compositor_.damages.push_back(*projected.damage);
   transaction_stage_ = TransactionStage::Cursor;
   return true;
 }

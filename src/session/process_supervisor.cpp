@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <algorithm>
 #include <cstring>
 #include <ostream>
 #include <spawn.h>
@@ -83,6 +84,16 @@ bool ProcessSupervisor::spawn(const ChildSpec &spec, std::ostream &error) {
   const bool readiness_path_existed =
       spec.readiness_socket &&
       ::lstat(spec.readiness_socket->c_str(), &readiness_before) == 0;
+  std::vector<ReadinessPath> additional_readiness;
+  additional_readiness.reserve(spec.additional_readiness_sockets.size());
+  for (const auto &path : spec.additional_readiness_sockets) {
+    struct stat before{};
+    const bool existed = ::lstat(path.c_str(), &before) == 0;
+    additional_readiness.push_back(
+        {path, spec.additional_readiness_requires_socket, existed,
+         existed ? before.st_dev : 0,
+         existed ? before.st_ino : 0});
+  }
 
   std::vector<char *> argv;
   argv.reserve(spec.argv.size() + 1);
@@ -141,7 +152,8 @@ bool ProcessSupervisor::spawn(const ChildSpec &spec, std::ostream &error) {
   children_.push_back(
       {spec, pid, true, readiness_path_existed,
        readiness_path_existed ? readiness_before.st_dev : 0,
-       readiness_path_existed ? readiness_before.st_ino : 0});
+       readiness_path_existed ? readiness_before.st_ino : 0,
+       std::move(additional_readiness)});
   return true;
 }
 
@@ -181,10 +193,19 @@ bool ProcessSupervisor::wait_until_ready(
   while (std::chrono::steady_clock::now() < deadline) {
     if (pending_signal && *pending_signal != 0)
       return false;
-    if (path_ready(*child.spec.readiness_socket,
+    const bool primary_ready =
+        path_ready(*child.spec.readiness_socket,
                    child.spec.readiness_requires_socket,
                    child.readiness_path_existed, child.readiness_device,
-                   child.readiness_inode))
+                   child.readiness_inode);
+    const bool additional_ready =
+        std::all_of(child.additional_readiness.begin(),
+                    child.additional_readiness.end(), [](const auto &path) {
+          return path_ready(path.path, path.requires_socket,
+                            path.existed_before_spawn, path.previous_device,
+                            path.previous_inode);
+        });
+    if (primary_ready && additional_ready)
       return true;
     std::size_t exited = 0;
     if (const auto status = reap_nonblocking(exited, error)) {
@@ -194,8 +215,17 @@ bool ProcessSupervisor::wait_until_ready(
     }
     sleep_for(options_.poll_interval);
   }
+  std::string pending = *child.spec.readiness_socket;
+  for (const auto &path : child.additional_readiness) {
+    if (!path_ready(path.path, path.requires_socket,
+                    path.existed_before_spawn, path.previous_device,
+                    path.previous_inode)) {
+      pending = path.path;
+      break;
+    }
+  }
   error << "glasswyrm-session: timed out waiting for " << child.spec.name
-        << " readiness at " << *child.spec.readiness_socket << '\n';
+        << " readiness at " << pending << '\n';
   return false;
 }
 

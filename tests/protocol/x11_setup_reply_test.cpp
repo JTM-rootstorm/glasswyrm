@@ -125,6 +125,30 @@ void test_configurable_resource_range() {
       "per-client resource range is encoded");
 }
 
+void test_dynamic_screen_geometry(const ByteOrder order,
+                                  const bool game_compat) {
+  gw::protocol::x11::SetupReplyConfig config;
+  config.game_compat = game_compat;
+  config.screen.width_pixels = 1440;
+  config.screen.height_pixels = 600;
+  config.screen.width_millimeters = 381;
+  config.screen.height_millimeters = 159;
+  const auto reply = gw::protocol::x11::encode_setup_success(order, config);
+  const std::size_t screen = game_compat ? 96 : 80;
+  require(read_u16(reply, screen + 20, order) == 1440 &&
+              read_u16(reply, screen + 22, order) == 600 &&
+              read_u16(reply, screen + 24, order) == 381 &&
+              read_u16(reply, screen + 26, order) == 159,
+          "setup success serializes the current logical screen geometry");
+  require(read_u32(reply, screen, order) ==
+                  gw::protocol::x11::kScreenModel.root_window &&
+              read_u32(reply, screen + 4, order) ==
+                  gw::protocol::x11::kScreenModel.default_colormap &&
+              read_u32(reply, screen + 32, order) ==
+                  gw::protocol::x11::kScreenModel.root_visual,
+          "dynamic setup geometry preserves fixed X11 object identities");
+}
+
 void test_game_compat_profile(const ByteOrder order) {
   gw::protocol::x11::SetupReplyConfig config;
   config.game_compat = true;
@@ -187,6 +211,10 @@ int main() {
                       "001c000b00000007556e737570706f727465642070726f746f636f6c"
                       "2076657273696f6e");
   test_configurable_resource_range();
+  test_dynamic_screen_geometry(ByteOrder::LittleEndian, false);
+  test_dynamic_screen_geometry(ByteOrder::BigEndian, false);
+  test_dynamic_screen_geometry(ByteOrder::LittleEndian, true);
+  test_dynamic_screen_geometry(ByteOrder::BigEndian, true);
   test_game_compat_profile(ByteOrder::LittleEndian);
   test_game_compat_profile(ByteOrder::BigEndian);
   test_failure_reason_limit();

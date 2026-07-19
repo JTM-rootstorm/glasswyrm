@@ -19,6 +19,10 @@ namespace {
 struct Seen {
   bool runtime_dir{};
   bool display{};
+  bool backend{};
+  bool output_model{};
+  bool control_socket{};
+  bool scale_protocol{};
   bool drm_device{};
   bool tty{};
   bool connector{};
@@ -39,8 +43,11 @@ struct Seen {
 
 void print_usage(std::ostream &output) {
   output << "Usage: glasswyrm-session --runtime-dir PATH --display N\n"
-            "  --drm-device PATH --tty PATH --connector NAME\n"
-            "  --mode WIDTHxHEIGHT[@MILLIHZ] --input-device PATH ...\n"
+            "  [--backend drm|headless] [--output-model]\n"
+            "  [--control-socket PATH] [--scale-protocol]\n"
+            "  drm: --drm-device PATH --tty PATH --connector NAME\n"
+            "       --mode WIDTHxHEIGHT[@MILLIHZ] --input-device PATH ...\n"
+            "  headless: [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n"
             "  [--xkb-layout NAME] [--xkb-model NAME] [--xkb-variant NAME]\n"
             "  [--xkb-options LIST] [--drm-api auto|atomic|legacy]\n"
             "  [--mirror-dump-dir PATH] [--scene-manifest PATH]\n"
@@ -89,10 +96,8 @@ bool take_optional(int argc, char **argv, int &index, std::string_view option,
 }
 
 bool validate(const Options &options, const Seen &seen, std::ostream &error) {
-  if (!seen.runtime_dir || !seen.display || !seen.drm_device || !seen.tty ||
-      !seen.connector || !seen.mode || options.input_devices.empty()) {
-    error << "glasswyrm-session: runtime-dir, display, drm-device, tty, "
-             "connector, mode, and at least one input-device are required\n";
+  if (!seen.runtime_dir || !seen.display) {
+    error << "glasswyrm-session: runtime-dir and display are required\n";
     print_usage(error);
     return false;
   }
@@ -105,6 +110,43 @@ bool validate(const Options &options, const Seen &seen, std::ostream &error) {
     error << "glasswyrm-session: --drm-api requires auto, atomic, or legacy\n";
     return false;
   }
+  if (options.backend != "drm" && options.backend != "headless") {
+    error << "glasswyrm-session: --backend requires drm or headless\n";
+    return false;
+  }
+  if (options.backend == "drm") {
+    if (!seen.drm_device || !seen.tty || !seen.connector || !seen.mode ||
+        options.input_devices.empty()) {
+      error << "glasswyrm-session: DRM requires drm-device, tty, connector, "
+               "mode, and at least one input-device\n";
+      print_usage(error);
+      return false;
+    }
+    if (!options.headless_outputs.empty()) {
+      error << "glasswyrm-session: --headless-output requires --backend "
+               "headless\n";
+      return false;
+    }
+  } else if (seen.drm_device || seen.tty || seen.connector || seen.mode ||
+             seen.drm_api || seen.mirror_dump_dir || seen.drm_report) {
+    error << "glasswyrm-session: headless mode forbids DRM and TTY options\n";
+    return false;
+  }
+  if (options.control_socket && !options.output_model) {
+    error << "glasswyrm-session: --control-socket requires --output-model\n";
+    return false;
+  }
+  if (options.scale_protocol && !options.output_model) {
+    error << "glasswyrm-session: --scale-protocol requires --output-model\n";
+    return false;
+  }
+#if !GW_HAS_EXPERIMENTAL
+  if (options.scale_protocol) {
+    error << "glasswyrm-session: --scale-protocol is unavailable in this "
+             "build\n";
+    return false;
+  }
+#endif
   if (options.renderer != "software" && options.renderer != "gles" &&
       options.renderer != "auto") {
     error << "glasswyrm-session: --renderer requires software, gles, or auto\n";
@@ -194,6 +236,35 @@ ParseOptionsResult parse_options(int argc, char **argv, Options &options,
         return ParseOptionsResult::ExitFailure;
       }
       seen.display = true;
+    } else if (argument == "--backend")
+      parsed = take_value(argc, argv, index, argument, options.backend,
+                          seen.backend, error);
+    else if (argument == "--headless-output") {
+      if (++index >= argc || argv[index][0] == '\0')
+        parsed = false;
+      else
+        options.headless_outputs.emplace_back(argv[index]);
+      if (!parsed)
+        error << "glasswyrm-session: --headless-output requires a non-empty "
+                 "specification\n";
+    } else if (argument == "--output-model") {
+      if (seen.output_model) {
+        error << "glasswyrm-session: duplicate option: --output-model\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      seen.output_model = true;
+      options.output_model = true;
+    } else if (argument == "--control-socket")
+      parsed = take_optional(argc, argv, index, argument,
+                             options.control_socket, seen.control_socket,
+                             error);
+    else if (argument == "--scale-protocol") {
+      if (seen.scale_protocol) {
+        error << "glasswyrm-session: duplicate option: --scale-protocol\n";
+        return ParseOptionsResult::ExitFailure;
+      }
+      seen.scale_protocol = true;
+      options.scale_protocol = true;
     } else if (argument == "--drm-device")
       parsed = take_value(argc, argv, index, argument, options.drm_device,
                           seen.drm_device, error);
@@ -279,9 +350,14 @@ bool make_runtime_paths(const Options &options, RuntimePaths &paths,
                         std::string &error) {
   paths.wm_socket = options.runtime_dir + "/gwm.sock";
   paths.compositor_socket = options.runtime_dir + "/gwcomp.sock";
+  if (options.output_model)
+    paths.control_socket = options.control_socket.value_or(
+        options.runtime_dir + "/control.sock");
   paths.x11_socket = "/tmp/.X11-unix/X" + std::to_string(options.display);
   if (paths.wm_socket.size() >= sizeof(sockaddr_un::sun_path) ||
-      paths.compositor_socket.size() >= sizeof(sockaddr_un::sun_path)) {
+      paths.compositor_socket.size() >= sizeof(sockaddr_un::sun_path) ||
+      (paths.control_socket &&
+       paths.control_socket->size() >= sizeof(sockaddr_un::sun_path))) {
     error = "runtime directory is too long for Unix socket paths";
     return false;
   }
@@ -298,27 +374,30 @@ CommandPlan build_command_plan(const Options &options,
                            {},
                            paths.wm_socket,
                            true,
+                           true,
+                           {},
                            true});
 
   auto &compositor = plan.children.emplace_back();
   compositor.name = "gwcomp";
-  compositor.argv = {"gwcomp",
-                     "--backend",
-                     "drm",
-                     "--ipc-socket",
-                     paths.compositor_socket,
-                     "--drm-device",
-                     options.drm_device,
-                     "--tty",
-                     options.tty,
-                     "--connector",
-                     options.connector,
-                     "--mode",
-                     options.mode,
-                     "--drm-api",
-                     options.drm_api,
-                     "--renderer",
-                     options.renderer};
+  compositor.argv = {"gwcomp", "--backend", options.backend, "--ipc-socket",
+                     paths.compositor_socket};
+  if (options.backend == "headless") {
+    compositor.argv.insert(compositor.argv.end(),
+                           {"--dump-dir", options.runtime_dir + "/frames"});
+    for (const auto &output : options.headless_outputs) {
+      compositor.argv.emplace_back("--headless-output");
+      compositor.argv.push_back(output);
+    }
+  } else {
+    compositor.argv.insert(
+        compositor.argv.end(),
+        {"--drm-device", options.drm_device, "--tty", options.tty,
+         "--connector", options.connector, "--mode", options.mode,
+         "--drm-api", options.drm_api});
+  }
+  compositor.argv.insert(compositor.argv.end(),
+                         {"--renderer", options.renderer});
   append_option(compositor.argv, "--mirror-dump-dir", options.mirror_dump_dir);
   append_option(compositor.argv, "--scene-manifest", options.scene_manifest);
   append_option(compositor.argv, "--drm-report", options.drm_report);
@@ -339,6 +418,13 @@ CommandPlan build_command_plan(const Options &options,
                  options.xkb_layout,
                  "--xkb-model",
                  options.xkb_model};
+  if (options.output_model) {
+    server.argv.emplace_back("--output-model");
+    server.argv.emplace_back("--control-socket");
+    server.argv.push_back(*paths.control_socket);
+  }
+  if (options.scale_protocol)
+    server.argv.emplace_back("--scale-protocol");
   if (options.game_compat)
     server.argv.emplace_back("--game-compat");
   for (const auto &name : options.disabled_extensions) {
@@ -359,6 +445,8 @@ CommandPlan build_command_plan(const Options &options,
   }
   append_option(server.argv, "--x11-trace", options.x11_trace);
   server.readiness_socket = paths.x11_socket;
+  if (paths.control_socket)
+    server.additional_readiness_sockets.push_back(*paths.control_socket);
 
   if (!options.client.empty()) {
     auto &client = plan.children.emplace_back();
@@ -383,7 +471,11 @@ int run_launcher(const Options &options, std::ostream &error,
     error << "glasswyrm-session: " << detail << '\n';
     return 2;
   }
-  for (const auto *path : {&paths.wm_socket, &paths.compositor_socket}) {
+  std::vector<const std::string *> runtime_sockets = {
+      &paths.wm_socket, &paths.compositor_socket};
+  if (paths.control_socket)
+    runtime_sockets.push_back(&*paths.control_socket);
+  for (const auto *path : runtime_sockets) {
     struct stat status{};
     if (::lstat(path->c_str(), &status) == 0 || errno != ENOENT) {
       error << "glasswyrm-session: runtime socket path is already occupied: "
@@ -399,6 +491,8 @@ int run_launcher(const Options &options, std::ostream &error,
                                     error, pending_signal);
   (void)::unlink(paths.compositor_socket.c_str());
   (void)::unlink(paths.wm_socket.c_str());
+  if (paths.control_socket)
+    (void)::unlink(paths.control_socket->c_str());
   if (created)
     (void)::rmdir(options.runtime_dir.c_str());
   return result;

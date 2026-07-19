@@ -1,8 +1,10 @@
 #pragma once
 
+#include "backends/drm/inventory.hpp"
 #include "gwcomp/options.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace glasswyrm::drm {
@@ -34,6 +36,16 @@ struct DrmRuntimeResources {
   DrmRuntimeResources(const DrmRuntimeResources&) = delete;
   DrmRuntimeResources& operator=(const DrmRuntimeResources&) = delete;
 };
+
+[[nodiscard]] std::optional<drm::DrmInventorySelection>
+resolve_drm_output_selection(const drm::DeviceSnapshot& snapshot,
+                             const Options& options);
+
+[[nodiscard]] bool create_drm_presenter(
+    const Options& options, DrmRuntimeResources& resources,
+    drm::DrmOutputInventory& inventory,
+    std::unique_ptr<output::PresentationBackend>& presenter,
+    std::string& error);
 
 [[nodiscard]] bool create_drm_presenter(
     const Options& options, DrmRuntimeResources& resources,

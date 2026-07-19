@@ -161,4 +161,18 @@ void promote(const CompositorSnapshotSubmission& pending,
   replay = std::move(next);
 }
 
+void promote_content(const CompositorContentSubmission& pending,
+                     CompositorSnapshotSubmission& replay) {
+  for (const auto& replacement : pending.buffers) {
+    auto found = std::ranges::find_if(
+        replay.buffers, [&](const auto& current) {
+          return current.attach.surface_id == replacement.attach.surface_id;
+        });
+    if (found == replay.buffers.end())
+      replay.buffers.push_back(replacement);
+    else
+      *found = replacement;
+  }
+}
+
 } // namespace glasswyrm::server::compositor_buffer_replay

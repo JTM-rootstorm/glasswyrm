@@ -34,16 +34,24 @@ struct SocketPair {
   }
 };
 
-void establish(glasswyrm::server::ClientConnection& connection,
-               const int peer) {
+std::vector<std::uint8_t> establish(
+    glasswyrm::server::ClientConnection& connection, const int peer) {
   constexpr std::array<std::uint8_t, 12> setup{'l', 0, 11, 0, 0, 0,
                                                 0,   0, 0,  0, 0, 0};
   require(::send(peer, setup.data(), setup.size(), 0) == 12, "send setup");
   connection.handle_events(POLLIN);
   connection.handle_events(POLLOUT);
   std::array<std::uint8_t, 8192> reply{};
-  require(::recv(peer, reply.data(), reply.size(), 0) > 0,
-          "receive setup reply");
+  const auto size = ::recv(peer, reply.data(), reply.size(), 0);
+  require(size > 0, "receive setup reply");
+  return {reply.begin(), reply.begin() + size};
+}
+
+std::uint16_t little_u16(const std::vector<std::uint8_t>& bytes,
+                         const std::size_t offset) {
+  require(offset + 2 <= bytes.size(), "setup geometry field is in bounds");
+  return static_cast<std::uint16_t>(bytes[offset]) |
+         static_cast<std::uint16_t>(bytes[offset + 1] << 8U);
 }
 
 std::vector<std::uint8_t> map_then_focus(const std::uint32_t window) {
@@ -118,6 +126,25 @@ void test_pipelined_bytes_resume_once() {
           "pending request resumes once at the next exact sequence");
 }
 
+void test_setup_uses_server_screen_geometry() {
+  auto screen = gw::protocol::x11::kScreenModel;
+  screen.width_pixels = 1440;
+  screen.height_pixels = 600;
+  screen.width_millimeters = 381;
+  screen.height_millimeters = 159;
+  glasswyrm::server::ServerState state(screen);
+  SocketPair sockets;
+  glasswyrm::server::ClientConnection connection(sockets.server, 4,
+                                                  0x00800000U, state);
+  sockets.server = -1;
+  const auto reply = establish(connection, sockets.client);
+  require(little_u16(reply, 100) == screen.width_pixels &&
+              little_u16(reply, 102) == screen.height_pixels &&
+              little_u16(reply, 104) == screen.width_millimeters &&
+              little_u16(reply, 106) == screen.height_millimeters,
+          "client setup reply snapshots the current ServerState geometry");
+}
+
 void test_full_handler_returns_error_without_blocking() {
   constexpr std::uint32_t base = 0x00400000U;
   constexpr std::uint32_t window = base + 1;
@@ -177,6 +204,7 @@ void test_clear_area_forwards_expose_intent() {
 }  // namespace
 
 int main() {
+  test_setup_uses_server_screen_geometry();
   test_pipelined_bytes_resume_once();
   test_full_handler_returns_error_without_blocking();
   test_clear_area_forwards_expose_intent();
