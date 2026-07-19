@@ -23,8 +23,25 @@ bool parse_mode(const std::string_view text, ClientMode &mode) noexcept {
     mode = ClientMode::Windowed;
   else if (text == "app-requested")
     mode = ClientMode::AppRequested;
+  else if (text == "preference")
+    mode = ClientMode::Preference;
   else if (text == "cadence")
     mode = ClientMode::Cadence;
+  else
+    return false;
+  return true;
+}
+
+bool parse_preference(const std::string_view text,
+                      ClientPreference &preference) noexcept {
+  if (text == "default")
+    preference = ClientPreference::Default;
+  else if (text == "disable")
+    preference = ClientPreference::Disable;
+  else if (text == "allow")
+    preference = ClientPreference::Allow;
+  else if (text == "prefer")
+    preference = ClientPreference::Prefer;
   else
     return false;
   return true;
@@ -40,7 +57,17 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
     } else if (argument == "--self-test") {
       options.self_test = true;
     } else if (argument == "--prefer") {
+      if (options.preference_set)
+        return false;
       options.prefer = true;
+      options.preference = ClientPreference::Prefer;
+      options.preference_set = true;
+    } else if (argument == "--preference" && index + 1 < argc) {
+      if (options.preference_set ||
+          !parse_preference(argv[++index], options.preference))
+        return false;
+      options.preference_set = true;
+      options.prefer = options.preference == ClientPreference::Prefer;
     } else if (argument == "--display" && index + 1 < argc) {
       options.display = argv[++index];
     } else if (argument == "--result" && index + 1 < argc) {
@@ -72,12 +99,32 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
   if (options.mode != ClientMode::Cadence && options.frame_count_set &&
       options.frame_count != 1)
     return false;
-  if (options.mode == ClientMode::AppRequested)
+  if (options.mode == ClientMode::Preference && options.preference_set)
+    return false;
+  if (options.mode == ClientMode::AppRequested && !options.preference_set) {
     options.prefer = true;
+    options.preference = ClientPreference::Prefer;
+    options.preference_set = true;
+  }
   if (options.help || options.self_test)
     return true;
   return options.mode_set && !options.display.empty() &&
          !options.result_path.empty();
+}
+
+std::string_view
+client_preference_name(const ClientPreference preference) noexcept {
+  switch (preference) {
+  case ClientPreference::Default:
+    return "Default";
+  case ClientPreference::Disable:
+    return "Disable";
+  case ClientPreference::Allow:
+    return "Allow";
+  case ClientPreference::Prefer:
+    return "Prefer";
+  }
+  return {};
 }
 
 std::string_view client_mode_name(const ClientMode mode) noexcept {
@@ -90,6 +137,8 @@ std::string_view client_mode_name(const ClientMode mode) noexcept {
     return "windowed";
   case ClientMode::AppRequested:
     return "app-requested";
+  case ClientMode::Preference:
+    return "preference";
   case ClientMode::Cadence:
     return "cadence";
   }
