@@ -403,8 +403,12 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
       releases_.push_back({release->buffer_id, release->reason});
       if (vrr_profile_ && frame_acknowledged_) {
         vrr_response_.released_buffer_ids.push_back(release->buffer_id);
-        const auto expected = content_submission_ ? pending_content_.buffers.size()
-                                                  : pending_.buffers.size();
+        const auto* expectation = vrr_cache_.expectation();
+        if (!expectation) {
+          error = "M14 compositor buffer release has no response expectation";
+          return PeerProcessOutcome::Fatal;
+        }
+        const auto expected = expectation->release_buffer_ids.size();
         if (vrr_response_.released_buffer_ids.size() == expected)
           return finish_vrr_response(error);
         if (vrr_response_.released_buffer_ids.size() > expected) {
@@ -453,9 +457,12 @@ PeerProcessOutcome CompositorPeer::drain(std::string &error) {
     if (vrr_profile_) {
       vrr_response_.acknowledgement = *ack;
       frame_acknowledged_ = true;
-      const auto expected_releases = content_submission_
-                                         ? pending_content_.buffers.size()
-                                         : pending_.buffers.size();
+      const auto* expectation = vrr_cache_.expectation();
+      if (!expectation) {
+        error = "M14 compositor acknowledgement has no response expectation";
+        return PeerProcessOutcome::Fatal;
+      }
+      const auto expected_releases = expectation->release_buffer_ids.size();
       if (expected_releases == 0) return finish_vrr_response(error);
       continue;
     }
@@ -518,17 +525,17 @@ PeerProcessOutcome CompositorPeer::finish_vrr_response(std::string& error) {
     static_cast<void>(mode);
     expected_ids.insert(id);
   }
-  std::set<std::uint64_t> expected_releases;
-  const auto& buffers = content_submission_ ? pending_content_.buffers
-                                            : pending_.buffers;
-  for (const auto& buffer : buffers)
-    expected_releases.insert(buffer.attach.buffer_id);
+  const auto* expectation = vrr_cache_.expectation();
+  if (!expectation) {
+    error = "M14 compositor response has no staged expectation";
+    return PeerProcessOutcome::Fatal;
+  }
   const std::set<std::uint64_t> actual_releases(
       vrr_response_.released_buffer_ids.begin(),
       vrr_response_.released_buffer_ids.end());
   if (states != expected_ids || timings != expected_ids ||
       actual_releases.size() != vrr_response_.released_buffer_ids.size() ||
-      actual_releases != expected_releases) {
+      actual_releases != expectation->release_buffer_ids) {
     error = "M14 compositor response batch is incomplete";
     return PeerProcessOutcome::Fatal;
   }

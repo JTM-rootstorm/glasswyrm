@@ -4,6 +4,7 @@
 
 #include <glasswyrm/ipc.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fcntl.h>
@@ -191,10 +192,10 @@ gwipc_surface_vrr_state vrr_surface(const std::uint64_t generation,
   return value;
 }
 
-gwipc_buffer_attach attachment() {
+gwipc_buffer_attach attachment(const std::uint64_t buffer_id = 100) {
   gwipc_buffer_attach value{};
   value.struct_size = sizeof(value);
-  value.buffer_id = 100;
+  value.buffer_id = buffer_id;
   value.surface_id = 10;
   value.width = value.height = 2;
   value.stride = 8;
@@ -230,7 +231,8 @@ gwipc_frame_commit frame(const std::uint64_t id) {
 
 void stage(gw::compositor::Compositor& compositor,
            const gwipc_vrr_policy_mode mode, const std::uint64_t generation,
-           const bool attach_buffer, std::string& error) {
+           const bool attach_buffer, std::string& error,
+           const std::uint64_t buffer_id = 100) {
   require(compositor.begin_snapshot(7) && compositor.apply(output()) &&
               compositor.apply(surface()) &&
               compositor.apply(membership()) &&
@@ -240,9 +242,30 @@ void stage(gw::compositor::Compositor& compositor,
                   generation, mode != GWIPC_VRR_POLICY_OFF)),
           "stage complete M14 snapshot");
   if (attach_buffer)
-    require(compositor.attach(attachment(), buffer_fd(), error),
+    require(compositor.attach(attachment(buffer_id), buffer_fd(), error),
             "attach M14 window buffer");
   require(compositor.end_snapshot(), "finish complete M14 snapshot");
+}
+
+bool is_release(const gw::compositor::VrrResponseMessage& response,
+                const std::uint64_t buffer_id,
+                const gwipc_buffer_release_reason reason) {
+  gwipc_buffer_release release{};
+  release.struct_size = sizeof(release);
+  release.buffer_id = buffer_id;
+  release.reason = reason;
+  gwipc_contract_payload* raw = nullptr;
+  if (gwipc_contract_encode_buffer_release(&release, &raw) != GWIPC_STATUS_OK)
+    return false;
+  const std::unique_ptr<gwipc_contract_payload,
+                        decltype(&gwipc_contract_payload_destroy)>
+      expected(raw, gwipc_contract_payload_destroy);
+  std::size_t expected_size = 0;
+  const auto* expected_bytes =
+      gwipc_contract_payload_data(expected.get(), &expected_size);
+  return response.payload.size() == expected_size && expected_bytes != nullptr &&
+         std::equal(response.payload.begin(), response.payload.end(),
+                    expected_bytes);
 }
 
 }  // namespace
@@ -296,5 +319,23 @@ int main() {
               observed->hashes.at(0) == observed->hashes.at(1) &&
               observed->hashes.at(1) == observed->hashes.at(2),
           "unchanged pixels still present the policy transition after retry: " +
+              error);
+
+  stage(compositor, GWIPC_VRR_POLICY_OFF, 2, true, error, 101);
+  const auto replaced = compositor.commit(frame(4), error);
+  require(replaced.result == GWIPC_FRAME_ACCEPTED &&
+              replaced.disposition ==
+                  gw::compositor::PresentedFrame::Disposition::Complete &&
+              replaced.vrr_response.size() == 4 &&
+              replaced.vrr_response[0].type ==
+                  GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT &&
+              replaced.vrr_response[1].type ==
+                  GWIPC_MESSAGE_PRESENTATION_TIMING &&
+              replaced.vrr_response[2].type ==
+                  GWIPC_MESSAGE_FRAME_ACKNOWLEDGED &&
+              replaced.vrr_response[3].type == GWIPC_MESSAGE_BUFFER_RELEASE &&
+              is_release(replaced.vrr_response[3], 100,
+                         GWIPC_BUFFER_RELEASE_REPLACED),
+          "replacement M14 response releases only the old buffer as replaced: " +
               error);
 }

@@ -72,6 +72,21 @@ if get_option('glasswyrmd')
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
     )
+    compositor_peer_vrr_buffer_release_test = executable(
+      'compositor_peer_vrr_buffer_release_test',
+      files(
+        tests_source_dir / 'integration/compositor_peer_vrr_buffer_release_test.cpp',
+      ),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test(
+      'compositor-peer-vrr-buffer-release',
+      compositor_peer_vrr_buffer_release_test,
+      args: [gwcomp_program.full_path()],
+      depends: [gwcomp_program],
+      timeout: 10,
+    )
     server_vrr_lifecycle_test = executable(
       'server_vrr_lifecycle_test',
       files(tests_source_dir / 'integration/server_vrr_lifecycle_test.cpp'),

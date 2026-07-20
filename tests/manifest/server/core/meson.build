@@ -134,6 +134,7 @@ if get_option('glasswyrmd')
       ['server-vrr-state-cache', 'server_vrr_state_cache_test.cpp'],
       ['server-vrr-projection', 'server_vrr_projection_test.cpp'],
       ['server-vrr-transaction', 'server_vrr_transaction_test.cpp'],
+      ['server-vrr-buffer-retirement', 'compositor_buffer_retirement_test.cpp'],
     ]
       server_vrr_test_executable = executable(
         server_vrr_test[0].underscorify(),

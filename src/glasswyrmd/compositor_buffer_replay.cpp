@@ -133,6 +133,47 @@ bool rearm_content(
   return true;
 }
 
+std::set<std::uint64_t> retired_buffer_ids(
+    const CompositorSnapshotSubmission& submission,
+    const CompositorSnapshotSubmission& replay) {
+  std::set<std::uint64_t> retained_surfaces;
+  for (const auto& surface : submission.surfaces)
+    retained_surfaces.insert(surface.surface_id);
+
+  std::map<std::uint64_t, std::uint64_t> replacements;
+  for (const auto& buffer : submission.buffers)
+    replacements.insert_or_assign(buffer.attach.surface_id,
+                                  buffer.attach.buffer_id);
+
+  std::set<std::uint64_t> retired;
+  for (const auto& buffer : replay.buffers) {
+    const auto replacement = replacements.find(buffer.attach.surface_id);
+    if (!retained_surfaces.contains(buffer.attach.surface_id) ||
+        (replacement != replacements.end() &&
+         replacement->second != buffer.attach.buffer_id))
+      retired.insert(buffer.attach.buffer_id);
+  }
+  return retired;
+}
+
+std::set<std::uint64_t> retired_buffer_ids(
+    const CompositorContentSubmission& submission,
+    const CompositorSnapshotSubmission& replay) {
+  std::map<std::uint64_t, std::uint64_t> attached;
+  for (const auto& buffer : replay.buffers)
+    attached.insert_or_assign(buffer.attach.surface_id,
+                              buffer.attach.buffer_id);
+
+  std::set<std::uint64_t> retired;
+  for (const auto& replacement : submission.buffers) {
+    const auto current = attached.find(replacement.attach.surface_id);
+    if (current != attached.end() &&
+        current->second != replacement.attach.buffer_id)
+      retired.insert(current->second);
+  }
+  return retired;
+}
+
 void promote(const CompositorSnapshotSubmission& pending,
              CompositorSnapshotSubmission& replay) {
   CompositorSnapshotSubmission next = pending;
