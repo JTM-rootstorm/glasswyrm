@@ -43,6 +43,28 @@ headless_stack=$(sed -n '/^start_headless_stack()/,/^}/p' <<<"$guest")
 grep -F -- '--game-compat' <<<"$headless_stack" >/dev/null ||
   fail 'M14 headless policy stack does not enable the EWMH game profile'
 
+policy_client=$(sed -n '/^run_policy_client()/,/^}/p' <<<"$guest")
+grep -Fx -- '  wait_policy_cleanup' <<<"$policy_client" >/dev/null ||
+  fail 'M14 single-client policy transitions do not wait for cleanup'
+focus_restore=$(sed -n '/^wait_focus_restore()/,/^}/p' <<<"$guest")
+for expected in 'candidate_window' 'client.get("window")' 'x.get("name")=="LEFT"'; do
+  grep -F -- "$expected" <<<"$focus_restore" >/dev/null ||
+    fail "M14 focus restoration predicate lacks: $expected"
+done
+focus_handoff=$(sed -n '/wait "$focus_b"; client_pid=0/,/wait "$focus_a_pid"; focus_a_pid=0/p' \
+  <<<"$guest")
+grep -Fx -- \
+  'wait_focus_restore "$work/gwinfo-focus-a.json" "$work/client-focus-a.json"' \
+  <<<"$focus_handoff" >/dev/null ||
+  fail 'M14 focused-client handoff does not wait for candidate restoration'
+if grep -F -- 'sleep .2' <<<"$focus_handoff" >/dev/null; then
+  fail 'M14 focused-client handoff still relies on a fixed delay'
+fi
+focus_cleanup=$(sed -n '/wait "$focus_a_pid"; focus_a_pid=0/,/result\[gwout_vrr\]=passed/p' \
+  <<<"$guest")
+grep -Fx -- 'wait_policy_cleanup' <<<"$focus_cleanup" >/dev/null ||
+  fail 'M14 focused-client transition does not wait for cleanup'
+
 for expected in \
   6864ea631d61636289a21c7d2d6655a17be0c004 \
   "snapshot name 'base'" 'snapshot_name=base' \

@@ -354,6 +354,24 @@ assert d.get("vrr") and all(x.get("candidate_window")==0 for x in d["vrr"])' \
   [[ ! -s $state ]] || cat "$state" >&2
   return 1
 }
+wait_focus_restore() {
+  local state=$1 client_state=$2
+  for _ in {1..400}; do
+    if "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+          >"$state" 2>/dev/null &&
+       python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); client=json.load(open(sys.argv[2]))
+left=[x for x in d.get("vrr",[]) if x.get("name")=="LEFT"]
+assert len(left)==1 and left[0].get("candidate_window")==client.get("window")' \
+          "$state" "$client_state" 2>/dev/null; then
+      return
+    fi
+    sleep .05
+  done
+  printf 'Timed out waiting for M14 focus restoration\n' >&2
+  [[ ! -s $state ]] || cat "$state" >&2
+  return 1
+}
 run_policy_client() {
   local label=$1 mode=$2 client=$3 preference=${4:-}
   "$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr "$mode" --json \
@@ -388,10 +406,9 @@ wait_file "$work/client-focus-b.json"
 "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
   >"$work/gwinfo-focus-b.json"
 wait "$focus_b"; client_pid=0
-sleep .2
-"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
-  >"$work/gwinfo-focus-a.json"
+wait_focus_restore "$work/gwinfo-focus-a.json" "$work/client-focus-a.json"
 wait "$focus_a_pid"; focus_a_pid=0
+wait_policy_cleanup
 
 python3 - "$artifact_dir/milestone14-gwout.log" <<'PY'
 import json,sys
