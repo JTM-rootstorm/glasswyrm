@@ -69,6 +69,7 @@ for expected in \
   '--headless-vrr LEFT=40000-60000' '--headless-vrr RIGHT=48000-75000' \
   '--vrr-report' '--vrr-protocol' '--vrr "$mode"' 'gwinfo" --socket' \
   'm14_vrr_client' off fullscreen focused app-requested always-eligible borderless \
+  'wait_policy_cleanup' 'coordinated M14 client cleanup' \
   '--preference "$preference"' 'm12/acquire_sdl.sh' 'm12/build_clients.sh' \
   5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 \
   'systemctl restart gwm-m14-headless.service' \

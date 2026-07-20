@@ -335,6 +335,25 @@ wait_file() {
   printf 'Timed out waiting for M14 file: %s\n' "$path" >&2
   return 1
 }
+wait_policy_cleanup() {
+  local state="$work/gwinfo-cleanup.json"
+  for _ in {1..400}; do
+    if "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+          >"$state" 2>/dev/null &&
+       python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+assert not d.get("windows")
+assert d.get("vrr") and all(x.get("candidate_window")==0 for x in d["vrr"])' \
+          "$state" 2>/dev/null; then
+      rm -f "$state"
+      return
+    fi
+    sleep .05
+  done
+  printf 'Timed out waiting for coordinated M14 client cleanup\n' >&2
+  [[ ! -s $state ]] || cat "$state" >&2
+  return 1
+}
 run_policy_client() {
   local label=$1 mode=$2 client=$3 preference=${4:-}
   "$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr "$mode" --json \
@@ -347,6 +366,7 @@ run_policy_client() {
   "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
     >"$work/gwinfo-$label.json"
   wait "$client_pid"; client_pid=0
+  wait_policy_cleanup
 }
 for mode in off fullscreen focused app-requested always-eligible; do
   run_policy_client "$mode" "$mode" "${client_mode[$mode]}"
