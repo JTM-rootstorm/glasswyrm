@@ -372,6 +372,31 @@ assert len(left)==1 and left[0].get("candidate_window")==client.get("window")' \
   [[ ! -s $state ]] || cat "$state" >&2
   return 1
 }
+wait_restart_state() {
+  local state=$1 client_state=$2
+  for _ in {1..400}; do
+    if "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+          >"$state" 2>/dev/null &&
+       python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); client=json.load(open(sys.argv[2]))
+window=client.get("window")
+left=[x for x in d.get("vrr",[]) if x.get("name")=="LEFT"]
+assert isinstance(window,int) and window!=0 and len(left)==1
+state=left[0]
+assert state.get("policy")=="focused" and state.get("decision")=="enabled"
+assert state.get("desired_enabled") is True
+assert state.get("effective_enabled") is True
+assert state.get("candidate_window")==window
+assert state.get("reasons")==["simulated-headless"]' \
+          "$state" "$client_state" 2>/dev/null; then
+      return
+    fi
+    sleep .05
+  done
+  printf 'Timed out waiting for stable M14 restart state\n' >&2
+  [[ ! -s $state ]] || cat "$state" >&2
+  return 1
+}
 run_policy_client() {
   local label=$1 mode=$2 client=$3 preference=${4:-}
   "$build/tools/gwout" --socket "$runtime/control.sock" set LEFT --vrr "$mode" --json \
@@ -423,21 +448,15 @@ result[gwout_vrr]=passed
 DISPLAY=:99 "$vrr_client" --display :99 --mode windowed --hold-ms 8000 \
   --result "$work/client-restart.json" & client_pid=$!
 wait_file "$work/client-restart.json"
-"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
-  >"$work/pre-restart.json"
+wait_restart_state "$work/pre-restart.json" "$work/client-restart.json"
 systemctl restart gwm-m14-headless.service
 wait_socket "$runtime/gwm.sock"
-"$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json >"$work/post-gwm.json"
+wait_restart_state "$work/post-gwm.json" "$work/client-restart.json"
 result[gwm_replay]=passed
 mv "$work/headless-vrr.jsonl" "$work/headless-vrr-before-restart.jsonl"
 systemctl restart gwcomp-m14-headless.service
 wait_socket "$runtime/gwcomp.sock"
-for _ in {1..200}; do
-  "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
-    >"$work/post-gwcomp.json" 2>/dev/null && break
-  sleep .05
-done
-[[ -s $work/post-gwcomp.json ]]
+wait_restart_state "$work/post-gwcomp.json" "$work/client-restart.json"
 result[compositor_replay]=passed
 python3 - "$work/pre-restart.json" "$work/post-gwm.json" \
   "$work/post-gwcomp.json" "$work/client-restart.json" \
