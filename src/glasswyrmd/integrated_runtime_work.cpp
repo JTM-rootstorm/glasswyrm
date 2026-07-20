@@ -159,7 +159,9 @@ bool ServerRuntime::service_peer_replay(std::string& error) {
 bool ServerRuntime::service_lifecycle_work(
     const std::vector<CompositorBufferRelease>& compositor_releases) {
   if (lifecycle_ && bridge_->policy_result_ready()) {
-    const auto* expected = lifecycle_->pending_policy_snapshot();
+    const auto* expected = lifecycle_policy_reconciliation_
+                               ? &*lifecycle_policy_reconciliation_
+                               : lifecycle_->pending_policy_snapshot();
     auto evaluated = expected
                          ? apply_policy_result(*expected,
                                                bridge_->policy_result(),
@@ -171,6 +173,7 @@ bool ServerRuntime::service_lifecycle_work(
                                                    : nullptr)
                          : std::nullopt;
     if (!evaluated) {
+      lifecycle_policy_reconciliation_.reset();
       if (server_.options_.vrr_protocol) {
         auto* cache = bridge_->vrr_cache();
         if (!cache || !lifecycle_vrr_before_) {
@@ -187,13 +190,38 @@ bool ServerRuntime::service_lifecycle_work(
                      "glasswyrmd: invalid policy lifecycle result\n");
         return false;
       }
-    } else if (!lifecycle_->policy_accepted(std::move(*evaluated))) {
-      std::fprintf(stderr,
-                   "glasswyrmd: policy lifecycle transition failed\n");
-      return false;
+    } else if (server_.options_.vrr_protocol &&
+               !policy_output_facts_match(*expected, *evaluated)) {
+      if (lifecycle_policy_reconciliation_) {
+        std::fprintf(stderr,
+                     "glasswyrmd: VRR policy output membership did not "
+                     "converge after one reconciliation pass\n");
+        return false;
+      }
+      if (!bridge_->prepare_policy_reconciliation()) {
+        std::fprintf(stderr,
+                     "glasswyrmd: could not prepare VRR policy membership "
+                     "reconciliation\n");
+        return false;
+      }
+      lifecycle_policy_reconciliation_ = std::move(*evaluated);
+      if (!send_policy(*lifecycle_policy_reconciliation_)) {
+        std::fprintf(stderr,
+                     "glasswyrmd: could not submit VRR policy membership "
+                     "reconciliation\n");
+        return false;
+      }
+    } else {
+      lifecycle_policy_reconciliation_.reset();
+      if (!lifecycle_->policy_accepted(std::move(*evaluated))) {
+        std::fprintf(stderr,
+                     "glasswyrmd: policy lifecycle transition failed\n");
+        return false;
+      }
     }
   }
   if (lifecycle_ && bridge_->policy_rejected_ready()) {
+    lifecycle_policy_reconciliation_.reset();
     if (server_.options_.vrr_protocol) {
       auto* cache = bridge_->vrr_cache();
       if (!cache || !lifecycle_vrr_before_)
@@ -202,6 +230,14 @@ bool ServerRuntime::service_lifecycle_work(
     }
     if (!lifecycle_->policy_rejected()) {
       std::fprintf(stderr, "glasswyrmd: policy rejection transition failed\n");
+      return false;
+    }
+  }
+  if (lifecycle_ && bridge_->compositor_interrupted_ready()) {
+    if (content_presenter_) content_presenter_->reject_lifecycle();
+    if (!lifecycle_->compositor_interrupted()) {
+      std::fprintf(stderr,
+                   "glasswyrmd: compositor retry transition failed\n");
       return false;
     }
   }

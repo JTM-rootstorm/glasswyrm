@@ -73,6 +73,9 @@ void ServerRuntime::initialize_lifecycle() {
   callbacks.fatal = [] { SignalRuntime::request_stop(); };
   callbacks.rebase = rebase_lifecycle_operation;
   callbacks.prepare_rollback = [this] { return bridge_->prepare_rollback(); };
+  callbacks.prepare_compositor_retry = [this] {
+    return bridge_->prepare_compositor_retry();
+  };
   lifecycle_ = std::make_unique<LifecycleCoordinator>(
       server_.state_.lifecycle_snapshot(), 1024, std::move(callbacks));
   server_.deferred_lifecycle_handler_ =
@@ -438,6 +441,7 @@ void ServerRuntime::complete_lifecycle(const std::uint64_t token,
   input_transition_before_.reset();
   vrr_event_batch_.reset();
   lifecycle_vrr_before_.reset();
+  lifecycle_policy_reconciliation_.reset();
   pending_mutations_.erase(token);
   if (cleanup_base) server_.pending_resource_bases_.erase(*cleanup_base);
   bridge_->clear_transaction_result();

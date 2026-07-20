@@ -121,6 +121,7 @@ public:
   [[nodiscard]] bool
   can_adopt_output_layout(const output::OutputLayout& layout) const noexcept;
   [[nodiscard]] bool adopt_output_layout(output::OutputLayout layout);
+  [[nodiscard]] bool prepare_reconnect_replay(std::string& error);
   void forget_cursor_replay() noexcept;
   void disconnect() noexcept;
 
@@ -169,6 +170,8 @@ private:
   bool frame_acknowledged_{};
   VrrResponseBatch vrr_response_;
   VrrStateCache vrr_cache_;
+  std::optional<VrrStateCache> accepted_vrr_cache_;
+  std::optional<VrrStateCache> reconnect_staged_vrr_cache_;
   bool content_submission_{};
   std::vector<CompositorSessionStateChange> session_state_changes_;
   std::unique_ptr<CompositorOutputInventory> pending_output_inventory_;

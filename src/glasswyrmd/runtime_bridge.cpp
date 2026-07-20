@@ -137,8 +137,8 @@ RuntimeBridge::RuntimeBridge(std::string policy_path,
       compositor_(std::move(compositor_path), screen, software_content,
                   session_state, cpu_buffer_synchronization, output_model,
                   vrr_profile),
-      deadline_duration_(deadline), output_model_(output_model),
-      vrr_profile_(vrr_profile) {}
+      deadline_duration_(deadline), software_content_(software_content),
+      output_model_(output_model), vrr_profile_(vrr_profile) {}
 
 void RuntimeBridge::start(const Clock::time_point now) noexcept {
   policy_.disconnect();
@@ -324,8 +324,15 @@ bool RuntimeBridge::service(const short policy_revents,
         }
         const auto& replay = compositor_.replay_input();
         const bool resume_compositor_transaction =
-            recovering_ &&
+            !software_content_ && recovering_ &&
             resume_transaction_stage_ == TransactionStage::Compositor;
+        if (software_content_ && replay.commit_id != 0 &&
+            !compositor_.prepare_reconnect_replay(error)) {
+          stage_ = Stage::Failed;
+          if (error.empty())
+            error = "could not prepare output-model content replay";
+          return false;
+        }
         auto submission = resume_compositor_transaction
                               ? pending_compositor_
                           : replay.commit_id != 0
@@ -364,11 +371,13 @@ bool RuntimeBridge::service(const short policy_revents,
         }
         if (resume_transaction_stage_ == TransactionStage::Compositor) {
           if (output_model_) {
-            // The reconnect bootstrap above already submitted the retained
-            // compositor transaction. Its accepted response is the original
-            // transaction's completion, not a replay prelude to a duplicate
-            // commit with the same generation.
-            transaction_stage_ = TransactionStage::Complete;
+            // A metadata-only transaction can itself bootstrap the fresh
+            // compositor. Buffered submissions may omit retained attachments,
+            // so they bootstrap from canonical replay above and surface the
+            // interrupted lifecycle leg for a coordinated rebuild.
+            transaction_stage_ = software_content_
+                                     ? TransactionStage::CompositorInterrupted
+                                     : TransactionStage::Complete;
           } else {
             transaction_stage_ = TransactionStage::PolicyReady;
             if (!submit_compositor(pending_compositor_, resume_error)) {
@@ -377,10 +386,13 @@ bool RuntimeBridge::service(const short policy_revents,
             }
           }
         }
-        if (resume_transaction_stage_ == TransactionStage::Content &&
-            !submit_content(pending_content_, resume_error)) {
-          error = resume_error;
-          return false;
+        if (resume_transaction_stage_ == TransactionStage::Content) {
+          if (software_content_ && output_model_) {
+            transaction_stage_ = TransactionStage::ContentRejected;
+          } else if (!submit_content(pending_content_, resume_error)) {
+            error = resume_error;
+            return false;
+          }
         }
         if (resume_transaction_stage_ == TransactionStage::Cursor) {
           if (!compositor_.submit(pending_compositor_, resume_error)) {
@@ -399,6 +411,8 @@ bool RuntimeBridge::service(const short policy_revents,
             resume_transaction_stage_ == TransactionStage::Complete ||
             resume_transaction_stage_ == TransactionStage::ContentComplete ||
             resume_transaction_stage_ == TransactionStage::CursorComplete ||
+            resume_transaction_stage_ ==
+                TransactionStage::CompositorInterrupted ||
             resume_transaction_stage_ == TransactionStage::CompositorRejected ||
             resume_transaction_stage_ == TransactionStage::ContentRejected ||
             resume_transaction_stage_ == TransactionStage::CursorRejected ||
@@ -503,6 +517,9 @@ bool RuntimeBridge::submit_replay(
 bool RuntimeBridge::compositor_rejected_ready() const noexcept {
   return transaction_stage_ == TransactionStage::CompositorRejected;
 }
+bool RuntimeBridge::compositor_interrupted_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::CompositorInterrupted;
+}
 
 bool RuntimeBridge::compositor_result_ready() const noexcept {
   return transaction_stage_ == TransactionStage::Complete;
@@ -543,11 +560,26 @@ void RuntimeBridge::forget_cursor_replay() noexcept {
     resume_transaction_stage_ = TransactionStage::None;
 }
 
+bool RuntimeBridge::prepare_policy_reconciliation() noexcept {
+  if (!ready() || transaction_stage_ != TransactionStage::PolicyReady)
+    return false;
+  transaction_stage_ = TransactionStage::None;
+  return true;
+}
+
+bool RuntimeBridge::prepare_compositor_retry() noexcept {
+  if (!ready() || transaction_stage_ != TransactionStage::CompositorInterrupted)
+    return false;
+  transaction_stage_ = TransactionStage::PolicyReady;
+  return true;
+}
+
 bool RuntimeBridge::prepare_rollback() noexcept {
   if (!ready() ||
       (transaction_stage_ != TransactionStage::PolicyReady &&
        transaction_stage_ != TransactionStage::PolicyRejected &&
        transaction_stage_ != TransactionStage::Complete &&
+       transaction_stage_ != TransactionStage::CompositorInterrupted &&
        transaction_stage_ != TransactionStage::CompositorRejected))
     return false;
   transaction_stage_ = TransactionStage::None;

@@ -203,6 +203,7 @@ class ServerRuntime {
   std::optional<InputTransitionState> input_transition_before_;
   std::optional<VrrEventBatch> vrr_event_batch_;
   std::optional<VrrStateCache> lifecycle_vrr_before_;
+  std::optional<LifecycleSnapshot> lifecycle_policy_reconciliation_;
   bool content_replay_attempted_{false};
   std::map<std::uint64_t, PendingMutation> pending_mutations_;
 #endif

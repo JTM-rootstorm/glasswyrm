@@ -204,6 +204,19 @@ std::optional<LifecycleSnapshot> apply_policy_result(
   return evaluated;
 }
 
+bool policy_output_facts_match(const LifecycleSnapshot& policy_input,
+                               const LifecycleSnapshot& evaluated) noexcept {
+  if (policy_input.windows.size() != evaluated.windows.size()) return false;
+  for (const auto& [window_id, before] : policy_input.windows) {
+    const auto after = evaluated.windows.find(window_id);
+    if (after == evaluated.windows.end() ||
+        before.assigned_output_id != after->second.assigned_output_id ||
+        before.output_memberships != after->second.output_memberships)
+      return false;
+  }
+  return true;
+}
+
 CompositorSnapshotSubmission project_compositor(const LifecycleSnapshot& snapshot,
                                                 std::uint64_t commit,
                                                 std::uint64_t generation,

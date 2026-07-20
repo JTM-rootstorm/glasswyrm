@@ -2,6 +2,9 @@
 #include "glasswyrmd/cursor_presenter.hpp"
 #include "glasswyrmd/lifecycle_projection.hpp"
 #include "glasswyrmd/output_scene_projection.hpp"
+#include "glasswyrmd/pixel_storage.hpp"
+#include "glasswyrmd/published_buffer.hpp"
+#include "glasswyrmd/vrr_policy_projection.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <chrono>
@@ -67,6 +70,13 @@ void stop(const pid_t child) {
   (void)::kill(child, SIGTERM);
   int status = 0;
   require(::waitpid(child, &status, 0) == child, "reap bridge peer");
+}
+
+void stop_while_suspended(const pid_t child) {
+  require(child > 0 && ::kill(child, SIGKILL) == 0,
+          "kill suspended bridge peer");
+  int status = 0;
+  require(::waitpid(child, &status, 0) == child, "reap suspended bridge peer");
 }
 
 bool service_once(RuntimeBridge& bridge, std::string& error) {
@@ -313,7 +323,7 @@ int main(int argc, char** argv) {
   RuntimeBridge vrr_bridge(
       vrr_policy_socket, vrr_compositor_socket,
       gw::protocol::x11::kScreenModel, std::chrono::seconds(10), true, false,
-      false, true, true);
+      true, true, true);
   vrr_bridge.start();
   drive_until(vrr_bridge, [&] { return vrr_bridge.ready(); },
               "VRR reconnect bridge bootstrap timed out");
@@ -322,43 +332,224 @@ int main(int argc, char** argv) {
   require(vrr_layout && vrr_cache && vrr_cache->outputs().size() == 2,
           "VRR reconnect bridge exposes complete inventory");
   const auto changed_output = vrr_layout->output_order.front().value;
-  require(vrr_cache->set_policy(changed_output,
-                                GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE),
-          "stage changed VRR policy before lifecycle transaction");
-  glasswyrm::server::LifecycleSnapshot vrr_snapshot;
-  const auto vrr_policy = glasswyrm::server::project_policy(
-      vrr_snapshot, 20, 20, vrr_layout, vrr_cache);
-  require(vrr_bridge.submit_policy(vrr_policy, error),
-          "submit VRR-changing policy transaction");
+
+  require(vrr_cache->set_policy(changed_output, GWIPC_VRR_POLICY_FOCUSED),
+          "restore focused policy for buffered reconnect");
+  glasswyrm::server::LifecycleSnapshot reconnect_membership_snapshot;
+  reconnect_membership_snapshot.root_order = {10};
+  glasswyrm::server::LifecycleWindow reconnect_membership_window;
+  reconnect_membership_window.xid = 10;
+  reconnect_membership_window.parent =
+      reconnect_membership_snapshot.root_window;
+  reconnect_membership_window.requested_width = 320;
+  reconnect_membership_window.requested_height = 200;
+  reconnect_membership_window.map_requested = true;
+  reconnect_membership_window.creation_serial = 1;
+  reconnect_membership_window.map_serial = 2;
+  reconnect_membership_snapshot.windows.emplace(
+      10, reconnect_membership_window);
+  glasswyrm::server::VrrWindowStateStore reconnect_published_vrr;
+  glasswyrm::server::synchronize_vrr_windows(
+      reconnect_membership_snapshot, reconnect_published_vrr, *vrr_cache);
+  const auto reconnect_policy = glasswyrm::server::project_policy(
+      reconnect_membership_snapshot, 20, 20, vrr_layout, vrr_cache);
+  require(vrr_bridge.submit_policy(reconnect_policy, error),
+          "submit membership-invalid buffered baseline policy");
   drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
-              "VRR-changing policy result timed out");
-  const auto evaluated = glasswyrm::server::apply_policy_result(
-      vrr_snapshot, vrr_bridge.policy_result(), vrr_layout, vrr_cache);
-  require(evaluated.has_value(),
-          "VRR-changing policy result stages compositor state");
-  const auto vrr_scene = glasswyrm::server::project_compositor(
-      *evaluated, 21, 21, true, vrr_layout, vrr_cache);
-  require(vrr_bridge.submit_compositor(vrr_scene, error),
-          "submit VRR-changing compositor transaction");
-  stop(vrr_compositor_process);
+              "membership-invalid buffered baseline policy timed out");
+  const auto reconnect_snapshot = glasswyrm::server::apply_policy_result(
+      reconnect_membership_snapshot, vrr_bridge.policy_result(), vrr_layout,
+      vrr_cache);
+  require(reconnect_snapshot &&
+              !vrr_cache->windows().at(10).policy_result->eligible &&
+              (vrr_cache->windows().at(10).policy_result->reason_flags &
+               GWIPC_VRR_REASON_SURFACE_MEMBERSHIP_INVALID) != 0,
+          "buffered baseline retains contract-valid invalid membership");
+  auto pixels = glasswyrm::server::PixelStorage::create(320, 200);
+  require(pixels.has_value(), "create buffered reconnect pixels");
+  pixels->fill({0, 0, 320, 200}, UINT32_C(0x00102030));
+  auto buffer = glasswyrm::server::PublishedWindowBuffer::create(
+      100, 10, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);
+  require(buffer && buffer->signal_ready(),
+          "create synchronized buffered reconnect publication");
+  auto baseline = glasswyrm::server::project_compositor(
+      *reconnect_snapshot, 21, 21, true, vrr_layout, vrr_cache);
+  glasswyrm::server::CompositorSnapshotSubmission::Buffer attachment;
+  attachment.attach.struct_size = sizeof(attachment.attach);
+  attachment.attach.buffer_id = buffer->buffer_id();
+  attachment.attach.surface_id = (UINT64_C(1) << 32U) | 10U;
+  attachment.attach.width = buffer->width();
+  attachment.attach.height = buffer->height();
+  attachment.attach.stride = buffer->stride();
+  attachment.attach.storage_size = buffer->size();
+  attachment.attach.pixel_format = GWIPC_PIXEL_FORMAT_XRGB8888;
+  attachment.attach.alpha_semantics = GWIPC_ALPHA_OPAQUE;
+  attachment.attach.color = {GWIPC_SDR_COLOR_SPACE_SRGB,
+                             GWIPC_TRANSFER_FUNCTION_SRGB,
+                             GWIPC_COLOR_PRIMARIES_SRGB, 0, 0, 0, 0};
+  attachment.attach.synchronization = buffer->synchronization();
+  attachment.fd = buffer->fd();
+  attachment.synchronization_fd = buffer->synchronization_fd();
+  baseline.buffers.push_back(attachment);
+  glasswyrm::server::CompositorSnapshotSubmission::Damage damage;
+  damage.surface_id = attachment.attach.surface_id;
+  damage.rectangles.push_back({0, 0, 320, 200});
+  baseline.damages.push_back(damage);
+  require(vrr_bridge.submit_compositor(baseline, error),
+          "publish synchronized buffered reconnect baseline: " + error);
+  drive_until(vrr_bridge, [&] { return vrr_bridge.compositor_result_ready(); },
+              "buffered reconnect baseline compositor frame timed out");
+  vrr_bridge.clear_transaction_result();
+
+  const auto interrupted_policy = glasswyrm::server::project_policy(
+      *reconnect_snapshot, 22, 22, vrr_layout, vrr_cache);
+  require(vrr_bridge.submit_policy(interrupted_policy, error),
+          "stage interrupted buffered compositor policy");
+  drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
+              "interrupted buffered compositor policy timed out");
+  const auto interrupted_snapshot = glasswyrm::server::apply_policy_result(
+      *reconnect_snapshot, vrr_bridge.policy_result(), vrr_layout, vrr_cache);
+  require(interrupted_snapshot && vrr_cache->generation() == 22,
+          "interrupted policy stages a newer VRR generation");
+  auto delta = glasswyrm::server::project_compositor(
+      *interrupted_snapshot, 23, 23, true, vrr_layout, vrr_cache);
+  delta.commit_id = 23;
+  delta.generation = 23;
+  delta.buffers.clear();
+  delta.damages = baseline.damages;
+  require(::kill(vrr_compositor_process, SIGSTOP) == 0,
+          "suspend compositor before interrupted full frame");
+  require(vrr_bridge.submit_compositor(delta, error),
+          "submit attachment-omitting buffered compositor transaction");
+  stop_while_suspended(vrr_compositor_process);
   drive_until(vrr_bridge, [&] { return !vrr_bridge.ready(); },
-              "in-flight VRR compositor disconnect was not reported");
+              "in-flight buffered compositor disconnect was not reported");
   vrr_compositor_process = launch_output_model_vrr(
       argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump-2");
   drive_until(vrr_bridge,
-              [&] { return vrr_bridge.compositor_result_ready(); },
-              "reconnected VRR compositor transaction did not complete");
-  require(vrr_cache->outputs().at(changed_output).policy.mode ==
-              GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE &&
-              vrr_cache->outputs().at(changed_output).compositor_state &&
-              vrr_cache->outputs()
-                      .at(changed_output)
-                      .compositor_state->requested_mode ==
-                  GWIPC_VRR_POLICY_ALWAYS_ELIGIBLE,
-          "reconnect bootstrap and retained VRR transaction stay consistent");
+              [&] { return vrr_bridge.compositor_interrupted_ready(); },
+              "reconnected buffered compositor did not expose interruption");
+  require(vrr_cache->generation() == 22,
+          "canonical reconnect replay restores the staged VRR generation");
+  const auto rollback_policy = glasswyrm::server::project_policy(
+      *reconnect_snapshot, 24, 24, vrr_layout, vrr_cache);
+  require(vrr_bridge.prepare_rollback() &&
+              vrr_bridge.submit_policy(rollback_policy, error),
+          "interrupted forward frame begins coordinated policy rollback");
+  drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
+              "coordinated rollback policy timed out");
+  const auto rollback_snapshot = glasswyrm::server::apply_policy_result(
+      *reconnect_snapshot, vrr_bridge.policy_result(), vrr_layout, vrr_cache);
+  require(rollback_snapshot && vrr_cache->generation() == 24,
+          "coordinated rollback stages committed VRR policy");
+  auto rollback_scene = glasswyrm::server::project_compositor(
+      *rollback_snapshot, 25, 25, true, vrr_layout, vrr_cache);
+  rollback_scene.damages = baseline.damages;
+  require(::kill(vrr_compositor_process, SIGSTOP) == 0,
+          "suspend compositor before rollback frame");
+  require(vrr_bridge.submit_compositor(rollback_scene, error),
+          "submit coordinated compositor rollback");
+  stop_while_suspended(vrr_compositor_process);
+  drive_until(vrr_bridge, [&] { return !vrr_bridge.ready(); },
+              "in-flight compositor rollback disconnect was not reported");
+  vrr_compositor_process = launch_output_model_vrr(
+      argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump-3");
+  drive_until(vrr_bridge,
+              [&] { return vrr_bridge.compositor_interrupted_ready(); },
+              "reconnected compositor rollback did not expose interruption");
+  require(vrr_cache->generation() == 24,
+          "rollback reconnect restores the staged VRR generation");
+  auto rollback_retry = glasswyrm::server::project_compositor(
+      *rollback_snapshot, 26, 26, true, vrr_layout, vrr_cache);
+  rollback_retry.damages = baseline.damages;
+  require(vrr_bridge.prepare_compositor_retry() &&
+              vrr_bridge.submit_compositor(rollback_retry, error),
+          "retry committed compositor rollback without another policy pass");
+  drive_until(vrr_bridge, [&] { return vrr_bridge.compositor_result_ready(); },
+              "retried committed compositor rollback timed out");
   vrr_bridge.clear_transaction_result();
-  require(vrr_bridge.ready() && vrr_bridge.transaction_idle(),
-          "reconnected VRR transaction completes without a duplicate replay");
+
+  glasswyrm::server::CompositorContentSubmission interrupted_content;
+  interrupted_content.commit_id = 27;
+  interrupted_content.generation = 27;
+  interrupted_content.damages = baseline.damages;
+  require(::kill(vrr_compositor_process, SIGSTOP) == 0,
+          "suspend compositor before interrupted incremental frame");
+  require(vrr_bridge.submit_content(interrupted_content, error),
+          "submit interrupted incremental content frame");
+  stop_while_suspended(vrr_compositor_process);
+  drive_until(vrr_bridge, [&] { return !vrr_bridge.ready(); },
+              "in-flight content disconnect was not reported");
+  vrr_compositor_process = launch_output_model_vrr(
+      argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump-4");
+  drive_until(vrr_bridge, [&] { return vrr_bridge.content_rejected_ready(); },
+              "reconnected content frame did not request canonical replay");
+  require(vrr_cache->generation() == 24,
+          "content reconnect preserves the accepted VRR checkpoint");
+  vrr_bridge.clear_transaction_result();
+
+  require(vrr_cache->set_policy(changed_output, GWIPC_VRR_POLICY_FOCUSED),
+          "stage focused policy for membership reconciliation");
+  glasswyrm::server::LifecycleSnapshot membership_snapshot;
+  membership_snapshot.root_order = {10};
+  glasswyrm::server::LifecycleWindow membership_window;
+  membership_window.xid = 10;
+  membership_window.parent = membership_snapshot.root_window;
+  membership_window.requested_width = 320;
+  membership_window.requested_height = 200;
+  membership_window.map_requested = true;
+  membership_window.creation_serial = 1;
+  membership_window.map_serial = 2;
+  membership_snapshot.windows.emplace(10, membership_window);
+  glasswyrm::server::VrrWindowStateStore published_vrr;
+  glasswyrm::server::synchronize_vrr_windows(
+      membership_snapshot, published_vrr, *vrr_cache);
+  const auto first_membership_policy = glasswyrm::server::project_policy(
+      membership_snapshot, 30, 30, vrr_layout, vrr_cache);
+  const bool first_membership_submitted =
+      vrr_bridge.submit_policy(first_membership_policy, error);
+  require(first_membership_submitted,
+          "submit pre-placement VRR policy transaction: " + error);
+  drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
+              "pre-placement VRR policy result timed out");
+  const auto first_membership_result =
+      glasswyrm::server::apply_policy_result(
+          membership_snapshot, vrr_bridge.policy_result(), vrr_layout,
+          vrr_cache);
+  require(first_membership_result &&
+              !glasswyrm::server::policy_output_facts_match(
+                  membership_snapshot, *first_membership_result) &&
+              !vrr_cache->windows().at(10).policy_result->eligible &&
+              (vrr_cache->windows().at(10).policy_result->reason_flags &
+               GWIPC_VRR_REASON_SURFACE_MEMBERSHIP_INVALID) != 0,
+          "first GWM pass derives output membership without publishing a stale "
+          "candidate");
+  require(vrr_bridge.prepare_policy_reconciliation(),
+          "policy-ready bridge permits a bounded reconciliation pass");
+  const auto second_membership_policy = glasswyrm::server::project_policy(
+      *first_membership_result, 31, 31, vrr_layout, vrr_cache);
+  const bool second_membership_submitted =
+      vrr_bridge.submit_policy(second_membership_policy, error);
+  require(second_membership_submitted,
+          "submit derived-membership VRR policy transaction: " + error);
+  drive_until(vrr_bridge, [&] { return vrr_bridge.policy_result_ready(); },
+              "derived-membership VRR policy result timed out");
+  const auto stable_membership_result =
+      glasswyrm::server::apply_policy_result(
+          *first_membership_result, vrr_bridge.policy_result(), vrr_layout,
+          vrr_cache);
+  require(stable_membership_result &&
+              glasswyrm::server::policy_output_facts_match(
+                  *first_membership_result, *stable_membership_result) &&
+              vrr_cache->windows().at(10).policy_result->eligible &&
+              vrr_cache->windows().at(10).policy_result->selected &&
+              (vrr_cache->windows().at(10).policy_result->reason_flags &
+               GWIPC_VRR_REASON_SURFACE_MEMBERSHIP_INVALID) == 0,
+          "second real GWM pass converges and selects the focused candidate "
+          "before any compositor submission");
+  require(vrr_bridge.prepare_rollback(),
+          "clear the isolated reconciliation transaction");
+
   stop(vrr_compositor_process);
   stop(vrr_policy_process);
   return 0;

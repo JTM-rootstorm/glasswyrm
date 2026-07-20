@@ -259,6 +259,7 @@ bool CompositorPeer::accept_output_inventory(std::string &error) {
         return false;
       }
     }
+    if (!accepted_vrr_cache_) accepted_vrr_cache_ = vrr_cache_;
   }
   pending_output_inventory_.reset();
   state_ = PeerBootstrapState::Synchronized;
@@ -543,6 +544,7 @@ PeerProcessOutcome CompositorPeer::finish_vrr_response(std::string& error) {
     error = "M14 compositor response failed server promotion preflight";
     return PeerProcessOutcome::Fatal;
   }
+  accepted_vrr_cache_ = vrr_cache_;
   if (content_submission_)
     compositor_buffer_replay::promote_content(pending_content_, replay_input_);
   else
@@ -550,6 +552,10 @@ PeerProcessOutcome CompositorPeer::finish_vrr_response(std::string& error) {
   content_submission_ = false;
   frame_acknowledged_ = false;
   state_ = PeerBootstrapState::Synchronized;
+  if (reconnect_staged_vrr_cache_) {
+    vrr_cache_ = std::move(*reconnect_staged_vrr_cache_);
+    reconnect_staged_vrr_cache_.reset();
+  }
   error.clear();
   return PeerProcessOutcome::Progress;
 }
@@ -584,6 +590,29 @@ void CompositorPeer::forget_cursor_replay() noexcept {
   forget_cursor(pending_);
 }
 
+bool CompositorPeer::prepare_reconnect_replay(std::string& error) {
+  if (replay_input_.commit_id == 0) {
+    error.clear();
+    return true;
+  }
+  if (vrr_profile_) {
+    if (!accepted_vrr_cache_ || reconnect_staged_vrr_cache_) {
+      error = "accepted M14 replay checkpoint is unavailable";
+      return false;
+    }
+    reconnect_staged_vrr_cache_ = vrr_cache_;
+    vrr_cache_ = *accepted_vrr_cache_;
+  }
+  if (!compositor_buffer_replay::prepare(replay_input_, error)) {
+    if (reconnect_staged_vrr_cache_) {
+      vrr_cache_ = std::move(*reconnect_staged_vrr_cache_);
+      reconnect_staged_vrr_cache_.reset();
+    }
+    return false;
+  }
+  return true;
+}
+
 void CompositorPeer::disconnect() noexcept {
   transport_.disconnect();
   state_ = PeerBootstrapState::Disconnected;
@@ -595,5 +624,9 @@ void CompositorPeer::disconnect() noexcept {
   releases_.clear();
   session_state_changes_.clear();
   pending_output_inventory_.reset();
+  if (reconnect_staged_vrr_cache_) {
+    vrr_cache_ = std::move(*reconnect_staged_vrr_cache_);
+    reconnect_staged_vrr_cache_.reset();
+  }
 }
 } // namespace glasswyrm::server

@@ -18,6 +18,9 @@ namespace glasswyrm::server {
     const LifecycleSnapshot&, const PolicySnapshotResult&,
     const output::OutputLayout* layout = nullptr,
     VrrStateCache* vrr = nullptr);
+[[nodiscard]] bool policy_output_facts_match(
+    const LifecycleSnapshot& policy_input,
+    const LifecycleSnapshot& evaluated) noexcept;
 [[nodiscard]] CompositorSnapshotSubmission project_compositor(
     const LifecycleSnapshot&, std::uint64_t commit, std::uint64_t generation,
     bool software_content = false,
