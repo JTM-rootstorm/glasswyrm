@@ -160,6 +160,114 @@ void test_one_lifecycle_frame() {
           "one compositor frame carries exact output and surface VRR state");
 }
 
+void test_membership_reconciliation_before_compositor() {
+  const auto outputs = layout();
+  LifecycleSnapshot proposed;
+  proposed.root_window = 1;
+  proposed.workspace_id = 1;
+  proposed.root_order = {10};
+  LifecycleWindow window;
+  window.xid = 10;
+  window.parent = 1;
+  window.requested_width = 640;
+  window.requested_height = 480;
+  window.map_requested = true;
+  proposed.windows.emplace(window.xid, window);
+
+  auto vrr = cache();
+  require(vrr.set_policy(5, GWIPC_VRR_POLICY_FOCUSED),
+          "select focused VRR policy for membership reconciliation");
+  VrrWindowStateStore published;
+  synchronize_vrr_windows(proposed, published, vrr);
+
+  const auto first_submission =
+      project_policy(proposed, 20, 30, &outputs, &vrr);
+  const std::array canonical_outputs{UINT64_C(5)};
+  require(ipc::internal::decode_vrr_membership_hint(
+              canonical_outputs,
+              first_submission.output_hints.front().preferred_output_id) ==
+              std::vector<std::uint64_t>{},
+          "first mapped-window policy pass carries the pre-placement empty "
+          "membership fact");
+
+  PolicySnapshotResult first_result;
+  first_result.generation = 30;
+  gwipc_policy_window_state placed{};
+  placed.struct_size = sizeof(placed);
+  placed.window_id = 10;
+  placed.workspace_id = 1;
+  placed.output_id = 5;
+  placed.final_width = 640;
+  placed.final_height = 480;
+  placed.stacking = 0;
+  placed.visible = 1;
+  placed.focused = 1;
+  placed.managed = 1;
+  placed.fullscreen_eligible = GWIPC_TRI_STATE_FALSE;
+  placed.direct_scanout_eligible = GWIPC_TRI_STATE_FALSE;
+  placed.applied_state = GWIPC_POLICY_APPLIED_NORMAL;
+  first_result.windows.push_back(placed);
+  gwipc_policy_output_vrr_state unavailable{};
+  unavailable.struct_size = sizeof(unavailable);
+  unavailable.output_id = 5;
+  unavailable.mode = GWIPC_VRR_POLICY_FOCUSED;
+  unavailable.candidate_required = 1;
+  unavailable.reason_flags = GWIPC_VRR_REASON_NO_CANDIDATE;
+  first_result.vrr_outputs.push_back(unavailable);
+  gwipc_policy_window_vrr_state invalid_membership{};
+  invalid_membership.struct_size = sizeof(invalid_membership);
+  invalid_membership.window_id = 10;
+  invalid_membership.output_id = 5;
+  invalid_membership.preference = GWIPC_VRR_PREFERENCE_DEFAULT;
+  invalid_membership.focused = 1;
+  invalid_membership.reason_flags =
+      GWIPC_VRR_REASON_SURFACE_MEMBERSHIP_INVALID;
+  first_result.vrr_windows.push_back(invalid_membership);
+
+  const auto first_evaluated =
+      apply_policy_result(proposed, first_result, &outputs, &vrr);
+  require(first_evaluated &&
+              first_evaluated->windows.at(10).output_memberships ==
+                  std::vector<std::uint64_t>{5} &&
+              !policy_output_facts_match(proposed, *first_evaluated),
+          "first GWM placement derives membership and requires reconciliation");
+
+  const auto second_submission =
+      project_policy(*first_evaluated, 21, 31, &outputs, &vrr);
+  require(ipc::internal::decode_vrr_membership_hint(
+              canonical_outputs,
+              second_submission.output_hints.front().preferred_output_id) ==
+              std::vector<std::uint64_t>{5},
+          "reconciliation policy pass carries the derived membership fact");
+
+  PolicySnapshotResult second_result;
+  second_result.generation = 31;
+  second_result.windows.push_back(placed);
+  gwipc_policy_output_vrr_state available = unavailable;
+  available.selected_window_id = 10;
+  available.desired_enabled = 1;
+  available.reason_flags = 0;
+  second_result.vrr_outputs.push_back(available);
+  gwipc_policy_window_vrr_state selected = invalid_membership;
+  selected.selected = 1;
+  selected.eligible = 1;
+  selected.exclusive_output_membership = 1;
+  selected.reason_flags = 0;
+  second_result.vrr_windows.push_back(selected);
+
+  const auto stable =
+      apply_policy_result(*first_evaluated, second_result, &outputs, &vrr);
+  require(stable && policy_output_facts_match(*first_evaluated, *stable),
+          "second GWM result is membership-stable before compositor publish");
+  const auto compositor =
+      project_compositor(*stable, 22, 32, true, &outputs, &vrr);
+  require(compositor.surface_vrr_states.size() == 1 &&
+              compositor.surface_vrr_states.front().policy_selected == 1 &&
+              compositor.surface_vrr_states.front()
+                  .exclusive_output_membership == 1,
+          "only the stable reconciled policy result is compositor-ready");
+}
+
 void test_override_redirect_surface_projection() {
   const auto outputs = layout();
   LifecycleSnapshot proposed;
@@ -295,6 +403,7 @@ void test_semantic_invalid_checkpoint_restore() {
 
 int main() {
   test_one_lifecycle_frame();
+  test_membership_reconciliation_before_compositor();
   test_override_redirect_surface_projection();
   test_semantic_invalid_checkpoint_restore();
 }

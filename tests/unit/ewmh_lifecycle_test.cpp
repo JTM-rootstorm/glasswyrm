@@ -101,6 +101,7 @@ void test_policy_rejection_and_rollback(const x11::ByteOrder order) {
       },
       [] {},
       {},
+      [] { return true; },
       [] { return true; }};
   LifecycleCoordinator coordinator(committed, 2, callbacks);
   require(coordinator.enqueue(operation) == EnqueueStatus::Queued &&

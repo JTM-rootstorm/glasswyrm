@@ -85,6 +85,7 @@ public:
   }
   [[nodiscard]] bool compositor_result_ready() const noexcept;
   [[nodiscard]] bool compositor_rejected_ready() const noexcept;
+  [[nodiscard]] bool compositor_interrupted_ready() const noexcept;
   [[nodiscard]] bool content_result_ready() const noexcept;
   [[nodiscard]] bool content_rejected_ready() const noexcept;
   [[nodiscard]] bool cursor_result_ready() const noexcept;
@@ -98,6 +99,8 @@ public:
     return result;
   }
   void forget_cursor_replay() noexcept;
+  [[nodiscard]] bool prepare_policy_reconciliation() noexcept;
+  [[nodiscard]] bool prepare_compositor_retry() noexcept;
   [[nodiscard]] bool prepare_rollback() noexcept;
   void clear_transaction_result() noexcept;
 
@@ -115,7 +118,8 @@ private:
   enum class TransactionStage { None, Policy, PolicyReady, PolicyRejected,
                                 Compositor, Content, Cursor, Complete,
                                 ContentComplete, CursorComplete,
-                                CompositorRejected, ContentRejected,
+                                CompositorInterrupted, CompositorRejected,
+                                ContentRejected,
                                 CursorRejected, Replay,
                                 ReplayComplete, ReplayRejected };
   TransactionStage transaction_stage_{TransactionStage::None};
@@ -123,6 +127,7 @@ private:
   PolicySnapshotSubmission pending_policy_;
   CompositorSnapshotSubmission pending_compositor_;
   CompositorContentSubmission pending_content_;
+  bool software_content_{};
   bool output_model_{};
   bool vrr_profile_{};
   bool output_scene_submitted_{};

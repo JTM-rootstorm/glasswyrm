@@ -35,6 +35,7 @@ struct Recorder {
   std::vector<std::uint32_t> commits;
   std::vector<std::pair<std::uint64_t, bool>> completed;
   unsigned rollbacks_prepared{};
+  unsigned compositor_retries_prepared{};
   bool fatal{};
 
   LifecycleCallbacks callbacks() {
@@ -58,6 +59,10 @@ struct Recorder {
         {},
         [&] {
           ++rollbacks_prepared;
+          return true;
+        },
+        [&] {
+          ++compositor_retries_prepared;
           return true;
         }};
   }
@@ -132,6 +137,51 @@ void test_compositor_rejection_rolls_back_both_peers() {
               recorder.completed.back() ==
                   std::pair<std::uint64_t, bool>{10, false},
           "rollback replays compositor and never commits rejected state");
+}
+
+void test_compositor_rollback_interruption_retries_only_compositor() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 4, recorder.callbacks());
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              coordinator.policy_accepted(snapshot(11)) &&
+              coordinator.compositor_rejected() &&
+              coordinator.policy_accepted(snapshot(1)) &&
+              coordinator.phase() == CoordinatorPhase::RollingBackCompositor,
+          "enter committed compositor rollback");
+  const auto policy_before_retry = recorder.policy;
+  require(coordinator.compositor_interrupted() &&
+              coordinator.phase() == CoordinatorPhase::RollingBackCompositor &&
+              recorder.policy == policy_before_retry &&
+              recorder.compositor ==
+                  std::vector<std::uint32_t>({11, 1, 1}) &&
+              recorder.rollbacks_prepared == 1 &&
+              recorder.compositor_retries_prepared == 1,
+          "interrupted compositor rollback retries only committed compositor "
+          "state");
+  require(coordinator.compositor_accepted() && !recorder.fatal &&
+              recorder.completed.back() ==
+                  std::pair<std::uint64_t, bool>{10, false},
+          "retried committed compositor rollback completes the rejection");
+}
+
+void test_forward_compositor_interruption_rolls_back_both_peers() {
+  Recorder recorder;
+  LifecycleCoordinator coordinator(snapshot(1), 4, recorder.callbacks());
+  require(coordinator.enqueue(operation(10, 1, 10)) == EnqueueStatus::Queued &&
+              coordinator.policy_accepted(snapshot(11)) &&
+              coordinator.compositor_interrupted() &&
+              coordinator.phase() == CoordinatorPhase::RollingBackPolicy &&
+              recorder.policy == std::vector<std::uint32_t>({10, 1}) &&
+              recorder.compositor == std::vector<std::uint32_t>({11}) &&
+              recorder.rollbacks_prepared == 1 &&
+              recorder.compositor_retries_prepared == 0,
+          "interrupted forward compositor starts coordinated rollback");
+  require(coordinator.policy_accepted(snapshot(1)) &&
+              coordinator.compositor_accepted() && !recorder.fatal &&
+              recorder.commits.empty() &&
+              recorder.completed.back() ==
+                  std::pair<std::uint64_t, bool>{10, false},
+          "interrupted forward compositor rolls back without promotion");
 }
 
 void test_cancellation_before_policy_result() {
@@ -338,6 +388,8 @@ int main() {
   test_priority_cleanup_runs_after_active_before_fifo();
   test_replace_committed_requires_idle_boundary();
   test_compositor_rejection_rolls_back_both_peers();
+  test_compositor_rollback_interruption_retries_only_compositor();
+  test_forward_compositor_interruption_rolls_back_both_peers();
   test_cancellation_before_policy_result();
   test_disconnect_replays_each_phase();
   test_commit_failure_is_fatal();

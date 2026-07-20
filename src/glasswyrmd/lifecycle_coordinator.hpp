@@ -38,6 +38,7 @@ struct LifecycleCallbacks {
   std::function<std::optional<LifecycleSnapshot>(
       const LifecycleSnapshot&, const LifecycleOperation&)> rebase;
   std::function<bool()> prepare_rollback;
+  std::function<bool()> prepare_compositor_retry;
 };
 
 [[nodiscard]] std::optional<LifecycleSnapshot> rebase_lifecycle_operation(
@@ -57,6 +58,7 @@ class LifecycleCoordinator {
   [[nodiscard]] bool policy_accepted(LifecycleSnapshot evaluated);
   [[nodiscard]] bool policy_rejected();
   [[nodiscard]] bool compositor_accepted();
+  [[nodiscard]] bool compositor_interrupted();
   [[nodiscard]] bool compositor_rejected();
   void peer_disconnected();
   [[nodiscard]] bool peer_synchronized();

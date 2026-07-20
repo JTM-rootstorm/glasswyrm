@@ -352,6 +352,10 @@ bool ServerRuntime::service_output_control_work() {
 
   if (output_configuration_stage_ ==
       OutputConfigurationRuntimeStage::AwaitingCompositor) {
+    if (bridge_->compositor_interrupted_ready())
+      return begin_output_rollback(
+          gw::ipc::wire::OutputConfigurationResult::CompositorRejected,
+          false);
     if (bridge_->compositor_rejected_ready())
       return begin_output_rollback(
           gw::ipc::wire::OutputConfigurationResult::CompositorRejected,
@@ -388,6 +392,14 @@ bool ServerRuntime::service_output_control_work() {
     return true;
   }
 
+  if (bridge_->compositor_interrupted_ready()) {
+    if (!bridge_->prepare_compositor_retry())
+      return false;
+    if (content_presenter_) content_presenter_->reject_lifecycle();
+    output_configuration_peer_reset_ = false;
+    return submit_output_compositor(*output_configuration_before_,
+                                    transaction->old_layout, true);
+  }
   if (bridge_->compositor_rejected_ready()) {
     if (content_presenter_)
       content_presenter_->reject_lifecycle();

@@ -214,8 +214,26 @@ bool LifecycleCoordinator::compositor_accepted() {
   return false;
 }
 
+bool LifecycleCoordinator::compositor_interrupted() {
+  if (!active_) return false;
+  if (phase_ == CoordinatorPhase::AwaitingCompositor)
+    return compositor_rejected();
+  const auto* retry = phase_ == CoordinatorPhase::RollingBackCompositor
+                          ? &committed_
+                          : nullptr;
+  if (!retry) return false;
+  if (callbacks_.prepare_compositor_retry &&
+      !callbacks_.prepare_compositor_retry()) {
+    fatal();
+    return false;
+  }
+  if (!send_compositor(*retry)) fatal();
+  return phase_ != CoordinatorPhase::Fatal;
+}
+
 bool LifecycleCoordinator::compositor_rejected() {
-  if (phase_ != CoordinatorPhase::AwaitingCompositor || !active_) return false;
+  if (!active_) return false;
+  if (phase_ != CoordinatorPhase::AwaitingCompositor) return false;
   if (callbacks_.prepare_rollback && !callbacks_.prepare_rollback()) {
     fatal();
     return false;
