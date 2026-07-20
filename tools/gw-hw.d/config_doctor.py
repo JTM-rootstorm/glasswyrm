@@ -151,8 +151,17 @@ def _modetest_connector_property_value(
     in_selected_connector = False
     in_properties = False
     selected_property = False
+    in_connectors = False
     values: list[int] = []
     for line in output.splitlines():
+        if line == line.lstrip() and line.rstrip().endswith(":"):
+            in_connectors = line.strip().lower() == "connectors:"
+            in_selected_connector = False
+            in_properties = False
+            selected_property = False
+            continue
+        if not in_connectors:
+            continue
         candidate = connector_row.match(line)
         if candidate:
             in_selected_connector = candidate.group(1) == connector
@@ -160,6 +169,87 @@ def _modetest_connector_property_value(
             selected_property = False
             continue
         if not in_selected_connector:
+            continue
+        heading = line.strip().lower()
+        if heading == "props:":
+            in_properties = True
+            selected_property = False
+            continue
+        if not in_properties:
+            continue
+        candidate_property = property_row.match(line)
+        if candidate_property:
+            selected_property = candidate_property.group(1) == property_name
+            continue
+        if not selected_property:
+            continue
+        candidate_value = value_row.match(line)
+        if candidate_value:
+            values.append(int(candidate_value.group(1)))
+            selected_property = False
+    return values[0] if len(values) == 1 else None
+
+
+def _modetest_selected_crtc_id(output: str, connector: str) -> int | None:
+    connector_row = re.compile(
+        r"^\s*\d+\s+(\d+)\s+(?:connected|disconnected|unknown)\s+(\S+)\b",
+        re.IGNORECASE,
+    )
+    encoder_row = re.compile(r"^\s*(\d+)\s+(\d+)\s+\S+\s+0x[0-9a-f]+\s+0x[0-9a-f]+\s*$",
+                             re.IGNORECASE)
+    section = ""
+    encoder_ids: list[int] = []
+    encoder_crtcs: list[tuple[int, int]] = []
+    for line in output.splitlines():
+        if line == line.lstrip() and line.rstrip().endswith(":"):
+            section = line.strip().lower()
+            continue
+        if section == "connectors:":
+            candidate = connector_row.match(line)
+            if candidate and candidate.group(2) == connector:
+                encoder_ids.append(int(candidate.group(1)))
+        elif section == "encoders:":
+            candidate = encoder_row.match(line)
+            if candidate:
+                encoder_crtcs.append(
+                    (int(candidate.group(1)), int(candidate.group(2))))
+    if len(encoder_ids) != 1 or encoder_ids[0] == 0:
+        return None
+    crtc_ids = [crtc_id for encoder_id, crtc_id in encoder_crtcs
+                if encoder_id == encoder_ids[0]]
+    if len(crtc_ids) != 1 or crtc_ids[0] == 0:
+        return None
+    return crtc_ids[0]
+
+
+def _modetest_crtc_property_value(
+        output: str, crtc_id: int, property_name: str) -> int | None:
+    crtc_row = re.compile(
+        r"^\s*(\d+)\s+\d+\s+\(-?[0-9]+,-?[0-9]+\)\s+"
+        r"\([1-9][0-9]*x[1-9][0-9]*\)\s*$")
+    property_row = re.compile(r"^\s*\d+\s+([A-Za-z0-9_-]+):\s*$")
+    value_row = re.compile(r"^\s*value:\s*(-?[0-9]+)\s*$", re.IGNORECASE)
+    in_selected_crtc = False
+    in_properties = False
+    selected_property = False
+    in_crtcs = False
+    values: list[int] = []
+    for line in output.splitlines():
+        if line == line.lstrip() and line.rstrip().endswith(":"):
+            in_crtcs = line.strip().lower() == "crtcs:"
+            in_selected_crtc = False
+            in_properties = False
+            selected_property = False
+            continue
+        if not in_crtcs:
+            continue
+        candidate = crtc_row.match(line)
+        if candidate:
+            in_selected_crtc = int(candidate.group(1)) == crtc_id
+            in_properties = False
+            selected_property = False
+            continue
+        if not in_selected_crtc:
             continue
         heading = line.strip().lower()
         if heading == "props:":
@@ -245,13 +335,17 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
                        if path.is_file() and os.access(path, os.X_OK)), None)
     modetest_text = ""
     if modetest and os.path.realpath(modetest).startswith(("/usr/bin/", "/bin/")):
-        result = subprocess.run([modetest, "-D", str(drm), "-c", "-p"], check=False,
+        result = subprocess.run([modetest, "-D", str(drm), "-c", "-e", "-p"], check=False,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=10)
         if result.returncode == 0:
             modetest_text = result.stdout[:1024 * 1024]
-    atomic = "atomic" in modetest_text.lower() or "VRR_ENABLED" in modetest_text
-    vrr_property = "VRR_ENABLED" in modetest_text
+    selected_crtc_id = _modetest_selected_crtc_id(modetest_text, connector)
+    selected_vrr_value = (_modetest_crtc_property_value(
+        modetest_text, selected_crtc_id, "VRR_ENABLED")
+        if selected_crtc_id is not None else None)
+    vrr_property = selected_vrr_value in {0, 1}
+    atomic = "atomic" in modetest_text.lower() or vrr_property
     connector_vrr_capable = _modetest_connector_property_value(
         modetest_text, connector, "vrr_capable")
     vrr_capable = (connector_vrr_capable if connector_vrr_capable in {0, 1}
