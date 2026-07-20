@@ -66,7 +66,8 @@ bool enqueue_control(gwipc_connection* connection, const std::uint16_t type,
 }
 
 bool enqueue_buffer(gwipc_connection* connection,
-                    const CompositorSnapshotSubmission::Buffer& buffer) {
+                    const CompositorSnapshotSubmission::Buffer& buffer,
+                    const std::uint32_t flags = GWIPC_FLAG_SNAPSHOT_ITEM) {
   gwipc_contract_payload* raw = nullptr;
   if (buffer.fd < 0 ||
       gwipc_contract_encode_buffer_attach(&buffer.attach, &raw) !=
@@ -78,7 +79,7 @@ bool enqueue_buffer(gwipc_connection* connection,
   gwipc_outgoing_message message{};
   message.struct_size = sizeof(message);
   message.type = GWIPC_MESSAGE_BUFFER_ATTACH;
-  message.flags = GWIPC_FLAG_SNAPSHOT_ITEM;
+  message.flags = flags;
   message.payload = data;
   message.payload_size = size;
   const int fds[2] = {buffer.fd, buffer.synchronization_fd};
@@ -506,8 +507,8 @@ bool CompositorPeer::submit(const CompositorSnapshotSubmission& submission,
     expectation.presented_generation = complete.generation;
     for (const auto& output : complete.outputs)
       if (output.enabled) expectation.output_ids.insert(output.output_id);
-    for (const auto& buffer : complete.buffers)
-      expectation.release_buffer_ids.insert(buffer.attach.buffer_id);
+    expectation.release_buffer_ids =
+        compositor_buffer_replay::retired_buffer_ids(complete, replay_input_);
     if (!vrr_cache_.expect_response(std::move(expectation))) {
       error = "could not stage the M14 compositor response expectation";
       return false;
@@ -581,8 +582,8 @@ bool CompositorPeer::submit_content(
     expectation.presented_generation = submission.generation;
     for (const auto& output : replay_input_.outputs)
       if (output.enabled) expectation.output_ids.insert(output.output_id);
-    for (const auto& buffer : submission.buffers)
-      expectation.release_buffer_ids.insert(buffer.attach.buffer_id);
+    expectation.release_buffer_ids =
+        compositor_buffer_replay::retired_buffer_ids(submission, replay_input_);
     if (!vrr_cache_.expect_response(std::move(expectation))) {
       error = "could not stage the M14 content response expectation";
       return false;
@@ -590,7 +591,7 @@ bool CompositorPeer::submit_content(
   }
   auto* connection = transport_.connection();
   for (const auto& buffer : submission.buffers)
-    if (!enqueue_buffer(connection, buffer)) {
+    if (!enqueue_buffer(connection, buffer, 0)) {
       error = "could not queue incremental compositor buffer";
       if (vrr_profile_) vrr_cache_.cancel_expectation();
       return false;
