@@ -15,7 +15,10 @@ from common import (
     ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, ConfigError, HarnessError,
     RUN_STEPS, _prepare_private_empty_directory, _read_json, _write_json,
 )
-from config_doctor import _modetest_has_selected_mode, doctor, parse_config
+from config_doctor import (
+    _modetest_connector_property_value, _modetest_has_selected_mode, doctor,
+    parse_config,
+)
 from evidence import (
     _copy_fixture_artifacts, _create_archive, analyze_cadence, finalize_live,
     validate_archive, validate_restore,
@@ -140,6 +143,27 @@ id encoder status name size (mm) modes encoders
                 _modetest_has_selected_mode(
                     modetest_fixture, "DP-3", "2560x1440@144000")):
             raise AssertionError("wrong refresh or connector mode was accepted")
+        property_fixture = '''Connectors:
+42 41 connected DP-2 600x340 1 41
+  props:
+    9 vrr_capable:
+      flags: immutable range
+      values: 0 1
+      value: 1
+43 41 connected DP-1 600x340 1 41
+  props:
+    9 vrr_capable:
+      flags: immutable range
+      values: 0 1
+      value: 0
+'''
+        if (_modetest_connector_property_value(
+                property_fixture, "DP-1", "vrr_capable") != 0 or
+                _modetest_connector_property_value(
+                    property_fixture, "DP-2", "vrr_capable") != 1 or
+                _modetest_connector_property_value(
+                    property_fixture, "DP-3", "vrr_capable") is not None):
+            raise AssertionError("connector property parsing crossed connector boundaries")
         for addition in ('command = "rm -rf /"\n', 'password = "secret"\n', 'package = "x11-base/glasswyrm"\n'):
             path.write_text(valid + addition, encoding="utf-8")
             try:
@@ -163,7 +187,8 @@ id encoder status name size (mm) modes encoders
         runner = FixedLiveRunner(config, Path(directory), fake, "/dev/tty2", False,
                                  lambda path, kind: True, lambda: dict(state), False)
         runner.run()
-        if runner.steps != list(RUN_STEPS) or not runner.cleanup_attempted:
+        if (runner.steps != list(RUN_STEPS) or not runner.cleanup_attempted or
+                runner.cleanup_wait_count != 5):
             raise AssertionError("fixed live runner order or cleanup changed")
         replay_names = {item["name"] for item in runner.snapshot_expectations}
         if not {"milestone14-restart-gwm.json", "milestone14-restart.log"}.issubset(replay_names):
@@ -173,9 +198,10 @@ id encoder status name size (mm) modes encoders
             raise AssertionError("live runner unexpectedly used the session wrapper")
         server = next((argv for argv in commands
                        if str(FIXED_BINARIES["server"]) in argv), None)
-        if (server is None or server.count("--libinput-device") != 2 or
+        if (server is None or server.count("--game-compat") != 1 or
+                server.count("--libinput-device") != 2 or
                 "/dev/input/event0" not in server or "/dev/input/event1" not in server):
-            raise AssertionError("direct server argv omitted fixed libinput devices")
+            raise AssertionError("direct server argv omitted the game profile or fixed libinput devices")
         if not any(argv[1:3] == ["restart", LIVE_UNITS["gwm"]]
                    for argv in commands):
             raise AssertionError("GWM restart is not independently supervised")
@@ -205,6 +231,23 @@ id encoder status name size (mm) modes encoders
         polling.snapshot("polling.json", "always-eligible", True)
         if snapshot_attempts != 2 or not (Path(directory) / "polling.json").is_file():
             raise AssertionError("snapshot polling did not atomically promote converged state")
+        cleanup_attempts = 0
+        def cleanup_converging(argv: list[str], output: Path | None) -> int:
+            nonlocal cleanup_attempts
+            cleanup_attempts += 1
+            assert output is not None
+            windows = ([{"window": 41}] if cleanup_attempts == 1 else [])
+            candidate = 41 if cleanup_attempts == 2 else 0
+            _write_json(output, {"vrr": [{"name": "DP-1",
+                                            "candidate_window": candidate}],
+                                 "windows": windows})
+            return 0
+        cleanup_polling = FixedLiveRunner(
+            config, Path(directory), cleanup_converging, "/dev/tty2", False,
+            validate_runtime=True)
+        cleanup_polling.wait_policy_cleanup()
+        if cleanup_attempts != 3 or cleanup_polling.cleanup_wait_count != 1:
+            raise AssertionError("cleanup polling accepted stale windows or candidates")
         chvt = [argv for argv in commands if argv and argv[0] == str(FIXED_BINARIES["chvt"])]
         if [argv[1] for argv in chvt[:2]] != ["1", "2"]:
             raise AssertionError("VT inactive observation does not precede reacquire")

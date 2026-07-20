@@ -139,6 +139,48 @@ def _modetest_has_selected_mode(output: str, connector: str, mode: str) -> bool:
     return False
 
 
+def _modetest_connector_property_value(
+        output: str, connector: str, property_name: str) -> int | None:
+    """Return one integer property value from exactly one connector block."""
+    connector_row = re.compile(
+        r"^\s*\d+\s+\d+\s+(?:connected|disconnected|unknown)\s+(\S+)\b",
+        re.IGNORECASE,
+    )
+    property_row = re.compile(r"^\s*\d+\s+([A-Za-z0-9_-]+):\s*$")
+    value_row = re.compile(r"^\s*value:\s*(-?[0-9]+)\s*$", re.IGNORECASE)
+    in_selected_connector = False
+    in_properties = False
+    selected_property = False
+    values: list[int] = []
+    for line in output.splitlines():
+        candidate = connector_row.match(line)
+        if candidate:
+            in_selected_connector = candidate.group(1) == connector
+            in_properties = False
+            selected_property = False
+            continue
+        if not in_selected_connector:
+            continue
+        heading = line.strip().lower()
+        if heading == "props:":
+            in_properties = True
+            selected_property = False
+            continue
+        if not in_properties:
+            continue
+        candidate_property = property_row.match(line)
+        if candidate_property:
+            selected_property = candidate_property.group(1) == property_name
+            continue
+        if not selected_property:
+            continue
+        candidate_value = value_row.match(line)
+        if candidate_value:
+            values.append(int(candidate_value.group(1)))
+            selected_property = False
+    return values[0] if len(values) == 1 else None
+
+
 def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> tuple[bool, list[dict[str, object]]]:
     if set(facts) != DOCTOR_FACT_KEYS:
         raise HarnessError("doctor fixture has a non-exact schema")
@@ -198,7 +240,7 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
         debug_text += "\n" + text(debug, "")
     elif debug.is_dir() and not debug_text:
         debug_text = text(debug / "vrr_capable", "")
-    vrr_capable = 1 if re.search(r"(?:vrr_capable\s*[:=]?\s*)1\b", debug_text, re.I) or debug_text == "1" else 0
+    debug_vrr_capable = 1 if re.search(r"(?:vrr_capable\s*[:=]?\s*)1\b", debug_text, re.I) or debug_text == "1" else 0
     modetest = next((str(path) for path in (Path("/usr/bin/modetest"), Path("/bin/modetest"))
                        if path.is_file() and os.access(path, os.X_OK)), None)
     modetest_text = ""
@@ -210,6 +252,10 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
             modetest_text = result.stdout[:1024 * 1024]
     atomic = "atomic" in modetest_text.lower() or "VRR_ENABLED" in modetest_text
     vrr_property = "VRR_ENABLED" in modetest_text
+    connector_vrr_capable = _modetest_connector_property_value(
+        modetest_text, connector, "vrr_capable")
+    vrr_capable = (connector_vrr_capable if connector_vrr_capable in {0, 1}
+                   else debug_vrr_capable)
     driver_link = Path("/sys/class/drm") / card / "device" / "driver"
     try:
         driver = driver_link.resolve(strict=True).name
