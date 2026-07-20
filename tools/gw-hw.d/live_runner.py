@@ -64,6 +64,7 @@ class FixedLiveRunner:
         self.before_state: dict[str, object] | None = None
         self.after_state: dict[str, object] | None = None
         self.snapshot_expectations: list[dict[str, object]] = []
+        self.cleanup_wait_count = 0
 
     @staticmethod
     def _execute(argv: list[str], output: Path | None = None) -> int:
@@ -178,6 +179,42 @@ class FixedLiveRunner:
     def stop_client(self, tag: str) -> None:
         unit = f"m14-hardware-client-{tag}.service"
         self.command([str(FIXED_BINARIES["systemctl"]), "stop", unit])
+
+    def wait_policy_cleanup(self) -> None:
+        self.cleanup_wait_count += 1
+        if not self.validate_runtime:
+            return
+        last_error = "state was not observed"
+        path = self.artifacts / ".policy-cleanup.tmp"
+        for _ in range(400):
+            path.unlink(missing_ok=True)
+            argv = [str(FIXED_BINARIES["gwinfo"]), "--socket",
+                    str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"]
+            if self.execute(argv, path) != 0:
+                last_error = "gwinfo query failed"
+                time.sleep(.05)
+                continue
+            try:
+                value = _read_json(path)
+                outputs = value.get("vrr")
+                windows = value.get("windows")
+                if (not isinstance(outputs, list) or len(outputs) != 1 or
+                        not isinstance(outputs[0], dict) or
+                        outputs[0].get("name") != self.config["connector"]):
+                    raise HarnessError("expected exactly the selected VRR output")
+                if windows != []:
+                    raise HarnessError("client windows remain in the committed snapshot")
+                candidate = outputs[0].get("candidate_window")
+                if (isinstance(candidate, bool) or not isinstance(candidate, int) or
+                        candidate != 0):
+                    raise HarnessError("a VRR candidate remains in the committed snapshot")
+                path.unlink(missing_ok=True)
+                return
+            except HarnessError as error:
+                last_error = str(error)
+                time.sleep(.05)
+        raise HarnessError(
+            f"timed out waiting for coordinated client cleanup: {last_error}")
 
     def snapshot(self, name: str, policy: str, effective: bool,
                  preference: str | None = None) -> dict[str, Any]:
@@ -315,16 +352,16 @@ class FixedLiveRunner:
             self._step(4); self.start_server()
             self._step(5); self.start_client("off-cadence", "cadence", "default", True)
             self._step(6)
-            self._step(7); self.snapshot("milestone14-off.json", "off", False); self.stop_client("off-cadence")
+            self._step(7); self.snapshot("milestone14-off.json", "off", False); self.stop_client("off-cadence"); self.wait_policy_cleanup()
             self._step(8); self.set_policy("fullscreen")
             self._step(9); self.start_client("on-cadence", "cadence", "default", True)
             self._step(10); self.snapshot("milestone14-fullscreen.log", "fullscreen", True)
-            self._step(11); self.stop_client("on-cadence")
+            self._step(11); self.stop_client("on-cadence"); self.wait_policy_cleanup()
             self._step(12); self.snapshot("milestone14-fullscreen-exit.json", "fullscreen", False)
             self._step(13); self.start_client("borderless", "borderless", "default")
-            self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless")
-            self._step(15); self.set_policy("focused"); self.start_client("focus-a", "windowed", "default"); self.snapshot("milestone14-focused.log", "focused", True); self.start_client("focus-b", "windowed", "default"); self.snapshot("milestone14-focused-transfer.json", "focused", True); self.stop_client("focus-b"); self.stop_client("focus-a")
-            self._step(16); self.set_policy("app-requested"); self.start_client("app-preferences", "preference"); self.snapshot("milestone14-app-requested.log", "app-requested", False, "disable"); self.stop_client("app-preferences")
+            self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless"); self.wait_policy_cleanup()
+            self._step(15); self.set_policy("focused"); self.start_client("focus-a", "windowed", "default"); self.snapshot("milestone14-focused.log", "focused", True); self.start_client("focus-b", "windowed", "default"); self.snapshot("milestone14-focused-transfer.json", "focused", True); self.stop_client("focus-b"); self.stop_client("focus-a"); self.wait_policy_cleanup()
+            self._step(16); self.set_policy("app-requested"); self.start_client("app-preferences", "preference"); self.snapshot("milestone14-app-requested.log", "app-requested", False, "disable"); self.stop_client("app-preferences"); self.wait_policy_cleanup()
             self._step(17); self.set_policy("always-eligible"); self.start_client("always", "windowed", "default"); self.snapshot("milestone14-always.log", "always-eligible", True)
             self._step(18); self.set_policy("off"); self.snapshot("milestone14-policy-off.json", "off", False); self.set_policy("always-eligible")
             self._step(19); self.command([str(FIXED_BINARIES["chvt"]), self.alternate_tty]); self.snapshot("milestone14-vt-inactive.json", "always-eligible", False); self.command([str(FIXED_BINARIES["chvt"]), TTY_PATTERN.fullmatch(str(self.config["tty"])).group(1)])  # type: ignore[union-attr]
@@ -356,7 +393,7 @@ class FixedLiveRunner:
     def start_server(self) -> None:
         keyboard = str(self.config["keyboard_device"]); pointer = str(self.config["pointer_device"])
         self.start_unit(LIVE_UNITS["server"], "server",
-                        ["--display", "14", "--wm-socket", str(RUNTIME_ROOT / "gwm.sock"), "--compositor-socket", str(RUNTIME_ROOT / "gwcomp.sock"), "--software-content", "--output-model", "--control-socket", str(RUNTIME_ROOT / "control.sock"), "--vrr-protocol", "--libinput-device", keyboard, "--libinput-device", pointer],
+                        ["--display", "14", "--wm-socket", str(RUNTIME_ROOT / "gwm.sock"), "--compositor-socket", str(RUNTIME_ROOT / "gwcomp.sock"), "--software-content", "--output-model", "--control-socket", str(RUNTIME_ROOT / "control.sock"), "--game-compat", "--vrr-protocol", "--libinput-device", keyboard, "--libinput-device", pointer],
                         ["PrivateDevices=no", "DevicePolicy=closed", f"DeviceAllow={keyboard} r", f"DeviceAllow={pointer} r", "KillMode=mixed", "SuccessExitStatus=143"])
         self.wait_path(RUNTIME_ROOT / "control.sock"); self.wait_path(Path("/tmp/.X11-unix/X14"))
 
@@ -378,5 +415,3 @@ class FixedLiveRunner:
         shutil.copyfile(frames[-1], self.artifacts / "milestone14-screen.ppm")
         if (self.artifacts / "milestone14-canonical.ppm").read_bytes() != (self.artifacts / "milestone14-screen.ppm").read_bytes():
             raise HarnessError("VRR-only transition changed canonical pixels")
-
-
