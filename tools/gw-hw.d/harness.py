@@ -16,8 +16,8 @@ from common import (
     RUN_STEPS, _prepare_private_empty_directory, _read_json, _write_json,
 )
 from config_doctor import (
-    _modetest_connector_property_value, _modetest_has_selected_mode, doctor,
-    parse_config,
+    _modetest_connector_property_value, _modetest_crtc_property_value,
+    _modetest_has_selected_mode, _modetest_selected_crtc_id, doctor, parse_config,
 )
 from evidence import (
     _copy_fixture_artifacts, _create_archive, analyze_cadence, finalize_live,
@@ -164,6 +164,56 @@ id encoder status name size (mm) modes encoders
                 _modetest_connector_property_value(
                     property_fixture, "DP-3", "vrr_capable") is not None):
             raise AssertionError("connector property parsing crossed connector boundaries")
+        crtc_fixture = '''Encoders:
+id crtc type possible crtcs possible clones
+41 77 TMDS 0x00000001 0x00000000
+42 88 TMDS 0x00000002 0x00000000
+43 66 TMDS 0x00000004 0x00000000
+Connectors:
+42 41 connected DP-1 600x340 1 41
+43 42 connected DP-2 600x340 1 42
+44 43 connected DP-3 600x340 1 43
+CRTCs:
+id fb pos size
+66 89 (0,0) (1920x1080)
+  props:
+    11 ACTIVE:
+      flags: range
+      values: 0 1
+      value: 1
+77 90 (0,0) (2560x1440)
+  props:
+    12 VRR_ENABLED:
+      flags: range
+      values: 0 1
+      value: 0
+88 91 (2560,0) (2560x1440)
+  props:
+    12 VRR_ENABLED:
+      flags: range
+      values: 0 1
+      value: 1
+99 0 (0,0) (1920x1080)
+  props:
+    12 VRR_ENABLED:
+      flags: range
+      values: 0 1
+      value: 1
+'''
+        dp1_crtc = _modetest_selected_crtc_id(crtc_fixture, "DP-1")
+        dp2_crtc = _modetest_selected_crtc_id(crtc_fixture, "DP-2")
+        dp3_crtc = _modetest_selected_crtc_id(crtc_fixture, "DP-3")
+        if (dp1_crtc != 77 or dp2_crtc != 88 or dp3_crtc != 66 or
+                _modetest_selected_crtc_id(crtc_fixture, "DP-4") is not None or
+                _modetest_crtc_property_value(
+                    crtc_fixture, dp1_crtc, "VRR_ENABLED") != 0 or
+                _modetest_crtc_property_value(
+                    crtc_fixture, dp2_crtc, "VRR_ENABLED") != 1 or
+                _modetest_crtc_property_value(
+                    crtc_fixture, dp3_crtc, "VRR_ENABLED") is not None or
+                _modetest_crtc_property_value(
+                    crtc_fixture, 100, "VRR_ENABLED") is not None):
+            raise AssertionError("CRTC property parsing crossed pipeline boundaries")
         for addition in ('command = "rm -rf /"\n', 'password = "secret"\n', 'package = "x11-base/glasswyrm"\n'):
             path.write_text(valid + addition, encoding="utf-8")
             try:
