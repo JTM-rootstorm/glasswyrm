@@ -310,7 +310,8 @@ start_headless_stack() {
   systemd-run --unit=glasswyrmd-m14-headless --property=Type=simple --no-block -- \
     "$build/src/glasswyrmd" --display 99 --wm-socket "$runtime/gwm.sock" \
     --compositor-socket "$runtime/gwcomp.sock" --software-content \
-    --output-model --control-socket "$runtime/control.sock" --vrr-protocol
+    --output-model --control-socket "$runtime/control.sock" --game-compat \
+    --vrr-protocol
   wait_socket "$runtime/control.sock"; wait_socket /tmp/.X11-unix/X99
 }
 

@@ -39,6 +39,10 @@ guest=$(bash -c 'source "$1"; milestone14_guest_script' _ "$library")
 cat "$library" >"$temporary/contract"
 printf '%s\n' "$guest" >>"$temporary/contract"
 
+headless_stack=$(sed -n '/^start_headless_stack()/,/^}/p' <<<"$guest")
+grep -F -- '--game-compat' <<<"$headless_stack" >/dev/null ||
+  fail 'M14 headless policy stack does not enable the EWMH game profile'
+
 for expected in \
   6864ea631d61636289a21c7d2d6655a17be0c004 \
   "snapshot name 'base'" 'snapshot_name=base' \
