@@ -65,6 +65,26 @@ focus_cleanup=$(sed -n '/wait "$focus_a_pid"; focus_a_pid=0/,/result\[gwout_vrr\
 grep -Fx -- 'wait_policy_cleanup' <<<"$focus_cleanup" >/dev/null ||
   fail 'M14 focused-client transition does not wait for cleanup'
 
+restart_predicate=$(sed -n '/^wait_restart_state()/,/^}/p' <<<"$guest")
+for expected in 'state.get("policy")=="focused"' \
+  'state.get("decision")=="enabled"' 'state.get("desired_enabled") is True' \
+  'state.get("effective_enabled") is True' \
+  'state.get("candidate_window")==window' \
+  'state.get("reasons")==["simulated-headless"]'; do
+  grep -F -- "$expected" <<<"$restart_predicate" >/dev/null ||
+    fail "M14 restart-state predicate lacks: $expected"
+done
+restart_handoff=$(sed -n '/wait_file "$work\/client-restart.json"/,/result\[compositor_replay\]=passed/p' \
+  <<<"$guest")
+for state in pre-restart post-gwm post-gwcomp; do
+  grep -Fx -- \
+    "wait_restart_state \"\$work/$state.json\" \"\$work/client-restart.json\"" \
+    <<<"$restart_handoff" >/dev/null ||
+    fail "M14 restart handoff does not await stable $state state"
+done
+[[ $(grep -Fc -- 'wait_restart_state ' <<<"$restart_handoff") == 3 ]] ||
+  fail 'M14 restart handoff must use exactly three semantic state waits'
+
 for expected in \
   6864ea631d61636289a21c7d2d6655a17be0c004 \
   "snapshot name 'base'" 'snapshot_name=base' \
