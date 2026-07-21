@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -15,6 +16,7 @@
 #include <sys/uio.h>
 #include <thread>
 #include <time.h>
+#include <unistd.h>
 
 namespace {
 
@@ -232,6 +234,37 @@ void synchronize(xcb_connection_t *connection) {
   std::free(reply);
 }
 
+void service_bounded_repaints(
+    xcb_connection_t *connection, const ClientOptions &options,
+    const xcb_window_t window, const xcb_gcontext_t gc,
+    const std::uint16_t width, const std::uint16_t height,
+    const std::uint8_t depth) {
+  if (options.repaint_count == 0) {
+    if (options.hold_ms != 0)
+      std::this_thread::sleep_for(std::chrono::milliseconds(options.hold_ms));
+    return;
+  }
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::milliseconds(options.hold_ms);
+  std::uint32_t completed{};
+  while (completed < options.repaint_count &&
+         std::chrono::steady_clock::now() < deadline) {
+    if (::unlink(options.repaint_trigger.c_str()) == 0) {
+      put_pixels(connection, window, gc, width, height, 0, 0,
+                 gw::test::m14::deterministic_pattern(width, height), depth);
+      require(xcb_flush(connection) > 0,
+              "could not flush requested bounded repaint");
+      synchronize(connection);
+      ++completed;
+      continue;
+    }
+    require(errno == ENOENT, "could not consume bounded repaint trigger");
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  require(completed == options.repaint_count,
+          "bounded repaint trigger count was not satisfied");
+}
+
 int run_client(const ClientOptions &options) {
   int preferred_screen{};
   auto *connection = xcb_connect(options.display.c_str(), &preferred_screen);
@@ -376,8 +409,8 @@ int run_client(const ClientOptions &options) {
                             vrr_evidence.reason_mask,
                             eventfd_synchronized};
     gw::test::m14::write_client_state(options.result_path, state);
-    if (options.hold_ms != 0)
-      std::this_thread::sleep_for(std::chrono::milliseconds(options.hold_ms));
+    service_bounded_repaints(connection, options, window, gc, pattern_width,
+                             pattern_height, screen.root_depth);
     xcb_disconnect(connection);
     return 0;
   } catch (...) {

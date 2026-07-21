@@ -51,6 +51,14 @@ void test_options() {
                  options) &&
               options.prefer,
           "app-requested mode explicitly selects Prefer");
+  options = {};
+  require(parses({"client", "--display", ":4", "--mode", "windowed",
+                  "--result", "/tmp/result", "--hold-ms", "1000",
+                  "--repaint-trigger", "/tmp/repaint", "--repaint-count", "2"},
+                 options) &&
+              options.repaint_trigger == "/tmp/repaint" &&
+              options.repaint_count == 2,
+          "bounded repaint trigger parses explicitly");
   require(parses({"client", "--display", ":4", "--mode", "windowed", "--result",
                   "/tmp/result", "--frames", "1"}),
           "non-cadence mode accepts its single published frame");
@@ -81,6 +89,12 @@ void test_options() {
                        "--result", "/tmp/result", "--preference", "prefer"}) &&
               !parses({"client", "--display", ":4", "--mode", "windowed",
                        "--result", "/tmp/result", "--frames", "2"}) &&
+              !parses({"client", "--display", ":4", "--mode", "windowed",
+                       "--result", "/tmp/result", "--repaint-trigger",
+                       "/tmp/repaint"}) &&
+              !parses({"client", "--display", ":4", "--mode", "windowed",
+                       "--result", "/tmp/result", "--hold-ms", "0",
+                       "--repaint-trigger", "/tmp/repaint", "--repaint-count", "2"}) &&
               parses({"client", "--self-test"}),
           "client options reject unbounded or incomplete invocations");
 }
