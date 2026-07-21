@@ -14,10 +14,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from common import (
-    ARTIFACT_SCHEMA, CONNECTOR_PATTERN, ConfigError, DOCTOR_FACT_KEYS,
-    DRM_PATTERN, EDID_PATTERN, HarnessError, INPUT_PATTERN, INTEGER_KEYS,
-    MAX_CONFIG_BYTES, MODE_PATTERN, SCHEMA_KEYS, STRING_KEYS, TTY_PATTERN,
-    _read_json, _read_regular, _safe_text, _write_json, interval_tolerance,
+    ARTIFACT_SCHEMA, COMMIT_PATTERN, CONNECTOR_PATTERN, ConfigError,
+    DOCTOR_FACT_KEYS, DRM_PATTERN, EDID_PATTERN, HarnessError, INPUT_PATTERN,
+    INTEGER_KEYS, M14_REQUIRED_BASE_COMMIT, MAX_CONFIG_BYTES, MODE_PATTERN,
+    SCHEMA_KEYS, STRING_KEYS, TTY_PATTERN, _read_json, _read_regular,
+    _safe_text, _write_json, interval_tolerance,
 )
 
 def parse_config(path: Path) -> dict[str, object]:
@@ -68,6 +69,11 @@ def parse_config(path: Path) -> dict[str, object]:
         raise ConfigError(f"debugfs_connector_path must equal {expected_debugfs}")
     if not EDID_PATTERN.fullmatch(str(parsed["edid_sha256"])):
         raise ConfigError("edid_sha256 must be exactly 64 lowercase hex digits")
+    if parsed["required_base_commit"] != M14_REQUIRED_BASE_COMMIT:
+        raise ConfigError(
+            f"required_base_commit must equal {M14_REQUIRED_BASE_COMMIT}")
+    if not COMMIT_PATTERN.fullmatch(str(parsed["tested_commit"])):
+        raise ConfigError("tested_commit must be exactly 40 lowercase hex digits")
     if len(str(parsed["monitor_model"])) > 128:
         raise ConfigError("monitor_model exceeds 128 characters")
     minimum = int(parsed["expected_min_refresh_hz"])
@@ -80,6 +86,14 @@ def parse_config(path: Path) -> dict[str, object]:
     if not target_distinguishes_fixed_refresh(parsed):
         raise ConfigError("target cadence coincides with fixed-refresh quantization")
     return parsed
+
+
+def validate_cli_identity(config: dict[str, object], required_base: str,
+                          tested_commit: str) -> None:
+    if required_base != config["required_base_commit"]:
+        raise ConfigError("--required-base does not match the reviewed configuration")
+    if tested_commit != config["tested_commit"]:
+        raise ConfigError("--tested-commit does not match the reviewed configuration")
 
 
 def target_distinguishes_fixed_refresh(config: dict[str, object]) -> bool:
@@ -398,13 +412,17 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
     }
 
 
-def doctor(config_path: Path, fixture_dir: Path | None = None,
+def doctor(config_path: Path, required_base: str, tested_commit: str,
+           fixture_dir: Path | None = None,
            artifact_dir: Path | None = None) -> int:
     try:
         config = parse_config(config_path)
+        validate_cli_identity(config, required_base, tested_commit)
         facts = _read_json(fixture_dir / "doctor.json") if fixture_dir else _live_doctor_facts(config)
         passed, checks = _validate_doctor_facts(config, facts)
-        report = {"schema": ARTIFACT_SCHEMA, "passed": passed, "checks": checks,
+        report = {"schema": ARTIFACT_SCHEMA, "passed": passed,
+                  "required_base_commit": config["required_base_commit"],
+                  "tested_commit": config["tested_commit"], "checks": checks,
                   "facts": facts}
         if artifact_dir:
             artifact_dir.mkdir(mode=0o700, parents=True, exist_ok=True)

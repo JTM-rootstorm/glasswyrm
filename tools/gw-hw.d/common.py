@@ -13,12 +13,12 @@ SCHEMA_KEYS = {
     "drm_device", "connector", "mode", "tty", "expected_min_refresh_hz",
     "expected_max_refresh_hz", "target_refresh_hz", "monitor_model",
     "edid_sha256", "debugfs_connector_path", "keyboard_device",
-    "pointer_device",
+    "pointer_device", "required_base_commit", "tested_commit",
 }
 STRING_KEYS = {
     "drm_device", "connector", "mode", "tty", "monitor_model",
     "edid_sha256", "debugfs_connector_path", "keyboard_device",
-    "pointer_device",
+    "pointer_device", "required_base_commit", "tested_commit",
 }
 INTEGER_KEYS = SCHEMA_KEYS - STRING_KEYS
 MODE_PATTERN = re.compile(r"([1-9][0-9]*)x([1-9][0-9]*)@([1-9][0-9]*)")
@@ -27,6 +27,8 @@ DRM_PATTERN = re.compile(r"/dev/dri/card([0-9]+)")
 TTY_PATTERN = re.compile(r"/dev/tty([1-9][0-9]*)")
 INPUT_PATTERN = re.compile(r"/dev/input/event([0-9]+)")
 EDID_PATTERN = re.compile(r"[0-9a-f]{64}")
+COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
+M14_REQUIRED_BASE_COMMIT = "6864ea631d61636289a21c7d2d6655a17be0c004"
 MAX_CONFIG_BYTES = 16 * 1024
 MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 128 * 1024 * 1024
@@ -56,7 +58,12 @@ REQUIRED_ARTIFACTS = (
     "milestone14-fullscreen.log",
     "milestone14-borderless.log",
     "milestone14-focused.log",
+    "client-app-default.json",
+    "client-app-prefer.json",
+    "client-app-preferences.json",
+    "milestone14-app-requested-default.json",
     "milestone14-app-requested.log",
+    "milestone14-app-requested-disable.json",
     "milestone14-always.log",
     "milestone14-vt.log",
     "milestone14-restart.log",
@@ -71,7 +78,11 @@ ARCHIVE_STATE_ARTIFACTS = (
 FIXTURE_COPY_ARTIFACTS = (
     "milestone14-vrr-report.jsonl", "milestone14-fullscreen.log",
     "milestone14-borderless.log", "milestone14-focused.log",
-    "milestone14-app-requested.log", "milestone14-always.log",
+    "client-app-default.json", "client-app-prefer.json",
+    "client-app-preferences.json",
+    "milestone14-app-requested-default.json",
+    "milestone14-app-requested.log",
+    "milestone14-app-requested-disable.json", "milestone14-always.log",
     "milestone14-vt.log", "milestone14-restart.log",
     "milestone14-canonical.ppm", "milestone14-screen.ppm",
 )
