@@ -39,6 +39,15 @@ RECORDED = (
     "compiler_c", "compiler_cxx", "meson_version", "ninja_version",
     "systemd_version", "kernel", "libdrm", "drm_connector", "clang",
 )
+DAEMON_SERVICE_IDS = {
+    "glasswyrmd-m14-headless.service", "gwm-m14-headless.service",
+    "gwcomp-m14-headless.service", "glasswyrmd-m14-single.service",
+    "gwm-m14-single.service", "gwcomp-m14-single.service",
+    "glasswyrmd-m14-qxl.service", "gwm-m14-qxl.service",
+    "gwcomp-m14-qxl.service",
+}
+UINPUT_SERVICE_ID = "gw-uinput-m14.service"
+SERVICE_IDS = DAEMON_SERVICE_IDS | {UINPUT_SERVICE_ID}
 ARTIFACTS = (
     "milestone14-runtime-test.log",
     "milestone14-meson-test.log",
@@ -55,6 +64,8 @@ ARTIFACTS = (
     "milestone14-qxl-post-gwm.json",
     "milestone14-qxl-post-gwcomp.json",
     "milestone14-qxl-restart.json",
+    "milestone14-qxl-gwm-restart-journal.jsonl",
+    "milestone14-qxl-gwcomp-restart-journal.jsonl",
     "milestone14-headless-report.jsonl",
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
@@ -87,6 +98,8 @@ ARCHIVE_MEMBERS = {
     "milestone14-qxl-post-gwm.json",
     "milestone14-qxl-post-gwcomp.json",
     "milestone14-qxl-restart.json",
+    "milestone14-qxl-gwm-restart-journal.jsonl",
+    "milestone14-qxl-gwcomp-restart-journal.jsonl",
     "milestone14-headless-report.jsonl",
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
@@ -246,6 +259,31 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or qxl_semantic.get("hardware_capable") is not False
                 or qxl_semantic.get("kms_controllable") is not False):
             raise ValueError("QXL restart evidence does not preserve VRR-off state")
+        restart_proof = qxl_restart.get("restart_proof", {})
+        expected_restart_proof = {
+            "gwm": ("milestone14-qxl-gwm-restart-journal.jsonl",
+                    "gwm: policy accepted"),
+            "gwcomp": ("milestone14-qxl-gwcomp-restart-journal.jsonl",
+                       "gwcomp: frame accepted"),
+        }
+        if set(restart_proof) != set(expected_restart_proof):
+            raise ValueError("QXL restart proof inventory differs")
+        for name, (journal_name, message_prefix) in expected_restart_proof.items():
+            proof = restart_proof[name]
+            previous = proof.get("previous_invocation_id", "")
+            current = proof.get("invocation_id", "")
+            if (not re.fullmatch(r"[0-9a-f]{32}", previous)
+                    or not re.fullmatch(r"[0-9a-f]{32}", current)
+                    or previous == current
+                    or proof.get("journal") != journal_name
+                    or proof.get("message_prefix") != message_prefix):
+                raise ValueError(f"QXL {name} restart invocation proof is invalid")
+            journal = load_jsonl(root / journal_name)
+            if (any(record.get("_SYSTEMD_INVOCATION_ID") != current
+                    for record in journal)
+                    or not any(str(record.get("MESSAGE", "")).startswith(
+                        message_prefix) for record in journal)):
+                raise ValueError(f"QXL {name} restart journal is not from the new process")
 
         headless = load_jsonl(root / "milestone14-headless-report.jsonl")
         capabilities = [record for record in headless
@@ -372,21 +410,44 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
             raise ValueError("restoration evidence is incomplete")
         service_results = load_object(root / "milestone14-service-results.json")
         services = service_results.get("services", [])
-        if (service_results.get("passed") is not True or len(services) != 10
-                or any(service.get("LoadState") != "loaded"
-                       or service.get("ActiveState") != "inactive"
-                       or service.get("Result") != "success"
-                       or service.get("ExecMainCode") != "exited"
-                       or service.get("ExecMainStatus") != "0"
-                       for service in services)):
+        services_by_id = {service.get("Id"): service for service in services}
+        if (service_results.get("passed") is not True
+                or len(services) != len(SERVICE_IDS)
+                or set(services_by_id) != SERVICE_IDS):
             raise ValueError("service result gate is incomplete")
+        for unit in DAEMON_SERVICE_IDS:
+            service = services_by_id[unit]
+            if (service.get("LoadState") != "loaded"
+                    or service.get("ActiveState") != "inactive"
+                    or service.get("SubState") != "dead"
+                    or service.get("Result") != "success"
+                    or service.get("ExecMainCode") != "exited"
+                    or service.get("ExecMainStatus") != "0"):
+                raise ValueError(f"daemon service result is incomplete: {unit}")
+        uinput = services_by_id[UINPUT_SERVICE_ID]
+        if uinput != {
+                "Id": UINPUT_SERVICE_ID, "LoadState": "not-found",
+                "ActiveState": "inactive", "SubState": "dead",
+                "Result": "success", "ExecMainCode": "0",
+                "ExecMainStatus": "0"}:
+            raise ValueError("collected uinput service result is incomplete")
         cleanup = load_object(root / "milestone14-cleanup.json")
         cleanup_checks = cleanup.get("restoration_checks", {})
+        cleanup_units = cleanup.get("units", [])
+        cleanup_by_id = {unit.get("Id"): unit for unit in cleanup_units}
         if (cleanup.get("failure_stage") != "completed"
                 or cleanup.get("original_exit_status") != 0
                 or cleanup.get("restoration_attempted") is not True
                 or cleanup.get("restoration_ok") is not True
                 or cleanup.get("cleanup_failures") != 0
+                or cleanup.get("sockets_released") is not True
+                or cleanup.get("errors") != []
+                or len(cleanup_units) != len(SERVICE_IDS)
+                or set(cleanup_by_id) != SERVICE_IDS
+                or any(unit.get("LoadState") not in {"loaded", "not-found"}
+                       or unit.get("ActiveState") != "inactive"
+                       or unit.get("SubState") != "dead"
+                       for unit in cleanup_units)
                 or cleanup_checks != {name: "passed" for name in
                                       ("kms", "vt", "getty", "logind")}):
             raise ValueError("successful-run cleanup diagnostics are incomplete")

@@ -106,7 +106,24 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
                            "hardware_capable": False,
                            "kms_controllable": False,
                            "reasons": ["output-not-vrr-capable",
-                                       "vrr-property-missing"]}})
+                                       "vrr-property-missing"]},
+        "restart_proof": {
+            "gwm": {
+                "previous_invocation_id": "1" * 32,
+                "invocation_id": "2" * 32,
+                "journal": "milestone14-qxl-gwm-restart-journal.jsonl",
+                "message_prefix": "gwm: policy accepted"},
+            "gwcomp": {
+                "previous_invocation_id": "3" * 32,
+                "invocation_id": "4" * 32,
+                "journal": "milestone14-qxl-gwcomp-restart-journal.jsonl",
+                "message_prefix": "gwcomp: frame accepted"}}})
+    (root / "milestone14-qxl-gwm-restart-journal.jsonl").write_text(
+        json.dumps({"_SYSTEMD_INVOCATION_ID": "2" * 32,
+                    "MESSAGE": "gwm: policy accepted commit=2"}) + "\n")
+    (root / "milestone14-qxl-gwcomp-restart-journal.jsonl").write_text(
+        json.dumps({"_SYSTEMD_INVOCATION_ID": "4" * 32,
+                    "MESSAGE": "gwcomp: frame accepted commit=2"}) + "\n")
     headless = [
         {"record": "capability", "backend": "headless",
          "device": "simulated", "driver": "headless",
@@ -187,16 +204,25 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
     write_json(root / "milestone14-restoration.json", {
         "passed": True, "checks": {name: True for name in
         ("kms", "vt", "vrr", "getty", "logind")}})
-    services = [{"Id": f"test-{index}.service", "LoadState": "loaded",
+    services = [{"Id": unit, "LoadState": "loaded",
                  "ActiveState": "inactive", "SubState": "dead",
                  "Result": "success", "ExecMainCode": "exited",
-                 "ExecMainStatus": "0"} for index in range(10)]
+                 "ExecMainStatus": "0"}
+                for unit in sorted(validator.DAEMON_SERVICE_IDS)]
+    services.append({"Id": validator.UINPUT_SERVICE_ID,
+                     "LoadState": "not-found", "ActiveState": "inactive",
+                     "SubState": "dead", "Result": "success",
+                     "ExecMainCode": "0", "ExecMainStatus": "0"})
     write_json(root / "milestone14-service-results.json", {
         "schema": 1, "passed": True, "services": services})
     write_json(root / "milestone14-cleanup.json", {
         "schema": 1, "failure_stage": "completed", "original_exit_status": 0,
         "restoration_attempted": True, "restoration_ok": True,
         "cleanup_failures": 0,
+        "sockets_released": True, "errors": [],
+        "units": [{"Id": unit, "LoadState": "not-found",
+                   "ActiveState": "inactive", "SubState": "dead"}
+                  for unit in sorted(validator.SERVICE_IDS)],
         "restoration_checks": {name: "passed" for name in
                                ("kms", "vt", "getty", "logind")}})
     (root / "milestone14-cleanup.log").write_text(
@@ -249,6 +275,53 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any("unsupported profile" in error
                for error in json.loads(summary.read_text())["evidence_errors"])
     capability.write_text(saved)
+
+    restart_path = root / "milestone14-qxl-restart.json"
+    saved_restart = restart_path.read_text()
+    stale_restart = json.loads(saved_restart)
+    stale_restart["restart_proof"]["gwm"]["invocation_id"] = \
+        stale_restart["restart_proof"]["gwm"]["previous_invocation_id"]
+    write_json(restart_path, stale_restart)
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("restart invocation proof" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    restart_path.write_text(saved_restart)
+
+    journal_path = root / "milestone14-qxl-gwm-restart-journal.jsonl"
+    saved_journal = journal_path.read_text()
+    journal_path.write_text(json.dumps({
+        "_SYSTEMD_INVOCATION_ID": "1" * 32,
+        "MESSAGE": "gwm: policy accepted commit=2"}) + "\n")
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("restart journal" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    journal_path.write_text(saved_journal)
+
+    service_path = root / "milestone14-service-results.json"
+    saved_services = service_path.read_text()
+    duplicate_services = json.loads(saved_services)
+    duplicate_services["services"][-1]["Id"] = \
+        duplicate_services["services"][0]["Id"]
+    write_json(service_path, duplicate_services)
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("service result gate" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    service_path.write_text(saved_services)
+
+    cleanup_path = root / "milestone14-cleanup.json"
+    saved_cleanup = cleanup_path.read_text()
+    active_cleanup = json.loads(saved_cleanup)
+    active_cleanup["units"][0]["ActiveState"] = "active"
+    active_cleanup["units"][0]["SubState"] = "running"
+    write_json(cleanup_path, active_cleanup)
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("cleanup diagnostics" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    cleanup_path.write_text(saved_cleanup)
 
     unsupported = json.loads(saved)
     unsupported["crtc_property_present"] = False
