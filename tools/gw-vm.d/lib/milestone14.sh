@@ -678,11 +678,14 @@ grep -Fxq 'gwout: selected output does not provide controllable VRR' \
 python3 - "$qxl_gwout_status" "$qxl/gwout-rejected.stderr" \
   "$artifact_dir/milestone14-gwout.log" <<'PY'
 import json,sys
-status=int(sys.argv[1]); error=open(sys.argv[2]).read().strip()
-assert status!=0 and error=='gwout: selected output does not provide controllable VRR'
+status=int(sys.argv[1])
+diagnostics=[line for line in open(sys.argv[2]).read().splitlines()
+             if line.startswith('gwout:')]
+expected='gwout: selected output does not provide controllable VRR'
+assert status!=0 and diagnostics==[expected]
 with open(sys.argv[3],'a') as output:
  json.dump({'profile':'qxl-unsupported','requested_policy':'always-eligible',
-            'accepted':False,'exit_status':status,'error':error},output,sort_keys=True)
+            'accepted':False,'exit_status':status,'error':expected},output,sort_keys=True)
  output.write('\n')
 PY
 "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
@@ -700,7 +703,8 @@ while True:
   if time.monotonic()>=deadline: raise SystemExit('QXL VRR capability record was not observed')
   time.sleep(.05)
 assert not capability['connector_property_present']
-assert not capability['connector_property_value'] and not capability['crtc_property_present']
+assert not capability['connector_property_value']
+assert capability['crtc_property_present'] and capability['crtc_property_id'] > 0
 assert not capability['controllable'] and not capability['atomic_test_on']
 capability.update({'schema':1,'profile':'qxl-unsupported','passed':True})
 json.dump(capability,open(sys.argv[2],'w'),sort_keys=True)
@@ -708,7 +712,7 @@ state=json.load(open(sys.argv[3])); assert len(state['vrr'])==1
 v=state['vrr'][0]
 assert not v['simulated'] and not v['hardware_capable'] and not v['kms_controllable']
 assert v['policy']=='off' and not v.get('effective_enabled',False)
-assert {'output-not-vrr-capable','vrr-property-missing'} & set(v['reasons'])
+assert {'output-not-vrr-capable','vrr-property-missing'} <= set(v['reasons'])
 PY
 result[qxl_unsupported]=passed
 
@@ -775,7 +779,9 @@ kb,ka,vb,va=(json.load(open(x)) for x in sys.argv[1:5])
 records=[json.loads(x) for x in open(sys.argv[5]) if x.strip()]
 restore=next(x for x in reversed(records) if x.get('record')=='vrr-restore')
 states=sys.argv[7:]
-checks={'kms':kb==ka,'vt':vb==va,'vrr':restore['readback_success'] and
+vt_restored=(vb['active'][0]==va['active'][0] and
+             all(vb[key]==va[key] for key in ('mode','kd','keyboard')))
+checks={'kms':kb==ka,'vt':vt_restored,'vrr':restore['readback_success'] and
         restore['original_enabled']==restore['restored_enabled'] and
         restore['kms_restore'] and restore['vt_restore'] and restore['getty_restore'],
         'getty':states[0]==states[1] and states[2]==states[3],

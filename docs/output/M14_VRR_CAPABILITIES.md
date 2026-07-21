@@ -58,4 +58,6 @@ negotiated. Historical sessions retain their exact M13 inventory and scene
 shape. An incapable DRM output continues ordinary fixed-refresh presentation,
 and non-Off policy changes are rejected with explicit capability reasons.
 QXL is the required incapable hardware profile and is never treated as
-positive VRR evidence.
+positive VRR evidence. The reviewed QXL profile exposes the generic CRTC
+`VRR_ENABLED` property but omits connector `vrr_capable`; that incomplete
+pipeline is hardware-incapable, fails enable validation, and must remain off.
