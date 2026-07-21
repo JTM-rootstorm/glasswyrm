@@ -48,6 +48,12 @@ evidence, not producer frames, and do not increment the producer frame count.
 Failure to quiesce, drop/reacquire master, acknowledge a VT transition, or
 re-modeset the committed frame is fatal.
 
+For an opt-in M14 VRR session, release first disables VRR and confirms property
+readback before DRM master is dropped. Acquire restores the committed frame,
+then reevaluates VRR policy only after the session is active again. The M10
+ordering and restoration guarantees otherwise remain unchanged; see
+[M14 VRR KMS control](M14_VRR_KMS_CONTROL.md).
+
 ## Ordered shutdown
 
 Normal shutdown and handled fatal paths attempt this exact order:

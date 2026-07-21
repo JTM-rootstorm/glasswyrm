@@ -167,3 +167,7 @@ M10 does not provide acceleration, real input, multiple outputs, clones,
 scaling, rotation, cursor or overlay planes, dynamic mode changes, hotplug
 recovery, DMA-BUF scanout, format modifiers, explicit synchronization, DPMS,
 VRR, HDR, color management, leases, or X11 RANDR.
+
+The later opt-in M14 profile adds capability-gated atomic `VRR_ENABLED`
+control without changing this M10 scanout ownership or making VRR part of the
+historical backend contract. See [M14 VRR KMS control](M14_VRR_KMS_CONTROL.md).
