@@ -306,7 +306,7 @@ cleanup() {
     kill "$focus_a_pid" 2>/dev/null
     wait "$focus_a_pid" 2>/dev/null
   }
-  local unit load_state active_state sub_state result
+  local unit load_state active_state sub_state unit_result
   for unit in "${service_units[@]}"; do
     load_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null)
     active_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
@@ -322,13 +322,13 @@ cleanup() {
     load_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null)
     active_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
     sub_state=$(systemctl show "$unit" -p SubState --value 2>/dev/null)
-    result=$(systemctl show "$unit" -p Result --value 2>/dev/null)
-    if [[ $active_state == failed || $result != success ]]; then
+    unit_result=$(systemctl show "$unit" -p Result --value 2>/dev/null)
+    if [[ $active_state == failed || $unit_result != success ]]; then
       systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
         -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
         >>"$artifact_dir/milestone14-cleanup.log" 2>&1
       printf 'service remained active after cleanup: %s load=%s active=%s sub=%s result=%s\n' \
-        "$unit" "$load_state" "$active_state" "$sub_state" "$result" | tee -a \
+        "$unit" "$load_state" "$active_state" "$sub_state" "$unit_result" | tee -a \
         "$cleanup_errors" "$artifact_dir/milestone14-cleanup.log" >/dev/null
       cleanup_failures=$((cleanup_failures + 1))
       systemctl reset-failed "$unit" \
