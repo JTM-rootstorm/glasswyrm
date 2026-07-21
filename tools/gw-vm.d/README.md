@@ -89,6 +89,7 @@ actions:
 ./tools/gw-vm milestone11-runtime-test --yes
 ./tools/gw-vm milestone12-runtime-test --yes
 ./tools/gw-vm milestone13-runtime-test --yes
+./tools/gw-vm milestone14-runtime-test --yes
 ./tools/gw-vm milestone11-interactive-rerun --yes
 ```
 
@@ -329,3 +330,29 @@ evidence. A final QXL
 DRM stage applies scale 4/3 and Rotate180, compares the canonical mirror with a
 host graphical-console capture, exercises VT replay, restores scale 1/1 and
 Normal, and verifies resource cleanup. No arbitrary guest command is exposed.
+
+Milestone 14 preserves the accepted M13 gate and then validates the fixed QXL
+negative-capability profile with this release sequence:
+
+```sh
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone13-runtime-test --yes
+./tools/gw-vm reset --yes
+./tools/gw-vm milestone14-runtime-test --yes
+```
+
+The M14 command requires committed source descending from
+`6864ea631d61636289a21c7d2d6655a17be0c004` and the single configured internal
+snapshot exactly named `base`. It runs the historical/default, strict M14,
+software/GLES, sanitizer, component, staged API 0.1-0.9 consumer,
+source-layout, fake-DRM, simulated-headless, raw-protocol, tool, policy, and SDL
+gates before starting the real QXL DRM path. QXL remains fixed refresh: the
+connector lacks `vrr_capable`, non-Off policy is rejected, and effective VRR
+must remain false through VT, GWM, and compositor restart recovery.
+
+The accepted result is `milestone14-summary.json`. Its checksum-protected
+archive retains the raw QXL DRM/VRR reports, KMS and VT before/after snapshots,
+post-restart state, service results, restoration proof, journals, and derived
+policy evidence beneath the configured `artifacts/vm/` path. This gate is not
+positive VRR hardware evidence; the separately reviewed `gw-hw` physical gate
+remains mandatory.
