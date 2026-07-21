@@ -80,6 +80,24 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "keyboard_character_device": True, "pointer_character_device": True,
     }
     write_json(fixture / "doctor.json", facts)
+    write_json(fixture / "milestone14-build-provenance.json", {
+        "schema": "glasswyrm.m14-build-provenance.v1",
+        "source_commit": TESTED_COMMIT,
+        "tracked_source_clean": True,
+        "binaries": [
+            {"role": role, "path": path, "size": index + 1,
+             "sha256": f"{index + 1:064x}"}
+            for index, (role, path) in enumerate((
+                ("gwm", "src/gwm"),
+                ("gwcomp", "src/gwcomp"),
+                ("server", "src/glasswyrmd"),
+                ("gwout", "tools/gwout"),
+                ("gwinfo", "tools/gwinfo"),
+                ("client", "tests/manifest/m14/m14_vrr_client"),
+                ("drm-probe", "tools/gw_drm_probe"),
+            ))
+        ],
+    })
     before = {"vrr_enabled": 0, "kms": {"mode": "2560x1440@144000"},
               "kd_mode": "text", "active_vt": 1, "getty_active": True}
     after = dict(before)
@@ -106,27 +124,47 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "window": 101, "preference": "Default", "frame_count": 1,
         "eventfd_synchronized": False, "events_selected": True,
     }
-    write_json(fixture / "client-app-default.json", client)
+    write_json(fixture / "client-app-default.json",
+               dict(client, preference_reply_count=1, notify_event_count=0,
+                    notify_change_mask=0, reason_mask=1 << 20))
     write_json(fixture / "client-app-prefer.json",
-               dict(client, window=102, mode="app-requested", preference="Prefer"))
+               dict(client, window=102, mode="app-requested", preference="Prefer",
+                    preference_reply_count=1, notify_event_count=1,
+                    notify_change_mask=1, reason_mask=0))
     write_json(fixture / "client-app-preferences.json",
-               dict(client, window=103, mode="preference", preference="Disable"))
+               dict(client, window=103, mode="preference", preference="Disable",
+                    preference_reply_count=4, notify_event_count=3,
+                    notify_change_mask=1, reason_mask=1 << 19,
+                    preference_sequence=["Default", "Allow", "Prefer", "Disable"]))
     app_output = {
         "name": "DP-1", "policy": "app-requested",
         "hardware_capable": True, "kms_controllable": True,
         "simulated": False,
     }
     write_json(fixture / "milestone14-app-requested-default.json", {
-        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0)],
-        "windows": [{"window": 101, "preference": "Default"}],
+        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0,
+                     reasons=["no-candidate"])],
+        "windows": [{"window": 101, "preference": "Default",
+                     "reasons": ["window-did-not-request"]}],
     })
     write_json(fixture / "milestone14-app-requested.log", {
-        "vrr": [dict(app_output, effective_enabled=True, candidate_window=102)],
-        "windows": [{"window": 102, "preference": "Prefer"}],
+        "vrr": [dict(app_output, effective_enabled=True, candidate_window=102,
+                     reasons=[])],
+        "windows": [{"window": 102, "preference": "Prefer", "reasons": []}],
     })
     write_json(fixture / "milestone14-app-requested-disable.json", {
-        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0)],
-        "windows": [{"window": 103, "preference": "Disable"}],
+        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0,
+                     reasons=["no-candidate"])],
+        "windows": [{"window": 103, "preference": "Disable",
+                     "reasons": ["window-preference-disabled"]}],
+    })
+    capture_output = dict(app_output, candidate_window=0)
+    write_json(fixture / "milestone14-capture-off-state.json", {
+        "vrr": [dict(capture_output, policy="off", effective_enabled=False)],
+    })
+    write_json(fixture / "milestone14-capture-enabled-state.json", {
+        "vrr": [dict(capture_output, policy="always-eligible",
+                     effective_enabled=True)],
     })
     ppm = b"P6\n1 1\n255\n\x12\x34\x56"
     (fixture / "milestone14-canonical.ppm").write_bytes(ppm)
@@ -242,6 +280,21 @@ def main() -> int:
         assert summary["required_base_commit"] == REQUIRED_BASE
         assert summary["tested_commit"] == TESTED_COMMIT
         assert_archive(artifacts)
+
+        provenance_path = fixture / "milestone14-build-provenance.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        write_json(provenance_path, dict(provenance, source_commit="c" * 40))
+        rejected_artifacts = root / "provenance-rejected"
+        rejected = run(
+            "milestone14-vrr-test", "--config", str(config), "--yes",
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--dry-run", "--fixture-dir", str(fixture),
+            "--artifact-dir", str(rejected_artifacts),
+        )
+        assert rejected.returncode == 1
+        assert "build provenance" in rejected.stderr
+        write_json(provenance_path, provenance)
 
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)

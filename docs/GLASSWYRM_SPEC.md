@@ -1222,6 +1222,10 @@ unacceptable:
 
 ```sh
 tested_commit=$(git rev-parse HEAD)
+meson setup /var/tmp/glasswyrm-build-m14 \
+  -Ddrm_backend=true -Dlibinput_backend=true \
+  -Dphysical_validation_provenance=true
+meson compile -C /var/tmp/glasswyrm-build-m14
 ./tools/gw-hw doctor --config /path/to/reviewed.toml \
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
@@ -1232,6 +1236,11 @@ tested_commit=$(git rev-parse HEAD)
   --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
+
+The physical harness fails closed unless the fixed build contains the
+Meson-generated provenance manifest for the exact clean tested commit and the
+current sizes and SHA-256 hashes of all seven repository executables match it.
+The validated manifest is part of the checksummed evidence archive.
 
 ## 26. Definition of done
 

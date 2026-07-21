@@ -17,5 +17,6 @@ option('asan', type: 'boolean', value: false, description: 'Enable AddressSaniti
 option('ubsan', type: 'boolean', value: false, description: 'Enable UndefinedBehaviorSanitizer.')
 option('tsan', type: 'boolean', value: false, description: 'Enable ThreadSanitizer.')
 option('experimental', type: 'boolean', value: true, description: 'Reserve experimental Glasswyrm extension support.')
+option('physical_validation_provenance', type: 'boolean', value: false, description: 'Generate a fail-closed M14 manifest for the fixed physical-validation build.')
 option('m9_xeyes', type: 'string', value: '', description: 'Path to the exact xeyes 1.3.1 binary for opt-in M9 live tests.')
 option('m9_xclock', type: 'string', value: '', description: 'Path to the exact xclock 1.2.0 binary for opt-in M9 live tests.')

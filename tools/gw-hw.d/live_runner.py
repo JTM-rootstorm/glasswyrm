@@ -15,20 +15,15 @@ import time
 from typing import Any
 
 from common import (
-    HarnessError, MAX_JSON_BYTES, MIN_ENABLED_INTERVALS, RUN_STEPS,
-    TTY_PATTERN, _read_json, _read_regular,
+    BUILD_ROOT, HarnessError, MAX_JSON_BYTES, MIN_ENABLED_INTERVALS, RUN_STEPS,
+    TTY_PATTERN, _read_json, _read_regular, _write_json,
+    vrr_rejection_reasons,
 )
+from provenance import PROVENANCE_BINARIES
 
-BUILD_ROOT = Path("/var/tmp/glasswyrm-build-m14")
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
 FIXED_BINARIES = {
-    "gwm": BUILD_ROOT / "src/gwm",
-    "gwcomp": BUILD_ROOT / "src/gwcomp",
-    "server": BUILD_ROOT / "src/glasswyrmd",
-    "gwout": BUILD_ROOT / "tools/gwout",
-    "gwinfo": BUILD_ROOT / "tools/gwinfo",
-    "client": BUILD_ROOT / "tests/manifest/m14/m14_vrr_client",
-    "drm-probe": BUILD_ROOT / "tools/gw_drm_probe",
+    **PROVENANCE_BINARIES,
     "systemctl": Path("/usr/bin/systemctl"),
     "systemd-run": Path("/usr/bin/systemd-run"),
     "chvt": Path("/usr/bin/chvt"),
@@ -47,7 +42,8 @@ class FixedLiveRunner:
     def __init__(self, config: dict[str, object], artifacts: Path,
                  execute: Any = None, active_tty: str | None = None,
                  verify_paths: bool = True, ready: Any = None,
-                 state_reader: Any = None, validate_runtime: bool = True) -> None:
+                 state_reader: Any = None, validate_runtime: bool = True,
+                 preflight_reader: Any = None) -> None:
         self.config = config
         self.artifacts = artifacts
         self.execute = execute or self._execute
@@ -55,6 +51,8 @@ class FixedLiveRunner:
         self.verify_paths = verify_paths
         self.ready = ready or self._ready
         self.state_reader = state_reader or self._console_state
+        self.preflight_reader = preflight_reader or self._live_console_preflight
+        self.recheck_console = verify_paths or preflight_reader is not None
         self.validate_runtime = validate_runtime
         self.steps: list[str] = []
         self.cleanup_attempted = False
@@ -68,6 +66,7 @@ class FixedLiveRunner:
         self.client_units: list[str] = []
         self.before_state: dict[str, object] | None = None
         self.after_state: dict[str, object] | None = None
+        self.restoration_evidence: dict[str, object] | None = None
         self.snapshot_expectations: list[dict[str, object]] = []
         self.cleanup_wait_count = 0
         self.cadence_ranges: dict[str, tuple[int, int]] = {}
@@ -146,6 +145,41 @@ class FixedLiveRunner:
         return {"active_vt": active_vt, "kd_mode": kd_mode,
                 "getty_active": getty_active}
 
+    def _live_console_preflight(self) -> dict[str, object]:
+        try:
+            active_name = Path("/sys/class/tty/tty0/active").read_text(
+                encoding="ascii").strip()
+            active_tty = f"/dev/{active_name}"
+            kd_modes: dict[str, int] = {}
+            for tty in (str(self.config["tty"]),
+                        str(self.config["alternate_tty"])):
+                with open(tty, "rb", buffering=0) as terminal:
+                    packed = fcntl.ioctl(terminal.fileno(), 0x4B3B, bytes(4))
+                    kd_modes[tty] = struct.unpack("I", packed)[0]
+        except (OSError, UnicodeError) as error:
+            raise HarnessError(
+                f"cannot recheck exact active VT/KD_TEXT state: {error}") from error
+        return {"active_tty": active_tty, "kd_modes": kd_modes}
+
+    def verify_live_console(self) -> None:
+        if not self.recheck_console:
+            return
+        state = self.preflight_reader()
+        active_tty = state.get("active_tty")
+        modes = state.get("kd_modes")
+        if active_tty != self.config["tty"]:
+            raise HarnessError(
+                "live run active VT changed before takeover: "
+                f"expected {self.config['tty']}, observed {active_tty}")
+        if not isinstance(modes, dict):
+            raise HarnessError("live console preflight omitted exact KD modes")
+        for tty in (str(self.config["tty"]),
+                    str(self.config["alternate_tty"])):
+            if modes.get(tty) != 0:
+                raise HarnessError(
+                    f"live run requires KD_TEXT on {tty}; observed KD mode "
+                    f"{modes.get(tty)}")
+
     def start_unit(self, name: str, executable: str, arguments: list[str],
                    properties: list[str] | None = None) -> None:
         argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={name.removesuffix('.service')}",
@@ -161,16 +195,21 @@ class FixedLiveRunner:
                       str(self.config["connector"]), "--vrr", policy, "--json"])
 
     def start_client(self, tag: str, mode: str, preference: str | None = None,
-                     cadence: bool = False) -> Path:
+                     cadence: bool = False, repaint: bool = False) -> Path:
         unit = f"m14-hardware-client-{tag}.service"
         result = self.artifacts / f"client-{tag}.json"
+        hold_ms = "60000" if repaint else "30000"
         arguments = ["--display", ":14", "--mode", mode, "--result", str(result),
-                     "--hold-ms", "30000"]
+                     "--hold-ms", hold_ms]
         if cadence:
             arguments += ["--frames", "180", "--target-refresh-hz",
                           str(self.config["target_refresh_hz"])]
         if preference is not None:
             arguments += ["--preference", preference]
+        if repaint:
+            arguments += ["--repaint-trigger",
+                          str(RUNTIME_ROOT / "repaint.request"),
+                          "--repaint-count", "2"]
         self.start_unit(unit, "client", arguments,
                         ["KillMode=mixed", "SuccessExitStatus=143"])
         self.client_units.append(unit)
@@ -271,10 +310,13 @@ class FixedLiveRunner:
             f"timed out waiting for coordinated client cleanup: {last_error}")
 
     def snapshot(self, name: str, policy: str, effective: bool,
-                 preference: str | None = None) -> dict[str, Any]:
+                 preference: str | None = None,
+                 output_reasons: tuple[str, ...] | None = None,
+                 window_reasons: tuple[str, ...] | None = None) -> dict[str, Any]:
         self.snapshot_expectations.append(
             {"name": name, "policy": policy, "effective": effective,
-             "preference": preference})
+             "preference": preference, "output_reasons": output_reasons,
+             "window_reasons": window_reasons})
         if not self.validate_runtime:
             self.command([str(FIXED_BINARIES["gwinfo"]), "--socket",
                           str(RUNTIME_ROOT / "control.sock"), "vrr",
@@ -301,12 +343,22 @@ class FixedLiveRunner:
                         output.get("kms_controllable") is not True or
                         output.get("simulated") is not False):
                     raise HarnessError("exact VRR output state has not converged")
+                if (output_reasons is not None and
+                        vrr_rejection_reasons(output.get("reasons")) !=
+                        list(output_reasons)):
+                    raise HarnessError("exact VRR output reasons have not converged")
                 if preference is not None:
                     windows = value.get("windows")
-                    if not isinstance(windows, list) or not any(
-                            item.get("preference", "").lower() == preference
-                            for item in windows if isinstance(item, dict)):
+                    window = next((item for item in windows
+                                   if isinstance(item, dict) and
+                                   item.get("preference", "").lower() == preference),
+                                  None) if isinstance(windows, list) else None
+                    if window is None:
                         raise HarnessError(f"{preference} window state has not converged")
+                    if (window_reasons is not None and
+                            window.get("reasons") != list(window_reasons)):
+                        raise HarnessError(
+                            "exact VRR window reasons have not converged")
                 os.replace(temporary, path)
                 return value
             except HarnessError as error:
@@ -324,19 +376,21 @@ class FixedLiveRunner:
         self.set_policy("app-requested")
         self.start_client("app-default", "windowed", "default")
         self.snapshot("milestone14-app-requested-default.json",
-                      "app-requested", False, "default")
+                      "app-requested", False, "default", ("no-candidate",),
+                      ("window-did-not-request",))
         self.stop_client("app-default")
         self.wait_policy_cleanup()
 
         self.start_client("app-prefer", "app-requested")
         self.snapshot("milestone14-app-requested.log",
-                      "app-requested", True, "prefer")
+                      "app-requested", True, "prefer", (), ())
         self.stop_client("app-prefer")
         self.wait_policy_cleanup()
 
         self.start_client("app-preferences", "preference")
         self.snapshot("milestone14-app-requested-disable.json",
-                      "app-requested", False, "disable")
+                      "app-requested", False, "disable", ("no-candidate",),
+                      ("window-preference-disabled",))
         self.stop_client("app-preferences")
         self.wait_policy_cleanup()
 
@@ -355,6 +409,43 @@ class FixedLiveRunner:
             raise HarnessError("live run refused the wrong active VT")
         if self.execute([str(FIXED_BINARIES["systemctl"]), "is-active", "display-manager.service"], None) == 0:
             raise HarnessError("live run refused an active graphical display manager")
+        self.verify_live_console()
+
+    def record_restoration_evidence(self) -> None:
+        original = self.before_state
+        restored = self.after_state
+        checks: dict[str, bool] = {}
+        errors = list(self.cleanup_errors)
+        for field, label in (("active_vt", "active VT"),
+                             ("kd_mode", "KD mode"),
+                             ("getty_active", "getty state")):
+            passed = (original is not None and restored is not None and
+                      field in original and field in restored and
+                      original[field] == restored[field])
+            checks[field] = passed
+            if not passed:
+                expected = original.get(field) if original else None
+                observed = restored.get(field) if restored else None
+                errors.append(
+                    f"{label} restoration mismatch: expected {expected}, "
+                    f"observed {observed}")
+        errors = list(dict.fromkeys(errors))
+        self.cleanup_errors = errors
+        self.restoration_evidence = {
+            "schema": "glasswyrm.m14-hardware.v1",
+            "original_console": original,
+            "restored_console": restored,
+            "checks": checks,
+            "errors": errors,
+            "readback_success": all(checks.values()),
+            "passed": all(checks.values()) and not errors,
+        }
+        try:
+            _write_json(self.artifacts / "milestone14-restore.json",
+                        self.restoration_evidence)
+        except OSError as error:
+            self.cleanup_errors.append(
+                f"restoration evidence write failed: {error}")
 
     def cleanup(self) -> None:
         self.cleanup_attempted = True
@@ -395,7 +486,8 @@ class FixedLiveRunner:
         except Exception as error:
             self.cleanup_errors.append(f"console readback failed: {error}")
         for path in (RUNTIME_ROOT / "control.sock", RUNTIME_ROOT / "gwcomp.sock",
-                     RUNTIME_ROOT / "gwm.sock", RUNTIME_ROOT / "mirror.capture"):
+                     RUNTIME_ROOT / "gwm.sock", RUNTIME_ROOT / "mirror.capture",
+                     RUNTIME_ROOT / "repaint.request"):
             try:
                 path.unlink(missing_ok=True)
             except OSError as error:
@@ -405,6 +497,7 @@ class FixedLiveRunner:
         except OSError as error:
             if self.validate_runtime:
                 self.cleanup_errors.append(f"runtime directory cleanup failed: {error}")
+        self.record_restoration_evidence()
 
     def run(self) -> None:
         self.preflight()
@@ -417,6 +510,7 @@ class FixedLiveRunner:
                               "--connector", str(self.config["connector"]), "--require-mode",
                               str(self.config["mode"]).split("@", 1)[0], "--snapshot-state", "--output",
                               str(self.artifacts / "kms-before.json")])
+            self.verify_live_console()
             self.command([str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit])
             self.getty_stopped = True
             self._step(2); self.start_unit(LIVE_UNITS["gwm"], "gwm", ["--ipc-socket", str(RUNTIME_ROOT / "gwm.sock")]); self.wait_path(RUNTIME_ROOT / "gwm.sock")
@@ -436,7 +530,7 @@ class FixedLiveRunner:
             self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless"); self.wait_policy_cleanup()
             self._step(15); self.set_policy("focused"); self.start_client("focus-a", "windowed", "default"); self.snapshot("milestone14-focused.log", "focused", True); self.start_client("focus-b", "windowed", "default"); self.snapshot("milestone14-focused-transfer.json", "focused", True); self.stop_client("focus-b"); self.stop_client("focus-a"); self.wait_policy_cleanup()
             self._step(16); self.run_app_requested_scenarios()
-            self._step(17); self.set_policy("always-eligible"); self.start_client("always", "windowed", "default"); self.snapshot("milestone14-always.log", "always-eligible", True)
+            self._step(17); self.set_policy("always-eligible"); self.start_client("always", "windowed", "default", repaint=True); self.snapshot("milestone14-always.log", "always-eligible", True)
             self._step(18); self.set_policy("off"); self.snapshot("milestone14-policy-off.json", "off", False); self.set_policy("always-eligible")
             self._step(19); self.command([str(FIXED_BINARIES["chvt"]), self.alternate_tty]); self.snapshot("milestone14-vt-inactive.json", "always-eligible", False); self.command([str(FIXED_BINARIES["chvt"]), TTY_PATTERN.fullmatch(str(self.config["tty"])).group(1)])  # type: ignore[union-attr]
             self._step(20); shutil.copyfile(self.artifacts / "milestone14-vt-inactive.json", self.artifacts / "milestone14-vt.log") if self.validate_runtime else None
@@ -480,11 +574,17 @@ class FixedLiveRunner:
         def capture(policy: str, destination: str) -> None:
             frames = sorted((self.artifacts / "frames").glob("*.ppm"))
             count = len(frames)
-            trigger.touch(mode=0o600, exist_ok=False)
             self.set_policy(policy)
+            state_name = ("milestone14-capture-off-state.json" if policy == "off"
+                          else "milestone14-capture-enabled-state.json")
+            self.snapshot(state_name, policy,
+                          policy == "always-eligible")
+            repaint_trigger = RUNTIME_ROOT / "repaint.request"
+            trigger.touch(mode=0o600, exist_ok=False)
+            repaint_trigger.touch(mode=0o600, exist_ok=False)
             for _ in range(200):
                 frames = sorted((self.artifacts / "frames").glob("*.ppm"))
-                if len(frames) > count:
+                if not repaint_trigger.exists() and len(frames) > count:
                     shutil.copyfile(frames[-1], self.artifacts / destination)
                     return
                 time.sleep(.05)

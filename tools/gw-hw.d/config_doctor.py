@@ -22,6 +22,7 @@ from common import (
     SCHEMA_KEYS, STRING_KEYS, TTY_PATTERN, _read_json, _read_regular,
     _safe_text, _write_json, interval_tolerance,
 )
+from provenance import validate_build_provenance
 
 def parse_config(path: Path) -> dict[str, object]:
     try:
@@ -515,6 +516,9 @@ def doctor(config_path: Path, required_base: str, tested_commit: str,
     try:
         config = parse_config(config_path)
         validate_cli_identity(config, required_base, tested_commit)
+        if fixture_dir is None:
+            validate_build_provenance(tested_commit, artifact_dir)
+            print("[ok] exact physical build provenance")
         facts = _read_json(fixture_dir / "doctor.json") if fixture_dir else _live_doctor_facts(config)
         passed, checks = _validate_doctor_facts(config, facts)
         report = {"schema": ARTIFACT_SCHEMA, "passed": passed,

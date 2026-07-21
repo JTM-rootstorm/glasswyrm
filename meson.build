@@ -253,3 +253,53 @@ if get_option('tools')
   subdir('tools')
 endif
 subdir('tests')
+
+if get_option('physical_validation_provenance')
+  if not (get_option('glasswyrmd') and get_option('gwm') and
+          get_option('gwcomp') and get_option('tools') and
+          get_option('drm_backend') and get_option('libinput_backend'))
+    error('physical_validation_provenance requires glasswyrmd, gwm, gwcomp, tools, drm_backend, and libinput_backend')
+  endif
+  if not xcb_test_dependency.found()
+    error('physical_validation_provenance requires XCB for the M14 hardware client')
+  endif
+
+  git_program = find_program('git', required: true)
+  source_commit_result = run_command(
+    git_program,
+    '-C', meson.project_source_root(),
+    'rev-parse', '--verify', 'HEAD',
+    check: false,
+  )
+  source_commit = source_commit_result.stdout().strip()
+  if source_commit_result.returncode() != 0 or source_commit == ''
+    error('physical_validation_provenance requires a Git checkout with an exact HEAD commit')
+  endif
+
+  physical_provenance_generator = find_program(
+    'tools/generate_m14_build_provenance.py',
+  )
+  custom_target(
+    'm14-physical-build-provenance',
+    input: [
+      gwm_program,
+      gwcomp_program,
+      glasswyrmd_program,
+      gwout_program,
+      gwinfo_program,
+      m14_vrr_client,
+      gw_drm_probe_program,
+    ],
+    output: 'glasswyrm-m14-build-manifest.json',
+    command: [
+      physical_provenance_generator,
+      '--source-root', meson.project_source_root(),
+      '--git', git_program.full_path(),
+      '--expected-commit', source_commit,
+      '--output', '@OUTPUT@',
+      '--roles', 'gwm,gwcomp,server,gwout,gwinfo,client,drm-probe',
+      '--binaries', '@INPUT@',
+    ],
+    build_by_default: true,
+  )
+endif
