@@ -482,6 +482,7 @@ if get_option('glasswyrmd')
       'gwcomp/output_inventory_publisher.cpp',
       'glasswyrmd/compositor_peer.cpp',
       'glasswyrmd/compositor_peer_submission.cpp',
+      'glasswyrmd/compositor_peer_vrr_response.cpp',
       'glasswyrmd/screen_geometry.cpp',
       'glasswyrmd/lifecycle_projection.cpp',
       'glasswyrmd/vrr_events.cpp',
