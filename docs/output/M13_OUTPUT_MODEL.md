@@ -64,3 +64,9 @@ See [output identities](M13_OUTPUT_IDENTITIES.md),
 
 This model does not add hotplug recovery, persistence, physical multi-connector
 routing, or dynamic physical mode setting.
+
+Milestone 14 preserves these descriptor, layout, and authority contracts while
+adding opt-in VRR capability and policy records. VRR does not make output
+layout mutable or expand the one-physical-connector boundary; see
+[M14 VRR capabilities](M14_VRR_CAPABILITIES.md) and
+[M14 KMS control](M14_VRR_KMS_CONTROL.md).

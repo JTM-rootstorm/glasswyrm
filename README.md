@@ -507,7 +507,30 @@ from the single internal `base` snapshot:
 
 The positive physical gate is separate and has not been accepted yet. It may
 take DRM master, switch VTs, stop the selected getty, and reconfigure the
-display. Run it only from the reviewed spare text VT with independent recovery
+display. Before running either hardware command, build the exact clean tested
+commit at the fixed path with physical-validation provenance enabled:
+
+```sh
+meson setup /var/tmp/glasswyrm-build-m14 --wipe \
+  -Dwerror=true \
+  -Dexperimental=true \
+  -Drender_gl=true \
+  -Dheadless_backend=true \
+  -Ddrm_backend=true \
+  -Dlibinput_backend=true \
+  -Dphysical_validation_provenance=true
+meson compile -C /var/tmp/glasswyrm-build-m14
+```
+
+That opt-in build fails closed if tracked source differs from the configured
+Git commit or HEAD changes before the manifest is generated. Its
+`glasswyrm-m14-build-manifest.json` binds the commit to SHA-256 hashes and
+sizes for the fixed `gwm`, `gwcomp`, `glasswyrmd`, `gwout`, `gwinfo`,
+`m14_vrr_client`, and `gw_drm_probe` executables. `gw-hw` re-hashes all seven
+before takeover and archives the validated manifest as
+`milestone14-build-provenance.json`.
+
+Run the gate only from the reviewed spare text VT with independent recovery
 access and no active display manager:
 
 ```sh
