@@ -119,9 +119,17 @@ done
 
 qxl_restart=$(sed -n '/^wait_qxl_vrr_off()/,/^chvt 1/p' <<<"$guest")
 for expected in \
+  'wait_qxl_restart_evidence() {' \
+  '_SYSTEMD_INVOCATION_ID=$invocation' \
+  "'gwm: policy accepted'" \
+  "'gwcomp: frame accepted'" \
+  'qxl_gwm_previous_invocation' \
+  'qxl_gwcomp_previous_invocation' \
   'systemctl restart gwm-m14-qxl.service' \
+  'wait_qxl_restart_evidence gwm-m14-qxl.service' \
   'wait_qxl_vrr_off "$qxl/post-gwm.json"' \
   'systemctl restart gwcomp-m14-qxl.service' \
+  'wait_qxl_restart_evidence gwcomp-m14-qxl.service' \
   'wait_qxl_vrr_off "$qxl/post-gwcomp.json"' \
   "value.get('policy')=='off'" \
   "value.get('desired_enabled') is False" \
@@ -129,10 +137,24 @@ for expected in \
   grep -F -- "$expected" <<<"$qxl_restart" >/dev/null ||
     fail "M14 QXL restart proof lacks: $expected"
 done
+gwm_evidence_line=$(grep -nF -- \
+  'wait_qxl_restart_evidence gwm-m14-qxl.service' <<<"$qxl_restart" | cut -d: -f1)
+gwm_query_line=$(grep -nF -- 'wait_qxl_vrr_off "$qxl/post-gwm.json"' \
+  <<<"$qxl_restart" | cut -d: -f1)
+gwcomp_evidence_line=$(grep -nF -- \
+  'wait_qxl_restart_evidence gwcomp-m14-qxl.service' <<<"$qxl_restart" | cut -d: -f1)
+gwcomp_query_line=$(grep -nF -- 'wait_qxl_vrr_off "$qxl/post-gwcomp.json"' \
+  <<<"$qxl_restart" | cut -d: -f1)
+((gwm_evidence_line < gwm_query_line &&
+  gwcomp_evidence_line < gwcomp_query_line)) ||
+  fail 'M14 QXL restart semantic query precedes fresh-process journal proof'
 
 cleanup=$(sed -n '/^cleanup()/,/^}/p' <<<"$guest")
 for expected in 'remove_owned_x_socket /tmp/.X11-unix/X98' \
   'remove_owned_x_socket /tmp/.X11-unix/X99' '"$control/input.sock"' \
+  'service stop failed:' 'service remained active after cleanup:' \
+  'owned sockets remained after cleanup' "'sockets_released'" \
+  "'errors':" "'units':units" 'scenario_exit=$final_status' \
   'failure_stage=$saved_stage'; do
   grep -F -- "$expected" <<<"$cleanup" >/dev/null ||
     fail "M14 cleanup lacks: $expected"
@@ -151,8 +173,10 @@ done
 service_gate=$(sed -n '/^service_units=(/,/result\[service_results\]=passed/p' \
   <<<"$guest")
 for expected in glasswyrmd-m14-qxl.service gwm-m14-qxl.service \
-  gwcomp-m14-qxl.service "record['Result']=='success'" \
-  "record['ExecMainStatus']=='0'"; do
+  gwcomp-m14-qxl.service "set(by_id)==expected" \
+  "record['SubState']=='dead'" "record['Result']=='success'" \
+  "record['ExecMainStatus']=='0'" "uinput=={'Id':'gw-uinput-m14.service'" \
+  "'LoadState':'not-found'"; do
   grep -F -- "$expected" <<<"$service_gate" >/dev/null ||
     fail "M14 service-result gate lacks: $expected"
 done
@@ -200,6 +224,8 @@ for expected in \
   'milestone14-qxl-vt-before.json' 'milestone14-qxl-vt-after.json' \
   'milestone14-qxl-post-vt.json' 'milestone14-qxl-post-gwm.json' \
   'milestone14-qxl-post-gwcomp.json' 'milestone14-qxl-restart.json' \
+  'milestone14-qxl-gwm-restart-journal.jsonl' \
+  'milestone14-qxl-gwcomp-restart-journal.jsonl' \
   'milestone14-headless-report.jsonl' 'milestone14-gw-vrr.log' \
   'milestone14-gwout.log' 'milestone14-gwinfo.json' \
   'milestone14-policy-matrix.json' 'milestone14-sdl-vrr.json' \
