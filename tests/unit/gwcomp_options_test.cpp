@@ -211,6 +211,7 @@ int main() {
       output.find("--headless-output") == std::string::npos ||
       output.find("--headless-vrr") == std::string::npos ||
       output.find("--vrr-report") == std::string::npos ||
+      output.find("--mirror-dump-trigger") == std::string::npos ||
       output.find("--renderer software|gles|auto") == std::string::npos ||
       output.find("--renderer-report PATH") == std::string::npos)
     return 1;
@@ -234,6 +235,7 @@ int main() {
              "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
              "--connector", "Virtual-1", "--mode", "1024x768@60000",
              "--drm-api", "atomic", "--mirror-dump-dir", "/tmp/mirror",
+             "--mirror-dump-trigger", "/tmp/mirror.trigger",
              "--drm-report", "/tmp/report.jsonl"},
             options, output, error) != ParseOptionsResult::Run ||
       options.backend != glasswyrm::compositor::Backend::Drm ||
@@ -243,6 +245,7 @@ int main() {
       options.mode->refresh_millihz != 60000 ||
       options.drm_api != glasswyrm::compositor::DrmApiMode::Atomic ||
       options.mirror_dump_dir != "/tmp/mirror" ||
+      options.mirror_dump_trigger != "/tmp/mirror.trigger" ||
       options.drm_report != "/tmp/report.jsonl")
     return 1;
 
@@ -287,6 +290,9 @@ int main() {
       {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
        "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
        "--headless-vrr", "HEADLESS-1=40000-60000"},
+      {"gwcomp", "--backend", "drm", "--ipc-socket", "/run/gw.sock",
+       "--drm-device", "/dev/dri/card0", "--tty", "/dev/tty2",
+       "--mirror-dump-trigger", "/tmp/mirror.trigger"},
   };
   for (auto arguments : invalid_drm) {
     options = {};

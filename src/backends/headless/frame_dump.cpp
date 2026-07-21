@@ -252,6 +252,12 @@ bool FrameDumper::stage(const FrameDumpMetadata& metadata,
     return false;
   }
 
+  if (!capture_requested(error)) {
+    if (!error.empty()) return false;
+    staged = StagedFrameDump{};
+    return true;
+  }
+
   std::vector<std::uint8_t> rgb(static_cast<std::size_t>(pixel_count) * 3);
   for (std::size_t index = 0; index < xrgb_pixels.size(); ++index) {
     const auto pixel = xrgb_pixels[index];
@@ -336,6 +342,11 @@ bool FrameDumper::commit(StagedFrameDump& staged, FrameDumpResult& result,
     manifest.close();
     std::error_code ignored;
     std::filesystem::remove(staged.final_path_, ignored);
+    staged.active_ = false;
+    return false;
+  }
+
+  if (!consume_capture_request(error)) {
     staged.active_ = false;
     return false;
   }
@@ -433,7 +444,7 @@ bool FrameDumper::commit_all(const std::span<StagedFrameDump> staged,
       break;
     }
   }
-  if (published == publications.size()) {
+  if (published == publications.size() && consume_capture_request(error)) {
     std::error_code ignored;
     for (const auto &publication : publications)
       if (publication.backed_up)
@@ -471,9 +482,51 @@ bool FrameDumper::dump(const FrameDumpMetadata& metadata,
                        FrameDumpResult& result, std::string& error) const {
   StagedFrameDump staged;
   if (!stage(metadata, xrgb_pixels, staged, error)) return false;
+  if (!staged.active()) {
+    result = {};
+    error.clear();
+    return true;
+  }
   if (commit(staged, result, error)) return true;
   abort(staged);
   return false;
+}
+
+bool FrameDumper::capture_requested(std::string& error) const {
+  if (!one_shot_trigger_) return true;
+  std::error_code filesystem_error;
+  const auto status = std::filesystem::symlink_status(*one_shot_trigger_,
+                                                      filesystem_error);
+  if (filesystem_error) {
+    if (filesystem_error ==
+        std::make_error_code(std::errc::no_such_file_or_directory)) {
+      error.clear();
+      return false;
+    }
+    error = "cannot inspect frame dump trigger: " + filesystem_error.message();
+    return false;
+  }
+  if (!std::filesystem::exists(status)) {
+    error.clear();
+    return false;
+  }
+  if (!std::filesystem::is_regular_file(status)) {
+    error = "frame dump trigger must be a regular non-symlink file";
+    return false;
+  }
+  error.clear();
+  return true;
+}
+
+bool FrameDumper::consume_capture_request(std::string& error) const {
+  if (!one_shot_trigger_) return true;
+  std::error_code filesystem_error;
+  (void)std::filesystem::remove(*one_shot_trigger_, filesystem_error);
+  if (filesystem_error) {
+    error = "cannot consume frame dump trigger: " + filesystem_error.message();
+    return false;
+  }
+  return true;
 }
 
 }  // namespace glasswyrm::headless
