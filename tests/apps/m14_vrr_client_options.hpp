@@ -27,16 +27,19 @@ inline constexpr std::string_view kClientUsage =
     "fullscreen|borderless|windowed|app-requested|preference|cadence --result PATH "
     "[--frames 1..10000] [--target-refresh-hz 1..1000] "
     "[--hold-ms 0..60000] [--prefer] "
-    "[--preference default|disable|allow|prefer]\n"
+    "[--preference default|disable|allow|prefer] "
+    "[--repaint-trigger PATH --repaint-count 1..16]\n"
     "       m14_vrr_client --self-test\n";
 
 struct ClientOptions {
   std::string display;
   std::string result_path;
+  std::string repaint_trigger;
   ClientMode mode{ClientMode::Windowed};
   std::uint32_t frame_count{1};
   std::uint32_t target_refresh_hz{72};
   std::uint32_t hold_ms{250};
+  std::uint32_t repaint_count{};
   bool mode_set{};
   bool frame_count_set{};
   bool prefer{};

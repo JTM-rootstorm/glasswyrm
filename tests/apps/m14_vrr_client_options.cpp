@@ -72,6 +72,16 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
       options.display = argv[++index];
     } else if (argument == "--result" && index + 1 < argc) {
       options.result_path = argv[++index];
+    } else if (argument == "--repaint-trigger" && index + 1 < argc) {
+      if (!options.repaint_trigger.empty())
+        return false;
+      options.repaint_trigger = argv[++index];
+    } else if (argument == "--repaint-count" && index + 1 < argc) {
+      if (options.repaint_count != 0 ||
+          !parse_u32(argv[++index], options.repaint_count) ||
+          options.repaint_count == 0 ||
+          options.repaint_count > 16)
+        return false;
     } else if (argument == "--mode" && index + 1 < argc) {
       if (!parse_mode(argv[++index], options.mode))
         return false;
@@ -106,6 +116,9 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
     options.preference = ClientPreference::Prefer;
     options.preference_set = true;
   }
+  if (options.repaint_trigger.empty() != (options.repaint_count == 0) ||
+      (options.repaint_count != 0 && options.hold_ms == 0))
+    return false;
   if (options.help || options.self_test)
     return true;
   return options.mode_set && !options.display.empty() &&
