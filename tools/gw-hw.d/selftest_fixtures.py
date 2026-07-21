@@ -10,7 +10,8 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
+def populate_live_evidence(
+        root: Path, config: dict[str, object]) -> dict[str, tuple[int, int]]:
     root.mkdir(mode=0o700)
     _write(root / "milestone14-hardware-doctor.json", {
         "passed": True,
@@ -46,9 +47,17 @@ def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
                     "restored_enabled": False, "readback_success": True,
                     "kms_restore": True, "vt_restore": True,
                     "getty_restore": True})
+    cadence_ranges: dict[str, tuple[int, int]] = {}
+    offset = 0
     with (root / "vrr-part-1.jsonl").open("w", encoding="utf-8") as output:
         for record in records:
-            output.write(json.dumps(record, sort_keys=True) + "\n")
+            line = json.dumps(record, sort_keys=True) + "\n"
+            if record.get("record") == "vrr-timing":
+                tag = "on-cadence" if record["effective_enabled"] else "off-cadence"
+                previous = cadence_ranges.get(tag, (offset, offset))
+                cadence_ranges[tag] = (previous[0], offset + len(line.encode("utf-8")))
+            output.write(line)
+            offset += len(line.encode("utf-8"))
 
     base_client = {
         "schema": "glasswyrm.m14-vrr-client.v2", "mode": "windowed",
@@ -106,3 +115,4 @@ def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
     ppm = b"P6\n1 1\n255\n\x12\x34\x56"
     (root / "milestone14-canonical.ppm").write_bytes(ppm)
     (root / "milestone14-screen.ppm").write_bytes(ppm)
+    return cadence_ranges

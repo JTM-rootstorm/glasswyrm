@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 from pathlib import Path
 import shutil
@@ -13,7 +14,10 @@ import sys
 import time
 from typing import Any
 
-from common import HarnessError, RUN_STEPS, TTY_PATTERN, _read_json
+from common import (
+    HarnessError, MAX_JSON_BYTES, MIN_ENABLED_INTERVALS, RUN_STEPS,
+    TTY_PATTERN, _read_json, _read_regular,
+)
 
 BUILD_ROOT = Path("/var/tmp/glasswyrm-build-m14")
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
@@ -59,12 +63,15 @@ class FixedLiveRunner:
         self.getty_was_active = False
         tty_number = TTY_PATTERN.fullmatch(str(config["tty"])).group(1)  # type: ignore[union-attr]
         self.getty_unit = f"getty@tty{tty_number}.service"
-        self.alternate_tty = "1" if tty_number != "1" else "2"
+        self.alternate_tty = TTY_PATTERN.fullmatch(
+            str(config["alternate_tty"])).group(1)  # type: ignore[union-attr]
         self.client_units: list[str] = []
         self.before_state: dict[str, object] | None = None
         self.after_state: dict[str, object] | None = None
         self.snapshot_expectations: list[dict[str, object]] = []
         self.cleanup_wait_count = 0
+        self.cadence_ranges: dict[str, tuple[int, int]] = {}
+        self._cadence_starts: dict[str, int] = {}
 
     @staticmethod
     def _execute(argv: list[str], output: Path | None = None) -> int:
@@ -175,6 +182,53 @@ class FixedLiveRunner:
                     state.get("preference", "").lower() != preference)):
                 raise HarnessError(f"client {tag} published unexpected state")
         return result
+
+    def begin_cadence(self, tag: str) -> None:
+        if not self.validate_runtime:
+            return
+        if tag in self._cadence_starts or tag in self.cadence_ranges:
+            raise HarnessError(f"cadence scenario {tag} was started more than once")
+        report = self.artifacts / "vrr-part-1.jsonl"
+        self._cadence_starts[tag] = len(_read_regular(report, MAX_JSON_BYTES))
+
+    def finish_cadence(self, tag: str, enabled: bool) -> None:
+        if not self.validate_runtime:
+            return
+        start = self._cadence_starts.pop(tag, None)
+        if start is None:
+            raise HarnessError(f"cadence scenario {tag} has no start boundary")
+        report = self.artifacts / "vrr-part-1.jsonl"
+        last_count = 0
+        for _ in range(200):
+            contents = _read_regular(report, MAX_JSON_BYTES)
+            if start > len(contents):
+                raise HarnessError(f"cadence scenario {tag} report was truncated")
+            relative_end = contents[start:].rfind(b"\n") + 1
+            if relative_end == 0:
+                time.sleep(.05)
+                continue
+            end = start + relative_end
+            count = 0
+            for number, line in enumerate(
+                    contents[start:end].decode("utf-8").splitlines(), 1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise HarnessError(
+                        f"invalid {tag} cadence JSONL line {number}: {error}") from error
+                if (isinstance(record, dict) and
+                        record.get("record") in {"vrr-timing", "timing"} and
+                        record.get("effective_enabled") is enabled):
+                    count += 1
+            last_count = count
+            if count >= MIN_ENABLED_INTERVALS + 1:
+                self.cadence_ranges[tag] = (start, end)
+                return
+            time.sleep(.05)
+        raise HarnessError(
+            f"cadence scenario {tag} produced only {last_count} bounded timing records")
 
     def stop_client(self, tag: str) -> None:
         unit = f"m14-hardware-client-{tag}.service"
@@ -341,7 +395,7 @@ class FixedLiveRunner:
         except Exception as error:
             self.cleanup_errors.append(f"console readback failed: {error}")
         for path in (RUNTIME_ROOT / "control.sock", RUNTIME_ROOT / "gwcomp.sock",
-                     RUNTIME_ROOT / "gwm.sock"):
+                     RUNTIME_ROOT / "gwm.sock", RUNTIME_ROOT / "mirror.capture"):
             try:
                 path.unlink(missing_ok=True)
             except OSError as error:
@@ -370,13 +424,13 @@ class FixedLiveRunner:
             # Start compositor and server through the same fixed builder used by start_stack.
             self.start_stack_after_gwm()
             self._step(4); self.start_server()
-            self._step(5); self.start_client("off-cadence", "cadence", "default", True)
+            self._step(5); self.begin_cadence("off-cadence"); self.start_client("off-cadence", "cadence", "default", True)
             self._step(6)
-            self._step(7); self.snapshot("milestone14-off.json", "off", False); self.stop_client("off-cadence"); self.wait_policy_cleanup()
+            self._step(7); self.snapshot("milestone14-off.json", "off", False); self.finish_cadence("off-cadence", False); self.stop_client("off-cadence"); self.wait_policy_cleanup()
             self._step(8); self.set_policy("fullscreen")
-            self._step(9); self.start_client("on-cadence", "cadence", "default", True)
+            self._step(9); self.begin_cadence("on-cadence"); self.start_client("on-cadence", "cadence", "default", True)
             self._step(10); self.snapshot("milestone14-fullscreen.log", "fullscreen", True)
-            self._step(11); self.stop_client("on-cadence"); self.wait_policy_cleanup()
+            self._step(11); self.finish_cadence("on-cadence", True); self.stop_client("on-cadence"); self.wait_policy_cleanup()
             self._step(12); self.snapshot("milestone14-fullscreen-exit.json", "fullscreen", False)
             self._step(13); self.start_client("borderless", "borderless", "default")
             self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless"); self.wait_policy_cleanup()
@@ -405,8 +459,9 @@ class FixedLiveRunner:
 
     def start_stack_after_gwm(self) -> None:
         drm = str(self.config["drm_device"]); tty = str(self.config["tty"])
+        mirror_trigger = RUNTIME_ROOT / "mirror.capture"
         self.start_unit(LIVE_UNITS["gwcomp"], "gwcomp",
-                        ["--backend", "drm", "--ipc-socket", str(RUNTIME_ROOT / "gwcomp.sock"), "--drm-device", drm, "--tty", tty, "--connector", str(self.config["connector"]), "--mode", str(self.config["mode"]), "--drm-api", "atomic", "--renderer", "software", "--mirror-dump-dir", str(self.artifacts / "frames"), "--drm-report", str(self.artifacts / "milestone14-drm-report.jsonl"), "--vrr-report", str(self.artifacts / "vrr-part-1.jsonl")],
+                        ["--backend", "drm", "--ipc-socket", str(RUNTIME_ROOT / "gwcomp.sock"), "--drm-device", drm, "--tty", tty, "--connector", str(self.config["connector"]), "--mode", str(self.config["mode"]), "--drm-api", "atomic", "--renderer", "software", "--mirror-dump-dir", str(self.artifacts / "frames"), "--mirror-dump-trigger", str(mirror_trigger), "--drm-report", str(self.artifacts / "milestone14-drm-report.jsonl"), "--vrr-report", str(self.artifacts / "vrr-part-1.jsonl")],
                         ["PrivateDevices=no", "DevicePolicy=closed", f"DeviceAllow={drm} rw", f"DeviceAllow={tty} rw", "StandardInput=tty-force", f"TTYPath={tty}", "TTYReset=yes", "TTYVHangup=yes", "TTYVTDisallocate=no", "KillMode=mixed", "SuccessExitStatus=143"])
         self.wait_path(RUNTIME_ROOT / "gwcomp.sock")
 
@@ -420,18 +475,22 @@ class FixedLiveRunner:
     def capture_pixels(self) -> None:
         if not self.validate_runtime:
             return
-        frames = sorted((self.artifacts / "frames").glob("*.ppm"))
-        if not frames:
-            raise HarnessError("no compositor mirror frame is available")
-        shutil.copyfile(frames[-1], self.artifacts / "milestone14-canonical.ppm")
-        count = len(frames); self.set_policy("off"); self.set_policy("always-eligible")
-        for _ in range(200):
+        trigger = RUNTIME_ROOT / "mirror.capture"
+
+        def capture(policy: str, destination: str) -> None:
             frames = sorted((self.artifacts / "frames").glob("*.ppm"))
-            if len(frames) > count:
-                break
-            time.sleep(.05)
-        if len(frames) <= count:
-            raise HarnessError("policy-only commit did not produce screen evidence")
-        shutil.copyfile(frames[-1], self.artifacts / "milestone14-screen.ppm")
+            count = len(frames)
+            trigger.touch(mode=0o600, exist_ok=False)
+            self.set_policy(policy)
+            for _ in range(200):
+                frames = sorted((self.artifacts / "frames").glob("*.ppm"))
+                if len(frames) > count:
+                    shutil.copyfile(frames[-1], self.artifacts / destination)
+                    return
+                time.sleep(.05)
+            raise HarnessError("one-shot mirror capture did not produce pixel evidence")
+
+        capture("off", "milestone14-canonical.ppm")
+        capture("always-eligible", "milestone14-screen.ppm")
         if (self.artifacts / "milestone14-canonical.ppm").read_bytes() != (self.artifacts / "milestone14-screen.ppm").read_bytes():
             raise HarnessError("VRR-only transition changed canonical pixels")

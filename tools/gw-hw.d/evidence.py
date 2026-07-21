@@ -20,8 +20,22 @@ from common import (
     _read_json, _read_regular, _write_json, interval_tolerance,
 )
 
-def analyze_cadence(report_path: Path, config: dict[str, object], enabled: bool) -> dict[str, object]:
-    lines = _read_regular(report_path, MAX_JSON_BYTES).decode("utf-8").splitlines()
+def analyze_cadence(
+        report_path: Path, config: dict[str, object], enabled: bool,
+        source_range: tuple[int, int] | None = None,
+        scenario: str | None = None) -> dict[str, object]:
+    contents = _read_regular(report_path, MAX_JSON_BYTES)
+    if source_range is None:
+        start, end = 0, len(contents)
+    else:
+        start, end = source_range
+        if (isinstance(start, bool) or not isinstance(start, int) or
+                isinstance(end, bool) or not isinstance(end, int) or
+                start < 0 or start >= end or end > len(contents) or
+                (start > 0 and contents[start - 1:start] != b"\n") or
+                contents[end - 1:end] != b"\n"):
+            raise HarnessError("cadence source byte range is invalid or unaligned")
+    lines = contents[start:end].decode("utf-8").splitlines()
     intervals: deque[int] = deque(maxlen=MAX_INTERVALS)
     previous: dict[int, tuple[int, int]] = {}
     for number, line in enumerate(lines, 1):
@@ -75,7 +89,7 @@ def analyze_cadence(report_path: Path, config: dict[str, object], enabled: bool)
     passed = (enabled_criterion if enabled else
               len(values) >= MIN_ENABLED_INTERVALS and
               percentage < DISABLED_PASS_PERCENT and not enabled_criterion)
-    return {
+    result: dict[str, object] = {
         "schema": ARTIFACT_SCHEMA, "state": "enabled" if enabled else "disabled",
         "sample_count": len(values), "target_interval_ns": round(target_ns, 3),
         "tolerance_ns": round(tolerance_ns, 3), "within_threshold_count": within,
@@ -86,6 +100,11 @@ def analyze_cadence(report_path: Path, config: dict[str, object], enabled: bool)
         "fixed_quantized_count": quantized, "property_readback": 1 if enabled else 0,
         "passed": passed,
     }
+    if source_range is not None:
+        result["source_byte_range"] = {"start": start, "end": end}
+    if scenario is not None:
+        result["scenario"] = scenario
+    return result
 
 
 def validate_restore(before_path: Path, after_path: Path) -> dict[str, object]:
@@ -134,8 +153,15 @@ def finalize_live(config: dict[str, object], artifacts: Path,
     if not parts:
         raise HarnessError("VRR report parts are missing")
     report.write_bytes(b"".join(_read_regular(path, MAX_JSON_BYTES) for path in parts))
-    off = analyze_cadence(report, config, False)
-    on = analyze_cadence(report, config, True)
+    off_range = runner.cadence_ranges.get("off-cadence")
+    on_range = runner.cadence_ranges.get("on-cadence")
+    if (off_range is None or on_range is None or
+            off_range[1] > on_range[0]):
+        raise HarnessError("ordered cadence scenario boundaries are incomplete")
+    off = analyze_cadence(
+        report, config, False, off_range, "off-cadence")
+    on = analyze_cadence(
+        report, config, True, on_range, "on-cadence")
     _write_json(artifacts / "milestone14-vrr-off-summary.json", off)
     _write_json(artifacts / "milestone14-vrr-on-summary.json", on)
     if not off["passed"] or not on["passed"]:
@@ -318,6 +344,26 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
             if (record.get("required_base_commit") != required_base or
                     record.get("tested_commit") != tested_commit):
                 errors.append(f"{label} source identity does not match configuration")
+        if summary.get("dry_run") is False:
+            for name, enabled, scenario in (
+                    ("milestone14-vrr-off-summary.json", False, "off-cadence"),
+                    ("milestone14-vrr-on-summary.json", True, "on-cadence")):
+                cadence = _read_json(artifact_dir / name)
+                source_range = cadence.get("source_byte_range")
+                if (not isinstance(source_range, dict) or
+                        set(source_range) != {"start", "end"}):
+                    errors.append(f"{name} omits its exact scenario byte range")
+                    continue
+                try:
+                    recomputed = analyze_cadence(
+                        artifact_dir / "milestone14-vrr-report.jsonl", config,
+                        enabled,
+                        (source_range["start"], source_range["end"]),
+                        scenario)
+                    if cadence != recomputed:
+                        errors.append(f"{name} differs from bounded report evidence")
+                except HarnessError as error:
+                    errors.append(f"{name} has invalid bounded evidence: {error}")
         if (artifact_dir / "milestone14-canonical.ppm").read_bytes() != (artifact_dir / "milestone14-screen.ppm").read_bytes():
             errors.append("canonical and screen PPM differ")
         expected = set(REQUIRED_ARTIFACTS) | set(ARCHIVE_STATE_ARTIFACTS) | {"SHA256SUMS"}

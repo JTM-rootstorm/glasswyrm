@@ -963,7 +963,10 @@ The current M14 command-line configuration is intentionally explicit:
   experimental X11 view and same-UID control surface;
 - `gwcomp --headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ` enables bounded
   per-output simulation;
-- `gwcomp --vrr-report PATH` creates a non-replacing JSONL report; and
+- `gwcomp --vrr-report PATH` creates a non-replacing JSONL report;
+- `gwcomp --mirror-dump-trigger PATH` optionally gates physical mirror PPMs
+  behind one-shot regular-file markers while leaving the historical per-frame
+  mirror behavior unchanged when omitted; and
 - `gwout set OUTPUT --vrr MODE` is the only implemented persistent-process
   policy edit. Policy is not persisted across a new session.
 
@@ -1218,9 +1221,15 @@ be run from an active graphical session or from a TTY whose interruption is
 unacceptable:
 
 ```sh
-./tools/gw-hw doctor --config /path/to/reviewed.toml
+tested_commit=$(git rev-parse HEAD)
+./tools/gw-hw doctor --config /path/to/reviewed.toml \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
+  --artifact-dir /var/tmp/glasswyrm-m14-doctor
 ./tools/gw-hw milestone14-vrr-test \
   --config /path/to/reviewed.toml \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 

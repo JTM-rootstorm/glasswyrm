@@ -511,9 +511,15 @@ display. Run it only from the reviewed spare text VT with independent recovery
 access and no active display manager:
 
 ```sh
-./tools/gw-hw doctor --config /path/to/reviewed.toml
+tested_commit=$(git rev-parse HEAD)
+./tools/gw-hw doctor --config /path/to/reviewed.toml \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
+  --artifact-dir /var/tmp/glasswyrm-m14-doctor
 ./tools/gw-hw milestone14-vrr-test \
   --config /path/to/reviewed.toml \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
