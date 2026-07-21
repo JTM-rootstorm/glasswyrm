@@ -65,6 +65,38 @@ focus_cleanup=$(sed -n '/wait "$focus_a_pid"; focus_a_pid=0/,/result\[gwout_vrr\
 grep -Fx -- 'wait_policy_cleanup' <<<"$focus_cleanup" >/dev/null ||
   fail 'M14 focused-client transition does not wait for cleanup'
 
+policy_matrix=$(sed -n '/^python3 - "$work\/gwinfo-off.json"/,/result\[vrr_policy_matrix\]=passed/p' \
+  <<<"$guest")
+app_transitions=$(sed -n '/^transitions=\[\]$/,/^b=left/p' <<<"$policy_matrix")
+for expected in \
+  "assert 'no-candidate' in out['reasons']" \
+  "assert reason in window['reasons']" \
+  "'output_reasons':out['reasons']" \
+  "'window_reasons':window['reasons']"; do
+  grep -F -- "$expected" <<<"$app_transitions" >/dev/null ||
+    fail "M14 policy matrix does not preserve output/window reason split: $expected"
+done
+if grep -F -- "assert reason in out['reasons']" <<<"$app_transitions" >/dev/null; then
+  fail 'M14 policy matrix incorrectly expects window rejection reasons on outputs'
+fi
+
+sdl_validator=$(sed -n '/^python3 - "$work\/headless-vrr-single.jsonl"/,/result\[sdl_vrr_reuse\]=passed/p' \
+  <<<"$guest")
+for expected in \
+  'enabled_index=next((i for i,x in enumerate(fullscreen)' \
+  'assert enabled_index is not None' \
+  'assert any(i>enabled_index and not x.get('\''effective_enabled'\'') and' \
+  "'NoCandidate' in x.get('reason_names',())" \
+  'assert requested and all(not x.get('\''effective_enabled'\'') and'; do
+  grep -F -- "$expected" <<<"$sdl_validator" >/dev/null ||
+    fail "M14 SDL validator lacks output-decision proof: $expected"
+done
+for stale in WindowNotFullscreen WindowNotBorderlessFullscreen WindowDidNotRequest; do
+  if grep -F -- "$stale" <<<"$sdl_validator" >/dev/null; then
+    fail "M14 SDL validator incorrectly expects window reason on output: $stale"
+  fi
+done
+
 restart_predicate=$(sed -n '/^wait_restart_state()/,/^}/p' <<<"$guest")
 for expected in 'state.get("policy")=="focused"' \
   'state.get("decision")=="enabled"' 'state.get("desired_enabled") is True' \

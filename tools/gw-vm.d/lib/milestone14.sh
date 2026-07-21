@@ -548,9 +548,12 @@ for value,preference,effective,reason in zip(docs[5:8],('default','prefer','disa
  out=left(value); assert out['policy']=='app-requested' and out['effective_enabled'] is effective
  window=next(x for x in value['windows'] if x['output']==out['id'])
  assert window['preference']==preference
- if reason: assert reason in out['reasons']
+ if reason:
+  assert 'no-candidate' in out['reasons']
+  assert reason in window['reasons']
  transitions.append({'preference':preference,'effective_enabled':effective,
-                     'reasons':out['reasons']})
+                     'output_reasons':out['reasons'],
+                     'window_reasons':window['reasons']})
 b=left(docs[8]); a=left(docs[9])
 assert b['candidate_window']==focus_b['window'] and a['candidate_window']==focus_a['window']
 bo=left(borderless); bw=next(x for x in borderless['windows'] if x['window']==bo['candidate_window'])
@@ -576,13 +579,16 @@ assert first['video_driver']==second['video_driver']=='x11'
 decisions=[x for x in records if x.get('record')=='decision']
 fullscreen=[x for x in decisions if x.get('policy_mode')==2]
 requested=[x for x in decisions if x.get('policy_mode')==4]
-assert any(x.get('effective_enabled') and x.get('candidate_window_id',0)!=0
-           for x in fullscreen)
-assert any(not x.get('effective_enabled') and
-           {'WindowNotFullscreen','WindowNotBorderlessFullscreen'} &
-           set(x.get('reason_names',())) for x in fullscreen)
-assert requested and not any(x.get('effective_enabled') for x in requested)
-assert any('WindowDidNotRequest' in x.get('reason_names',()) for x in requested)
+enabled_index=next((i for i,x in enumerate(fullscreen)
+                    if x.get('effective_enabled') and
+                    x.get('candidate_window_id',0)!=0),None)
+assert enabled_index is not None
+assert any(i>enabled_index and not x.get('effective_enabled') and
+           'NoCandidate' in x.get('reason_names',())
+           for i,x in enumerate(fullscreen))
+assert requested and all(not x.get('effective_enabled') and
+                         'NoCandidate' in x.get('reason_names',())
+                         for x in requested)
 json.dump({'schema':1,'passed':True,'sdl_version':'2.32.10',
  'fullscreen_desktop_enabled':True,'borderless_windowed_rejected':True,
  'implicit_app_request':False,'app_requested_effective':False},
