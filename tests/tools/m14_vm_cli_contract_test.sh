@@ -165,6 +165,9 @@ gwcomp_query_line=$(grep -nF -- 'wait_qxl_vrr_off "$qxl/post-gwcomp.json"' \
   fail 'M14 QXL restart semantic query precedes fresh-process journal proof'
 
 cleanup=$(sed -n '/^cleanup()/,/^}/p' <<<"$guest")
+if grep -Eq 'local .*\bresult\b' <<<"$cleanup"; then
+  fail 'M14 cleanup shadows the global scenario result map'
+fi
 for expected in 'remove_owned_x_socket /tmp/.X11-unix/X98' \
   'remove_owned_x_socket /tmp/.X11-unix/X99' '"$control/input.sock"' \
   'service stop failed:' 'service remained active after cleanup:' \
