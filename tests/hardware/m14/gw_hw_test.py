@@ -11,6 +11,12 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
+from config_doctor import (  # noqa: E402
+    ConfigError, _connector_profile, _parse_debugfs_refresh_range,
+    _reviewed_range_source, parse_config,
+)
+
 TOOL = ROOT / "tools" / "gw-hw"
 CONFIG_TEXT = '''drm_device = "/dev/dri/card0"
 required_base_commit = "6864ea631d61636289a21c7d2d6655a17be0c004"
@@ -18,6 +24,7 @@ tested_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 connector = "DP-1"
 mode = "2560x1440@144000"
 tty = "/dev/tty2"
+alternate_tty = "/dev/tty1"
 keyboard_device = "/dev/input/event0"
 pointer_device = "/dev/input/event1"
 expected_min_refresh_hz = 48
@@ -53,8 +60,14 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
     facts = {
         "schema": "glasswyrm.m14-hardware.v1", "root": True,
         "drm_device": "/dev/dri/card0", "drm_primary_node": True,
-        "tty": "/dev/tty2", "tty_character_device": True, "spare_tty": True,
-        "connector": "DP-1", "connected": True, "edid_sha256": "a" * 64,
+        "tty": "/dev/tty2", "tty_character_device": True,
+        "tty_kd_text": True, "active_tty": "/dev/tty2", "spare_tty": True,
+        "alternate_tty": "/dev/tty1", "alternate_tty_character_device": True,
+        "alternate_tty_kd_text": True, "alternate_tty_safe": True,
+        "connector": "DP-1", "connected": True, "active": True,
+        "connected_connector_count": 1, "active_connector_count": 1,
+        "single_connected_active_connector": True,
+        "edid_sha256": "a" * 64,
         "vrr_capable": 1, "atomic_kms": True, "vrr_enabled_property": True,
         "mode": "2560x1440@144000", "selected_mode_available": True,
         "range_source": "debugfs",
@@ -131,11 +144,33 @@ def assert_archive(artifacts: Path) -> None:
 
 
 def main() -> int:
+    assert _parse_debugfs_refresh_range("Min: 48 Hz\nMax: 144 Hz\n") == (48, 144)
+    assert _parse_debugfs_refresh_range(
+        "minimum_refresh = 48 maximum_refresh = 144") == (48, 144)
+    assert _parse_debugfs_refresh_range("vrr_capable: 1") is None
+    assert _parse_debugfs_refresh_range("min: 48 min: 60 max: 144") is None
+    assert _reviewed_range_source("min: 48 max: 144", 48, 144) == "debugfs"
+    assert _reviewed_range_source("min: 48 max: 240", 48, 144) == "config-reviewed"
+    assert _connector_profile(
+        [("DP-1", "connected", "enabled")], "DP-1") == (1, 1, True, True)
+    assert _connector_profile(
+        [("DP-1", "connected", "enabled"),
+         ("DP-2", "connected", "enabled")], "DP-1") == (2, 2, True, True)
     self_test = run("self-test")
     assert self_test.returncode == 0 and "self-test: ok" in self_test.stdout
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         config, fixture = make_fixture(root)
+        duplicate_vt = CONFIG_TEXT.replace(
+            'alternate_tty = "/dev/tty1"', 'alternate_tty = "/dev/tty2"')
+        config.write_text(duplicate_vt, encoding="utf-8")
+        try:
+            parse_config(config)
+        except ConfigError:
+            pass
+        else:
+            raise AssertionError("duplicate active and alternate VTs were accepted")
+        config.write_text(CONFIG_TEXT, encoding="utf-8")
         unconfirmed = run("milestone14-vrr-test", "--config", str(config),
                           "--required-base", REQUIRED_BASE,
                           "--tested-commit", TESTED_COMMIT,
@@ -167,6 +202,28 @@ def main() -> int:
                        "--fixture-dir", str(fixture))
         assert rejected.returncode == 1 and "selected mode available" in rejected.stdout
         unavailable["selected_mode_available"] = True
+        write_json(fixture / "doctor.json", unavailable)
+
+        unsafe_vt = dict(unavailable, active_tty="/dev/tty3",
+                         spare_tty=False, alternate_tty_safe=False)
+        write_json(fixture / "doctor.json", unsafe_vt)
+        wrong_vt = run("doctor", "--config", str(config),
+                       "--required-base", REQUIRED_BASE,
+                       "--tested-commit", TESTED_COMMIT,
+                       "--fixture-dir", str(fixture))
+        assert wrong_vt.returncode == 1
+        assert "exact active_tty" in wrong_vt.stdout
+
+        unsafe_profile = dict(unavailable, active_connector_count=2,
+                              connected_connector_count=2,
+                              single_connected_active_connector=False)
+        write_json(fixture / "doctor.json", unsafe_profile)
+        multiple = run("doctor", "--config", str(config),
+                       "--required-base", REQUIRED_BASE,
+                       "--tested-commit", TESTED_COMMIT,
+                       "--fixture-dir", str(fixture))
+        assert multiple.returncode == 1
+        assert "exactly one connected connector" in multiple.stdout
         write_json(fixture / "doctor.json", unavailable)
 
         artifacts = root / "artifacts"

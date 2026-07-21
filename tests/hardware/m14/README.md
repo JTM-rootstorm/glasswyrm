@@ -12,7 +12,11 @@ fixed build directory; the pinned M14 `required_base_commit` and tested commit
 must also be repeated on each command line. `keyboard_device` and
 `pointer_device` must name two reviewed
 `/dev/input/eventN` devices for the isolated session; the doctor verifies both
-character devices before the live runner stops the selected getty.
+character devices before the live runner stops the selected getty. `tty` must
+be the active VT in `KD_TEXT`; `alternate_tty` must be a distinct, inactive
+`KD_TEXT` VT that is safe for the bounded release/acquire check. The doctor
+also refuses profiles with more than one connected or active physical
+connector.
 
 The fixed live runner uses binaries from `/var/tmp/glasswyrm-build-m14` and
 refuses symlinked or missing executables. Configure and build that directory
@@ -36,6 +40,11 @@ display manager inactive and independent recovery access available. Do not run
 it from the current graphical session or a TTY whose interruption would be
 noticeable.
 
+`range_source` is reported as `debugfs` only when the connector debugfs data
+contains one unambiguous labelled minimum/maximum refresh pair that exactly
+matches the reviewed configuration. Missing, malformed, ambiguous, or
+mismatched debugfs ranges fall back to the explicit `config-reviewed` source.
+
 The implementation includes deterministic parser, doctor, failure-unwind, and
 fixture dry-run tests. Those are not positive hardware proof. Only a reviewed
 live run whose cadence, property readback, images, restoration, checksums, and
@@ -43,3 +52,11 @@ archive validators all pass can satisfy the physical gate. The archived
 AppRequested evidence must show Default disabled, Prefer effectively enabled,
 and Disable effectively disabled in compositor-authoritative snapshots; no
 such acceptance is claimed by this document.
+
+The live compositor uses one-shot mirror capture. Its two 180-frame cadence
+workloads produce timing and DRM reports but no PPM files or mirror `fsync`
+traffic. After cadence collection and restart recovery, the runner explicitly
+requests exactly one mirror with VRR off and one with VRR enabled, compares
+their canonical pixels, and removes any unconsumed runtime trigger during
+cleanup. This bounds a 4K run to two full-size PPM proof frames while preserving
+the default `gwcomp --mirror-dump-dir` behavior for other workflows.

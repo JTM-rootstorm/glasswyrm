@@ -9,7 +9,8 @@ session.
 ## Safety boundary
 
 `gw-hw doctor --config PATH` performs bounded discovery and rejects a target
-unless the exact primary node, connector, EDID hash, mode, spare VT, reviewed
+unless the exact primary node, connector, EDID hash, mode, active text VT,
+distinct inactive text VT, reviewed
 refresh range, distinguishable target cadence, and two reviewed
 `/dev/input/eventN` devices match. It also rejects a competing DRM master or an
 unsafe configuration file. The configuration has a fixed schema and cannot
@@ -17,12 +18,29 @@ contain commands, package operations, passwords, or remote execution fields.
 The live runner accepts only nonsymlink executables from the fixed
 `/var/tmp/glasswyrm-build-m14` build.
 
+The accepted one-output profile requires exactly one connected connector and
+exactly one active connector, both the configured connector. The doctor claims
+a `debugfs` range source only after parsing one labelled minimum/maximum pair
+that exactly matches the reviewed values; otherwise the explicitly reviewed
+configuration remains the recorded source.
+
 The live command requires an explicit confirmation token:
 
 ```sh
+tested_commit=$(git rev-parse HEAD)
+./tools/gw-hw doctor --config PATH \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
+  --artifact-dir /var/tmp/glasswyrm-m14-doctor
 ./tools/gw-hw milestone14-vrr-test \
-  --config PATH --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
+  --config PATH \
+  --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+  --tested-commit "$tested_commit" \
+  --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
+
+The doctor currently requires the libdrm `modetest` executable at
+`/usr/bin/modetest` or `/bin/modetest` for exact mode and property discovery.
 
 Before using it, arrange console access and recovery independent of the tested
 display. Record the current KMS, VRR, KD, VT, getty, device, and session state.

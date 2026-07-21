@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import array
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -56,8 +58,11 @@ def parse_config(path: Path) -> dict[str, object]:
     width, height, refresh = map(int, mode_match.groups())
     if width > 16_384 or height > 16_384 or refresh > 1_000_000:
         raise ConfigError("mode exceeds bounded dimensions or refresh")
-    if not TTY_PATTERN.fullmatch(str(parsed["tty"])):
-        raise ConfigError("tty must match /dev/ttyN with N greater than zero")
+    for name in ("tty", "alternate_tty"):
+        if not TTY_PATTERN.fullmatch(str(parsed[name])):
+            raise ConfigError(f"{name} must match /dev/ttyN with N greater than zero")
+    if parsed["tty"] == parsed["alternate_tty"]:
+        raise ConfigError("tty and alternate_tty must be distinct")
     for name in ("keyboard_device", "pointer_device"):
         if not INPUT_PATTERN.fullmatch(str(parsed[name])):
             raise ConfigError(f"{name} must match /dev/input/eventN")
@@ -104,6 +109,42 @@ def target_distinguishes_fixed_refresh(config: dict[str, object]) -> bool:
     tolerance = interval_tolerance(target_interval)
     nearest_multiple = max(1, round(target_interval / fixed_interval))
     return abs(target_interval - nearest_multiple * fixed_interval) > tolerance
+
+
+def _parse_debugfs_refresh_range(text: str) -> tuple[int, int] | None:
+    """Parse an explicitly labelled whole-Hz min/max pair, or fail closed."""
+    labels = {
+        "minimum": re.compile(
+            r"\b(?:min(?:imum)?(?:[_ -]?refresh)?(?:[_ -]?rate)?)\b\s*[:=]?\s*"
+            r"([1-9][0-9]{0,3})(?:\s*hz)?\b", re.IGNORECASE),
+        "maximum": re.compile(
+            r"\b(?:max(?:imum)?(?:[_ -]?refresh)?(?:[_ -]?rate)?)\b\s*[:=]?\s*"
+            r"([1-9][0-9]{0,3})(?:\s*hz)?\b", re.IGNORECASE),
+    }
+    values: dict[str, set[int]] = {name: set() for name in labels}
+    for name, pattern in labels.items():
+        values[name].update(int(match.group(1)) for match in pattern.finditer(text))
+    if len(values["minimum"]) != 1 or len(values["maximum"]) != 1:
+        return None
+    minimum = next(iter(values["minimum"]))
+    maximum = next(iter(values["maximum"]))
+    return (minimum, maximum) if 1 <= minimum < maximum <= 1000 else None
+
+
+def _reviewed_range_source(text: str, minimum: int, maximum: int) -> str:
+    return ("debugfs" if _parse_debugfs_refresh_range(text) == (minimum, maximum)
+            else "config-reviewed")
+
+
+def _connector_profile(states: list[tuple[str, str, str]],
+                       selected: str) -> tuple[int, int, bool, bool]:
+    """Return connected/active counts and the selected connector state."""
+    connected = [(name, enabled) for name, status, enabled in states
+                 if status == "connected"]
+    active = [(name, enabled) for name, enabled in connected if enabled == "enabled"]
+    selected_connected = any(name == selected for name, _ in connected)
+    selected_active = any(name == selected for name, _ in active)
+    return len(connected), len(active), selected_connected, selected_active
 
 
 def _modetest_has_selected_mode(output: str, connector: str, mode: str) -> bool:
@@ -292,6 +333,8 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
         raise HarnessError("doctor fixture schema is unsupported")
     expected = {
         "drm_device": config["drm_device"], "tty": config["tty"],
+        "alternate_tty": config["alternate_tty"],
+        "active_tty": config["tty"],
         "connector": config["connector"], "edid_sha256": config["edid_sha256"],
         "mode": config["mode"], "minimum_refresh_hz": config["expected_min_refresh_hz"],
         "maximum_refresh_hz": config["expected_max_refresh_hz"],
@@ -301,12 +344,21 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
     checks: list[tuple[str, bool, object]] = []
     for name, value in expected.items():
         checks.append((f"exact {name}", facts.get(name) == value, facts.get(name)))
-    for name in ("root", "drm_primary_node", "tty_character_device", "spare_tty",
-                 "connected", "atomic_kms", "vrr_enabled_property",
+    for name in ("root", "drm_primary_node", "tty_character_device",
+                 "tty_kd_text", "spare_tty", "alternate_tty_character_device",
+                 "alternate_tty_kd_text", "alternate_tty_safe", "connected",
+                 "active", "single_connected_active_connector",
+                 "atomic_kms", "vrr_enabled_property",
                  "selected_mode_available",
                  "no_competing_drm_master", "session_permissions",
                  "keyboard_character_device", "pointer_character_device"):
         checks.append((name.replace("_", " "), facts.get(name) is True, facts.get(name)))
+    checks.append(("exactly one connected connector",
+                   facts.get("connected_connector_count") == 1,
+                   facts.get("connected_connector_count")))
+    checks.append(("exactly one active connector",
+                   facts.get("active_connector_count") == 1,
+                   facts.get("active_connector_count")))
     checks.append(("vrr capable", facts.get("vrr_capable") == 1, facts.get("vrr_capable")))
     checks.append(("reviewed range source", facts.get("range_source") in {"debugfs", "config-reviewed"}, facts.get("range_source")))
     checks.append(("target cadence distinguishes fixed refresh", target_distinguishes_fixed_refresh(config), config["target_refresh_hz"]))
@@ -320,6 +372,7 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
 def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
     drm = Path(str(config["drm_device"]))
     tty = Path(str(config["tty"]))
+    alternate_tty = Path(str(config["alternate_tty"]))
     card = drm.name
     connector = str(config["connector"])
     root = Path("/sys/class/drm") / f"{card}-{connector}"
@@ -333,18 +386,41 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
             return path.read_text(encoding="ascii").strip() or fallback
         except OSError:
             return fallback
+    def kd_text(path: Path) -> bool:
+        try:
+            descriptor = os.open(
+                path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError:
+            return False
+        try:
+            mode = array.array("I", [0])
+            fcntl.ioctl(descriptor, 0x4B3B, mode, True)  # KDGETMODE
+            return mode[0] == 0  # KD_TEXT
+        except OSError:
+            return False
+        finally:
+            os.close(descriptor)
     try:
         edid = (root / "edid").read_bytes()
         digest = hashlib.sha256(edid).hexdigest() if edid else ""
     except OSError:
         digest = ""
     debug = Path(str(config["debugfs_connector_path"]))
-    debug_text = text(root / "vrr_capable", "")
+    debug_text = ""
     if debug.is_file():
-        debug_text += "\n" + text(debug, "")
-    elif debug.is_dir() and not debug_text:
-        debug_text = text(debug / "vrr_capable", "")
-    debug_vrr_capable = 1 if re.search(r"(?:vrr_capable\s*[:=]?\s*)1\b", debug_text, re.I) or debug_text == "1" else 0
+        debug_text = text(debug, "")
+    elif debug.is_dir():
+        for name in ("vrr_range", "vrr_capable"):
+            contents = text(debug / name, "")
+            if contents:
+                debug_text += ("\n" if debug_text else "") + contents
+    sysfs_vrr_text = text(root / "vrr_capable", "")
+    debug_vrr_capable = 1 if (
+        re.search(r"(?:vrr_capable\s*[:=]?\s*)1\b", debug_text, re.I) or
+        debug_text == "1" or sysfs_vrr_text == "1") else 0
+    reviewed_range = (int(config["expected_min_refresh_hz"]),
+                      int(config["expected_max_refresh_hz"]))
+    range_source = _reviewed_range_source(debug_text, *reviewed_range)
     modetest = next((str(path) for path in (Path("/usr/bin/modetest"), Path("/bin/modetest"))
                        if path.is_file() and os.access(path, os.X_OK)), None)
     modetest_text = ""
@@ -382,23 +458,44 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
     clients_available = clients_path.is_file() and os.access(clients_path, os.R_OK)
     clients = text(clients_path, "") if clients_available else ""
     competing = any(re.search(r"\by\b", line, re.I) for line in clients.splitlines()[1:])
-    current_tty = ""
-    try:
-        current_tty = os.ttyname(sys.stdin.fileno())
-    except OSError:
-        pass
+    active_tty_name = text(Path("/sys/class/tty/tty0/active"), "")
+    active_tty = f"/dev/{active_tty_name}" if active_tty_name else ""
+    tty_is_text = kd_text(tty)
+    alternate_is_text = kd_text(alternate_tty)
+    tty_is_active = active_tty == str(tty)
+    alternate_is_safe = (is_char(alternate_tty) and alternate_is_text and
+                         active_tty != str(alternate_tty) and tty != alternate_tty)
+    connector_states: list[tuple[str, str, str]] = []
+    for candidate in sorted(Path("/sys/class/drm").glob(f"{card}-*")):
+        name = candidate.name.removeprefix(f"{card}-")
+        status = text(candidate / "status", "")
+        if status not in {"connected", "disconnected", "unknown"}:
+            continue
+        connector_states.append((name, status, text(candidate / "enabled", "")))
+    connected_count, active_count, selected_connected, selected_active = (
+        _connector_profile(connector_states, connector))
     return {
         "schema": ARTIFACT_SCHEMA, "root": os.geteuid() == 0,
         "drm_device": str(drm), "drm_primary_node": is_char(drm),
         "tty": str(tty), "tty_character_device": is_char(tty),
-        "spare_tty": is_char(tty) and current_tty == str(tty),
-        "connector": connector, "connected": text(root / "status", "") == "connected",
+        "tty_kd_text": tty_is_text, "active_tty": active_tty,
+        "spare_tty": is_char(tty) and tty_is_text and tty_is_active,
+        "alternate_tty": str(alternate_tty),
+        "alternate_tty_character_device": is_char(alternate_tty),
+        "alternate_tty_kd_text": alternate_is_text,
+        "alternate_tty_safe": alternate_is_safe,
+        "connector": connector, "connected": selected_connected,
+        "active": selected_active,
+        "connected_connector_count": connected_count,
+        "active_connector_count": active_count,
+        "single_connected_active_connector": (
+            connected_count == 1 and active_count == 1 and selected_active),
         "edid_sha256": digest, "vrr_capable": vrr_capable,
         "atomic_kms": atomic, "vrr_enabled_property": vrr_property,
         "mode": str(config["mode"]),
         "selected_mode_available": _modetest_has_selected_mode(
             modetest_text, connector, str(config["mode"])),
-        "range_source": "debugfs" if debug_text else "config-reviewed",
+        "range_source": range_source,
         "minimum_refresh_hz": config["expected_min_refresh_hz"],
         "maximum_refresh_hz": config["expected_max_refresh_hz"],
         "no_competing_drm_master": clients_available and not competing,

@@ -10,13 +10,14 @@ import stat
 from typing import Any
 
 SCHEMA_KEYS = {
-    "drm_device", "connector", "mode", "tty", "expected_min_refresh_hz",
+    "drm_device", "connector", "mode", "tty", "alternate_tty",
+    "expected_min_refresh_hz",
     "expected_max_refresh_hz", "target_refresh_hz", "monitor_model",
     "edid_sha256", "debugfs_connector_path", "keyboard_device",
     "pointer_device", "required_base_commit", "tested_commit",
 }
 STRING_KEYS = {
-    "drm_device", "connector", "mode", "tty", "monitor_model",
+    "drm_device", "connector", "mode", "tty", "alternate_tty", "monitor_model",
     "edid_sha256", "debugfs_connector_path", "keyboard_device",
     "pointer_device", "required_base_commit", "tested_commit",
 }
@@ -40,7 +41,11 @@ ARTIFACT_SCHEMA = "glasswyrm.m14-hardware.v1"
 
 DOCTOR_FACT_KEYS = {
     "schema", "root", "drm_device", "drm_primary_node", "tty",
-    "tty_character_device", "spare_tty", "connector", "connected",
+    "tty_character_device", "tty_kd_text", "active_tty", "spare_tty",
+    "alternate_tty", "alternate_tty_character_device", "alternate_tty_kd_text",
+    "alternate_tty_safe", "connector", "connected", "active",
+    "connected_connector_count", "active_connector_count",
+    "single_connected_active_connector",
     "edid_sha256", "vrr_capable", "atomic_kms", "vrr_enabled_property",
     "mode", "range_source", "minimum_refresh_hz", "maximum_refresh_hz",
     "no_competing_drm_master", "session_permissions", "kernel", "libdrm",

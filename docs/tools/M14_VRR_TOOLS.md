@@ -71,9 +71,10 @@ hashes.
 ## Validation harnesses
 
 `gw-vm milestone14-runtime-test --yes` is the fixed QXL negative-capability
-gate. `gw-hw doctor --config PATH` validates a reviewed physical target, and
-`gw-hw milestone14-vrr-test --config PATH --artifact-dir PATH --yes` is the
-fixed positive gate. The hardware command may take DRM master, switch VTs,
-stop the selected getty, and reconfigure the display. Never run it from the
-current graphical session or a TTY whose interruption is unacceptable; follow
-the safety requirements in the M14 hardware validation document first.
+gate. Both `gw-hw doctor` and `gw-hw milestone14-vrr-test` require the reviewed
+configuration, pinned `--required-base`, exact `--tested-commit`, and a private
+artifact directory; the live command additionally requires literal `--yes`.
+The hardware command may take DRM master, switch VTs, stop the selected getty,
+and reconfigure the display. Never run it from the current graphical session
+or a TTY whose interruption is unacceptable; follow the safety requirements
+in the M14 hardware validation document first.

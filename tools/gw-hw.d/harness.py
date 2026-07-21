@@ -86,6 +86,44 @@ def dry_run(config_path: Path, required_base: str, tested_commit: str,
         return 1
 
 
+def _live_failure_summary(
+        error: Exception, runner: FixedLiveRunner | None,
+        artifact_dir: Path) -> dict[str, object]:
+    primary = str(error)
+    restoration_errors: list[str] = []
+    restoration_attempted = runner is not None and runner.cleanup_attempted
+    if runner is not None:
+        restoration_errors.extend(runner.cleanup_errors)
+    restore_path = artifact_dir / "milestone14-restore.json"
+    if restore_path.is_file():
+        try:
+            restore = _read_json(restore_path)
+            checks = restore.get("checks")
+            if isinstance(checks, dict):
+                restoration_errors.extend(
+                    f"restoration check failed: {name}"
+                    for name, passed in sorted(checks.items()) if passed is not True)
+            if restore.get("passed") is not True and not restoration_errors:
+                restoration_errors.append("restoration evidence did not pass")
+        except (HarnessError, OSError, json.JSONDecodeError) as restore_error:
+            restoration_errors.append(
+                f"restoration evidence unreadable: {restore_error}")
+    evidence_errors = [primary]
+    evidence_errors.extend(
+        value for value in restoration_errors if value not in evidence_errors)
+    return {
+        "schema": ARTIFACT_SCHEMA,
+        "dry_run": False,
+        "passed": False,
+        "failure_stage": "live-run-or-evidence",
+        "primary_error": primary,
+        "evidence_errors": evidence_errors,
+        "restoration_attempted": restoration_attempted,
+        "restoration": False if restoration_errors else None,
+        "restoration_errors": restoration_errors,
+    }
+
+
 def milestone14(config_path: Path, required_base: str, tested_commit: str,
                 confirmed: bool, dry: bool,
                 fixture_dir: Path | None, artifact_dir: Path) -> int:
@@ -98,6 +136,7 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
             return 2
         return dry_run(config_path, required_base, tested_commit,
                        fixture_dir, artifact_dir)
+    runner: FixedLiveRunner | None = None
     try:
         _prepare_private_empty_directory(artifact_dir, "live artifact directory")
         _prepare_private_empty_directory(RUNTIME_ROOT, "live runtime directory")
@@ -115,11 +154,9 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
         try:
             status = artifact_dir.lstat()
             if stat.S_ISDIR(status.st_mode) and not status.st_mode & 0o077:
-                _write_json(artifact_dir / "milestone14-hardware-summary.json",
-                            {"schema": ARTIFACT_SCHEMA, "dry_run": False,
-                             "passed": False,
-                             "failure_stage": "live-run-or-evidence",
-                             "evidence_errors": [str(error)]})
+                _write_json(
+                    artifact_dir / "milestone14-hardware-summary.json",
+                    _live_failure_summary(error, runner, artifact_dir))
         except OSError:
             pass
         print(f"gw-hw: live run failed: {error}", file=sys.stderr)
@@ -127,7 +164,7 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
 
 
 def self_test() -> int:
-    valid = '''required_base_commit = "6864ea631d61636289a21c7d2d6655a17be0c004"\ntested_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"\ndrm_device = "/dev/dri/card0"\nconnector = "DP-1"\nmode = "2560x1440@144000"\ntty = "/dev/tty2"\nkeyboard_device = "/dev/input/event0"\npointer_device = "/dev/input/event1"\nexpected_min_refresh_hz = 48\nexpected_max_refresh_hz = 144\ntarget_refresh_hz = 70\nmonitor_model = "reviewed model"\nedid_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\ndebugfs_connector_path = "/sys/kernel/debug/dri/0/DP-1"\n'''
+    valid = '''required_base_commit = "6864ea631d61636289a21c7d2d6655a17be0c004"\ntested_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"\ndrm_device = "/dev/dri/card0"\nconnector = "DP-1"\nmode = "2560x1440@144000"\ntty = "/dev/tty2"\nalternate_tty = "/dev/tty1"\nkeyboard_device = "/dev/input/event0"\npointer_device = "/dev/input/event1"\nexpected_min_refresh_hz = 48\nexpected_max_refresh_hz = 144\ntarget_refresh_hz = 70\nmonitor_model = "reviewed model"\nedid_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\ndebugfs_connector_path = "/sys/kernel/debug/dri/0/DP-1"\n'''
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "config.toml"
         path.write_text(valid, encoding="utf-8")
@@ -135,6 +172,32 @@ def self_test() -> int:
         validate_cli_identity(
             config, "6864ea631d61636289a21c7d2d6655a17be0c004",
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        cadence_report = Path(directory) / "scenario-bounded-cadence.jsonl"
+        cadence_lines: list[str] = []
+        for index in range(131):
+            cadence_lines.append(json.dumps({
+                "record": "vrr-timing", "sequence": index,
+                "kernel_timestamp_nanoseconds": 1_000_000_000 +
+                    14_285_714 * index,
+                "effective_enabled": True,
+            }, sort_keys=True) + "\n")
+        cadence_end = len("".join(cadence_lines).encode("utf-8"))
+        for index in range(512):
+            cadence_lines.append(json.dumps({
+                "record": "vrr-timing", "sequence": 1_000 + index,
+                "kernel_timestamp_nanoseconds": 10_000_000_000 +
+                    6_944_444 * index,
+                "effective_enabled": True,
+            }, sort_keys=True) + "\n")
+        cadence_report.write_text("".join(cadence_lines), encoding="utf-8")
+        bounded = analyze_cadence(
+            cadence_report, config, True, (0, cadence_end), "on-cadence")
+        contaminated = analyze_cadence(cadence_report, config, True)
+        if (bounded.get("passed") is not True or
+                bounded.get("sample_count") != 130 or
+                bounded.get("scenario") != "on-cadence" or
+                contaminated.get("passed") is not False):
+            raise AssertionError("cadence analysis crossed its scenario boundary")
         for required_base, tested_commit in (
                 ("0" * 40, "b" * 40),
                 ("6864ea631d61636289a21c7d2d6655a17be0c004", "c" * 40)):
@@ -348,6 +411,26 @@ id fb pos size
             raise AssertionError("fixed live runner failure did not propagate")
         if not failed_runner.cleanup_attempted:
             raise AssertionError("fixed live runner failure skipped cleanup")
+        failure_artifacts = Path(directory) / "failure-summary"
+        failure_artifacts.mkdir()
+        _write_json(failure_artifacts / "milestone14-restore.json", {
+            "checks": {"cleanup": False, "kms": True, "vt": False},
+            "passed": False,
+        })
+        failed_runner.cleanup_errors = ["cleanup command failed: systemctl stop"]
+        failure_summary = _live_failure_summary(
+            HarnessError("primary live failure"), failed_runner,
+            failure_artifacts)
+        if (failure_summary.get("primary_error") != "primary live failure" or
+                failure_summary.get("evidence_errors", [None])[0] !=
+                    "primary live failure" or
+                failure_summary.get("restoration_attempted") is not True or
+                failure_summary.get("restoration") is not False or
+                "cleanup command failed: systemctl stop" not in
+                    failure_summary.get("restoration_errors", []) or
+                "restoration check failed: vt" not in
+                    failure_summary.get("restoration_errors", [])):
+            raise AssertionError("failure summary masked cleanup or restoration evidence")
         try:
             finalize_live(config, Path(directory), runner)
         except HarnessError:
@@ -356,7 +439,7 @@ id fb pos size
             raise AssertionError("missing live evidence was accepted")
         from selftest_fixtures import populate_live_evidence
         live = Path(directory) / "positive-live"
-        populate_live_evidence(live, config)
+        cadence_ranges = populate_live_evidence(live, config)
         evidence_runner = FixedLiveRunner(
             config, live, fake, "/dev/tty2", False,
             lambda path, kind: True, lambda: dict(state), False)
@@ -364,6 +447,7 @@ id fb pos size
         evidence_runner.before_state = dict(state)
         evidence_runner.after_state = dict(state)
         evidence_runner.cleanup_attempted = True
+        evidence_runner.cadence_ranges = cadence_ranges
         finalize_live(config, live, evidence_runner)
         positive = _read_json(live / "milestone14-hardware-summary.json")
         if (positive.get("passed") is not True or
@@ -379,8 +463,21 @@ id fb pos size
             raise AssertionError("cross-evidence source identity mismatch was accepted")
         _write_json(live / "milestone14-hardware-summary.json", positive)
         _create_archive(live)
+        on_summary_path = live / "milestone14-vrr-on-summary.json"
+        on_summary = _read_json(on_summary_path)
+        invalid_cadence = dict(on_summary)
+        invalid_cadence["source_byte_range"] = dict(
+            on_summary["source_byte_range"],
+            start=on_summary["source_byte_range"]["start"] + 1)
+        _write_json(on_summary_path, invalid_cadence)
+        _create_archive(live)
+        if validate_archive(
+                live, live / "milestone14-vrr-hardware-evidence.tar")["passed"]:
+            raise AssertionError("unaligned cadence scenario evidence was accepted")
+        _write_json(on_summary_path, on_summary)
+        _create_archive(live)
         invalid_app = Path(directory) / "invalid-app-live"
-        populate_live_evidence(invalid_app, config)
+        invalid_ranges = populate_live_evidence(invalid_app, config)
         app_snapshot = _read_json(invalid_app / "milestone14-app-requested.log")
         app_snapshot["vrr"][0]["effective_enabled"] = False
         _write_json(invalid_app / "milestone14-app-requested.log", app_snapshot)
@@ -391,6 +488,7 @@ id fb pos size
         invalid_runner.before_state = dict(state)
         invalid_runner.after_state = dict(state)
         invalid_runner.cleanup_attempted = True
+        invalid_runner.cadence_ranges = invalid_ranges
         try:
             finalize_live(config, invalid_app, invalid_runner)
         except HarnessError:
