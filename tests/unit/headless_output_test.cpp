@@ -71,15 +71,69 @@ int main() {
       "\"file\":\"frame-000001-output-0000000000000026.ppm\"}\n";
   gw::test::require((std::string(manifest.begin(), manifest.end())) == (expected_manifest), "equality assertion");
 
+  auto second = metadata;
+  second.frame = 2;
+  gw::test::require(dumper.dump(second, output.pixels(), result, error),
+                    "default dumper must retain per-frame semantics");
+  gw::test::require(
+      std::filesystem::exists(
+          directory / "frame-000002-output-0000000000000026.ppm"),
+      "default dumper must publish every requested frame");
+
   FrameDumpResult invalid_result;
   auto invalid = metadata;
-  invalid.frame = 2;
+  invalid.frame = 3;
   invalid.width = 3;
   gw::test::require(!dumper.dump(invalid, output.pixels(), invalid_result, error), "assertion");
   gw::test::require(
       !std::filesystem::exists(
-          directory / "frame-000002-output-0000000000000026.ppm"),
+          directory / "frame-000003-output-0000000000000026.ppm"),
       "invalid dump must not create a frame");
+
+  const auto triggered_directory = directory / "triggered";
+  const auto trigger = directory / "capture.trigger";
+  FrameDumper triggered(triggered_directory, trigger);
+  auto triggered_metadata = metadata;
+  triggered_metadata.frame = 10;
+  for (; triggered_metadata.frame < 190; ++triggered_metadata.frame) {
+    result = {};
+    gw::test::require(
+        triggered.dump(triggered_metadata, output.pixels(), result, error) &&
+            result.file.empty(),
+        "absent trigger must suppress cadence frame dumps");
+  }
+  gw::test::require(result.file.empty() &&
+                        !std::filesystem::exists(triggered_directory),
+                    "180 cadence frames must publish no mirror artifacts");
+
+  std::ofstream(trigger, std::ios::binary).close();
+  gw::test::require(
+      triggered.dump(triggered_metadata, output.pixels(), result, error),
+      "present trigger must request one frame");
+  gw::test::require(!result.file.empty() &&
+                        std::filesystem::exists(result.file) &&
+                        !std::filesystem::exists(trigger),
+                    "successful one-shot dump must consume its trigger");
+
+  triggered_metadata.frame = 191;
+  result = {};
+  gw::test::require(
+      triggered.dump(triggered_metadata, output.pixels(), result, error) &&
+          result.file.empty() &&
+          !std::filesystem::exists(
+              triggered_directory /
+              "frame-000191-output-0000000000000026.ppm"),
+      "consumed trigger must suppress later frames");
+
+  const auto invalid_trigger = directory / "invalid-trigger";
+  std::filesystem::create_directory(invalid_trigger);
+  FrameDumper invalid_triggered(directory / "invalid-trigger-dumps",
+                                invalid_trigger);
+  gw::test::require(
+      !invalid_triggered.dump(triggered_metadata, output.pixels(), result,
+                              error) &&
+          error.find("regular non-symlink") != std::string::npos,
+      "non-regular triggers must fail closed");
 
   output.disable();
   gw::test::require(!output.enabled(), "assertion");

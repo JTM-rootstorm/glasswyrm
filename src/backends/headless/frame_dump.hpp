@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -64,8 +65,11 @@ class StagedFrameDump {
 
 class FrameDumper {
  public:
-  explicit FrameDumper(std::filesystem::path directory)
-      : directory_(std::move(directory)) {}
+  explicit FrameDumper(
+      std::filesystem::path directory,
+      std::optional<std::filesystem::path> one_shot_trigger = std::nullopt)
+      : directory_(std::move(directory)),
+        one_shot_trigger_(std::move(one_shot_trigger)) {}
 
   [[nodiscard]] bool stage(const FrameDumpMetadata& metadata,
                            std::span<const std::uint32_t> xrgb_pixels,
@@ -84,7 +88,11 @@ class FrameDumper {
                           FrameDumpResult& result, std::string& error) const;
 
  private:
+  [[nodiscard]] bool capture_requested(std::string& error) const;
+  [[nodiscard]] bool consume_capture_request(std::string& error) const;
+
   std::filesystem::path directory_;
+  std::optional<std::filesystem::path> one_shot_trigger_;
 };
 
 }  // namespace glasswyrm::headless

@@ -177,8 +177,11 @@ bool create_drm_presenter_impl(
     resources.vrr_report =
         std::make_unique<drm::DrmReport>(*options.vrr_report);
   if (options.mirror_dump_dir)
-    resources.mirror =
-        std::make_unique<headless::FrameDumper>(*options.mirror_dump_dir);
+    resources.mirror = std::make_unique<headless::FrameDumper>(
+        *options.mirror_dump_dir,
+        options.mirror_dump_trigger
+            ? std::optional<std::filesystem::path>(*options.mirror_dump_trigger)
+            : std::nullopt);
   if (!options.external_session)
     resources.vt_api = std::make_unique<session::LinuxVirtualTerminalApi>();
 

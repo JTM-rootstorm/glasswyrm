@@ -35,6 +35,7 @@ struct Options {
   std::optional<RequestedMode> mode;
   DrmApiMode drm_api{DrmApiMode::Auto};
   std::optional<std::string> mirror_dump_dir;
+  std::optional<std::string> mirror_dump_trigger;
   std::optional<std::string> drm_report;
   std::optional<std::string> vrr_report;
   std::optional<std::string> scene_manifest;

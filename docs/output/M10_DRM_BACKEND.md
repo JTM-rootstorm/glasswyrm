@@ -48,6 +48,16 @@ An inherited session uses `--drm-fd N --external-session` and forbids `--tty`.
 `--drm-device` and `--drm-fd` are mutually exclusive. `--dump-dir` remains
 headless-only.
 
+Long-running physical diagnostics may add
+`--mirror-dump-trigger /run/glasswyrm/capture`. Without that option, the
+historical mirror behavior is unchanged and every accepted DRM frame is
+published. With it, presentation proceeds normally but mirror staging is a
+no-op until the trigger path names a regular, non-symlink file. The next
+successfully published mirror consumes that file, so each explicitly created
+marker requests at most one PPM. The trigger requires `--mirror-dump-dir` and
+does not affect DRM reports, VRR reports, or rendering; while the marker is
+absent it performs no mirror encoding, writes, or `fsync` work.
+
 ## Discovery and deterministic selection
 
 Only Linux DRM primary nodes are eligible; render nodes are rejected. The real

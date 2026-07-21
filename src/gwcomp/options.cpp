@@ -24,7 +24,8 @@ void print_usage(std::ostream& output) {
       "  drm external: --drm-fd N --external-session\n"
       "  drm options: [--connector NAME] [--mode WIDTHxHEIGHT[@MILLIHZ]]\n"
       "               [--drm-api auto|atomic|legacy]\n"
-      "               [--mirror-dump-dir PATH] [--drm-report PATH]\n"
+      "               [--mirror-dump-dir PATH]\n"
+      "               [--mirror-dump-trigger PATH] [--drm-report PATH]\n"
       "  renderer: [--renderer software|gles|auto] [--renderer-report PATH]\n"
       "  common: [--vrr-report PATH] [--once] [--max-frames N]\n"
       "          [--help] [--version]\n";
@@ -190,7 +191,7 @@ bool validate_backend_options(const Options& options, std::ostream& error) {
     if (options.drm_device || options.drm_fd || options.external_session ||
         options.tty || options.connector || options.mode ||
         options.drm_api != DrmApiMode::Auto || options.mirror_dump_dir ||
-        options.drm_report) {
+        options.mirror_dump_trigger || options.drm_report) {
       error << "gwcomp: DRM options require --backend drm\n";
       return false;
     }
@@ -223,6 +224,10 @@ bool validate_backend_options(const Options& options, std::ostream& error) {
   }
   if (!options.dump_dir.empty()) {
     error << "gwcomp: --dump-dir is headless-only; use --mirror-dump-dir for DRM\n";
+    return false;
+  }
+  if (options.mirror_dump_trigger && !options.mirror_dump_dir) {
+    error << "gwcomp: --mirror-dump-trigger requires --mirror-dump-dir\n";
     return false;
   }
   if (options.drm_device && options.drm_fd) {
@@ -380,6 +385,12 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
     }
     if (argument == "--mirror-dump-dir") {
       if (!take_optional_path(argc, argv, index, options.mirror_dump_dir,
+                              argument, error))
+        return ParseOptionsResult::ExitFailure;
+      continue;
+    }
+    if (argument == "--mirror-dump-trigger") {
+      if (!take_optional_path(argc, argv, index, options.mirror_dump_trigger,
                               argument, error))
         return ParseOptionsResult::ExitFailure;
       continue;
