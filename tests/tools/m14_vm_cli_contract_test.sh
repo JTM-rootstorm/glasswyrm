@@ -118,9 +118,14 @@ done
   fail 'M14 restart handoff must use exactly three semantic state waits'
 
 qxl_restart=$(sed -n '/^wait_qxl_vrr_off()/,/^chvt 1/p' <<<"$guest")
+grep -F -- 'start_qxl_gwcomp() {' <<<"$guest" >/dev/null ||
+  fail 'M14 QXL compositor start command is not reusable'
 for expected in \
   'wait_qxl_restart_evidence() {' \
   '_SYSTEMD_INVOCATION_ID=$invocation' \
+  "record.get('_SYSTEMD_UNIT')==sys.argv[3]" \
+  "record.get('_BOOT_ID')==sys.argv[4]" \
+  'hash=[0-9a-f]{16}' \
   "'gwm: policy accepted'" \
   "'gwcomp: frame accepted'" \
   'qxl_gwm_previous_invocation' \
@@ -128,7 +133,8 @@ for expected in \
   'systemctl restart gwm-m14-qxl.service' \
   'wait_qxl_restart_evidence gwm-m14-qxl.service' \
   'wait_qxl_vrr_off "$qxl/post-gwm.json"' \
-  'systemctl restart gwcomp-m14-qxl.service' \
+  'stop_unit_successfully gwcomp-m14-qxl.service' \
+  'start_qxl_gwcomp' \
   'wait_qxl_restart_evidence gwcomp-m14-qxl.service' \
   'wait_qxl_vrr_off "$qxl/post-gwcomp.json"' \
   "value.get('policy')=='off'" \
@@ -137,6 +143,15 @@ for expected in \
   grep -F -- "$expected" <<<"$qxl_restart" >/dev/null ||
     fail "M14 QXL restart proof lacks: $expected"
 done
+gwcomp_collect_line=$(grep -nF -- 'stop_unit_successfully gwcomp-m14-qxl.service' \
+  <<<"$qxl_restart" | cut -d: -f1)
+gwcomp_move_line=$(grep -nF -- \
+  'mv "$qxl/drm-report.jsonl" "$qxl/drm-report-before-gwcomp.jsonl"' \
+  <<<"$qxl_restart" | cut -d: -f1)
+gwcomp_start_line=$(grep -nF -- 'start_qxl_gwcomp' <<<"$qxl_restart" | tail -n1 | cut -d: -f1)
+((gwcomp_collect_line < gwcomp_move_line &&
+  gwcomp_move_line < gwcomp_start_line)) ||
+  fail 'M14 QXL report rotation is not bounded by a collected compositor stop/start'
 gwm_evidence_line=$(grep -nF -- \
   'wait_qxl_restart_evidence gwm-m14-qxl.service' <<<"$qxl_restart" | cut -d: -f1)
 gwm_query_line=$(grep -nF -- 'wait_qxl_vrr_off "$qxl/post-gwm.json"' \
@@ -155,7 +170,8 @@ for expected in 'remove_owned_x_socket /tmp/.X11-unix/X98' \
   'service stop failed:' 'service remained active after cleanup:' \
   'owned sockets remained after cleanup' "'sockets_released'" \
   "'errors':" "'units':units" 'scenario_exit=$final_status' \
-  'failure_stage=$saved_stage'; do
+  'failure_stage=$saved_stage' "printf '\\n' >>\"\$cleanup_units\"" \
+  'systemctl reset-failed "$unit"' 'wait_unit_collected_success "$unit"'; do
   grep -F -- "$expected" <<<"$cleanup" >/dev/null ||
     fail "M14 cleanup lacks: $expected"
 done
@@ -172,13 +188,32 @@ done
 
 service_gate=$(sed -n '/^service_units=(/,/result\[service_results\]=passed/p' \
   <<<"$guest")
+for expected in "record.get('_SYSTEMD_INVOCATION_ID')==sys.argv[2]" \
+  "record.get('_SYSTEMD_UNIT')==sys.argv[1]" \
+  "record.get('INVOCATION_ID')==sys.argv[2]" \
+  "record.get('UNIT')==sys.argv[1]" \
+  "record.get('_BOOT_ID')==sys.argv[3]"; do
+  grep -F -- "$expected" <<<"$service_gate" >/dev/null ||
+    fail "M14 service lifecycle proof lacks: $expected"
+done
 for expected in glasswyrmd-m14-qxl.service gwm-m14-qxl.service \
-  gwcomp-m14-qxl.service "set(by_id)==expected" \
-  "record['SubState']=='dead'" "record['Result']=='success'" \
-  "record['ExecMainStatus']=='0'" "uinput=={'Id':'gw-uinput-m14.service'" \
-  "'LoadState':'not-found'"; do
+  gwcomp-m14-qxl.service "set(by_id)!=expected" \
+  "for unit in expected:" "'LoadState':'not-found'" \
+  "'ActiveState':'inactive','SubState':'dead','Result':'success'" \
+  "'ExecMainCode':'0','ExecMainStatus':'0'" \
+  'LifecycleInvocationID=%s' 'LifecycleBootID=%s' 'JournalMatched=true' \
+  "lifecycle_boots={record.get('LifecycleBootID') for record in records}" \
+  "'passed':not errors" \
+  "printf '\\n' >>\"\$work/service-results.txt\""; do
   grep -F -- "$expected" <<<"$service_gate" >/dev/null ||
     fail "M14 service-result gate lacks: $expected"
+done
+
+text_artifacts=$(sed -n '/^M14_TEXT_ARTIFACTS=(/,/^)/p' "$library")
+for journal in milestone14-qxl-gwm-restart-journal.jsonl \
+  milestone14-qxl-gwcomp-restart-journal.jsonl; do
+  grep -F -- "$journal" <<<"$text_artifacts" >/dev/null ||
+    fail "M14 text artifact collection omits: $journal"
 done
 
 for expected in \

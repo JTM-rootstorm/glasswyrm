@@ -16,6 +16,8 @@ M14_TEXT_ARTIFACTS=(
   milestone14-qxl-vt-before.json milestone14-qxl-vt-after.json
   milestone14-qxl-post-vt.json milestone14-qxl-post-gwm.json
   milestone14-qxl-post-gwcomp.json milestone14-qxl-restart.json
+  milestone14-qxl-gwm-restart-journal.jsonl
+  milestone14-qxl-gwcomp-restart-journal.jsonl
   milestone14-headless-report.jsonl milestone14-gw-vrr.log
   milestone14-gwout.log milestone14-gwinfo.json
   milestone14-policy-matrix.json milestone14-sdl-vrr.json
@@ -128,6 +130,7 @@ logind_active_before='' logind_socket_active_before=''
 logind_enabled_before='' logind_socket_enabled_before=''
 client_pid=0 focus_a_pid=0
 declare -A owned_x_socket_device owned_x_socket_inode
+declare -A service_invocation_id service_boot_id
 service_units=(glasswyrmd-m14-headless.service gwm-m14-headless.service
   gwcomp-m14-headless.service glasswyrmd-m14-single.service
   gwm-m14-single.service gwcomp-m14-single.service
@@ -218,6 +221,71 @@ gwcomp-restart-journal.jsonl|milestone14-qxl-gwcomp-restart-journal.jsonl
 EOF
 }
 
+unit_collected_success() {
+  local unit=$1 record
+  record=$(systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+    -p Result -p ExecMainCode -p ExecMainStatus --no-pager 2>/dev/null) || return
+  python3 - "$unit" "$record" <<'PY' 2>/dev/null
+import sys
+record=dict(line.split('=',1) for line in sys.argv[2].splitlines()
+            if '=' in line)
+assert record == {'Id':sys.argv[1],'LoadState':'not-found',
+ 'ActiveState':'inactive','SubState':'dead','Result':'success',
+ 'ExecMainCode':'0','ExecMainStatus':'0'},record
+PY
+}
+
+wait_unit_collected_success() {
+  local unit=$1 active result
+  for _ in {1..400}; do
+    unit_collected_success "$unit" && return
+    active=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
+    result=$(systemctl show "$unit" -p Result --value 2>/dev/null)
+    if [[ $active == failed || $result != success ]]; then
+      printf 'Service did not exit successfully: %s active=%s result=%s\n' \
+        "$unit" "$active" "$result" >&2
+      systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+        -p Result -p ExecMainCode -p ExecMainStatus --no-pager >&2
+      return 1
+    fi
+    sleep .05
+  done
+  printf 'Timed out waiting for collected successful service: %s\n' "$unit" >&2
+  systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+    -p Result -p ExecMainCode -p ExecMainStatus --no-pager >&2
+  return 1
+}
+
+stop_unit_successfully() {
+  local unit=$1 invocation boot_id journal
+  invocation=$(systemctl show "$unit" -p InvocationID --value)
+  boot_id=$(tr -d - </proc/sys/kernel/random/boot_id)
+  [[ $invocation =~ ^[0-9a-f]{32}$ && $boot_id =~ ^[0-9a-f]{32}$ ]]
+  journal=$work/service-lifecycle-${unit%.service}.jsonl
+  : >"$journal"
+  journalctl "_SYSTEMD_INVOCATION_ID=$invocation" "_BOOT_ID=$boot_id" \
+    -b --no-pager -o json >>"$journal"
+  journalctl "INVOCATION_ID=$invocation" "UNIT=$unit" "_BOOT_ID=$boot_id" \
+    -b --no-pager -o json >>"$journal"
+  python3 - "$unit" "$invocation" "$boot_id" "$journal" <<'PY'
+import json,sys
+records=[json.loads(line) for line in open(sys.argv[4]) if line.strip()]
+assert records
+def matches(record):
+ process=(record.get('_SYSTEMD_INVOCATION_ID')==sys.argv[2] and
+          record.get('_SYSTEMD_UNIT')==sys.argv[1])
+ manager=(record.get('INVOCATION_ID')==sys.argv[2] and
+          record.get('UNIT')==sys.argv[1])
+ return record.get('_BOOT_ID')==sys.argv[3] and (process or manager)
+assert all(matches(record) for record in records)
+assert any(matches(record) for record in records)
+PY
+  systemctl stop "$unit"
+  wait_unit_collected_success "$unit"
+  service_invocation_id[$unit]=$invocation
+  service_boot_id[$unit]=$boot_id
+}
+
 cleanup() {
   local saved_status=$? saved_stage=$failure_stage cleanup_failures=0
   local final_status=$saved_status cleanup_errors cleanup_units
@@ -225,6 +293,7 @@ cleanup() {
   local kms_cleanup=not_attempted vt_cleanup=not_attempted
   local getty_cleanup=not_attempted logind_cleanup=not_attempted
   local active_after enabled_after socket_active_after socket_enabled_after
+  local services_quiesced=true
   set +e
   install -d -m 0755 "$artifact_dir"
   cleanup_errors=$artifact_dir/.milestone14-cleanup-errors
@@ -237,7 +306,7 @@ cleanup() {
     kill "$focus_a_pid" 2>/dev/null
     wait "$focus_a_pid" 2>/dev/null
   }
-  local unit load_state active_state sub_state
+  local unit load_state active_state sub_state result
   for unit in "${service_units[@]}"; do
     load_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null)
     active_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
@@ -249,6 +318,39 @@ cleanup() {
       fi
     fi
   done
+  for unit in "${service_units[@]}"; do
+    load_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null)
+    active_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
+    sub_state=$(systemctl show "$unit" -p SubState --value 2>/dev/null)
+    result=$(systemctl show "$unit" -p Result --value 2>/dev/null)
+    if [[ $active_state == failed || $result != success ]]; then
+      systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+        -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
+        >>"$artifact_dir/milestone14-cleanup.log" 2>&1
+      printf 'service remained active after cleanup: %s load=%s active=%s sub=%s result=%s\n' \
+        "$unit" "$load_state" "$active_state" "$sub_state" "$result" | tee -a \
+        "$cleanup_errors" "$artifact_dir/milestone14-cleanup.log" >/dev/null
+      cleanup_failures=$((cleanup_failures + 1))
+      systemctl reset-failed "$unit" \
+        >>"$artifact_dir/milestone14-cleanup.log" 2>&1
+    fi
+    if ! wait_unit_collected_success "$unit"; then
+      printf 'service did not reach collected success after cleanup: %s\n' \
+        "$unit" | tee -a "$cleanup_errors" \
+        "$artifact_dir/milestone14-cleanup.log" >/dev/null
+      cleanup_failures=$((cleanup_failures + 1))
+      services_quiesced=false
+    fi
+    systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+      -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
+      >>"$cleanup_units" 2>&1
+    printf '\n' >>"$cleanup_units"
+  done
+  if [[ $services_quiesced != true ]]; then
+    restoration_ok=false
+    printf 'service cleanup did not quiesce every owned unit\n' | tee -a \
+      "$cleanup_errors" "$artifact_dir/milestone14-cleanup.log" >/dev/null
+  fi
   if [[ $logind_state_captured == true ]]; then
     restoration_attempted=true
     systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1 || restoration_ok=false
@@ -284,11 +386,12 @@ cleanup() {
       getty_cleanup=failed restoration_ok=false
     fi
   fi
-  if [[ -n $original_vt ]]; then
+  if [[ $services_quiesced == true && -n $original_vt ]]; then
     restoration_attempted=true
     chvt "$original_vt" >/dev/null 2>&1 || restoration_ok=false
   fi
-  if [[ -s $qxl/kms-before.json && -x $build/tools/gw_drm_probe ]]; then
+  if [[ $services_quiesced == true && -s $qxl/kms-before.json &&
+        -x $build/tools/gw_drm_probe ]]; then
     restoration_attempted=true
     if "$build/tools/gw_drm_probe" --device "$drm_device" \
         --connector "$connector" --require-mode 1024x768 \
@@ -314,27 +417,15 @@ PY
       "$cleanup_errors" "$artifact_dir/milestone14-cleanup.log" >/dev/null
     cleanup_failures=$((cleanup_failures + 1))
   fi
-  rm -f -- "$runtime/gwm.sock" "$runtime/gwcomp.sock" \
-    "$runtime/control.sock" "$runtime/gwm-single.sock" \
-    "$runtime/gwcomp-single.sock" "$runtime/control-single.sock" \
-    "$control/input.sock"
-  remove_owned_x_socket /tmp/.X11-unix/X98
-  remove_owned_x_socket /tmp/.X11-unix/X99
+  if [[ $services_quiesced == true ]]; then
+    rm -f -- "$runtime/gwm.sock" "$runtime/gwcomp.sock" \
+      "$runtime/control.sock" "$runtime/gwm-single.sock" \
+      "$runtime/gwcomp-single.sock" "$runtime/control-single.sock" \
+      "$control/input.sock"
+    remove_owned_x_socket /tmp/.X11-unix/X98
+    remove_owned_x_socket /tmp/.X11-unix/X99
+  fi
   preserve_qxl_evidence
-  for unit in "${service_units[@]}"; do
-    systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
-      --no-pager >>"$cleanup_units" 2>&1
-    load_state=$(systemctl show "$unit" -p LoadState --value 2>/dev/null)
-    active_state=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
-    sub_state=$(systemctl show "$unit" -p SubState --value 2>/dev/null)
-    if [[ $load_state != loaded && $load_state != not-found || \
-          $active_state != inactive || $sub_state != dead ]]; then
-      printf 'service remained active after cleanup: %s load=%s active=%s sub=%s\n' \
-        "$unit" "$load_state" "$active_state" "$sub_state" | tee -a \
-        "$cleanup_errors" "$artifact_dir/milestone14-cleanup.log" >/dev/null
-      cleanup_failures=$((cleanup_failures + 1))
-    fi
-  done
   cat "$cleanup_units" >>"$artifact_dir/milestone14-cleanup.log"
   local sockets_released=true path
   for path in "$runtime/gwm.sock" "$runtime/gwcomp.sock" \
@@ -680,8 +771,10 @@ json.dump({'schema':1,'passed':True,'gwm_replay':True,
  'reasons':list(expected[5])}},open(sys.argv[5],'w'),sort_keys=True)
 PY
 wait "$client_pid"; client_pid=0
-systemctl stop glasswyrmd-m14-headless.service gwm-m14-headless.service \
-  gwcomp-m14-headless.service
+for unit in glasswyrmd-m14-headless.service gwcomp-m14-headless.service \
+  gwm-m14-headless.service; do
+  stop_unit_successfully "$unit"
+done
 
 failure_stage='single-output-acceptance'
 systemd-run --unit=gwm-m14-single --property=Type=simple --no-block -- \
@@ -797,8 +890,10 @@ json.dump({'schema':1,'passed':True,'sdl_version':'2.32.10',
  open(sys.argv[4],'w'),sort_keys=True)
 PY
 result[sdl_vrr_reuse]=passed
-systemctl stop glasswyrmd-m14-single.service gwcomp-m14-single.service \
-  gwm-m14-single.service
+for unit in glasswyrmd-m14-single.service gwcomp-m14-single.service \
+  gwm-m14-single.service; do
+  stop_unit_successfully "$unit"
+done
 
 cat "$work/headless-vrr-before-restart.jsonl" "$work/headless-vrr.jsonl" \
   "$work/headless-vrr-single.jsonl" \
@@ -855,20 +950,23 @@ systemd-run --unit=gwm-m14-qxl --property=Type=simple \
   --property=SuccessExitStatus=143 --no-block -- \
   "$build/src/gwm" --ipc-socket "$runtime/gwm.sock"
 wait_socket "$runtime/gwm.sock"
-systemd-run --unit=gwcomp-m14-qxl --property=Type=simple \
-  --property=SuccessExitStatus=143 --property=PrivateDevices=no \
-  --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
-  --property="DeviceAllow=$target_vt rw" --property=StandardInput=tty-force \
-  --property="TTYPath=$target_vt" --property=StandardOutput=journal \
-  --property=StandardError=journal --property=TTYReset=yes \
-  --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
-  --property=KillMode=mixed --no-block -- \
-  "$build/src/gwcomp" --backend drm --ipc-socket "$runtime/gwcomp.sock" \
-  --drm-device "$drm_device" --tty "$target_vt" --connector "$connector" \
-  --mode 1024x768 --drm-api auto --renderer software \
-  --mirror-dump-dir "$qxl/frames" --drm-report "$qxl/drm-report.jsonl" \
-  --vrr-report "$qxl/vrr-report.jsonl"
-wait_socket "$runtime/gwcomp.sock"
+start_qxl_gwcomp() {
+  systemd-run --unit=gwcomp-m14-qxl --property=Type=simple \
+    --property=SuccessExitStatus=143 --property=PrivateDevices=no \
+    --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
+    --property="DeviceAllow=$target_vt rw" --property=StandardInput=tty-force \
+    --property="TTYPath=$target_vt" --property=StandardOutput=journal \
+    --property=StandardError=journal --property=TTYReset=yes \
+    --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
+    --property=KillMode=mixed --no-block -- \
+    "$build/src/gwcomp" --backend drm --ipc-socket "$runtime/gwcomp.sock" \
+    --drm-device "$drm_device" --tty "$target_vt" --connector "$connector" \
+    --mode 1024x768 --drm-api auto --renderer software \
+    --mirror-dump-dir "$qxl/frames" --drm-report "$qxl/drm-report.jsonl" \
+    --vrr-report "$qxl/vrr-report.jsonl"
+  wait_socket "$runtime/gwcomp.sock"
+}
+start_qxl_gwcomp
 systemd-run --unit=glasswyrmd-m14-qxl --property=Type=simple \
   --property=SuccessExitStatus=143 --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$keyboard r" \
@@ -956,7 +1054,9 @@ PY
 
 wait_qxl_restart_evidence() {
   local unit=$1 previous=$2 message_prefix=$3 journal=$4 result_name=$5
-  local invocation active substate
+  local invocation active substate boot_id
+  boot_id=$(tr -d - </proc/sys/kernel/random/boot_id)
+  [[ $boot_id =~ ^[0-9a-f]{32}$ ]]
   for _ in {1..400}; do
     invocation=$(systemctl show "$unit" -p InvocationID --value 2>/dev/null)
     active=$(systemctl show "$unit" -p ActiveState --value 2>/dev/null)
@@ -965,13 +1065,20 @@ wait_qxl_restart_evidence() {
           $active == active && $substate == running ]]; then
       journalctl -u "$unit" "_SYSTEMD_INVOCATION_ID=$invocation" -b \
         --no-pager -o json >"$journal"
-      if python3 - "$journal" "$invocation" "$message_prefix" <<'PY' 2>/dev/null
-import json,sys
+      if python3 - "$journal" "$invocation" "$unit" "$boot_id" \
+        "$message_prefix" <<'PY' 2>/dev/null
+import json,re,sys
 records=[json.loads(line) for line in open(sys.argv[1]) if line.strip()]
 assert records
 assert all(record.get('_SYSTEMD_INVOCATION_ID')==sys.argv[2]
+           and record.get('_SYSTEMD_UNIT')==sys.argv[3]
+           and record.get('_BOOT_ID')==sys.argv[4]
            for record in records)
-assert any(str(record.get('MESSAGE','')).startswith(sys.argv[3])
+patterns={
+ 'gwm: policy accepted':r'gwm: policy accepted commit=\d+ generation=\d+ windows=\d+ hash=[0-9a-f]{16}',
+ 'gwcomp: frame accepted':r'gwcomp: frame accepted commit=\d+ frame=\d+ hash=[0-9a-f]{16}',
+}
+assert any(re.fullmatch(patterns[sys.argv[5]],str(record.get('MESSAGE','')))
            for record in records)
 PY
       then
@@ -997,13 +1104,13 @@ wait_qxl_restart_evidence gwm-m14-qxl.service \
   "$qxl/gwm-restart-journal.jsonl" qxl_gwm_invocation
 wait_qxl_vrr_off "$qxl/post-gwm.json"
 result[qxl_gwm_replay]=passed
-mv "$qxl/drm-report.jsonl" "$qxl/drm-report-before-gwcomp.jsonl"
-mv "$qxl/vrr-report.jsonl" "$qxl/vrr-report-before-gwcomp.jsonl"
 qxl_gwcomp_previous_invocation=$(systemctl show gwcomp-m14-qxl.service \
   -p InvocationID --value)
 [[ $qxl_gwcomp_previous_invocation =~ ^[0-9a-f]{32}$ ]]
-systemctl restart gwcomp-m14-qxl.service
-wait_socket "$runtime/gwcomp.sock"
+stop_unit_successfully gwcomp-m14-qxl.service
+mv "$qxl/drm-report.jsonl" "$qxl/drm-report-before-gwcomp.jsonl"
+mv "$qxl/vrr-report.jsonl" "$qxl/vrr-report-before-gwcomp.jsonl"
+start_qxl_gwcomp
 wait_qxl_restart_evidence gwcomp-m14-qxl.service \
   "$qxl_gwcomp_previous_invocation" 'gwcomp: frame accepted' \
   "$qxl/gwcomp-restart-journal.jsonl" qxl_gwcomp_invocation
@@ -1012,7 +1119,8 @@ result[qxl_compositor_replay]=passed
 python3 - "$artifact_dir/milestone14-qxl-state.json" "$qxl/post-gwm.json" \
   "$qxl/post-gwcomp.json" "$qxl/qxl-restart.json" \
   "$qxl_gwm_previous_invocation" "$qxl_gwm_invocation" \
-  "$qxl_gwcomp_previous_invocation" "$qxl_gwcomp_invocation" <<'PY'
+  "$qxl_gwcomp_previous_invocation" "$qxl_gwcomp_invocation" \
+  "$(tr -d - </proc/sys/kernel/random/boot_id)" <<'PY'
 import json,sys
 before,gwm,comp=(json.load(open(path))['vrr'][0] for path in sys.argv[1:4])
 def semantic(value):
@@ -1028,10 +1136,12 @@ json.dump({'schema':1,'passed':True,'gwm_replay':True,
  'reasons':list(expected[5])},'restart_proof':{
  'gwm':{'previous_invocation_id':sys.argv[5],
         'invocation_id':sys.argv[6],
+        'unit':'gwm-m14-qxl.service','boot_id':sys.argv[9],
         'journal':'milestone14-qxl-gwm-restart-journal.jsonl',
         'message_prefix':'gwm: policy accepted'},
  'gwcomp':{'previous_invocation_id':sys.argv[7],
            'invocation_id':sys.argv[8],
+           'unit':'gwcomp-m14-qxl.service','boot_id':sys.argv[9],
            'journal':'milestone14-qxl-gwcomp-restart-journal.jsonl',
            'message_prefix':'gwcomp: frame accepted'}}},
  open(sys.argv[4],'w'),sort_keys=True)
@@ -1067,8 +1177,10 @@ import json,sys
 v=json.load(open(sys.argv[1]))['vrr'][0]; assert not v.get('effective_enabled',False)
 PY
 result[vt_replay]=passed
-systemctl stop glasswyrmd-m14-qxl.service gwm-m14-qxl.service \
-  gwcomp-m14-qxl.service gw-uinput-m14.service
+for unit in gwcomp-m14-qxl.service glasswyrmd-m14-qxl.service \
+  gwm-m14-qxl.service gw-uinput-m14.service; do
+  stop_unit_successfully "$unit"
+done
 chvt "$original_vt"
 [[ $getty_active_before != active ]] || systemctl start "$getty_unit"
 systemctl unmask --runtime "$logind_unit" "$logind_socket"
@@ -1116,9 +1228,15 @@ result[restoration]=passed
 
 : >"$work/service-results.txt"
 for unit in "${service_units[@]}"; do
+  [[ ${service_invocation_id[$unit]:-} =~ ^[0-9a-f]{32}$ &&
+     ${service_boot_id[$unit]:-} =~ ^[0-9a-f]{32}$ ]]
   systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
     -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
     >>"$work/service-results.txt"
+  printf 'LifecycleInvocationID=%s\nLifecycleBootID=%s\nJournalMatched=true\n' \
+    "${service_invocation_id[$unit]}" "${service_boot_id[$unit]}" \
+    >>"$work/service-results.txt"
+  printf '\n' >>"$work/service-results.txt"
 done
 python3 - "$work/service-results.txt" \
   "$artifact_dir/milestone14-service-results.json" <<'PY'
@@ -1127,26 +1245,37 @@ records=[]
 for paragraph in open(sys.argv[1]).read().strip().split('\n\n'):
  record=dict(line.split('=',1) for line in paragraph.splitlines() if '=' in line)
  if record: records.append(record)
-daemons={
+expected={
  'glasswyrmd-m14-headless.service','gwm-m14-headless.service',
  'gwcomp-m14-headless.service','glasswyrmd-m14-single.service',
  'gwm-m14-single.service','gwcomp-m14-single.service',
  'glasswyrmd-m14-qxl.service','gwm-m14-qxl.service',
- 'gwcomp-m14-qxl.service'}
-expected=daemons|{'gw-uinput-m14.service'}
+ 'gwcomp-m14-qxl.service','gw-uinput-m14.service'}
 by_id={record.get('Id'):record for record in records}
-assert len(records)==len(expected) and set(by_id)==expected,records
-for unit in daemons:
- record=by_id[unit]
- assert record['LoadState']=='loaded',record
- assert record['ActiveState']=='inactive' and record['SubState']=='dead',record
- assert record['Result']=='success',record
- assert record['ExecMainCode']=='exited' and record['ExecMainStatus']=='0',record
-uinput=by_id['gw-uinput-m14.service']
-assert uinput=={'Id':'gw-uinput-m14.service','LoadState':'not-found',
- 'ActiveState':'inactive','SubState':'dead','Result':'success',
- 'ExecMainCode':'0','ExecMainStatus':'0'},uinput
-json.dump({'schema':1,'passed':True,'services':records},open(sys.argv[2],'w'),sort_keys=True)
+errors=[]
+if len(records)!=len(expected) or set(by_id)!=expected:
+ errors.append('service inventory differs')
+else:
+ lifecycle_boots={record.get('LifecycleBootID') for record in records}
+ if len(lifecycle_boots)!=1: errors.append('lifecycle boot IDs differ')
+ for unit in expected:
+  record=by_id[unit]
+  collected={key:record.get(key) for key in ('Id','LoadState','ActiveState',
+   'SubState','Result','ExecMainCode','ExecMainStatus')}
+  wanted={'Id':unit,'LoadState':'not-found','ActiveState':'inactive',
+   'SubState':'dead','Result':'success','ExecMainCode':'0','ExecMainStatus':'0'}
+  if collected!=wanted: errors.append(f'{unit}: not collected success')
+  if not __import__('re').fullmatch(r'[0-9a-f]{32}',
+                                   record.get('LifecycleInvocationID','')):
+   errors.append(f'{unit}: invalid lifecycle invocation')
+  if not __import__('re').fullmatch(r'[0-9a-f]{32}',
+                                   record.get('LifecycleBootID','')):
+   errors.append(f'{unit}: invalid lifecycle boot')
+  if record.get('JournalMatched')!='true':
+   errors.append(f'{unit}: lifecycle journal was not matched')
+json.dump({'schema':1,'passed':not errors,'errors':errors,'services':records},
+ open(sys.argv[2],'w'),sort_keys=True)
+if errors: raise SystemExit('; '.join(errors))
 PY
 result[service_results]=passed
 
