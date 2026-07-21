@@ -266,6 +266,26 @@ class FixedLiveRunner:
             raise AssertionError("hardware run step order is not contiguous")
         self.steps.append(RUN_STEPS[number - 1])
 
+    def run_app_requested_scenarios(self) -> None:
+        self.set_policy("app-requested")
+        self.start_client("app-default", "windowed", "default")
+        self.snapshot("milestone14-app-requested-default.json",
+                      "app-requested", False, "default")
+        self.stop_client("app-default")
+        self.wait_policy_cleanup()
+
+        self.start_client("app-prefer", "app-requested")
+        self.snapshot("milestone14-app-requested.log",
+                      "app-requested", True, "prefer")
+        self.stop_client("app-prefer")
+        self.wait_policy_cleanup()
+
+        self.start_client("app-preferences", "preference")
+        self.snapshot("milestone14-app-requested-disable.json",
+                      "app-requested", False, "disable")
+        self.stop_client("app-preferences")
+        self.wait_policy_cleanup()
+
     def preflight(self) -> None:
         if self.verify_paths:
             for path in FIXED_BINARIES.values():
@@ -361,7 +381,7 @@ class FixedLiveRunner:
             self._step(13); self.start_client("borderless", "borderless", "default")
             self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless"); self.wait_policy_cleanup()
             self._step(15); self.set_policy("focused"); self.start_client("focus-a", "windowed", "default"); self.snapshot("milestone14-focused.log", "focused", True); self.start_client("focus-b", "windowed", "default"); self.snapshot("milestone14-focused-transfer.json", "focused", True); self.stop_client("focus-b"); self.stop_client("focus-a"); self.wait_policy_cleanup()
-            self._step(16); self.set_policy("app-requested"); self.start_client("app-preferences", "preference"); self.snapshot("milestone14-app-requested.log", "app-requested", False, "disable"); self.stop_client("app-preferences"); self.wait_policy_cleanup()
+            self._step(16); self.run_app_requested_scenarios()
             self._step(17); self.set_policy("always-eligible"); self.start_client("always", "windowed", "default"); self.snapshot("milestone14-always.log", "always-eligible", True)
             self._step(18); self.set_policy("off"); self.snapshot("milestone14-policy-off.json", "off", False); self.set_policy("always-eligible")
             self._step(19); self.command([str(FIXED_BINARIES["chvt"]), self.alternate_tty]); self.snapshot("milestone14-vt-inactive.json", "always-eligible", False); self.command([str(FIXED_BINARIES["chvt"]), TTY_PATTERN.fullmatch(str(self.config["tty"])).group(1)])  # type: ignore[union-attr]

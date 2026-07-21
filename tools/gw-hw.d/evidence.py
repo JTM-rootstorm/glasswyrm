@@ -12,9 +12,10 @@ import tarfile
 from typing import Any
 
 from common import (
-    ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, DISABLED_PASS_PERCENT,
+    ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, COMMIT_PATTERN,
+    DISABLED_PASS_PERCENT,
     ENABLED_PASS_PERCENT, FIXTURE_COPY_ARTIFACTS, HarnessError,
-    MAX_ARTIFACT_BYTES, MAX_INTERVALS, MAX_JSON_BYTES,
+    M14_REQUIRED_BASE_COMMIT, MAX_ARTIFACT_BYTES, MAX_INTERVALS, MAX_JSON_BYTES,
     MIN_ENABLED_INTERVALS, MODE_PATTERN, REQUIRED_ARTIFACTS, RUN_STEPS,
     _read_json, _read_regular, _write_json, interval_tolerance,
 )
@@ -97,6 +98,32 @@ def validate_restore(before_path: Path, after_path: Path) -> dict[str, object]:
     return {"schema": ARTIFACT_SCHEMA, "original": before, "restored": after,
             "fields": fields, "readback_success": all(fields.values()),
             "passed": all(fields.values())}
+
+
+def _validate_app_requested_snapshot(
+        path: Path, config: dict[str, object], client: dict[str, Any],
+        preference: str, effective: bool) -> None:
+    snapshot = _read_json(path)
+    outputs = snapshot.get("vrr")
+    windows = snapshot.get("windows")
+    if (not isinstance(outputs, list) or len(outputs) != 1 or
+            not isinstance(outputs[0], dict) or
+            outputs[0].get("name") != config["connector"] or
+            outputs[0].get("policy") != "app-requested" or
+            outputs[0].get("effective_enabled") is not effective or
+            outputs[0].get("hardware_capable") is not True or
+            outputs[0].get("kms_controllable") is not True or
+            outputs[0].get("simulated") is not False or
+            not isinstance(windows, list)):
+        raise HarnessError(f"{path.name} omitted authoritative AppRequested output state")
+    window = next((item for item in windows if isinstance(item, dict) and
+                   item.get("window") == client.get("window")), None)
+    if window is None or window.get("preference", "").lower() != preference:
+        raise HarnessError(f"{path.name} omitted authoritative {preference} window state")
+    candidate = outputs[0].get("candidate_window")
+    expected_candidate = client.get("window") if effective else 0
+    if candidate != expected_candidate:
+        raise HarnessError(f"{path.name} has the wrong AppRequested candidate")
 
 
 def finalize_live(config: dict[str, object], artifacts: Path,
@@ -189,6 +216,20 @@ def finalize_live(config: dict[str, object], artifacts: Path,
             not isinstance(preference.get("reason_mask"), int) or
             preference["reason_mask"] == 0):
         raise HarnessError("preference client omitted replies/events/reasons")
+    default_client = _read_json(artifacts / "client-app-default.json")
+    prefer_client = _read_json(artifacts / "client-app-prefer.json")
+    if (default_client.get("preference") != "Default" or
+            prefer_client.get("preference") != "Prefer"):
+        raise HarnessError("AppRequested clients omitted reviewed preferences")
+    _validate_app_requested_snapshot(
+        artifacts / "milestone14-app-requested-default.json", config,
+        default_client, "default", False)
+    _validate_app_requested_snapshot(
+        artifacts / "milestone14-app-requested.log", config,
+        prefer_client, "prefer", True)
+    _validate_app_requested_snapshot(
+        artifacts / "milestone14-app-requested-disable.json", config,
+        preference, "disable", False)
     focus_a = _read_json(artifacts / "client-focus-a.json")
     focus_b = _read_json(artifacts / "client-focus-b.json")
     first_focus = _read_json(artifacts / "milestone14-focused.log")
@@ -217,6 +258,8 @@ def finalize_live(config: dict[str, object], artifacts: Path,
         if not (artifacts / name).is_file() or (artifacts / name).stat().st_size == 0:
             raise HarnessError(f"required live scenario evidence is missing: {name}")
     summary = {"schema": ARTIFACT_SCHEMA, "dry_run": False, "passed": True,
+               "required_base_commit": config["required_base_commit"],
+               "tested_commit": config["tested_commit"],
                "run_step_count": len(runner.steps), "failure_stage": None,
                "evidence_errors": [], "enabled_pass_percentage": on["pass_percentage"],
                "disabled_pass_percentage": off["pass_percentage"],
@@ -262,6 +305,19 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
                if not (artifact_dir / name).is_file()]
     errors: list[str] = [f"missing artifact: {name}" for name in missing]
     if not missing:
+        config = _read_json(artifact_dir / "milestone14-hardware-config.json")
+        doctor = _read_json(artifact_dir / "milestone14-hardware-doctor.json")
+        summary = _read_json(artifact_dir / "milestone14-hardware-summary.json")
+        required_base = config.get("required_base_commit")
+        tested_commit = config.get("tested_commit")
+        if (required_base != M14_REQUIRED_BASE_COMMIT or
+                not isinstance(tested_commit, str) or
+                not COMMIT_PATTERN.fullmatch(tested_commit)):
+            errors.append("reviewed source identity is invalid")
+        for label, record in (("doctor", doctor), ("summary", summary)):
+            if (record.get("required_base_commit") != required_base or
+                    record.get("tested_commit") != tested_commit):
+                errors.append(f"{label} source identity does not match configuration")
         if (artifact_dir / "milestone14-canonical.ppm").read_bytes() != (artifact_dir / "milestone14-screen.ppm").read_bytes():
             errors.append("canonical and screen PPM differ")
         expected = set(REQUIRED_ARTIFACTS) | set(ARCHIVE_STATE_ARTIFACTS) | {"SHA256SUMS"}
@@ -273,6 +329,11 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
                 for member in source.getmembers():
                     if not member.isfile() or "/" in member.name or member.name.startswith("."):
                         errors.append(f"unsafe archive member: {member.name}")
+                        continue
+                    stream = source.extractfile(member)
+                    if stream is None or stream.read(MAX_ARTIFACT_BYTES + 1) != (
+                            artifact_dir / member.name).read_bytes():
+                        errors.append(f"archive member differs from evidence: {member.name}")
         except (OSError, tarfile.TarError) as error:
             errors.append(f"archive unreadable: {error}")
         sums = (artifact_dir / "SHA256SUMS").read_text(encoding="ascii").splitlines()

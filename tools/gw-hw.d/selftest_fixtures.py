@@ -12,7 +12,11 @@ def _write(path: Path, value: object) -> None:
 
 def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
     root.mkdir(mode=0o700)
-    _write(root / "milestone14-hardware-doctor.json", {"passed": True})
+    _write(root / "milestone14-hardware-doctor.json", {
+        "passed": True,
+        "required_base_commit": config["required_base_commit"],
+        "tested_commit": config["tested_commit"],
+    })
     _write(root / "milestone14-hardware-config.json", config)
     _write(root / "milestone14-drm-capability.json", {"controllable": True})
     kms = {"connector": config["connector"], "mode": config["mode"],
@@ -60,6 +64,13 @@ def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
                       notify_event_count=3, notify_change_mask=1, reason_mask=32,
                       preference_sequence=["Default", "Allow", "Prefer", "Disable"])
     _write(root / "client-app-preferences.json", preference)
+    app_default = dict(base_client, window=102)
+    app_prefer = dict(base_client, mode="app-requested", window=103,
+                      preference="Prefer", preference_reply_count=1,
+                      notify_event_count=1, notify_change_mask=1,
+                      reason_mask=1)
+    _write(root / "client-app-default.json", app_default)
+    _write(root / "client-app-prefer.json", app_prefer)
     _write(root / "client-focus-a.json", dict(base_client, window=201))
     _write(root / "client-focus-b.json", dict(base_client, window=202))
 
@@ -70,8 +81,21 @@ def populate_live_evidence(root: Path, config: dict[str, object]) -> None:
            {"vrr": [dict(output, candidate_window=201)], "windows": []})
     _write(root / "milestone14-focused-transfer.json",
            {"vrr": [dict(output, candidate_window=202)], "windows": []})
+    app_output = dict(output, policy="app-requested")
+    _write(root / "milestone14-app-requested-default.json", {
+        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0)],
+        "windows": [{"window": 102, "preference": "Default"}],
+    })
+    _write(root / "milestone14-app-requested.log", {
+        "vrr": [dict(app_output, effective_enabled=True, candidate_window=103)],
+        "windows": [{"window": 103, "preference": "Prefer"}],
+    })
+    _write(root / "milestone14-app-requested-disable.json", {
+        "vrr": [dict(app_output, effective_enabled=False, candidate_window=0)],
+        "windows": [{"window": 101, "preference": "Disable"}],
+    })
     for name in ("milestone14-fullscreen.log", "milestone14-borderless.log",
-                 "milestone14-app-requested.log", "milestone14-always.log",
+                 "milestone14-always.log",
                  "milestone14-vt.log"):
         _write(root / name, {"passed": True})
     replay = {"vrr": [{"name": config["connector"],

@@ -17,7 +17,8 @@ from common import (
 )
 from config_doctor import (
     _modetest_connector_property_value, _modetest_crtc_property_value,
-    _modetest_has_selected_mode, _modetest_selected_crtc_id, doctor, parse_config,
+    _modetest_has_selected_mode, _modetest_selected_crtc_id, doctor,
+    parse_config, validate_cli_identity,
 )
 from evidence import (
     _copy_fixture_artifacts, _create_archive, analyze_cadence, finalize_live,
@@ -25,7 +26,8 @@ from evidence import (
 )
 from live_runner import BUILD_ROOT, FIXED_BINARIES, LIVE_UNITS, RUNTIME_ROOT, FixedLiveRunner
 
-def dry_run(config_path: Path, fixture_dir: Path, artifact_dir: Path) -> int:
+def dry_run(config_path: Path, required_base: str, tested_commit: str,
+            fixture_dir: Path, artifact_dir: Path) -> int:
     if artifact_dir.exists():
         status = artifact_dir.lstat()
         if not stat.S_ISDIR(status.st_mode) or status.st_mode & 0o077 or any(artifact_dir.iterdir()):
@@ -37,7 +39,9 @@ def dry_run(config_path: Path, fixture_dir: Path, artifact_dir: Path) -> int:
     errors: list[str] = []
     try:
         config = parse_config(config_path)
-        if doctor(config_path, fixture_dir, artifact_dir) != 0:
+        validate_cli_identity(config, required_base, tested_commit)
+        if doctor(config_path, required_base, tested_commit,
+                  fixture_dir, artifact_dir) != 0:
             raise HarnessError("doctor failed")
         stage = "artifact collection"
         _copy_fixture_artifacts(fixture_dir, artifact_dir)
@@ -58,6 +62,8 @@ def dry_run(config_path: Path, fixture_dir: Path, artifact_dir: Path) -> int:
             raise HarnessError("exact restoration readback failed")
         stage = "summary"
         summary = {"schema": ARTIFACT_SCHEMA, "dry_run": True, "passed": True,
+                   "required_base_commit": config["required_base_commit"],
+                   "tested_commit": config["tested_commit"],
                    "run_step_count": len(RUN_STEPS), "failure_stage": None,
                    "evidence_errors": [], "enabled_pass_percentage": on["pass_percentage"],
                    "disabled_pass_percentage": off["pass_percentage"], "restoration": True,
@@ -80,7 +86,8 @@ def dry_run(config_path: Path, fixture_dir: Path, artifact_dir: Path) -> int:
         return 1
 
 
-def milestone14(config_path: Path, confirmed: bool, dry: bool,
+def milestone14(config_path: Path, required_base: str, tested_commit: str,
+                confirmed: bool, dry: bool,
                 fixture_dir: Path | None, artifact_dir: Path) -> int:
     if not confirmed:
         print("gw-hw: milestone14-vrr-test requires the literal --yes", file=sys.stderr)
@@ -89,12 +96,15 @@ def milestone14(config_path: Path, confirmed: bool, dry: bool,
         if fixture_dir is None:
             print("gw-hw: --dry-run requires --fixture-dir", file=sys.stderr)
             return 2
-        return dry_run(config_path, fixture_dir, artifact_dir)
+        return dry_run(config_path, required_base, tested_commit,
+                       fixture_dir, artifact_dir)
     try:
         _prepare_private_empty_directory(artifact_dir, "live artifact directory")
         _prepare_private_empty_directory(RUNTIME_ROOT, "live runtime directory")
         config = parse_config(config_path)
-        if doctor(config_path, None, artifact_dir) != 0:
+        validate_cli_identity(config, required_base, tested_commit)
+        if doctor(config_path, required_base, tested_commit,
+                  None, artifact_dir) != 0:
             raise HarnessError("live doctor failed")
         runner = FixedLiveRunner(config, artifact_dir)
         runner.run()
@@ -117,11 +127,23 @@ def milestone14(config_path: Path, confirmed: bool, dry: bool,
 
 
 def self_test() -> int:
-    valid = '''drm_device = "/dev/dri/card0"\nconnector = "DP-1"\nmode = "2560x1440@144000"\ntty = "/dev/tty2"\nkeyboard_device = "/dev/input/event0"\npointer_device = "/dev/input/event1"\nexpected_min_refresh_hz = 48\nexpected_max_refresh_hz = 144\ntarget_refresh_hz = 70\nmonitor_model = "reviewed model"\nedid_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\ndebugfs_connector_path = "/sys/kernel/debug/dri/0/DP-1"\n'''
+    valid = '''required_base_commit = "6864ea631d61636289a21c7d2d6655a17be0c004"\ntested_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"\ndrm_device = "/dev/dri/card0"\nconnector = "DP-1"\nmode = "2560x1440@144000"\ntty = "/dev/tty2"\nkeyboard_device = "/dev/input/event0"\npointer_device = "/dev/input/event1"\nexpected_min_refresh_hz = 48\nexpected_max_refresh_hz = 144\ntarget_refresh_hz = 70\nmonitor_model = "reviewed model"\nedid_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\ndebugfs_connector_path = "/sys/kernel/debug/dri/0/DP-1"\n'''
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "config.toml"
         path.write_text(valid, encoding="utf-8")
         config = parse_config(path)
+        validate_cli_identity(
+            config, "6864ea631d61636289a21c7d2d6655a17be0c004",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+        for required_base, tested_commit in (
+                ("0" * 40, "b" * 40),
+                ("6864ea631d61636289a21c7d2d6655a17be0c004", "c" * 40)):
+            try:
+                validate_cli_identity(config, required_base, tested_commit)
+            except ConfigError:
+                pass
+            else:
+                raise AssertionError("mismatched CLI identity was accepted")
         modetest_fixture = '''Connectors:
 id encoder status name size (mm) modes encoders
 42 41 connected DP-2 600x340 1 41
@@ -238,11 +260,19 @@ id fb pos size
                                  lambda path, kind: True, lambda: dict(state), False)
         runner.run()
         if (runner.steps != list(RUN_STEPS) or not runner.cleanup_attempted or
-                runner.cleanup_wait_count != 5):
+                runner.cleanup_wait_count != 7):
             raise AssertionError("fixed live runner order or cleanup changed")
         replay_names = {item["name"] for item in runner.snapshot_expectations}
         if not {"milestone14-restart-gwm.json", "milestone14-restart.log"}.issubset(replay_names):
             raise AssertionError("distinct GWM/compositor replay snapshots are absent")
+        app_states = {(item["name"], item["effective"], item["preference"])
+                      for item in runner.snapshot_expectations
+                      if str(item["name"]).startswith("milestone14-app-requested")}
+        if app_states != {
+                ("milestone14-app-requested-default.json", False, "default"),
+                ("milestone14-app-requested.log", True, "prefer"),
+                ("milestone14-app-requested-disable.json", False, "disable")}:
+            raise AssertionError("AppRequested authoritative transition proof changed")
         flattened = [item for argv in commands for item in argv]
         if str(BUILD_ROOT / "src/glasswyrm-session") in flattened:
             raise AssertionError("live runner unexpectedly used the session wrapper")
@@ -341,6 +371,32 @@ id fb pos size
                 not validate_archive(
                     live, live / "milestone14-vrr-hardware-evidence.tar")["passed"]):
             raise AssertionError("complete live evidence did not pass finalization")
+        mismatched = dict(positive, tested_commit="c" * 40)
+        _write_json(live / "milestone14-hardware-summary.json", mismatched)
+        _create_archive(live)
+        if validate_archive(
+                live, live / "milestone14-vrr-hardware-evidence.tar")["passed"]:
+            raise AssertionError("cross-evidence source identity mismatch was accepted")
+        _write_json(live / "milestone14-hardware-summary.json", positive)
+        _create_archive(live)
+        invalid_app = Path(directory) / "invalid-app-live"
+        populate_live_evidence(invalid_app, config)
+        app_snapshot = _read_json(invalid_app / "milestone14-app-requested.log")
+        app_snapshot["vrr"][0]["effective_enabled"] = False
+        _write_json(invalid_app / "milestone14-app-requested.log", app_snapshot)
+        invalid_runner = FixedLiveRunner(
+            config, invalid_app, fake, "/dev/tty2", False,
+            lambda path, kind: True, lambda: dict(state), False)
+        invalid_runner.steps = list(RUN_STEPS)
+        invalid_runner.before_state = dict(state)
+        invalid_runner.after_state = dict(state)
+        invalid_runner.cleanup_attempted = True
+        try:
+            finalize_live(config, invalid_app, invalid_runner)
+        except HarnessError:
+            pass
+        else:
+            raise AssertionError("disabled AppRequested Prefer snapshot was accepted")
         wrong_tty = FixedLiveRunner(config, Path(directory), fake, "/dev/tty3", False,
                                     lambda path, kind: True, lambda: dict(state), False)
         try:
@@ -370,10 +426,14 @@ def parser() -> argparse.ArgumentParser:
     subparsers = result.add_subparsers(dest="command", required=True)
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("--config", required=True, type=Path)
+    doctor_parser.add_argument("--required-base", required=True)
+    doctor_parser.add_argument("--tested-commit", required=True)
     doctor_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     doctor_parser.add_argument("--artifact-dir", type=Path)
     milestone_parser = subparsers.add_parser("milestone14-vrr-test")
     milestone_parser.add_argument("--config", required=True, type=Path)
+    milestone_parser.add_argument("--required-base", required=True)
+    milestone_parser.add_argument("--tested-commit", required=True)
     milestone_parser.add_argument("--yes", action="store_true")
     milestone_parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     milestone_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
@@ -385,9 +445,12 @@ def parser() -> argparse.ArgumentParser:
 def main(arguments: list[str] | None = None) -> int:
     options = parser().parse_args(arguments)
     if options.command == "doctor":
-        return doctor(options.config, options.fixture_dir, options.artifact_dir)
+        return doctor(options.config, options.required_base,
+                      options.tested_commit, options.fixture_dir,
+                      options.artifact_dir)
     if options.command == "milestone14-vrr-test":
-        return milestone14(options.config, options.yes, options.dry_run,
+        return milestone14(options.config, options.required_base,
+                           options.tested_commit, options.yes, options.dry_run,
                            options.fixture_dir, options.artifact_dir)
     return self_test()
 
