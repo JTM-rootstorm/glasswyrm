@@ -427,7 +427,7 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     readback_valid = true;
   }
   if (vrr_contract_enabled_ && vrr_state_initialized_) {
-    if (pending_->vrr_request &&
+    if (vrr_state_.kms_state().controllable && pending_->vrr_request &&
         (event.sequence == 0 ||
          (device_.snapshot().timestamp_monotonic &&
           (!event.timestamp_available ||
@@ -462,15 +462,21 @@ output::BackendEvent DrmPresenter::service(const short revents) {
       pending_->completed_vrr_state) {
     vrr_report_->abort(pending_->vrr_report);
     const auto feedback = pending_->completed_vrr_state->feedback();
-    const std::array<DrmReportRecord, 2> records{
-        DrmVrrReportRecord{vrr_decision_report(
-            *pending_->vrr_request, pending_->commit_id,
-            pending_->generation, feedback.effective_enabled)},
-        DrmVrrReportRecord{vrr_timing_report(
-            pending_->commit_id, pending_->generation,
-            *pending_->vrr_request, feedback)}};
-    if (!vrr_report_->stage(records, pending_->vrr_report, error))
-      return fatal_event("page-flip-vrr-report", std::move(error));
+    const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
+        *pending_->vrr_request, pending_->commit_id,
+        pending_->generation, feedback.effective_enabled)}};
+    if (feedback.flip_sequence == 0) {
+      if (!vrr_report_->stage(decision, pending_->vrr_report, error))
+        return fatal_event("page-flip-vrr-report", std::move(error));
+    } else {
+      const std::array<DrmReportRecord, 2> records{
+          decision,
+          DrmVrrReportRecord{vrr_timing_report(
+              pending_->commit_id, pending_->generation,
+              *pending_->vrr_request, feedback)}};
+      if (!vrr_report_->stage(records, pending_->vrr_report, error))
+        return fatal_event("page-flip-vrr-report", std::move(error));
+    }
   }
   pending_->completion_verified = true;
   return {output::BackendEventKind::Complete,

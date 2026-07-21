@@ -54,7 +54,8 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
         "schema": 1, "profile": "qxl-unsupported", "passed": True,
         "driver": "qxl", "connector_property_present": False,
         "connector_property_value": False,
-        "crtc_property_present": False, "controllable": False,
+        "crtc_property_present": True, "crtc_property_id": 24,
+        "controllable": False,
         "atomic_test_on": False,
     })
     write_json(root / "milestone14-qxl-state.json", {"vrr": [{
@@ -185,6 +186,15 @@ with tempfile.TemporaryDirectory() as temporary:
     saved = capability.read_text()
     write_json(capability, {"profile": "qxl-unsupported", "passed": True,
         "driver": "qxl", "connector_property_present": True})
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("unsupported profile" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    capability.write_text(saved)
+
+    unsupported = json.loads(saved)
+    unsupported["crtc_property_present"] = False
+    write_json(capability, unsupported)
     rejected = run(command)
     assert rejected.returncode == 2
     assert any("unsupported profile" in error

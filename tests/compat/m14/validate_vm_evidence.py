@@ -142,7 +142,9 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or capability.get("driver") != "qxl"
                 or capability.get("connector_property_present") is not False
                 or capability.get("connector_property_value") is not False
-                or capability.get("crtc_property_present") is not False
+                or capability.get("crtc_property_present") is not True
+                or not isinstance(capability.get("crtc_property_id"), int)
+                or capability["crtc_property_id"] <= 0
                 or capability.get("controllable") is not False
                 or capability.get("atomic_test_on") is not False):
             raise ValueError("QXL capability is not the explicit unsupported profile")

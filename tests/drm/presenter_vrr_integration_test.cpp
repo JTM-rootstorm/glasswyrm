@@ -24,7 +24,8 @@ std::filesystem::path temporary_directory() {
   return result;
 }
 
-DeviceSnapshot snapshot(const bool atomic = true) {
+DeviceSnapshot snapshot(const bool atomic = true,
+                        const bool connector_vrr_capable = true) {
   DeviceSnapshot value;
   value.canonical_path = "/dev/dri/card0";
   value.primary_node = value.dumb_buffer = value.universal_planes = true;
@@ -48,8 +49,8 @@ DeviceSnapshot snapshot(const bool atomic = true) {
   connector.modes.push_back(mode);
   connector.possible_crtc_mask = 1;
   connector.current_crtc_id = 40;
-  connector.vrr_property_present = true;
-  connector.vrr_capable = true;
+  connector.vrr_property_present = connector_vrr_capable;
+  connector.vrr_capable = connector_vrr_capable;
   value.connectors.push_back(connector);
   value.planes.push_back(
       {50, PlaneType::Primary, 1, {kFormatXrgb8888}, 40});
@@ -183,8 +184,10 @@ struct Rig {
 
   explicit Rig(const DrmPresentationApi api = DrmPresentationApi::Atomic,
                const bool atomic = true, const bool reject_vrr_on = false,
-               const bool negotiate_vrr = true)
-      : drm({"/dev/dri/card0", DeviceOpenStatus::Success, snapshot(atomic), {}}) {
+               const bool negotiate_vrr = true,
+               const bool connector_vrr_capable = true)
+      : drm({"/dev/dri/card0", DeviceOpenStatus::Success,
+             snapshot(atomic, connector_vrr_capable), {}}) {
     configure(kms);
     if (reject_vrr_on)
       kms.rejected_test_property = std::pair{22U, UINT64_C(1)};
@@ -429,6 +432,45 @@ void invalid_timing_restores_saved_state() {
       "invalid page-flip timing disables VRR before saved-state restore");
 }
 
+void incapable_output_accepts_unavailable_timing() {
+  Rig rig(DrmPresentationApi::Atomic, true, false, true, false);
+  const auto capability = rig.presenter->vrr_capability(1);
+  gw::test::require(
+      capability && !capability->hardware_capable &&
+          !capability->kms_controllable,
+      "incapable timing fixture retains a non-controllable VRR contract");
+
+  const std::array first_pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                                0xff404040U};
+  const auto first =
+      frame_set(first_pixels, 1, false, output::vrr::Decision::Disabled);
+  gw::test::require(rig.presenter->present(first.view()).disposition ==
+                        output::PresentDisposition::Complete,
+                    "incapable timing fixture initializes fixed refresh");
+
+  const std::array second_pixels{0xff111111U, 0xff222222U, 0xff333333U,
+                                 0xff444444U};
+  const auto second =
+      frame_set(second_pixels, 2, false, output::vrr::Decision::Disabled);
+  const auto pending = rig.presenter->present(second.view());
+  gw::test::require(pending.disposition == output::PresentDisposition::Pending,
+                    "incapable output still submits an ordinary page flip");
+  rig.drm.queue_page_flip(pending.token, 40, 0, 0, false);
+  const auto event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.vrr_feedback.contains(1) &&
+          !event.vrr_feedback.at(1).effective_enabled &&
+          !event.vrr_feedback.at(1).timestamp_available &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      event.error.empty() ? rig.error : event.error);
+  const auto report = contents(rig.report.path());
+  gw::test::require(
+      report.find("\"record\":\"vrr-decision\"") != std::string::npos &&
+          report.find("\"record\":\"vrr-timing\"") == std::string::npos,
+      "incapable output reports its decision without claiming timing evidence");
+}
+
 } // namespace
 
 int main() {
@@ -438,5 +480,6 @@ int main() {
   legacy_and_test_rejection();
   readback_mismatch_is_fatal();
   invalid_timing_restores_saved_state();
+  incapable_output_accepts_unavailable_timing();
   return 0;
 }
