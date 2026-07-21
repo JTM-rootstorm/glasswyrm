@@ -119,6 +119,19 @@ test(
 m14_vm_cli_contract_test = find_program(
   tests_source_dir / 'tools/m14_vm_cli_contract_test.sh',
 )
+
+m14_build_provenance_test = find_program(
+  tests_source_dir / 'tools/m14_build_provenance_test.py',
+)
+test(
+  'm14-build-provenance',
+  m14_build_provenance_test,
+  args: [
+    meson.project_source_root() / 'tools/generate_m14_build_provenance.py',
+    meson.project_source_root() / 'tools/gw-hw.d',
+  ],
+  timeout: 15,
+)
 test(
   'm14-vm-cli-contract',
   m14_vm_cli_contract_test,

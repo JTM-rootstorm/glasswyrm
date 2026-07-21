@@ -91,6 +91,8 @@ def _live_failure_summary(
         artifact_dir: Path) -> dict[str, object]:
     primary = str(error)
     restoration_errors: list[str] = []
+    restoration: bool | None = None
+    restoration_evidence: dict[str, object] | None = None
     restoration_attempted = runner is not None and runner.cleanup_attempted
     if runner is not None:
         restoration_errors.extend(runner.cleanup_errors)
@@ -98,16 +100,28 @@ def _live_failure_summary(
     if restore_path.is_file():
         try:
             restore = _read_json(restore_path)
+            if isinstance(restore.get("passed"), bool):
+                restoration = restore["passed"]
+            restoration_evidence = {
+                name: restore.get(name) for name in
+                ("original_console", "restored_console", "checks", "errors")
+                if name in restore
+            }
             checks = restore.get("checks")
             if isinstance(checks, dict):
                 restoration_errors.extend(
                     f"restoration check failed: {name}"
                     for name, passed in sorted(checks.items()) if passed is not True)
+            exact_errors = restore.get("errors")
+            if isinstance(exact_errors, list):
+                restoration_errors.extend(
+                    value for value in exact_errors if isinstance(value, str))
             if restore.get("passed") is not True and not restoration_errors:
                 restoration_errors.append("restoration evidence did not pass")
         except (HarnessError, OSError, json.JSONDecodeError) as restore_error:
             restoration_errors.append(
                 f"restoration evidence unreadable: {restore_error}")
+    restoration_errors = list(dict.fromkeys(restoration_errors))
     evidence_errors = [primary]
     evidence_errors.extend(
         value for value in restoration_errors if value not in evidence_errors)
@@ -119,7 +133,8 @@ def _live_failure_summary(
         "primary_error": primary,
         "evidence_errors": evidence_errors,
         "restoration_attempted": restoration_attempted,
-        "restoration": False if restoration_errors else None,
+        "restoration": restoration,
+        "restoration_evidence": restoration_evidence,
         "restoration_errors": restoration_errors,
     }
 
@@ -319,11 +334,18 @@ id fb pos size
             commands.append(argv)
             return 1 if argv[1:3] == ["is-active", "display-manager.service"] else 0
         state = {"active_vt": 2, "kd_mode": 0, "getty_active": True}
+        console_rechecks = 0
+        def console_preflight() -> dict[str, object]:
+            nonlocal console_rechecks
+            console_rechecks += 1
+            return {"active_tty": "/dev/tty2",
+                    "kd_modes": {"/dev/tty2": 0, "/dev/tty1": 0}}
         runner = FixedLiveRunner(config, Path(directory), fake, "/dev/tty2", False,
-                                 lambda path, kind: True, lambda: dict(state), False)
+                                 lambda path, kind: True, lambda: dict(state), False,
+                                 console_preflight)
         runner.run()
         if (runner.steps != list(RUN_STEPS) or not runner.cleanup_attempted or
-                runner.cleanup_wait_count != 7):
+                runner.cleanup_wait_count != 7 or console_rechecks != 2):
             raise AssertionError("fixed live runner order or cleanup changed")
         replay_names = {item["name"] for item in runner.snapshot_expectations}
         if not {"milestone14-restart-gwm.json", "milestone14-restart.log"}.issubset(replay_names):
@@ -357,6 +379,13 @@ id fb pos size
         if not any("preference" in argv and "client-app-preferences.json" in " ".join(argv)
                    for argv in commands):
             raise AssertionError("one-window preference scenario is absent")
+        repaint_client = next((argv for argv in commands
+                               if "client-always.json" in " ".join(argv)), None)
+        if (repaint_client is None or
+                repaint_client.count("--repaint-trigger") != 1 or
+                repaint_client.count("--repaint-count") != 1 or
+                "2" not in repaint_client):
+            raise AssertionError("bounded physical repaint trigger is absent")
         snapshot_attempts = 0
         def converging(argv: list[str], output: Path | None) -> int:
             nonlocal snapshot_attempts
@@ -394,6 +423,25 @@ id fb pos size
         chvt = [argv for argv in commands if argv and argv[0] == str(FIXED_BINARIES["chvt"])]
         if [argv[1] for argv in chvt[:2]] != ["1", "2"]:
             raise AssertionError("VT inactive observation does not precede reacquire")
+        restoration_root = Path(directory) / "exact-restoration"
+        restoration_root.mkdir()
+        restored_state = {"active_vt": 1, "kd_mode": 1, "getty_active": False}
+        restoration_runner = FixedLiveRunner(
+            config, restoration_root, fake, "/dev/tty2", False,
+            lambda path, kind: True, lambda: dict(restored_state), False)
+        restoration_runner.before_state = dict(state)
+        restoration_runner.cleanup()
+        restoration = _read_json(
+            restoration_root / "milestone14-restore.json")
+        if (restoration.get("original_console") != state or
+                restoration.get("restored_console") != restored_state or
+                restoration.get("checks") != {
+                    "active_vt": False, "kd_mode": False,
+                    "getty_active": False} or
+                not any("active VT restoration mismatch: expected 2, observed 1" == item
+                        for item in restoration.get("errors", [])) or
+                restoration.get("passed") is not False):
+            raise AssertionError("cleanup omitted exact console restoration evidence")
         calls = 0
         def failing(argv: list[str], output: Path | None) -> int:
             nonlocal calls
@@ -415,6 +463,7 @@ id fb pos size
         failure_artifacts.mkdir()
         _write_json(failure_artifacts / "milestone14-restore.json", {
             "checks": {"cleanup": False, "kms": True, "vt": False},
+            "errors": ["active VT restoration mismatch: expected 2, observed 1"],
             "passed": False,
         })
         failed_runner.cleanup_errors = ["cleanup command failed: systemctl stop"]
@@ -429,6 +478,8 @@ id fb pos size
                 "cleanup command failed: systemctl stop" not in
                     failure_summary.get("restoration_errors", []) or
                 "restoration check failed: vt" not in
+                    failure_summary.get("restoration_errors", []) or
+                "active VT restoration mismatch: expected 2, observed 1" not in
                     failure_summary.get("restoration_errors", [])):
             raise AssertionError("failure summary masked cleanup or restoration evidence")
         try:
@@ -495,6 +546,50 @@ id fb pos size
             pass
         else:
             raise AssertionError("disabled AppRequested Prefer snapshot was accepted")
+        for label, artifact, section, replacement in (
+                ("default-output-reason", "milestone14-app-requested-default.json",
+                 "vrr", ["no-candidate", "policy-off"]),
+                ("disable-window-reason", "milestone14-app-requested-disable.json",
+                 "windows", ["window-preference-disabled", "window-unfocused"])):
+            invalid_exact = Path(directory) / f"invalid-{label}"
+            invalid_exact_ranges = populate_live_evidence(invalid_exact, config)
+            invalid_snapshot = _read_json(invalid_exact / artifact)
+            invalid_snapshot[section][0]["reasons"] = replacement
+            _write_json(invalid_exact / artifact, invalid_snapshot)
+            invalid_exact_runner = FixedLiveRunner(
+                config, invalid_exact, fake, "/dev/tty2", False,
+                lambda path, kind: True, lambda: dict(state), False)
+            invalid_exact_runner.steps = list(RUN_STEPS)
+            invalid_exact_runner.before_state = dict(state)
+            invalid_exact_runner.after_state = dict(state)
+            invalid_exact_runner.cleanup_attempted = True
+            invalid_exact_runner.cadence_ranges = invalid_exact_ranges
+            try:
+                finalize_live(config, invalid_exact, invalid_exact_runner)
+            except HarnessError:
+                pass
+            else:
+                raise AssertionError(
+                    f"inexact AppRequested reasons were accepted: {label}")
+        invalid_mask = Path(directory) / "invalid-app-mask"
+        invalid_mask_ranges = populate_live_evidence(invalid_mask, config)
+        default_state = _read_json(invalid_mask / "client-app-default.json")
+        default_state["reason_mask"] = 0
+        _write_json(invalid_mask / "client-app-default.json", default_state)
+        invalid_mask_runner = FixedLiveRunner(
+            config, invalid_mask, fake, "/dev/tty2", False,
+            lambda path, kind: True, lambda: dict(state), False)
+        invalid_mask_runner.steps = list(RUN_STEPS)
+        invalid_mask_runner.before_state = dict(state)
+        invalid_mask_runner.after_state = dict(state)
+        invalid_mask_runner.cleanup_attempted = True
+        invalid_mask_runner.cadence_ranges = invalid_mask_ranges
+        try:
+            finalize_live(config, invalid_mask, invalid_mask_runner)
+        except HarnessError:
+            pass
+        else:
+            raise AssertionError("zero AppRequested rejection mask was accepted")
         wrong_tty = FixedLiveRunner(config, Path(directory), fake, "/dev/tty3", False,
                                     lambda path, kind: True, lambda: dict(state), False)
         try:
@@ -503,6 +598,30 @@ id fb pos size
             pass
         else:
             raise AssertionError("wrong live VT was accepted")
+        changed_active = FixedLiveRunner(
+            config, Path(directory), fake, "/dev/tty2", False,
+            lambda path, kind: True, lambda: dict(state), False,
+            lambda: {"active_tty": "/dev/tty1",
+                     "kd_modes": {"/dev/tty2": 0, "/dev/tty1": 0}})
+        try:
+            changed_active.preflight()
+        except HarnessError as error:
+            if "active VT changed" not in str(error):
+                raise
+        else:
+            raise AssertionError("just-in-time active VT drift was accepted")
+        graphical_alternate = FixedLiveRunner(
+            config, Path(directory), fake, "/dev/tty2", False,
+            lambda path, kind: True, lambda: dict(state), False,
+            lambda: {"active_tty": "/dev/tty2",
+                     "kd_modes": {"/dev/tty2": 0, "/dev/tty1": 1}})
+        try:
+            graphical_alternate.preflight()
+        except HarnessError as error:
+            if "KD_TEXT on /dev/tty1" not in str(error):
+                raise
+        else:
+            raise AssertionError("just-in-time alternate KD_GRAPHICS was accepted")
         def graphical(argv: list[str], output: Path | None) -> int:
             return 0
         graphical_runner = FixedLiveRunner(config, Path(directory), graphical, "/dev/tty2", False,

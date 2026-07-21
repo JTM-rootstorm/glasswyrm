@@ -38,6 +38,20 @@ MIN_ENABLED_INTERVALS = 120
 ENABLED_PASS_PERCENT = 75.0
 DISABLED_PASS_PERCENT = 25.0
 ARTIFACT_SCHEMA = "glasswyrm.m14-hardware.v1"
+NON_BLOCKING_VRR_REASONS = frozenset({
+    "timing-unavailable", "hardware-behavior-unconfirmed",
+    "simulated-headless", "manual-always-eligible",
+})
+
+
+def vrr_rejection_reasons(value: object) -> list[str] | None:
+    if (not isinstance(value, list) or
+            not all(isinstance(item, str) for item in value)):
+        return None
+    return [item for item in value if item not in NON_BLOCKING_VRR_REASONS]
+BUILD_PROVENANCE_SCHEMA = "glasswyrm.m14-build-provenance.v1"
+BUILD_PROVENANCE_ARTIFACT = "milestone14-build-provenance.json"
+BUILD_ROOT = Path("/var/tmp/glasswyrm-build-m14")
 
 DOCTOR_FACT_KEYS = {
     "schema", "root", "drm_device", "drm_primary_node", "tty",
@@ -54,6 +68,7 @@ DOCTOR_FACT_KEYS = {
     "selected_mode_available",
 }
 REQUIRED_ARTIFACTS = (
+    BUILD_PROVENANCE_ARTIFACT,
     "milestone14-hardware-doctor.json",
     "milestone14-hardware-config.json",
     "milestone14-drm-capability.json",
@@ -74,6 +89,8 @@ REQUIRED_ARTIFACTS = (
     "milestone14-restart.log",
     "milestone14-restore.json",
     "milestone14-hardware-summary.json",
+    "milestone14-capture-off-state.json",
+    "milestone14-capture-enabled-state.json",
     "milestone14-canonical.ppm",
     "milestone14-screen.ppm",
 )
@@ -81,6 +98,7 @@ ARCHIVE_STATE_ARTIFACTS = (
     "milestone14-state-before.json", "milestone14-state-after.json",
 )
 FIXTURE_COPY_ARTIFACTS = (
+    BUILD_PROVENANCE_ARTIFACT,
     "milestone14-vrr-report.jsonl", "milestone14-fullscreen.log",
     "milestone14-borderless.log", "milestone14-focused.log",
     "client-app-default.json", "client-app-prefer.json",
@@ -89,6 +107,8 @@ FIXTURE_COPY_ARTIFACTS = (
     "milestone14-app-requested.log",
     "milestone14-app-requested-disable.json", "milestone14-always.log",
     "milestone14-vt.log", "milestone14-restart.log",
+    "milestone14-capture-off-state.json",
+    "milestone14-capture-enabled-state.json",
     "milestone14-canonical.ppm", "milestone14-screen.ppm",
 )
 

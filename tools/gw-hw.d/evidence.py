@@ -12,13 +12,16 @@ import tarfile
 from typing import Any
 
 from common import (
-    ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, COMMIT_PATTERN,
+    ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, BUILD_PROVENANCE_ARTIFACT,
+    COMMIT_PATTERN,
     DISABLED_PASS_PERCENT,
     ENABLED_PASS_PERCENT, FIXTURE_COPY_ARTIFACTS, HarnessError,
     M14_REQUIRED_BASE_COMMIT, MAX_ARTIFACT_BYTES, MAX_INTERVALS, MAX_JSON_BYTES,
     MIN_ENABLED_INTERVALS, MODE_PATTERN, REQUIRED_ARTIFACTS, RUN_STEPS,
     _read_json, _read_regular, _write_json, interval_tolerance,
+    vrr_rejection_reasons,
 )
+from provenance import validate_archived_provenance
 
 def analyze_cadence(
         report_path: Path, config: dict[str, object], enabled: bool,
@@ -121,7 +124,8 @@ def validate_restore(before_path: Path, after_path: Path) -> dict[str, object]:
 
 def _validate_app_requested_snapshot(
         path: Path, config: dict[str, object], client: dict[str, Any],
-        preference: str, effective: bool) -> None:
+        preference: str, effective: bool, output_reasons: list[str],
+        window_reasons: list[str]) -> None:
     snapshot = _read_json(path)
     outputs = snapshot.get("vrr")
     windows = snapshot.get("windows")
@@ -133,11 +137,13 @@ def _validate_app_requested_snapshot(
             outputs[0].get("hardware_capable") is not True or
             outputs[0].get("kms_controllable") is not True or
             outputs[0].get("simulated") is not False or
+            vrr_rejection_reasons(outputs[0].get("reasons")) != output_reasons or
             not isinstance(windows, list)):
         raise HarnessError(f"{path.name} omitted authoritative AppRequested output state")
     window = next((item for item in windows if isinstance(item, dict) and
                    item.get("window") == client.get("window")), None)
-    if window is None or window.get("preference", "").lower() != preference:
+    if (window is None or window.get("preference", "").lower() != preference or
+            window.get("reasons") != window_reasons):
         raise HarnessError(f"{path.name} omitted authoritative {preference} window state")
     candidate = outputs[0].get("candidate_window")
     expected_candidate = client.get("window") if effective else 0
@@ -202,16 +208,35 @@ def finalize_live(config: dict[str, object], artifacts: Path,
         "vrr": value.get("readback_success") is True and
                value.get("original_enabled") == value.get("restored_enabled"),
         "kms": value.get("kms_restore") is True and before_kms == after_kms,
-        "vt": value.get("vt_restore") is True and
-              runner.before_state.get("active_vt") == runner.after_state.get("active_vt") and
+        "active_vt": value.get("vt_restore") is True and
+              runner.before_state.get("active_vt") == runner.after_state.get("active_vt"),
+        "kd_mode": value.get("vt_restore") is True and
               runner.before_state.get("kd_mode") == runner.after_state.get("kd_mode"),
         "getty": value.get("getty_restore") is True and
                  runner.before_state.get("getty_active") == runner.after_state.get("getty_active"),
         "cleanup": not runner.cleanup_errors,
     }
-    restore = {"schema": ARTIFACT_SCHEMA, "original_value": value.get("original_enabled"),
-               "restored_value": value.get("restored_enabled"), "checks": restore_checks,
-               "readback_success": all(restore_checks.values()), "passed": all(restore_checks.values())}
+    restore_errors = list(runner.cleanup_errors)
+    for name, passed in restore_checks.items():
+        if passed:
+            continue
+        if name in {"active_vt", "kd_mode", "getty"}:
+            field = "getty_active" if name == "getty" else name
+            restore_errors.append(
+                f"{name} restoration mismatch: expected "
+                f"{runner.before_state.get(field)}, observed "
+                f"{runner.after_state.get(field)}")
+        else:
+            restore_errors.append(f"restoration check failed: {name}")
+    restore_errors = list(dict.fromkeys(restore_errors))
+    restore = {"schema": ARTIFACT_SCHEMA,
+               "original_value": value.get("original_enabled"),
+               "restored_value": value.get("restored_enabled"),
+               "original_console": runner.before_state,
+               "restored_console": runner.after_state,
+               "checks": restore_checks, "errors": restore_errors,
+               "readback_success": all(restore_checks.values()),
+               "passed": all(restore_checks.values()) and not restore_errors}
     _write_json(artifacts / "milestone14-restore.json", restore)
     _write_json(artifacts / ARCHIVE_STATE_ARTIFACTS[0],
                 {"kms": before_kms, "vrr_enabled": value.get("original_enabled"),
@@ -240,22 +265,29 @@ def finalize_live(config: dict[str, object], artifacts: Path,
             preference["notify_event_count"] < 3 or
             preference.get("notify_change_mask", 0) & 1 == 0 or
             not isinstance(preference.get("reason_mask"), int) or
-            preference["reason_mask"] == 0):
+            preference["reason_mask"] != (1 << 19)):
         raise HarnessError("preference client omitted replies/events/reasons")
     default_client = _read_json(artifacts / "client-app-default.json")
     prefer_client = _read_json(artifacts / "client-app-prefer.json")
     if (default_client.get("preference") != "Default" or
-            prefer_client.get("preference") != "Prefer"):
+            default_client.get("preference_reply_count") != 1 or
+            default_client.get("reason_mask") != (1 << 20) or
+            prefer_client.get("preference") != "Prefer" or
+            prefer_client.get("preference_reply_count") != 1 or
+            not isinstance(prefer_client.get("notify_change_mask"), int) or
+            prefer_client["notify_change_mask"] == 0):
         raise HarnessError("AppRequested clients omitted reviewed preferences")
     _validate_app_requested_snapshot(
         artifacts / "milestone14-app-requested-default.json", config,
-        default_client, "default", False)
+        default_client, "default", False, ["no-candidate"],
+        ["window-did-not-request"])
     _validate_app_requested_snapshot(
         artifacts / "milestone14-app-requested.log", config,
-        prefer_client, "prefer", True)
+        prefer_client, "prefer", True, [], [])
     _validate_app_requested_snapshot(
         artifacts / "milestone14-app-requested-disable.json", config,
-        preference, "disable", False)
+        preference, "disable", False, ["no-candidate"],
+        ["window-preference-disabled"])
     focus_a = _read_json(artifacts / "client-focus-a.json")
     focus_b = _read_json(artifacts / "client-focus-b.json")
     first_focus = _read_json(artifacts / "milestone14-focused.log")
@@ -273,6 +305,20 @@ def finalize_live(config: dict[str, object], artifacts: Path,
                 outputs[0].get("policy") != "always-eligible" or
                 outputs[0].get("effective_enabled") is not True):
             raise HarnessError(f"{replay_name} omitted exact enabled replay evidence")
+    for capture_name, policy, effective in (
+            ("milestone14-capture-off-state.json", "off", False),
+            ("milestone14-capture-enabled-state.json", "always-eligible", True)):
+        capture = _read_json(artifacts / capture_name)
+        outputs = capture.get("vrr")
+        if (not isinstance(outputs, list) or len(outputs) != 1 or
+                outputs[0].get("name") != config["connector"] or
+                outputs[0].get("policy") != policy or
+                outputs[0].get("effective_enabled") is not effective or
+                outputs[0].get("hardware_capable") is not True or
+                outputs[0].get("kms_controllable") is not True or
+                outputs[0].get("simulated") is not False):
+            raise HarnessError(
+                f"{capture_name} omitted authoritative capture state")
     if not (artifacts / "milestone14-canonical.ppm").is_file() or not (
             artifacts / "milestone14-screen.ppm").is_file():
         raise HarnessError("canonical screen evidence is missing")
@@ -340,6 +386,12 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
                 not isinstance(tested_commit, str) or
                 not COMMIT_PATTERN.fullmatch(tested_commit)):
             errors.append("reviewed source identity is invalid")
+        if isinstance(tested_commit, str):
+            try:
+                validate_archived_provenance(
+                    artifact_dir / BUILD_PROVENANCE_ARTIFACT, tested_commit)
+            except HarnessError as error:
+                errors.append(f"build provenance is invalid: {error}")
         for label, record in (("doctor", doctor), ("summary", summary)):
             if (record.get("required_base_commit") != required_base or
                     record.get("tested_commit") != tested_commit):

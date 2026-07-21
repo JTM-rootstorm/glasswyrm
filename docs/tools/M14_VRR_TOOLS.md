@@ -74,6 +74,11 @@ hashes.
 gate. Both `gw-hw doctor` and `gw-hw milestone14-vrr-test` require the reviewed
 configuration, pinned `--required-base`, exact `--tested-commit`, and a private
 artifact directory; the live command additionally requires literal `--yes`.
+The fixed physical build must be configured with
+`-Dphysical_validation_provenance=true`. Its generated manifest binds the clean
+configured Git commit to SHA-256 hashes for every repository binary used by the
+runner; `gw-hw` re-hashes them before doctor discovery and archives the validated
+manifest.
 The hardware command may take DRM master, switch VTs, stop the selected getty,
 and reconfigure the display. Never run it from the current graphical session
 or a TTY whose interruption is unacceptable; follow the safety requirements

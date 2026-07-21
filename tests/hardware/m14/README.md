@@ -18,9 +18,31 @@ be the active VT in `KD_TEXT`; `alternate_tty` must be a distinct, inactive
 also refuses profiles with more than one connected or active physical
 connector.
 
+The live runner repeats the active-VT and `KD_TEXT` checks for both configured
+VTs at takeover time and again immediately before stopping the getty. Cleanup
+records the exact before/after active VT, KD mode, and getty state; a failed
+run reports the expected and observed values for every restoration mismatch.
+
 The fixed live runner uses binaries from `/var/tmp/glasswyrm-build-m14` and
-refuses symlinked or missing executables. Configure and build that directory
-from the exact commit being accepted before moving to the target text VT.
+refuses symlinked, missing, or unproven executables. Configure the exact clean
+commit with the provenance option, then build it before moving to the target
+text VT. Use an empty directory, or add `--reconfigure` when refreshing an
+existing fixed build after `HEAD` changes:
+
+```sh
+meson setup /var/tmp/glasswyrm-build-m14 \
+  -Ddrm_backend=true -Dlibinput_backend=true \
+  -Dphysical_validation_provenance=true
+meson compile -C /var/tmp/glasswyrm-build-m14
+```
+
+The opt-in Meson target records the configured Git commit and refuses to emit
+`glasswyrm-m14-build-manifest.json` if `HEAD` changed or any tracked source is
+dirty. It hashes `gwm`, `gwcomp`, `glasswyrmd`, `gwout`, `gwinfo`, the M14 XCB
+client, and `gw_drm_probe`. Untracked local plans do not invalidate the build.
+`gw-hw` independently checks the exact fixed paths, regular-executable type,
+size, and SHA-256 digest against `--tested-commit` before live hardware
+discovery. It copies the validated manifest into the evidence archive.
 
 ```sh
 ./tools/gw-hw doctor --config /path/to/reviewed.toml \
@@ -45,10 +67,11 @@ contains one unambiguous labelled minimum/maximum refresh pair that exactly
 matches the reviewed configuration. Missing, malformed, ambiguous, or
 mismatched debugfs ranges fall back to the explicit `config-reviewed` source.
 
-The implementation includes deterministic parser, doctor, failure-unwind, and
-fixture dry-run tests. Those are not positive hardware proof. Only a reviewed
-live run whose cadence, property readback, images, restoration, checksums, and
-archive validators all pass can satisfy the physical gate. The archived
+The implementation includes deterministic parser, doctor, provenance,
+failure-unwind, and fixture dry-run tests. Those are not positive hardware
+proof. Only a reviewed live run whose build hashes, cadence, property readback,
+images, restoration, checksums, and archive validators all pass can satisfy the
+physical gate. The archived
 AppRequested evidence must show Default disabled, Prefer effectively enabled,
 and Disable effectively disabled in compositor-authoritative snapshots; no
 such acceptance is claimed by this document.
@@ -56,7 +79,9 @@ such acceptance is claimed by this document.
 The live compositor uses one-shot mirror capture. Its two 180-frame cadence
 workloads produce timing and DRM reports but no PPM files or mirror `fsync`
 traffic. After cadence collection and restart recovery, the runner explicitly
-requests exactly one mirror with VRR off and one with VRR enabled, compares
-their canonical pixels, and removes any unconsumed runtime trigger during
-cleanup. This bounds a 4K run to two full-size PPM proof frames while preserving
-the default `gwcomp --mirror-dump-dir` behavior for other workflows.
+converges compositor-authoritative policy, arms exactly one mirror, requests a
+bounded repaint from the held client, and does this once with VRR off and once
+with VRR enabled. It compares the resulting canonical pixels and removes any
+unconsumed runtime trigger during cleanup. This bounds a 4K run to two
+full-size PPM proof frames while preserving the default
+`gwcomp --mirror-dump-dir` behavior for other workflows.
