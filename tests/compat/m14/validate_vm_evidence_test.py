@@ -60,9 +60,53 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
     })
     write_json(root / "milestone14-qxl-state.json", {"vrr": [{
         "simulated": False, "hardware_capable": False, "policy": "off",
-        "kms_controllable": False, "effective_enabled": False,
+        "kms_controllable": False, "desired_enabled": False,
+        "effective_enabled": False,
         "reasons": ["output-not-vrr-capable", "vrr-property-missing"],
     }]})
+    qxl_off = {"vrr": [{
+        "simulated": False, "hardware_capable": False, "policy": "off",
+        "kms_controllable": False, "desired_enabled": False,
+        "effective_enabled": False,
+        "reasons": ["output-not-vrr-capable", "vrr-property-missing"],
+    }]}
+    for name in ("milestone14-qxl-post-vt.json",
+                 "milestone14-qxl-post-gwm.json",
+                 "milestone14-qxl-post-gwcomp.json"):
+        write_json(root / name, qxl_off)
+    qxl_drm = [
+        {"record": "discovery"}, {"record": "selection"},
+        {"record": "restore"}, {"record": "discovery"},
+        {"record": "selection"},
+        {"record": "vt", "transition": "release", "master_owned": False},
+        {"record": "vt", "transition": "acquire", "master_owned": True},
+        {"record": "restore"},
+    ]
+    (root / "milestone14-qxl-drm-report.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in qxl_drm))
+    qxl_vrr = [
+        {"record": "vrr-capability", "controllable": False},
+        {"record": "vrr-restore"},
+        {"record": "vrr-capability", "controllable": False},
+        {"record": "vrr-restore"},
+    ]
+    (root / "milestone14-qxl-vrr-report.jsonl").write_text(
+        "".join(json.dumps(item) + "\n" for item in qxl_vrr))
+    kms = {"connector": "Virtual-1", "mode": "1024x768", "crtc": 24}
+    write_json(root / "milestone14-qxl-kms-before.json", kms)
+    write_json(root / "milestone14-qxl-kms-after.json", kms)
+    vt = {"active": [2, 0, 0], "mode": [0, 0, 0, 0, 0],
+          "kd": 0, "keyboard": 0}
+    write_json(root / "milestone14-qxl-vt-before.json", vt)
+    write_json(root / "milestone14-qxl-vt-after.json", vt)
+    write_json(root / "milestone14-qxl-restart.json", {
+        "passed": True, "gwm_replay": True, "compositor_replay": True,
+        "semantic_state": {"policy": "off", "desired_enabled": False,
+                           "effective_enabled": False,
+                           "hardware_capable": False,
+                           "kms_controllable": False,
+                           "reasons": ["output-not-vrr-capable",
+                                       "vrr-property-missing"]}})
     headless = [
         {"record": "capability", "backend": "headless",
          "device": "simulated", "driver": "headless",
@@ -143,6 +187,20 @@ def write_artifacts(root: pathlib.Path, validator) -> None:
     write_json(root / "milestone14-restoration.json", {
         "passed": True, "checks": {name: True for name in
         ("kms", "vt", "vrr", "getty", "logind")}})
+    services = [{"Id": f"test-{index}.service", "LoadState": "loaded",
+                 "ActiveState": "inactive", "SubState": "dead",
+                 "Result": "success", "ExecMainCode": "exited",
+                 "ExecMainStatus": "0"} for index in range(10)]
+    write_json(root / "milestone14-service-results.json", {
+        "schema": 1, "passed": True, "services": services})
+    write_json(root / "milestone14-cleanup.json", {
+        "schema": 1, "failure_stage": "completed", "original_exit_status": 0,
+        "restoration_attempted": True, "restoration_ok": True,
+        "cleanup_failures": 0,
+        "restoration_checks": {name: "passed" for name in
+                               ("kms", "vt", "getty", "logind")}})
+    (root / "milestone14-cleanup.log").write_text(
+        "failure_stage=completed\nexit_status=0\n")
 
     evidence = root / "evidence"
     evidence.mkdir()

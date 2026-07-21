@@ -11,11 +11,18 @@ M14_TESTED_COMMIT=
 M14_TEXT_ARTIFACTS=(
   milestone14-meson-test.log milestone14-source-layout.log
   milestone14-qxl-capability.json milestone14-qxl-state.json
+  milestone14-qxl-drm-report.jsonl milestone14-qxl-vrr-report.jsonl
+  milestone14-qxl-kms-before.json milestone14-qxl-kms-after.json
+  milestone14-qxl-vt-before.json milestone14-qxl-vt-after.json
+  milestone14-qxl-post-vt.json milestone14-qxl-post-gwm.json
+  milestone14-qxl-post-gwcomp.json milestone14-qxl-restart.json
   milestone14-headless-report.jsonl milestone14-gw-vrr.log
   milestone14-gwout.log milestone14-gwinfo.json
   milestone14-policy-matrix.json milestone14-sdl-vrr.json
   milestone14-sdl-probe.json milestone14-client-build.log
   milestone14-restart.json milestone14-restoration.json
+  milestone14-service-results.json milestone14-cleanup.json
+  milestone14-cleanup.log
   milestone14-glasswyrmd-journal.log milestone14-gwm-journal.log
   milestone14-gwcomp-journal.log milestone14-facts.env
 )
@@ -111,6 +118,7 @@ required_results=(historical_default strict_m14 strict_gles sanitizer
   simulated_headless_matrix raw_little_big gwout_vrr gwinfo_vrr
   vrr_policy_matrix sdl_vrr_reuse
   qxl_unsupported vt_replay gwm_replay compositor_replay restoration
+  qxl_gwm_replay qxl_compositor_replay service_results
   socket_cleanup archive_validation journal_evidence)
 for key in "${required_results[@]}"; do result[$key]=failed; done
 getty_state_captured=false logind_state_captured=false original_vt=
@@ -119,6 +127,7 @@ logind_unit=systemd-logind.service logind_socket=systemd-logind-varlink.socket
 logind_active_before='' logind_socket_active_before=''
 logind_enabled_before='' logind_socket_enabled_before=''
 client_pid=0 focus_a_pid=0
+declare -A owned_x_socket_device owned_x_socket_inode
 
 write_facts() {
   {
@@ -146,9 +155,72 @@ write_facts() {
   } >"$facts"
 }
 
+remember_owned_x_socket() {
+  local path=$1 identity
+  identity=$(stat -Lc '%d %i' "$path") || return
+  owned_x_socket_device[$path]=${identity%% *}
+  owned_x_socket_inode[$path]=${identity##* }
+}
+
+remove_owned_x_socket() {
+  local path=$1 identity
+  [[ -n ${owned_x_socket_device[$path]:-} ]] || return 0
+  identity=$(stat -Lc '%d %i' "$path" 2>/dev/null) || return 0
+  if [[ ${identity%% *} == "${owned_x_socket_device[$path]}" &&
+        ${identity##* } == "${owned_x_socket_inode[$path]}" ]]; then
+    rm -f -- "$path"
+  else
+    printf 'preserved replacement X socket not owned by M14: %s\n' "$path" \
+      >>"$artifact_dir/milestone14-cleanup.log"
+  fi
+}
+
+owned_x_socket_released() {
+  local path=$1 identity
+  [[ -n ${owned_x_socket_device[$path]:-} ]] || return 0
+  identity=$(stat -Lc '%d %i' "$path" 2>/dev/null) || return 0
+  [[ ${identity%% *} != "${owned_x_socket_device[$path]}" ||
+     ${identity##* } != "${owned_x_socket_inode[$path]}" ]]
+}
+
+preserve_qxl_evidence() {
+  local kind path found source destination
+  install -d -m 0755 "$artifact_dir"
+  for kind in drm vrr; do
+    destination="$artifact_dir/milestone14-qxl-$kind-report.jsonl"
+    found=false
+    for path in "$qxl/$kind-report-before-gwcomp.jsonl" \
+      "$qxl/$kind-report.jsonl"; do
+      [[ -s $path ]] || continue
+      if [[ $found == false ]]; then : >"$destination"; found=true; fi
+      cat "$path" >>"$destination"
+    done
+  done
+  while IFS='|' read -r source destination; do
+    [[ -s $qxl/$source ]] || continue
+    cp -- "$qxl/$source" "$artifact_dir/$destination"
+  done <<'EOF'
+kms-before.json|milestone14-qxl-kms-before.json
+kms-after.json|milestone14-qxl-kms-after.json
+vt-before.json|milestone14-qxl-vt-before.json
+vt-after.json|milestone14-qxl-vt-after.json
+post-vt.json|milestone14-qxl-post-vt.json
+post-gwm.json|milestone14-qxl-post-gwm.json
+post-gwcomp.json|milestone14-qxl-post-gwcomp.json
+qxl-restart.json|milestone14-qxl-restart.json
+EOF
+}
+
 cleanup() {
-  local saved_status=$?
+  local saved_status=$? saved_stage=$failure_stage cleanup_failures=0
+  local restoration_attempted=false restoration_ok=true
+  local kms_cleanup=not_attempted vt_cleanup=not_attempted
+  local getty_cleanup=not_attempted logind_cleanup=not_attempted
+  local active_after enabled_after socket_active_after socket_enabled_after
   set +e
+  install -d -m 0755 "$artifact_dir"
+  printf 'failure_stage=%s\nexit_status=%s\n' "$saved_stage" "$saved_status" \
+    >"$artifact_dir/milestone14-cleanup.log"
   ((client_pid == 0)) || { kill "$client_pid" 2>/dev/null; wait "$client_pid" 2>/dev/null; }
   ((focus_a_pid == 0)) || {
     kill "$focus_a_pid" 2>/dev/null
@@ -156,24 +228,98 @@ cleanup() {
   }
   systemctl stop glasswyrmd-m14-headless.service gwm-m14-headless.service \
     gwcomp-m14-headless.service glasswyrm-m14-qxl.service \
+    glasswyrmd-m14-qxl.service gwm-m14-qxl.service gwcomp-m14-qxl.service \
     glasswyrmd-m14-single.service gwm-m14-single.service \
     gwcomp-m14-single.service \
     gw-uinput-m14.service >/dev/null 2>&1 || true
   if [[ $logind_state_captured == true ]]; then
-    systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1
-    [[ $logind_socket_active_before != active ]] || systemctl start "$logind_socket" >/dev/null 2>&1
-    [[ $logind_active_before != active ]] || systemctl start "$logind_unit" >/dev/null 2>&1
-    [[ $logind_socket_active_before == active ]] || systemctl stop "$logind_socket" >/dev/null 2>&1
-    [[ $logind_active_before == active ]] || systemctl stop "$logind_unit" >/dev/null 2>&1
-    [[ $logind_socket_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_socket" >/dev/null 2>&1
-    [[ $logind_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_unit" >/dev/null 2>&1
+    restoration_attempted=true
+    systemctl unmask --runtime "$logind_unit" "$logind_socket" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_socket_active_before != active ]] || systemctl start "$logind_socket" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_active_before != active ]] || systemctl start "$logind_unit" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_socket_active_before == active ]] || systemctl stop "$logind_socket" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_active_before == active ]] || systemctl stop "$logind_unit" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_socket_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_socket" >/dev/null 2>&1 || restoration_ok=false
+    [[ $logind_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_unit" >/dev/null 2>&1 || restoration_ok=false
+    active_after=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
+    socket_active_after=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
+    enabled_after=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
+    socket_enabled_after=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
+    if [[ $active_after == "$logind_active_before" &&
+          $socket_active_after == "$logind_socket_active_before" &&
+          $enabled_after == "$logind_enabled_before" &&
+          $socket_enabled_after == "$logind_socket_enabled_before" ]]; then
+      logind_cleanup=passed
+    else
+      logind_cleanup=failed restoration_ok=false
+    fi
   fi
   if [[ $getty_state_captured == true ]]; then
-    [[ $getty_active_before != active ]] || systemctl start "$getty_unit" >/dev/null 2>&1
-    [[ $getty_active_before == active ]] || systemctl stop "$getty_unit" >/dev/null 2>&1
+    restoration_attempted=true
+    [[ $getty_active_before != active ]] || systemctl start "$getty_unit" >/dev/null 2>&1 || restoration_ok=false
+    [[ $getty_active_before == active ]] || systemctl stop "$getty_unit" >/dev/null 2>&1 || restoration_ok=false
+    active_after=$(systemctl is-active "$getty_unit" 2>/dev/null || true)
+    enabled_after=$(systemctl is-enabled "$getty_unit" 2>/dev/null || true)
+    if [[ $active_after == "$getty_active_before" &&
+          $enabled_after == "$getty_enabled_before" ]]; then
+      getty_cleanup=passed
+    else
+      getty_cleanup=failed restoration_ok=false
+    fi
   fi
-  [[ -z $original_vt ]] || chvt "$original_vt" >/dev/null 2>&1
-  rm -f /tmp/.X11-unix/X98 /tmp/.X11-unix/X99 "$runtime"/*.sock
+  if [[ -n $original_vt ]]; then
+    restoration_attempted=true
+    chvt "$original_vt" >/dev/null 2>&1 || restoration_ok=false
+  fi
+  if [[ -s $qxl/kms-before.json && -x $build/tools/gw_drm_probe ]]; then
+    restoration_attempted=true
+    if "$build/tools/gw_drm_probe" --device "$drm_device" \
+        --connector "$connector" --require-mode 1024x768 \
+        --expect-restored "$qxl/kms-before.json" \
+        --output "$qxl/kms-cleanup.json" >/dev/null 2>&1; then
+      kms_cleanup=passed
+    else kms_cleanup=failed restoration_ok=false; fi
+  fi
+  if [[ -s $qxl/vt-before.json ]] && declare -F capture_vt_state >/dev/null; then
+    if capture_vt_state "$qxl/vt-cleanup.json" >/dev/null 2>&1 &&
+      python3 - "$qxl/vt-before.json" \
+        "$qxl/vt-cleanup.json" <<'PY' >/dev/null 2>&1
+import json,sys
+before,after=(json.load(open(path)) for path in sys.argv[1:])
+assert before['active'][0]==after['active'][0]
+assert all(before[key]==after[key] for key in ('mode','kd','keyboard'))
+PY
+    then vt_cleanup=passed
+    else vt_cleanup=failed restoration_ok=false; fi
+  fi
+  [[ $restoration_ok == true ]] || cleanup_failures=$((cleanup_failures + 1))
+  rm -f -- "$runtime/gwm.sock" "$runtime/gwcomp.sock" \
+    "$runtime/control.sock" "$runtime/gwm-single.sock" \
+    "$runtime/gwcomp-single.sock" "$runtime/control-single.sock" \
+    "$control/input.sock"
+  remove_owned_x_socket /tmp/.X11-unix/X98
+  remove_owned_x_socket /tmp/.X11-unix/X99
+  preserve_qxl_evidence
+  systemctl show glasswyrmd-m14-headless.service gwm-m14-headless.service \
+    gwcomp-m14-headless.service glasswyrmd-m14-single.service \
+    gwm-m14-single.service gwcomp-m14-single.service \
+    glasswyrmd-m14-qxl.service gwm-m14-qxl.service gwcomp-m14-qxl.service \
+    gw-uinput-m14.service -p Id -p LoadState -p ActiveState -p SubState \
+    -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
+    >>"$artifact_dir/milestone14-cleanup.log" 2>&1 || true
+  python3 - "$saved_stage" "$saved_status" "$restoration_attempted" \
+    "$restoration_ok" "$cleanup_failures" "$kms_cleanup" "$vt_cleanup" \
+    "$getty_cleanup" "$logind_cleanup" \
+    "$artifact_dir/milestone14-cleanup.json" <<'PY'
+import json,sys
+json.dump({'schema':1,'failure_stage':sys.argv[1],
+ 'original_exit_status':int(sys.argv[2]),
+ 'restoration_attempted':sys.argv[3]=='true',
+ 'restoration_ok':sys.argv[4]=='true','cleanup_failures':int(sys.argv[5]),
+ 'restoration_checks':{'kms':sys.argv[6],'vt':sys.argv[7],
+  'getty':sys.argv[8],'logind':sys.argv[9]}},open(sys.argv[10],'w'),sort_keys=True)
+PY
+  failure_stage=$saved_stage
   write_facts
   return "$saved_status"
 }
@@ -313,6 +459,7 @@ start_headless_stack() {
     --output-model --control-socket "$runtime/control.sock" --game-compat \
     --vrr-protocol
   wait_socket "$runtime/control.sock"; wait_socket /tmp/.X11-unix/X99
+  remember_owned_x_socket /tmp/.X11-unix/X99
 }
 
 failure_stage='headless-runtime'
@@ -498,6 +645,7 @@ systemd-run --unit=glasswyrmd-m14-single --property=Type=simple --no-block -- \
   --output-model --control-socket "$runtime/control-single.sock" \
   --game-compat --vrr-protocol
 wait_socket "$runtime/control-single.sock"; wait_socket /tmp/.X11-unix/X98
+remember_owned_x_socket /tmp/.X11-unix/X98
 
 "$build/tools/gwout" --socket "$runtime/control-single.sock" set LEFT \
   --vrr fullscreen --json >/dev/null
@@ -649,23 +797,34 @@ getty_state_captured=true logind_state_captured=true
 capture_vt_state "$qxl/vt-before.json"
 [[ $getty_active_before != active ]] || systemctl stop "$getty_unit"
 systemctl mask --runtime --now "$logind_socket" "$logind_unit"
-systemd-run --unit=glasswyrm-m14-qxl --property=Type=simple \
-  --setenv="PATH=$build/src:/usr/bin:/bin" --property=PrivateDevices=no \
+systemd-run --unit=gwm-m14-qxl --property=Type=simple \
+  --property=SuccessExitStatus=143 --no-block -- \
+  "$build/src/gwm" --ipc-socket "$runtime/gwm.sock"
+wait_socket "$runtime/gwm.sock"
+systemd-run --unit=gwcomp-m14-qxl --property=Type=simple \
+  --property=SuccessExitStatus=143 --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
-  --property="DeviceAllow=$target_vt rw" --property="DeviceAllow=$keyboard r" \
-  --property="DeviceAllow=$pointer r" --property=StandardInput=tty-force \
+  --property="DeviceAllow=$target_vt rw" --property=StandardInput=tty-force \
   --property="TTYPath=$target_vt" --property=StandardOutput=journal \
   --property=StandardError=journal --property=TTYReset=yes \
   --property=TTYVHangup=yes --property=TTYVTDisallocate=no \
-  --property=KillMode=mixed --property=SuccessExitStatus=143 --no-block -- \
-  "$build/src/glasswyrm-session" --runtime-dir "$runtime" --display 99 \
-  --backend drm --drm-device "$drm_device" --tty "$target_vt" \
-  --connector "$connector" --mode 1024x768 --drm-api auto \
-  --input-device "$keyboard" --input-device "$pointer" --output-model \
-  --control-socket "$runtime/control.sock" --vrr-protocol --renderer software \
+  --property=KillMode=mixed --no-block -- \
+  "$build/src/gwcomp" --backend drm --ipc-socket "$runtime/gwcomp.sock" \
+  --drm-device "$drm_device" --tty "$target_vt" --connector "$connector" \
+  --mode 1024x768 --drm-api auto --renderer software \
   --mirror-dump-dir "$qxl/frames" --drm-report "$qxl/drm-report.jsonl" \
   --vrr-report "$qxl/vrr-report.jsonl"
+wait_socket "$runtime/gwcomp.sock"
+systemd-run --unit=glasswyrmd-m14-qxl --property=Type=simple \
+  --property=SuccessExitStatus=143 --property=PrivateDevices=no \
+  --property=DevicePolicy=closed --property="DeviceAllow=$keyboard r" \
+  --property="DeviceAllow=$pointer r" --no-block -- \
+  "$build/src/glasswyrmd" --display 99 --wm-socket "$runtime/gwm.sock" \
+  --compositor-socket "$runtime/gwcomp.sock" --software-content \
+  --libinput-device "$keyboard" --libinput-device "$pointer" --output-model \
+  --control-socket "$runtime/control.sock" --vrr-protocol
 wait_socket "$runtime/control.sock"; wait_socket /tmp/.X11-unix/X99
+remember_owned_x_socket /tmp/.X11-unix/X99
 set +e
 "$build/tools/gwout" --socket "$runtime/control.sock" set "$connector" \
   --vrr always-eligible --json >"$qxl/gwout-rejected.stdout" \
@@ -716,6 +875,58 @@ assert {'output-not-vrr-capable','vrr-property-missing'} <= set(v['reasons'])
 PY
 result[qxl_unsupported]=passed
 
+wait_qxl_vrr_off() {
+  local state=$1
+  for _ in {1..400}; do
+    if "$build/tools/gwinfo" --socket "$runtime/control.sock" vrr --json \
+          >"$state" 2>/dev/null &&
+       python3 - "$state" <<'PY' 2>/dev/null
+import json,sys
+values=json.load(open(sys.argv[1])).get('vrr',[])
+assert len(values)==1
+value=values[0]
+assert value.get('policy')=='off'
+assert value.get('desired_enabled') is False
+assert value.get('effective_enabled') is False
+assert value.get('hardware_capable') is False
+assert value.get('kms_controllable') is False
+assert {'output-not-vrr-capable','vrr-property-missing'} <= set(value.get('reasons',[]))
+PY
+    then return; fi
+    sleep .05
+  done
+  printf 'Timed out waiting for QXL VRR-off replay state: %s\n' "$state" >&2
+  [[ ! -s $state ]] || cat "$state" >&2
+  return 1
+}
+
+systemctl restart gwm-m14-qxl.service
+wait_socket "$runtime/gwm.sock"
+wait_qxl_vrr_off "$qxl/post-gwm.json"
+result[qxl_gwm_replay]=passed
+mv "$qxl/drm-report.jsonl" "$qxl/drm-report-before-gwcomp.jsonl"
+mv "$qxl/vrr-report.jsonl" "$qxl/vrr-report-before-gwcomp.jsonl"
+systemctl restart gwcomp-m14-qxl.service
+wait_socket "$runtime/gwcomp.sock"
+wait_qxl_vrr_off "$qxl/post-gwcomp.json"
+result[qxl_compositor_replay]=passed
+python3 - "$artifact_dir/milestone14-qxl-state.json" "$qxl/post-gwm.json" \
+  "$qxl/post-gwcomp.json" "$qxl/qxl-restart.json" <<'PY'
+import json,sys
+before,gwm,comp=(json.load(open(path))['vrr'][0] for path in sys.argv[1:4])
+def semantic(value):
+ return (value['policy'],value['desired_enabled'],value['effective_enabled'],
+         value['hardware_capable'],value['kms_controllable'],tuple(value['reasons']))
+expected=semantic(before)
+assert expected[0:5]==('off',False,False,False,False)
+assert semantic(gwm)==expected and semantic(comp)==expected
+json.dump({'schema':1,'passed':True,'gwm_replay':True,
+ 'compositor_replay':True,'semantic_state':{'policy':expected[0],
+ 'desired_enabled':expected[1],'effective_enabled':expected[2],
+ 'hardware_capable':expected[3],'kms_controllable':expected[4],
+ 'reasons':list(expected[5])}},open(sys.argv[4],'w'),sort_keys=True)
+PY
+
 chvt 1
 python3 - "$qxl/drm-report.jsonl" release <<'PY'
 import json,pathlib,sys,time
@@ -746,7 +957,8 @@ import json,sys
 v=json.load(open(sys.argv[1]))['vrr'][0]; assert not v.get('effective_enabled',False)
 PY
 result[vt_replay]=passed
-systemctl stop glasswyrm-m14-qxl.service gw-uinput-m14.service
+systemctl stop glasswyrmd-m14-qxl.service gwm-m14-qxl.service \
+  gwcomp-m14-qxl.service gw-uinput-m14.service
 chvt "$original_vt"
 [[ $getty_active_before != active ]] || systemctl start "$getty_unit"
 systemctl unmask --runtime "$logind_unit" "$logind_socket"
@@ -792,15 +1004,44 @@ json.dump({'schema':1,'passed':True,'checks':checks},open(sys.argv[6],'w'),sort_
 PY
 result[restoration]=passed
 
+service_units=(glasswyrmd-m14-headless.service gwm-m14-headless.service
+  gwcomp-m14-headless.service glasswyrmd-m14-single.service
+  gwm-m14-single.service gwcomp-m14-single.service
+  glasswyrmd-m14-qxl.service gwm-m14-qxl.service gwcomp-m14-qxl.service
+  gw-uinput-m14.service)
+: >"$work/service-results.txt"
+for unit in "${service_units[@]}"; do
+  systemctl show "$unit" -p Id -p LoadState -p ActiveState -p SubState \
+    -p Result -p ExecMainCode -p ExecMainStatus --no-pager \
+    >>"$work/service-results.txt"
+done
+python3 - "$work/service-results.txt" \
+  "$artifact_dir/milestone14-service-results.json" <<'PY'
+import json,sys
+records=[]
+for paragraph in open(sys.argv[1]).read().strip().split('\n\n'):
+ record=dict(line.split('=',1) for line in paragraph.splitlines() if '=' in line)
+ if record: records.append(record)
+assert len(records)==10,records
+for record in records:
+ assert record['LoadState']=='loaded',record
+ assert record['ActiveState']=='inactive',record
+ assert record['Result']=='success',record
+ assert record['ExecMainCode']=='exited',record
+ assert record['ExecMainStatus']=='0',record
+json.dump({'schema':1,'passed':True,'services':records},open(sys.argv[2],'w'),sort_keys=True)
+PY
+result[service_results]=passed
+
 failure_stage=evidence
 journalctl -u glasswyrmd-m14-headless.service -u glasswyrmd-m14-single.service \
-  -u glasswyrm-m14-qxl.service \
+  -u glasswyrmd-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-glasswyrmd-journal.log"
 journalctl -u gwm-m14-headless.service -u gwm-m14-single.service \
-  -u glasswyrm-m14-qxl.service \
+  -u gwm-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-gwm-journal.log"
 journalctl -u gwcomp-m14-headless.service -u gwcomp-m14-single.service \
-  -u glasswyrm-m14-qxl.service \
+  -u gwcomp-m14-qxl.service \
   -b --no-pager >"$artifact_dir/milestone14-gwcomp-journal.log"
 [[ -s $artifact_dir/milestone14-glasswyrmd-journal.log &&
    -s $artifact_dir/milestone14-gwm-journal.log &&
@@ -809,17 +1050,26 @@ result[journal_evidence]=passed
 [[ ! -S $runtime/gwm.sock && ! -S $runtime/gwcomp.sock &&
    ! -S $runtime/control.sock && ! -S $runtime/gwm-single.sock &&
    ! -S $runtime/gwcomp-single.sock && ! -S $runtime/control-single.sock &&
-   ! -S /tmp/.X11-unix/X98 && ! -S /tmp/.X11-unix/X99 ]]
+   ! -S $control/input.sock ]] &&
+  owned_x_socket_released /tmp/.X11-unix/X98 &&
+  owned_x_socket_released /tmp/.X11-unix/X99
 result[socket_cleanup]=passed
 
 failure_stage=archive
+preserve_qxl_evidence
 evidence=$artifact_dir/evidence
 install -d -m 0755 "$evidence"
 for name in milestone14-qxl-capability.json milestone14-qxl-state.json \
+  milestone14-qxl-drm-report.jsonl milestone14-qxl-vrr-report.jsonl \
+  milestone14-qxl-kms-before.json milestone14-qxl-kms-after.json \
+  milestone14-qxl-vt-before.json milestone14-qxl-vt-after.json \
+  milestone14-qxl-post-vt.json milestone14-qxl-post-gwm.json \
+  milestone14-qxl-post-gwcomp.json milestone14-qxl-restart.json \
   milestone14-headless-report.jsonl milestone14-gw-vrr.log \
   milestone14-gwout.log milestone14-gwinfo.json milestone14-restart.json \
   milestone14-policy-matrix.json milestone14-sdl-vrr.json \
-  milestone14-sdl-probe.json milestone14-restoration.json; do
+  milestone14-sdl-probe.json milestone14-restoration.json \
+  milestone14-service-results.json; do
   cp "$artifact_dir/$name" "$evidence/"
 done
 (cd "$evidence" && sha256sum -- * >SHA256SUMS && \

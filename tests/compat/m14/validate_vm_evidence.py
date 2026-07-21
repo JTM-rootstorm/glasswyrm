@@ -17,7 +17,8 @@ REQUIRED_RESULTS = (
     "api_consumers source_layout fake_drm_matrix simulated_headless_matrix "
     "raw_little_big gwout_vrr gwinfo_vrr vrr_policy_matrix sdl_vrr_reuse "
     "qxl_unsupported vt_replay "
-    "gwm_replay compositor_replay restoration socket_cleanup "
+    "gwm_replay compositor_replay restoration qxl_gwm_replay "
+    "qxl_compositor_replay service_results socket_cleanup "
     "archive_validation journal_evidence"
 ).split()
 IDENTITY = {
@@ -44,6 +45,16 @@ ARTIFACTS = (
     "milestone14-source-layout.log",
     "milestone14-qxl-capability.json",
     "milestone14-qxl-state.json",
+    "milestone14-qxl-drm-report.jsonl",
+    "milestone14-qxl-vrr-report.jsonl",
+    "milestone14-qxl-kms-before.json",
+    "milestone14-qxl-kms-after.json",
+    "milestone14-qxl-vt-before.json",
+    "milestone14-qxl-vt-after.json",
+    "milestone14-qxl-post-vt.json",
+    "milestone14-qxl-post-gwm.json",
+    "milestone14-qxl-post-gwcomp.json",
+    "milestone14-qxl-restart.json",
     "milestone14-headless-report.jsonl",
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
@@ -54,6 +65,9 @@ ARTIFACTS = (
     "milestone14-client-build.log",
     "milestone14-restart.json",
     "milestone14-restoration.json",
+    "milestone14-service-results.json",
+    "milestone14-cleanup.json",
+    "milestone14-cleanup.log",
     "milestone14-glasswyrmd-journal.log",
     "milestone14-gwm-journal.log",
     "milestone14-gwcomp-journal.log",
@@ -63,6 +77,16 @@ ARTIFACTS = (
 ARCHIVE_MEMBERS = {
     "milestone14-qxl-capability.json",
     "milestone14-qxl-state.json",
+    "milestone14-qxl-drm-report.jsonl",
+    "milestone14-qxl-vrr-report.jsonl",
+    "milestone14-qxl-kms-before.json",
+    "milestone14-qxl-kms-after.json",
+    "milestone14-qxl-vt-before.json",
+    "milestone14-qxl-vt-after.json",
+    "milestone14-qxl-post-vt.json",
+    "milestone14-qxl-post-gwm.json",
+    "milestone14-qxl-post-gwcomp.json",
+    "milestone14-qxl-restart.json",
     "milestone14-headless-report.jsonl",
     "milestone14-gw-vrr.log",
     "milestone14-gwout.log",
@@ -72,6 +96,7 @@ ARCHIVE_MEMBERS = {
     "milestone14-sdl-probe.json",
     "milestone14-restart.json",
     "milestone14-restoration.json",
+    "milestone14-service-results.json",
 }
 
 
@@ -162,6 +187,65 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or not reasons.intersection({"output-not-vrr-capable",
                                              "vrr-property-missing"})):
             raise ValueError("QXL state makes an unsupported VRR claim")
+
+        qxl_drm = load_jsonl(root / "milestone14-qxl-drm-report.jsonl")
+        if (sum(record.get("record") == "discovery" for record in qxl_drm) < 2
+                or sum(record.get("record") == "selection" for record in qxl_drm) < 2
+                or not any(record.get("record") == "vt"
+                           and record.get("transition") == "release"
+                           for record in qxl_drm)
+                or not any(record.get("record") == "vt"
+                           and record.get("transition") == "acquire"
+                           and record.get("master_owned") is True
+                           for record in qxl_drm)
+                or sum(record.get("record") == "restore" for record in qxl_drm) < 2):
+            raise ValueError("raw QXL DRM report does not prove restart and VT replay")
+        qxl_vrr = load_jsonl(root / "milestone14-qxl-vrr-report.jsonl")
+        if (sum(record.get("record") == "vrr-capability" for record in qxl_vrr) < 2
+                or sum(record.get("record") == "vrr-restore" for record in qxl_vrr) < 2
+                or any(record.get("controllable") is not False
+                       for record in qxl_vrr
+                       if record.get("record") == "vrr-capability")):
+            raise ValueError("raw QXL VRR report does not prove unsupported replay")
+        if (load_object(root / "milestone14-qxl-kms-before.json") !=
+                load_object(root / "milestone14-qxl-kms-after.json")):
+            raise ValueError("raw QXL KMS state was not restored")
+        vt_before = load_object(root / "milestone14-qxl-vt-before.json")
+        vt_after = load_object(root / "milestone14-qxl-vt-after.json")
+        if (vt_before.get("active", [None])[0] != vt_after.get("active", [None])[0]
+                or any(vt_before.get(key) != vt_after.get(key)
+                       for key in ("mode", "kd", "keyboard"))):
+            raise ValueError("raw QXL VT state was not restored")
+
+        def require_qxl_off(name: str) -> dict:
+            payload = load_object(root / name)
+            values = payload.get("vrr", [])
+            if len(values) != 1:
+                raise ValueError(f"{name} does not contain one QXL output")
+            value = values[0]
+            if (value.get("policy") != "off"
+                    or value.get("desired_enabled") is not False
+                    or value.get("effective_enabled") is not False
+                    or value.get("hardware_capable") is not False
+                    or value.get("kms_controllable") is not False):
+                raise ValueError(f"{name} does not preserve QXL VRR-off state")
+            return value
+
+        for qxl_state in ("milestone14-qxl-post-vt.json",
+                          "milestone14-qxl-post-gwm.json",
+                          "milestone14-qxl-post-gwcomp.json"):
+            require_qxl_off(qxl_state)
+        qxl_restart = load_object(root / "milestone14-qxl-restart.json")
+        qxl_semantic = qxl_restart.get("semantic_state", {})
+        if (qxl_restart.get("passed") is not True
+                or qxl_restart.get("gwm_replay") is not True
+                or qxl_restart.get("compositor_replay") is not True
+                or qxl_semantic.get("policy") != "off"
+                or qxl_semantic.get("desired_enabled") is not False
+                or qxl_semantic.get("effective_enabled") is not False
+                or qxl_semantic.get("hardware_capable") is not False
+                or qxl_semantic.get("kms_controllable") is not False):
+            raise ValueError("QXL restart evidence does not preserve VRR-off state")
 
         headless = load_jsonl(root / "milestone14-headless-report.jsonl")
         capabilities = [record for record in headless
@@ -286,6 +370,26 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or set(checks) != {"kms", "vt", "vrr", "getty", "logind"}
                 or not all(checks.values())):
             raise ValueError("restoration evidence is incomplete")
+        service_results = load_object(root / "milestone14-service-results.json")
+        services = service_results.get("services", [])
+        if (service_results.get("passed") is not True or len(services) != 10
+                or any(service.get("LoadState") != "loaded"
+                       or service.get("ActiveState") != "inactive"
+                       or service.get("Result") != "success"
+                       or service.get("ExecMainCode") != "exited"
+                       or service.get("ExecMainStatus") != "0"
+                       for service in services)):
+            raise ValueError("service result gate is incomplete")
+        cleanup = load_object(root / "milestone14-cleanup.json")
+        cleanup_checks = cleanup.get("restoration_checks", {})
+        if (cleanup.get("failure_stage") != "completed"
+                or cleanup.get("original_exit_status") != 0
+                or cleanup.get("restoration_attempted") is not True
+                or cleanup.get("restoration_ok") is not True
+                or cleanup.get("cleanup_failures") != 0
+                or cleanup_checks != {name: "passed" for name in
+                                      ("kms", "vt", "getty", "logind")}):
+            raise ValueError("successful-run cleanup diagnostics are incomplete")
         validate_archive(root / "milestone14-vm-vrr-evidence.tar", root)
     except (OSError, ValueError, KeyError, StopIteration, json.JSONDecodeError,
             tarfile.TarError) as error:

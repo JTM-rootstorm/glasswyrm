@@ -117,6 +117,46 @@ done
 [[ $(grep -Fc -- 'wait_restart_state ' <<<"$restart_handoff") == 3 ]] ||
   fail 'M14 restart handoff must use exactly three semantic state waits'
 
+qxl_restart=$(sed -n '/^wait_qxl_vrr_off()/,/^chvt 1/p' <<<"$guest")
+for expected in \
+  'systemctl restart gwm-m14-qxl.service' \
+  'wait_qxl_vrr_off "$qxl/post-gwm.json"' \
+  'systemctl restart gwcomp-m14-qxl.service' \
+  'wait_qxl_vrr_off "$qxl/post-gwcomp.json"' \
+  "value.get('policy')=='off'" \
+  "value.get('desired_enabled') is False" \
+  "value.get('effective_enabled') is False"; do
+  grep -F -- "$expected" <<<"$qxl_restart" >/dev/null ||
+    fail "M14 QXL restart proof lacks: $expected"
+done
+
+cleanup=$(sed -n '/^cleanup()/,/^}/p' <<<"$guest")
+for expected in 'remove_owned_x_socket /tmp/.X11-unix/X98' \
+  'remove_owned_x_socket /tmp/.X11-unix/X99' '"$control/input.sock"' \
+  'failure_stage=$saved_stage'; do
+  grep -F -- "$expected" <<<"$cleanup" >/dev/null ||
+    fail "M14 cleanup lacks: $expected"
+done
+if grep -E -- 'rm -f( --)? /tmp/\.X11-unix/X(98|99)' <<<"$cleanup" >/dev/null; then
+  fail 'M14 cleanup deletes an X socket without ownership verification'
+fi
+socket_gate=$(sed -n '/! -S \$runtime\/gwm.sock/,/result\[socket_cleanup\]=passed/p' \
+  <<<"$guest")
+for expected in 'owned_x_socket_released /tmp/.X11-unix/X98' \
+  'owned_x_socket_released /tmp/.X11-unix/X99' '! -S $control/input.sock'; do
+  grep -F -- "$expected" <<<"$socket_gate" >/dev/null ||
+    fail "M14 socket cleanup gate lacks: $expected"
+done
+
+service_gate=$(sed -n '/^service_units=(/,/result\[service_results\]=passed/p' \
+  <<<"$guest")
+for expected in glasswyrmd-m14-qxl.service gwm-m14-qxl.service \
+  gwcomp-m14-qxl.service "record['Result']=='success'" \
+  "record['ExecMainStatus']=='0'"; do
+  grep -F -- "$expected" <<<"$service_gate" >/dev/null ||
+    fail "M14 service-result gate lacks: $expected"
+done
+
 for expected in \
   6864ea631d61636289a21c7d2d6655a17be0c004 \
   "snapshot name 'base'" 'snapshot_name=base' \
@@ -155,11 +195,18 @@ for expected in \
   '--property=KillMode=mixed' '--property=SuccessExitStatus=143' \
   'chvt 1' 'chvt "${target_vt#/dev/tty}"' 'vrr-restore' \
   'milestone14-qxl-capability.json' 'milestone14-qxl-state.json' \
+  'milestone14-qxl-drm-report.jsonl' 'milestone14-qxl-vrr-report.jsonl' \
+  'milestone14-qxl-kms-before.json' 'milestone14-qxl-kms-after.json' \
+  'milestone14-qxl-vt-before.json' 'milestone14-qxl-vt-after.json' \
+  'milestone14-qxl-post-vt.json' 'milestone14-qxl-post-gwm.json' \
+  'milestone14-qxl-post-gwcomp.json' 'milestone14-qxl-restart.json' \
   'milestone14-headless-report.jsonl' 'milestone14-gw-vrr.log' \
   'milestone14-gwout.log' 'milestone14-gwinfo.json' \
   'milestone14-policy-matrix.json' 'milestone14-sdl-vrr.json' \
   'milestone14-sdl-probe.json' 'milestone14-client-build.log' \
   'milestone14-restart.json' 'milestone14-restoration.json' \
+  'milestone14-service-results.json' 'milestone14-cleanup.json' \
+  'milestone14-cleanup.log' \
   'milestone14-glasswyrmd-journal.log' 'milestone14-gwm-journal.log' \
   'milestone14-gwcomp-journal.log' 'milestone14-facts.env' \
   'milestone14-summary.json' 'milestone14-vm-vrr-evidence.tar' \

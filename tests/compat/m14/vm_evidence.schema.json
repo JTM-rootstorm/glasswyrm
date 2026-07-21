@@ -46,6 +46,9 @@
         "gwm_replay",
         "compositor_replay",
         "restoration",
+        "qxl_gwm_replay",
+        "qxl_compositor_replay",
+        "service_results",
         "socket_cleanup",
         "archive_validation",
         "journal_evidence"
