@@ -262,28 +262,43 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
         restart_proof = qxl_restart.get("restart_proof", {})
         expected_restart_proof = {
             "gwm": ("milestone14-qxl-gwm-restart-journal.jsonl",
-                    "gwm: policy accepted"),
+                    "gwm-m14-qxl.service", "gwm: policy accepted",
+                    r"gwm: policy accepted commit=\d+ generation=\d+ "
+                    r"windows=\d+ hash=[0-9a-f]{16}"),
             "gwcomp": ("milestone14-qxl-gwcomp-restart-journal.jsonl",
-                       "gwcomp: frame accepted"),
+                       "gwcomp-m14-qxl.service", "gwcomp: frame accepted",
+                       r"gwcomp: frame accepted commit=\d+ frame=\d+ "
+                       r"hash=[0-9a-f]{16}"),
         }
         if set(restart_proof) != set(expected_restart_proof):
             raise ValueError("QXL restart proof inventory differs")
-        for name, (journal_name, message_prefix) in expected_restart_proof.items():
+        restart_boot_ids = set()
+        for name, (journal_name, unit, message_prefix,
+                   message_pattern) in expected_restart_proof.items():
             proof = restart_proof[name]
             previous = proof.get("previous_invocation_id", "")
             current = proof.get("invocation_id", "")
+            boot_id = proof.get("boot_id", "")
+            restart_boot_ids.add(boot_id)
             if (not re.fullmatch(r"[0-9a-f]{32}", previous)
                     or not re.fullmatch(r"[0-9a-f]{32}", current)
+                    or not re.fullmatch(r"[0-9a-f]{32}", boot_id)
                     or previous == current
+                    or proof.get("unit") != unit
                     or proof.get("journal") != journal_name
                     or proof.get("message_prefix") != message_prefix):
                 raise ValueError(f"QXL {name} restart invocation proof is invalid")
             journal = load_jsonl(root / journal_name)
             if (any(record.get("_SYSTEMD_INVOCATION_ID") != current
+                    or record.get("_SYSTEMD_UNIT") != unit
+                    or record.get("_BOOT_ID") != boot_id
                     for record in journal)
-                    or not any(str(record.get("MESSAGE", "")).startswith(
-                        message_prefix) for record in journal)):
+                    or not any(re.fullmatch(message_pattern,
+                                            str(record.get("MESSAGE", "")))
+                               for record in journal)):
                 raise ValueError(f"QXL {name} restart journal is not from the new process")
+        if len(restart_boot_ids) != 1:
+            raise ValueError("QXL restart proof boot IDs differ")
 
         headless = load_jsonl(root / "milestone14-headless-report.jsonl")
         capabilities = [record for record in headless
@@ -412,25 +427,31 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
         services = service_results.get("services", [])
         services_by_id = {service.get("Id"): service for service in services}
         if (service_results.get("passed") is not True
+                or service_results.get("errors") != []
                 or len(services) != len(SERVICE_IDS)
                 or set(services_by_id) != SERVICE_IDS):
             raise ValueError("service result gate is incomplete")
-        for unit in DAEMON_SERVICE_IDS:
+        for unit in SERVICE_IDS:
             service = services_by_id[unit]
-            if (service.get("LoadState") != "loaded"
-                    or service.get("ActiveState") != "inactive"
-                    or service.get("SubState") != "dead"
-                    or service.get("Result") != "success"
-                    or service.get("ExecMainCode") != "exited"
-                    or service.get("ExecMainStatus") != "0"):
-                raise ValueError(f"daemon service result is incomplete: {unit}")
-        uinput = services_by_id[UINPUT_SERVICE_ID]
-        if uinput != {
-                "Id": UINPUT_SERVICE_ID, "LoadState": "not-found",
-                "ActiveState": "inactive", "SubState": "dead",
-                "Result": "success", "ExecMainCode": "0",
-                "ExecMainStatus": "0"}:
-            raise ValueError("collected uinput service result is incomplete")
+            collected = {key: service.get(key) for key in (
+                "Id", "LoadState", "ActiveState", "SubState", "Result",
+                "ExecMainCode", "ExecMainStatus")}
+            if collected != {
+                    "Id": unit, "LoadState": "not-found",
+                    "ActiveState": "inactive", "SubState": "dead",
+                    "Result": "success", "ExecMainCode": "0",
+                    "ExecMainStatus": "0"}:
+                raise ValueError(
+                    f"collected service result is incomplete: {unit}")
+            if (not re.fullmatch(r"[0-9a-f]{32}",
+                                 service.get("LifecycleInvocationID", ""))
+                    or not re.fullmatch(r"[0-9a-f]{32}",
+                                        service.get("LifecycleBootID", ""))
+                    or service.get("JournalMatched") != "true"):
+                raise ValueError(
+                    f"service lifecycle result is incomplete: {unit}")
+        if len({service.get("LifecycleBootID") for service in services}) != 1:
+            raise ValueError("service lifecycle boot IDs differ")
         cleanup = load_object(root / "milestone14-cleanup.json")
         cleanup_checks = cleanup.get("restoration_checks", {})
         cleanup_units = cleanup.get("units", [])
@@ -444,10 +465,12 @@ def validate_artifacts(root: pathlib.Path) -> list[str]:
                 or cleanup.get("errors") != []
                 or len(cleanup_units) != len(SERVICE_IDS)
                 or set(cleanup_by_id) != SERVICE_IDS
-                or any(unit.get("LoadState") not in {"loaded", "not-found"}
-                       or unit.get("ActiveState") != "inactive"
-                       or unit.get("SubState") != "dead"
-                       for unit in cleanup_units)
+                or any(unit != {
+                    "Id": identity, "LoadState": "not-found",
+                    "ActiveState": "inactive", "SubState": "dead",
+                    "Result": "success", "ExecMainCode": "0",
+                    "ExecMainStatus": "0"}
+                    for identity, unit in cleanup_by_id.items())
                 or cleanup_checks != {name: "passed" for name in
                                       ("kms", "vt", "getty", "logind")}):
             raise ValueError("successful-run cleanup diagnostics are incomplete")
