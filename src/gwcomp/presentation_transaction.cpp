@@ -448,7 +448,7 @@ PresentedFrame PresentationTransaction::stage_presentation(
     PresentedFrame presented, std::string& error) {
   glasswyrm::output::PresentResult presentation;
   if (prepared.frame_set) {
-    presentation = compositor.presenter_->present(prepared.frame_set->view());
+    presentation = compositor.presenter_->present(*prepared.frame_set);
   } else {
     const auto& output = *validated.candidate.committed().output;
     const glasswyrm::output::SoftwareFrameView frame{

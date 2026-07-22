@@ -7,11 +7,61 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <unistd.h>
 
 namespace {
+
+class OwnedSetPresenter final
+    : public glasswyrm::output::PresentationBackend {
+ public:
+  glasswyrm::output::PresentResult present(
+      const glasswyrm::output::SoftwareFrameView&) override {
+    historical_called = true;
+    return {glasswyrm::output::PresentDisposition::Rejected, 0, 0,
+            "historical frame path selected"};
+  }
+  glasswyrm::output::PresentResult present(
+      const glasswyrm::output::SoftwareFrameSet&) override;
+  glasswyrm::output::PresentResult present(
+      const glasswyrm::output::SoftwareFrameSetView&) override {
+    untrusted_view_called = true;
+    return {glasswyrm::output::PresentDisposition::Rejected, 0, 0,
+            "untrusted frame-set view selected"};
+  }
+  int poll_fd() const noexcept override { return -1; }
+  short poll_events() const noexcept override { return 0; }
+  glasswyrm::output::BackendEvent service(short) override { return {}; }
+  glasswyrm::output::BackendStateResult suspend(std::string& error) override {
+    error.clear();
+    return glasswyrm::output::BackendStateResult::Complete;
+  }
+  glasswyrm::output::PresentResult resume(
+      const glasswyrm::output::SoftwareFrameView&) override {
+    return {};
+  }
+  glasswyrm::output::BackendStateResult shutdown(
+      std::string& error) noexcept override {
+    error.clear();
+    return glasswyrm::output::BackendStateResult::Complete;
+  }
+
+  bool owned_set_called{};
+  bool untrusted_view_called{};
+  bool historical_called{};
+};
+
+glasswyrm::output::PresentResult OwnedSetPresenter::present(
+    const glasswyrm::output::SoftwareFrameSet& frames) {
+  owned_set_called = true;
+  if (!frames.finalized())
+    return {glasswyrm::output::PresentDisposition::Rejected, 0, 0,
+            "frame set was not finalized"};
+  return {glasswyrm::output::PresentDisposition::Complete, 0,
+          frames.aggregate_hash(), {}};
+}
 
 gwipc_sdr_color_metadata srgb() {
   return {GWIPC_SDR_COLOR_SPACE_SRGB,
@@ -142,6 +192,28 @@ void output_model_presents_frame_set() {
   std::filesystem::remove_all(root, ignored);
 }
 
+void output_model_uses_owned_frame_set_boundary() {
+  using gw::compositor::SceneProfile;
+  using Disposition = gw::compositor::PresentedFrame::Disposition;
+
+  auto presenter = std::make_unique<OwnedSetPresenter>();
+  auto* observer = presenter.get();
+  gw::compositor::Compositor compositor(std::move(presenter));
+  std::string error;
+  gw::test::require(
+      compositor.configure_scene_profile(SceneProfile::OutputModel, 1, 7) &&
+          compositor.begin_snapshot(7) &&
+          compositor.apply(enabled_output()) && compositor.end_snapshot(),
+      "owned frame-set presenter snapshot stages");
+  const auto presented = compositor.commit(frame(), error);
+  gw::test::require(
+      presented.disposition == Disposition::Complete &&
+          presented.result == GWIPC_FRAME_ACCEPTED &&
+          observer->owned_set_called && !observer->untrusted_view_called &&
+          !observer->historical_called,
+      "output-model transaction submits the owned finalized frame set");
+}
+
 void historical_disabled_output_stays_dropped() {
   using Disposition = gw::compositor::PresentedFrame::Disposition;
 
@@ -212,6 +284,7 @@ void output_model_metadata_only_stays_manifest_only() {
 
 int main() {
   output_model_presents_frame_set();
+  output_model_uses_owned_frame_set_boundary();
   historical_disabled_output_stays_dropped();
   output_model_metadata_only_stays_manifest_only();
   return 0;
