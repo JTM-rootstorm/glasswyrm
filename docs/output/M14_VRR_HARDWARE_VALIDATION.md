@@ -65,6 +65,13 @@ private, per-unit `*.log` file in the live artifact directory. These diagnostic
 sidecars survive early service failure without weakening the accepted
 archive's exact artifact allowlist.
 
+Before takeover, the live runner checks its bounded core and client unit-name
+set. Active collisions are rejected; inactive or failed stale transient units
+are reset by exact name and must unload before the run proceeds. New units use
+`Type=exec` startup confirmation and collection-on-failure, while cleanup stops
+only units whose transient launch succeeded. A compositor restart creates a
+fresh transient service instead of relying on an unloaded definition.
+
 The live command refuses direct execution and requires the exact
 `glasswyrm-m14-harness.scope` transient scope shown above. This prevents
 stopping the configured getty from terminating the harness with its login

@@ -391,10 +391,14 @@ id fb pos size
             raise AssertionError("GWM restart is not independently supervised")
         compositor_stops = [argv for argv in commands
                             if argv[1:3] == ["stop", LIVE_UNITS["gwcomp"]]]
+        compositor_launches = [argv for argv in transient_units
+                               if str(FIXED_BINARIES["gwcomp"]) in argv]
         compositor_starts = [argv for argv in commands
                              if argv[1:3] == ["start", LIVE_UNITS["gwcomp"]]]
-        if not compositor_stops or not compositor_starts:
-            raise AssertionError("compositor restart is not independently supervised")
+        if (not compositor_stops or len(compositor_launches) != 2 or
+                compositor_starts):
+            raise AssertionError(
+                "compositor restart did not recreate its transient service")
         if not any("preference" in argv and "client-app-preferences.json" in " ".join(argv)
                    for argv in commands):
             raise AssertionError("one-window preference scenario is absent")
