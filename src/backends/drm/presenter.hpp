@@ -61,6 +61,8 @@ class DrmPresenter final : public output::PresentationBackend,
   [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameView& frame) override;
   [[nodiscard]] output::PresentResult present(
+      const output::SoftwareFrameSet& frames) override;
+  [[nodiscard]] output::PresentResult present(
       const output::SoftwareFrameSetView& frames) override;
   [[nodiscard]] int poll_fd() const noexcept override;
   [[nodiscard]] short poll_events() const noexcept override;
@@ -146,7 +148,8 @@ class DrmPresenter final : public output::PresentationBackend,
       const output::SoftwareFrameView& frame, FullCopyReason forced_reason,
       std::uint64_t layout_generation,
       const output::VrrPresentationRequest* vrr_request,
-      bool require_output_identity);
+      bool require_output_identity,
+      std::optional<std::uint64_t> trusted_visible_hash = std::nullopt);
   [[nodiscard]] output::BackendEvent fatal_event(std::string stage,
                                                  std::string reason);
   void record_fatal(std::string stage, std::string reason) noexcept;

@@ -116,9 +116,18 @@ class PresentationBackend {
   }
 
   [[nodiscard]] virtual PresentResult present(const SoftwareFrameView& frame) = 0;
-  // The M13 boundary is additive while historical producers still submit one
-  // SoftwareFrameView. Backends keep both entry points until the integrated
-  // transaction migrates without changing historical fixtures.
+  // Internal owners may submit the finalized frame set directly. Its stored
+  // per-output and aggregate hashes are trusted because SoftwareFrameSet has
+  // no public pixel-mutation path after finalize(). External/view callers
+  // retain the validating entry point below.
+  [[nodiscard]] virtual PresentResult present(const SoftwareFrameSet& frames) {
+    if (!frames.finalized())
+      return {PresentDisposition::Rejected, 0, 0,
+              "presentation requires a finalized output frame set"};
+    return present(frames.view());
+  }
+  // The view boundary remains available for untrusted adapters and tests.
+  // Backends must validate any hashes and metadata supplied through it.
   [[nodiscard]] virtual PresentResult present(
       const SoftwareFrameSetView&) {
     return {PresentDisposition::Rejected, 0, 0,

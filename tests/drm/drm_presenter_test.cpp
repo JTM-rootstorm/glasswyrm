@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <fcntl.h>
 #include <fstream>
+#include <iomanip>
 #include <poll.h>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -172,6 +174,12 @@ std::string contents(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(input), {}};
 }
 
+std::string hex64(const std::uint64_t value) {
+  std::ostringstream encoded;
+  encoded << std::hex << std::setfill('0') << std::setw(16) << value;
+  return encoded.str();
+}
+
 void replace_report_target(void* context) {
   const auto& path = *static_cast<std::filesystem::path*>(context);
   const auto replacement = path.string() + ".foreign";
@@ -271,6 +279,41 @@ void frame_set_boundary() {
           event.visible_hash == pending_frames.aggregate_hash() &&
           rig.presenter->finalize_pending(pending.token, rig.error),
       "DRM asynchronous frame-set completion reports the aggregate hash");
+}
+
+void trusted_frame_set_hash_boundary() {
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  auto frames = frame_set(pixels, 1);
+  auto& output_frame = const_cast<output::OutputFrameResult&>(
+      frames.outputs().begin()->second);
+  const auto finalized_hash = output_frame.visible_hash;
+
+  // Deliberately violate the owned set's logical immutability in this test so
+  // a regression that hashes its pixels again is externally distinguishable.
+  output_frame.frame.pixels()[0] ^= 0x00010101U;
+  gw::test::require(output_frame.frame.visible_hash() != finalized_hash,
+                    "trusted frame-set fixture separates stored and live hashes");
+
+  Rig trusted(DrmPresentationApi::Atomic, true, true, false, true, true);
+  const auto presented = trusted.presenter->present(frames);
+  const auto report = contents(trusted.report.path());
+  gw::test::require(
+      presented.disposition == output::PresentDisposition::Complete &&
+          report.find("\"canonical_hash\":\"" + hex64(finalized_hash) +
+                      "\"") != std::string::npos,
+      "owned finalized frame set presents with its stored canonical hash: " +
+          presented.error + " report=" + report);
+
+  Rig untrusted(DrmPresentationApi::Atomic);
+  const auto commits_before = untrusted.kms.atomic_commits.size();
+  const auto calls_before = untrusted.kms.calls.size();
+  const auto rejected = untrusted.presenter->present(frames.view());
+  gw::test::require(
+      rejected.disposition == output::PresentDisposition::Rejected &&
+          untrusted.kms.atomic_commits.size() == commits_before &&
+          untrusted.kms.calls.size() == calls_before,
+      "untrusted frame-set view recomputes and rejects a forged visible hash");
 }
 
 void historical_frame_identity_adapter() {
@@ -546,6 +589,7 @@ int main() {
   atomic_lifecycle_and_delayed_evidence();
   presentation_refresh_tolerance();
   frame_set_boundary();
+  trusted_frame_set_hash_boundary();
   historical_frame_identity_adapter();
   accumulated_damage_copy_and_vt_fallback();
   incomplete_damage_recovers_with_full_copy();
