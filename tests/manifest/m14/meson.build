@@ -109,6 +109,27 @@ if get_option('glasswyrmd')
       args: ['--self-test'],
       timeout: 10,
     )
+
+    if (get_option('libgwipc') and get_option('gwm') and
+        get_option('gwcomp') and get_option('headless_backend'))
+      m14_vrr_client_runtime_test = find_program(
+        tests_source_dir / 'apps/m14_vrr_client_runtime_test.sh',
+      )
+      test(
+        'm14-vrr-client-headless-runtime',
+        m14_vrr_client_runtime_test,
+        args: [
+          gwm_program.full_path(),
+          gwcomp_program.full_path(),
+          glasswyrmd_program.full_path(),
+          m14_vrr_client.full_path(),
+          m14_client_state_validator.full_path(),
+        ],
+        depends: [gwm_program, gwcomp_program, glasswyrmd_program,
+                  m14_vrr_client],
+        timeout: 20,
+      )
+    endif
   endif
 endif
 
