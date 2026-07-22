@@ -12,7 +12,9 @@ import stat
 import struct
 import subprocess
 import sys
+import tempfile
 import time
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from common import (
@@ -49,6 +51,28 @@ LIVE_MANAGED_UNITS = (
 
 PATH_WAIT_ATTEMPTS = 200
 CLIENT_RESULT_WAIT_ATTEMPTS = 1200
+COMMAND_TIMEOUT_SECONDS = 120
+COMMAND_TAIL_BYTES = 2048
+QUERY_ATTEMPTS = 3
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Bounded evidence from one shell-free fixed executable invocation."""
+
+    exit_status: int | None
+    signal: int | None
+    timed_out: bool
+    stdout_bytes: int
+    stderr_bytes: int
+    elapsed_ns: int
+    output_path: Path | None
+    bounded_tail: str
+
+    @property
+    def succeeded(self) -> bool:
+        return (not self.timed_out and self.signal is None and
+                self.exit_status == 0)
 
 
 def _control_group_has_live_scope(contents: str) -> bool:
@@ -110,21 +134,89 @@ class FixedLiveRunner:
         self._cadence_starts: dict[str, int] = {}
 
     @staticmethod
-    def _execute(argv: list[str], output: Path | None = None) -> int:
+    def _execute(argv: list[str], output: Path | None = None) -> CommandResult:
         allowed = {str(path) for path in FIXED_BINARIES.values()}
         if not argv or argv[0] not in allowed:
             raise HarnessError("live runner rejected a non-fixed executable")
-        stream = output.open("ab") if output else subprocess.DEVNULL
+        started = time.monotonic_ns()
+        stream = output.open("a+b") if output else tempfile.TemporaryFile()
+        stderr = tempfile.TemporaryFile()
+        stdout_start = stream.tell()
+        exit_status: int | None = None
+        terminating_signal: int | None = None
+        timed_out = False
         try:
-            result = subprocess.run(argv, check=False, stdin=subprocess.DEVNULL,
-                                    stdout=stream, stderr=subprocess.STDOUT, timeout=120)
-            return result.returncode
+            try:
+                result = subprocess.run(
+                    argv, check=False, stdin=subprocess.DEVNULL,
+                    stdout=stream, stderr=stderr,
+                    timeout=COMMAND_TIMEOUT_SECONDS,
+                )
+                if result.returncode < 0:
+                    terminating_signal = -result.returncode
+                else:
+                    exit_status = result.returncode
+            except subprocess.TimeoutExpired:
+                timed_out = True
+            stream.flush()
+            stderr.flush()
+            stdout_bytes = stream.tell() - stdout_start
+            stderr_bytes = stderr.tell()
+            tails: list[bytes] = []
+            if stdout_bytes:
+                stream.seek(max(stdout_start, stream.tell() - COMMAND_TAIL_BYTES))
+                tails.append(stream.read(COMMAND_TAIL_BYTES))
+            if stderr_bytes:
+                stderr.seek(max(0, stderr_bytes - COMMAND_TAIL_BYTES))
+                tails.append(stderr.read(COMMAND_TAIL_BYTES))
+            tail = b"\n".join(tails)[-COMMAND_TAIL_BYTES:].decode(
+                "utf-8", errors="replace",
+            )
+            return CommandResult(
+                exit_status, terminating_signal, timed_out,
+                stdout_bytes, stderr_bytes,
+                time.monotonic_ns() - started, output, tail,
+            )
         finally:
-            if output:
-                stream.close()
+            stream.close()
+            stderr.close()
+
+    def command_result(self, argv: list[str],
+                       output: Path | None = None) -> CommandResult:
+        """Run one fixed argv and normalize legacy injected test executors."""
+        allowed = {str(path) for path in FIXED_BINARIES.values()}
+        if not argv or argv[0] not in allowed:
+            raise HarnessError("live runner rejected a non-fixed executable")
+        started = time.monotonic_ns()
+        raw = self.execute(argv, output)
+        if isinstance(raw, CommandResult):
+            return raw
+        if isinstance(raw, bool) or not isinstance(raw, int):
+            raise HarnessError("live runner executor returned an invalid result")
+        size = 0
+        tail = ""
+        if output is not None and output.is_file():
+            contents = _read_regular(output, MAX_JSON_BYTES)
+            size = len(contents)
+            tail = contents[-COMMAND_TAIL_BYTES:].decode(
+                "utf-8", errors="replace",
+            )
+        return CommandResult(
+            raw if raw >= 0 else None,
+            -raw if raw < 0 else None,
+            False,
+            size,
+            0,
+            time.monotonic_ns() - started,
+            output,
+            tail,
+        )
 
     def command(self, argv: list[str], output: str | None = None) -> None:
-        if self.execute(argv, self.artifacts / output if output else None) != 0:
+        result = self.command_result(
+            argv, self.artifacts / output if output else None,
+        )
+        if not result.succeeded:
             raise HarnessError(f"fixed command failed: {Path(argv[0]).name}")
 
     @staticmethod
@@ -178,8 +270,9 @@ class FixedLiveRunner:
                 kd_mode = struct.unpack("I", packed)[0]
         except OSError as error:
             raise HarnessError(f"cannot capture exact VT/KD state: {error}") from error
-        getty_active = self.execute(
-            [str(FIXED_BINARIES["systemctl"]), "is-active", self.getty_unit], None) == 0
+        getty_active = self.command_result(
+            [str(FIXED_BINARIES["systemctl"]), "is-active", self.getty_unit],
+        ).succeeded
         return {"active_vt": active_vt, "kd_mode": kd_mode,
                 "getty_active": getty_active}
 
@@ -224,7 +317,7 @@ class FixedLiveRunner:
         argv = [str(FIXED_BINARIES["systemctl"]), "show",
                 "--property=LoadState", "--property=ActiveState", name]
         try:
-            if self.execute(argv, path) != 0:
+            if not self.command_result(argv, path).succeeded:
                 raise HarnessError(
                     f"cannot inspect fixed transient unit: {name}")
             fields: dict[str, str] = {}
@@ -269,7 +362,7 @@ class FixedLiveRunner:
 
     def stop_unit(self, name: str) -> None:
         argv = [str(FIXED_BINARIES["systemctl"]), "stop", name]
-        stop_result = self.execute(argv, None)
+        stop_result = self.command_result(argv)
         if self.verify_paths:
             reset_attempted = False
             for _ in range(20):
@@ -279,8 +372,9 @@ class FixedLiveRunner:
                 if (load_state == "loaded" and
                         active_state in {"inactive", "failed"} and
                         not reset_attempted):
-                    if self.execute([str(FIXED_BINARIES["systemctl"]),
-                                     "reset-failed", name], None) != 0:
+                    if not self.command_result([
+                            str(FIXED_BINARIES["systemctl"]),
+                            "reset-failed", name]).succeeded:
                         raise HarnessError(
                             f"fixed transient unit could not be reset: {name}")
                     reset_attempted = True
@@ -293,8 +387,9 @@ class FixedLiveRunner:
             else:
                 raise HarnessError(
                     f"fixed transient unit did not unload after stop: {name} "
-                    f"(stop={stop_result}, {load_state}/{active_state})")
-        elif stop_result != 0:
+                    f"(stop={stop_result.exit_status}, "
+                    f"{load_state}/{active_state})")
+        elif not stop_result.succeeded:
             raise HarnessError(f"fixed transient unit did not stop: {name}")
         self.managed_units = [unit for unit in self.managed_units
                               if unit != name]
@@ -413,7 +508,7 @@ class FixedLiveRunner:
             path.unlink(missing_ok=True)
             argv = [str(FIXED_BINARIES["gwinfo"]), "--socket",
                     str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"]
-            if self.execute(argv, path) != 0:
+            if not self.command_result(argv, path).succeeded:
                 last_error = "gwinfo query failed"
                 time.sleep(.05)
                 continue
@@ -538,7 +633,9 @@ class FixedLiveRunner:
                 raise HarnessError("live run requires invocation from the configured text VT") from error
         if current != self.config["tty"]:
             raise HarnessError("live run refused the wrong active VT")
-        if self.execute([str(FIXED_BINARIES["systemctl"]), "is-active", "display-manager.service"], None) == 0:
+        if self.command_result([
+                str(FIXED_BINARIES["systemctl"]), "is-active",
+                "display-manager.service"]).succeeded:
             raise HarnessError("live run refused an active graphical display manager")
         if self.verify_paths:
             self.prepare_unit_names()
@@ -598,7 +695,7 @@ class FixedLiveRunner:
                 self.cleanup_errors.append(f"cleanup exception: {error}")
         for argv in operations:
             try:
-                if self.execute(argv, None) != 0:
+                if not self.command_result(argv).succeeded:
                     self.cleanup_errors.append(f"cleanup command failed: {Path(argv[0]).name} {' '.join(argv[1:3])}")
             except Exception as error:  # restoration must continue after every failure
                 self.cleanup_errors.append(f"cleanup exception: {error}")
@@ -609,7 +706,7 @@ class FixedLiveRunner:
                     str(self.config["mode"]).split("@", 1)[0], "--expect-restored",
                     str(self.artifacts / "kms-before.json"), "--output", str(after)]
             try:
-                if self.execute(argv, None) != 0:
+                if not self.command_result(argv).succeeded:
                     self.cleanup_errors.append("exact KMS restoration probe failed")
             except Exception as error:
                 self.cleanup_errors.append(f"KMS restoration probe exception: {error}")
