@@ -26,6 +26,40 @@ struct PayloadDeleter {
   }
 };
 
+class PosixSceneManifestIo final : public SceneManifestIo {
+public:
+  int open(const char *path, const int flags,
+           const mode_t mode) const override {
+    return ::open(path, flags, mode);
+  }
+
+  int stat(const int fd, struct stat *status) const override {
+    return ::fstat(fd, status);
+  }
+
+  int lock(const int fd, const int operation) const override {
+    return ::flock(fd, operation);
+  }
+
+  ssize_t write(const int fd, const void *data,
+                const std::size_t size) const override {
+    return ::write(fd, data, size);
+  }
+
+  int synchronize(const int fd) const override { return ::fdatasync(fd); }
+
+  int truncate(const int fd, const off_t size) const override {
+    return ::ftruncate(fd, size);
+  }
+
+  int close(const int fd) const override { return ::close(fd); }
+};
+
+std::shared_ptr<const SceneManifestIo> default_io() {
+  static const auto io = std::make_shared<PosixSceneManifestIo>();
+  return io;
+}
+
 void hash_bytes(std::uint64_t &hash, std::span<const std::uint8_t> bytes) {
   for (const auto byte : bytes) {
     hash ^= byte;
@@ -101,11 +135,12 @@ std::vector<std::uint64_t> manifest_order(const Scene &scene) {
   return visible;
 }
 
-bool write_all(int fd, std::string_view bytes) {
+bool write_all(const SceneManifestIo &io, const int fd,
+               const std::string_view bytes) {
   std::size_t offset = 0;
   while (offset < bytes.size()) {
     const auto count =
-        ::write(fd, bytes.data() + offset, bytes.size() - offset);
+        io.write(fd, bytes.data() + offset, bytes.size() - offset);
     if (count > 0)
       offset += static_cast<std::size_t>(count);
     else if (count < 0 && errno == EINTR)
@@ -117,6 +152,10 @@ bool write_all(int fd, std::string_view bytes) {
 }
 
 } // namespace
+
+SceneManifest::SceneManifest(std::filesystem::path path,
+                             std::shared_ptr<const SceneManifestIo> io)
+    : path_(std::move(path)), io_(io ? std::move(io) : default_io()) {}
 
 bool SceneManifest::describe(const std::uint64_t commit_id,
                              const std::uint64_t generation, const Scene &scene,
@@ -277,29 +316,29 @@ bool SceneManifest::publish(PreparedSceneManifest &prepared,
     error = "scene manifest parent must be a real directory";
     return false;
   }
-  const int fd =
-      ::open(path_.c_str(),
-             O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW, 0600);
+  const int fd = io_->open(path_.c_str(),
+                           O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW,
+                           0600);
   if (fd < 0) {
     error = std::string("scene manifest open failed: ") + std::strerror(errno);
     return false;
   }
   struct stat status{};
-  bool ok = ::fstat(fd, &status) == 0 && S_ISREG(status.st_mode) &&
-            ::flock(fd, LOCK_EX) == 0;
+  bool ok = io_->stat(fd, &status) == 0 && S_ISREG(status.st_mode) &&
+            io_->lock(fd, LOCK_EX) == 0;
   const off_t original_size = ok ? status.st_size : -1;
   if (ok)
-    ok = write_all(fd, prepared.json) && ::fdatasync(fd) == 0;
+    ok = write_all(*io_, fd, prepared.json) && io_->synchronize(fd) == 0;
   if (!ok && original_size >= 0) {
-    const auto truncated = ::ftruncate(fd, original_size);
-    const auto synchronized = ::fdatasync(fd);
+    const auto truncated = io_->truncate(fd, original_size);
+    const auto synchronized = io_->synchronize(fd);
     static_cast<void>(truncated);
     static_cast<void>(synchronized);
   }
   const int saved_errno = errno;
   if (original_size >= 0)
-    (void)::flock(fd, LOCK_UN);
-  (void)::close(fd);
+    (void)io_->lock(fd, LOCK_UN);
+  (void)io_->close(fd);
   if (!ok) {
     error = std::string("scene manifest append failed: ") +
             std::strerror(saved_errno);
