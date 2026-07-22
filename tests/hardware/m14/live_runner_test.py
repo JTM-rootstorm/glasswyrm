@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 
 from common import HarnessError  # noqa: E402
 from live_runner import (  # noqa: E402
-    CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES, FIXED_BINARIES,
-    LIVE_MANAGED_UNITS, LIVE_UNITS, QUERY_ATTEMPTS,
+    CLEANUP_QUERY_ATTEMPTS, CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES,
+    FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS, QUERY_ATTEMPTS,
     QUERY_DIAGNOSTIC_SCHEMA, CommandResult, FixedLiveRunner,
 )
 
@@ -311,6 +311,64 @@ def test_query_diagnostic_tail_is_bounded(root: Path) -> None:
     )
     assert diagnostic_path.stat().st_size <= 32 * 1024
     assert diagnostic_path.stat().st_mode & 0o077 == 0
+
+
+def test_policy_cleanup_uses_bounded_typed_queries(root: Path) -> None:
+    calls = 0
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        assert output is not None
+        windows = [{"window": 41}] if calls == 1 else []
+        candidate = 41 if calls == 2 else 0
+        output.write_text(
+            json.dumps({
+                "vrr": [{"name": "DP-1", "candidate_window": candidate}],
+                "windows": windows,
+            }) + "\n",
+            encoding="utf-8",
+        )
+        return query_result(output)
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    runner.wait_policy_cleanup()
+
+    assert calls == 3
+    assert calls < 400
+    assert runner.cleanup_wait_count == 1
+    assert not (root / ".policy-cleanup.query.tmp").exists()
+    diagnostic = read_query_diagnostic(root, "policy-cleanup")
+    assert diagnostic["outcome"] == "converged"
+    assert diagnostic["attempt_count"] == 3
+    assert diagnostic["attempt_limit"] == CLEANUP_QUERY_ATTEMPTS
+    coherent_path = Path(str(diagnostic["last_coherent_json"]))
+    assert json.loads(coherent_path.read_text(
+        encoding="utf-8",
+    ))["vrr"][0]["candidate_window"] == 41
+
+
+def test_policy_cleanup_fails_once_on_signal(root: Path) -> None:
+    calls = 0
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        return query_result(
+            output, status=None, terminating_signal=15,
+        )
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    expect_harness_error_contains(
+        runner.wait_policy_cleanup,
+        "coordinated client cleanup query failed: "
+        "gwinfo query terminated by signal 15",
+    )
+    assert calls == 1
+    assert not (root / ".policy-cleanup.query.tmp").exists()
+    diagnostic = read_query_diagnostic(root, "policy-cleanup")
+    assert diagnostic["outcome"] == "fatal"
+    assert diagnostic["attempt_count"] == 1
 
 
 def test_start_unit_contract(root: Path) -> None:
@@ -639,6 +697,14 @@ def main() -> int:
         snapshot_tail = root / "snapshot-tail"
         snapshot_tail.mkdir()
         test_query_diagnostic_tail_is_bounded(snapshot_tail)
+
+        cleanup_queries = root / "cleanup-queries"
+        cleanup_queries.mkdir()
+        test_policy_cleanup_uses_bounded_typed_queries(cleanup_queries)
+
+        cleanup_signal = root / "cleanup-signal"
+        cleanup_signal.mkdir()
+        test_policy_cleanup_fails_once_on_signal(cleanup_signal)
 
         client_wait = root / "client-wait"
         client_wait.mkdir()
