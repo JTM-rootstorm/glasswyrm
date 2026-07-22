@@ -293,7 +293,7 @@ id fb pos size
       flags: range
       values: 0 1
       value: 1
-99 0 (0,0) (1920x1080)
+99 0 (0,0) (0x0)
   props:
     12 VRR_ENABLED:
       flags: range

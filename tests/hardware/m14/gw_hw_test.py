@@ -13,8 +13,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 from config_doctor import (  # noqa: E402
-    ConfigError, _connector_profile, _parse_debugfs_refresh_range,
-    _reviewed_range_source, parse_config,
+    ConfigError, _connector_profile, _modetest_commands,
+    _parse_debugfs_refresh_range, _reviewed_range_source, parse_config,
 )
 
 TOOL = ROOT / "tools" / "gw-hw"
@@ -182,6 +182,19 @@ def assert_archive(artifacts: Path) -> None:
 
 
 def main() -> int:
+    assert _modetest_commands(
+        "/usr/bin/modetest", Path("/dev/dri/card0"), "nvidia") == [
+            ["/usr/bin/modetest", "-D", "/dev/dri/card0", "-c", "-e", "-p"],
+            ["/usr/bin/modetest", "-M", "nvidia-drm", "-D",
+             "/dev/dri/card0", "-c", "-e", "-p"],
+        ]
+    assert _modetest_commands(
+        "/usr/bin/modetest", Path("/dev/dri/card1"), "amdgpu")[-1] == [
+            "/usr/bin/modetest", "-M", "amdgpu", "-D", "/dev/dri/card1",
+            "-c", "-e", "-p",
+        ]
+    assert len(_modetest_commands(
+        "/usr/bin/modetest", Path("/dev/dri/card0"), "bad/module")) == 1
     assert _parse_debugfs_refresh_range("Min: 48 Hz\nMax: 144 Hz\n") == (48, 144)
     assert _parse_debugfs_refresh_range(
         "minimum_refresh = 48 maximum_refresh = 144") == (48, 144)

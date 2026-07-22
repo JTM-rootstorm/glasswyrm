@@ -24,6 +24,38 @@ from common import (
 )
 from provenance import validate_build_provenance
 
+
+MODETEST_MODULE_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _modetest_commands(
+        executable: str, drm: Path, driver: str) -> list[list[str]]:
+    """Return exact-node discovery commands, including a bounded driver fallback."""
+    suffix = ["-D", str(drm), "-c", "-e", "-p"]
+    commands = [[executable, *suffix]]
+    if not MODETEST_MODULE_PATTERN.fullmatch(driver):
+        return commands
+    module = "nvidia-drm" if driver == "nvidia" else driver
+    commands.append([executable, "-M", module, *suffix])
+    return commands
+
+
+def _query_modetest(executable: str, drm: Path, driver: str) -> str:
+    """Collect one successful bounded resource dump without changing KMS state."""
+    for command in _modetest_commands(executable, drm, driver):
+        try:
+            result = subprocess.run(
+                command, check=False, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if result.returncode == 0:
+            return result.stdout[:1024 * 1024]
+    return ""
+
+
 def parse_config(path: Path) -> dict[str, object]:
     try:
         status = path.lstat()
@@ -282,7 +314,7 @@ def _modetest_crtc_property_value(
         output: str, crtc_id: int, property_name: str) -> int | None:
     crtc_row = re.compile(
         r"^\s*(\d+)\s+\d+\s+\(-?[0-9]+,-?[0-9]+\)\s+"
-        r"\([1-9][0-9]*x[1-9][0-9]*\)\s*$")
+        r"\([0-9]+x[0-9]+\)\s*$")
     property_row = re.compile(r"^\s*\d+\s+([A-Za-z0-9_-]+):\s*$")
     value_row = re.compile(r"^\s*value:\s*(-?[0-9]+)\s*$", re.IGNORECASE)
     in_selected_crtc = False
@@ -401,6 +433,11 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
             return False
         finally:
             os.close(descriptor)
+    driver_link = Path("/sys/class/drm") / card / "device" / "driver"
+    try:
+        driver = driver_link.resolve(strict=True).name
+    except OSError:
+        driver = "unavailable"
     try:
         edid = (root / "edid").read_bytes()
         digest = hashlib.sha256(edid).hexdigest() if edid else ""
@@ -426,11 +463,7 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
                        if path.is_file() and os.access(path, os.X_OK)), None)
     modetest_text = ""
     if modetest and os.path.realpath(modetest).startswith(("/usr/bin/", "/bin/")):
-        result = subprocess.run([modetest, "-D", str(drm), "-c", "-e", "-p"], check=False,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, timeout=10)
-        if result.returncode == 0:
-            modetest_text = result.stdout[:1024 * 1024]
+        modetest_text = _query_modetest(modetest, drm, driver)
     selected_crtc_id = _modetest_selected_crtc_id(modetest_text, connector)
     selected_vrr_value = (_modetest_crtc_property_value(
         modetest_text, selected_crtc_id, "VRR_ENABLED")
@@ -441,11 +474,6 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
         modetest_text, connector, "vrr_capable")
     vrr_capable = (connector_vrr_capable if connector_vrr_capable in {0, 1}
                    else debug_vrr_capable)
-    driver_link = Path("/sys/class/drm") / card / "device" / "driver"
-    try:
-        driver = driver_link.resolve(strict=True).name
-    except OSError:
-        driver = "unavailable"
     libdrm = "unavailable"
     pkg_config = next((str(path) for path in (Path("/usr/bin/pkg-config"), Path("/bin/pkg-config"))
                        if path.is_file() and os.access(path, os.X_OK)), None)
