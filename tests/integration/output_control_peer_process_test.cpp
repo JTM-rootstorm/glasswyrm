@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <poll.h>
@@ -23,6 +24,7 @@ using glasswyrm::output::OutputLayout;
 using glasswyrm::output::OutputModeId;
 using glasswyrm::output::OutputState;
 using glasswyrm::server::OutputControlPeer;
+using glasswyrm::server::VrrStateCache;
 using gw::test::require;
 
 struct ConnectionDelete {
@@ -113,7 +115,93 @@ glasswyrm::server::LifecycleSnapshot window_snapshot() {
   return snapshot;
 }
 
-Connection connect_tool(const std::string &path) {
+std::vector<gwipc_output_vrr_capability_upsert> vrr_capabilities() {
+  std::vector<gwipc_output_vrr_capability_upsert> values;
+  for (const std::uint64_t output_id : {11U, 12U}) {
+    gwipc_output_vrr_capability_upsert value{};
+    value.struct_size = sizeof(value);
+    value.output_id = output_id;
+    value.simulated = 1;
+    value.reason_flags = GWIPC_VRR_REASON_SIMULATED_HEADLESS;
+    values.push_back(value);
+  }
+  return values;
+}
+
+std::vector<gwipc_output_vrr_policy_upsert> vrr_policies() {
+  std::vector<gwipc_output_vrr_policy_upsert> values;
+  for (const std::uint64_t output_id : {11U, 12U}) {
+    gwipc_output_vrr_policy_upsert value{};
+    value.struct_size = sizeof(value);
+    value.output_id = output_id;
+    value.mode = GWIPC_VRR_POLICY_FOCUSED;
+    values.push_back(value);
+  }
+  return values;
+}
+
+void make_vrr_ready(VrrStateCache &cache) {
+  cache.set_window_preference(41, GWIPC_VRR_PREFERENCE_PREFER);
+  std::vector<gwipc_policy_output_vrr_state> output_policies;
+  for (const std::uint64_t output_id : {11U, 12U}) {
+    gwipc_policy_output_vrr_state value{};
+    value.struct_size = sizeof(value);
+    value.output_id = output_id;
+    value.mode = GWIPC_VRR_POLICY_FOCUSED;
+    value.candidate_required = 1;
+    if (output_id == 11) {
+      value.selected_window_id = 41;
+      value.desired_enabled = 1;
+    }
+    output_policies.push_back(value);
+  }
+  gwipc_policy_window_vrr_state window_policy{};
+  window_policy.struct_size = sizeof(window_policy);
+  window_policy.window_id = 41;
+  window_policy.output_id = 11;
+  window_policy.preference = GWIPC_VRR_PREFERENCE_PREFER;
+  window_policy.selected = 1;
+  window_policy.eligible = 1;
+  window_policy.focused = 1;
+  require(cache.stage_policy_result(1, output_policies, {window_policy}),
+          "VRR query fixture stages policy state");
+
+  std::vector<gwipc_output_vrr_state_upsert> output_states;
+  for (const std::uint64_t output_id : {11U, 12U}) {
+    gwipc_output_vrr_state_upsert value{};
+    value.struct_size = sizeof(value);
+    value.output_id = output_id;
+    value.requested_mode = GWIPC_VRR_POLICY_FOCUSED;
+    value.decision = output_id == 11 ? GWIPC_VRR_DECISION_ENABLED
+                                     : GWIPC_VRR_DECISION_DISABLED;
+    value.desired_enabled = output_id == 11;
+    value.effective_enabled = output_id == 11;
+    value.session_active = 1;
+    value.candidate_window_id = output_id == 11 ? 41 : 0;
+    value.candidate_surface_id =
+        output_id == 11 ? (UINT64_C(1) << 32U) | 41U : 0;
+    value.reason_flags = GWIPC_VRR_REASON_SIMULATED_HEADLESS |
+                         (output_id == 11 ? 0 : GWIPC_VRR_REASON_NO_CANDIDATE);
+    value.state_generation = 1;
+    output_states.push_back(value);
+  }
+  require(cache.seed_compositor_state(output_states, {}),
+          "VRR query fixture stages output state without timing");
+  gwipc_surface_vrr_state window_state{};
+  window_state.struct_size = sizeof(window_state);
+  window_state.surface_id = (UINT64_C(1) << 32U) | 41U;
+  window_state.window_id = 41;
+  window_state.output_id = 11;
+  window_state.preference = GWIPC_VRR_PREFERENCE_PREFER;
+  window_state.policy_selected = 1;
+  window_state.policy_eligible = 1;
+  window_state.focused = 1;
+  window_state.policy_generation = 1;
+  require(cache.stage_surface_states({window_state}),
+          "VRR query fixture stages window state");
+}
+
+Connection connect_tool(const std::string &path, const bool offer_vrr = false) {
   gwipc_connection_options options{};
   options.struct_size = sizeof(options);
   options.path = path.c_str();
@@ -123,6 +211,10 @@ Connection connect_tool(const std::string &path) {
       GWIPC_CAP_SNAPSHOTS | GWIPC_CAP_OUTPUT_STATE | GWIPC_CAP_OUTPUT_CONTROL |
       GWIPC_CAP_SURFACE_STATE | GWIPC_CAP_WINDOW_LIFECYCLE |
       GWIPC_CAP_SURFACE_OUTPUT_MEMBERSHIP | GWIPC_CAP_SCALE_METADATA;
+  if (offer_vrr)
+    options.offered_capabilities |= GWIPC_CAP_VRR_METADATA |
+                                    GWIPC_CAP_VRR_POLICY |
+                                    GWIPC_CAP_PRESENTATION_TIMING;
   options.required_peer_capabilities = GWIPC_CAP_OUTPUT_CONTROL;
   options.maximum_payload = 4096;
   options.maximum_fd_count = 0;
@@ -151,9 +243,16 @@ void pump(OutputControlPeer &server,
   for (std::size_t index = 0; index < tagged.size(); ++index)
     tagged[index].revents = descriptors[index].revents;
   server.service(tagged);
-  for (std::size_t index = 0; index < clients.size(); ++index)
-    (void)gwipc_connection_process_poll_events(
+  for (std::size_t index = 0; index < clients.size(); ++index) {
+    const auto client_status = gwipc_connection_process_poll_events(
         clients[index], descriptors[tagged.size() + index].revents);
+    if (client_status != GWIPC_STATUS_OK &&
+        client_status != GWIPC_STATUS_WOULD_BLOCK)
+      std::fprintf(
+          stderr, "test: client transport status=%s state=%u\n",
+          gwipc_status_string(client_status),
+          static_cast<unsigned>(gwipc_connection_get_state(clients[index])));
+  }
 }
 
 void establish(OutputControlPeer &server,
@@ -278,7 +377,11 @@ int main() {
   require(::mkdtemp(directory.data()) != nullptr,
           "create output-control directory");
   const std::string path = directory + "/control.sock";
-  OutputControlPeer server(path, inventory(), [] { return window_snapshot(); });
+  VrrStateCache vrr;
+  require(vrr.replace_inventory(vrr_capabilities(), vrr_policies()),
+          "install initial VRR query inventory");
+  OutputControlPeer server(
+      path, inventory(), [] { return window_snapshot(); }, &vrr);
   std::string error;
   const bool started = server.start(error);
   require(started, "start output-control listener: " + error);
@@ -321,6 +424,74 @@ int main() {
                               GWIPC_MESSAGE_SNAPSHOT_END,
                               GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED},
           "window query publishes geometry, policy, membership, and scale");
+
+  auto vrr_tool = connect_tool(path, true);
+  establish(server, {tool.get(), vrr_tool.get()});
+  query.query_id = 53;
+  query.flags = GWIPC_OUTPUT_QUERY_VRR | GWIPC_OUTPUT_QUERY_WINDOWS;
+  enqueue_contract(vrr_tool.get(), GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
+                   GWIPC_FLAG_ACK_REQUIRED, query,
+                   gwipc_contract_encode_output_state_query);
+  auto query_result = GWIPC_OUTPUT_CONFIGURATION_ACCEPTED;
+  const auto busy_types =
+      receive_types(server, vrr_tool.get(), 1, &query_result);
+  require(busy_types ==
+                  std::vector<std::uint16_t>{
+                      GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED} &&
+              query_result == GWIPC_OUTPUT_CONFIGURATION_BUSY &&
+              server.peer_count() == 2,
+          "valid not-ready VRR query returns only BUSY and retains its peer");
+
+  make_vrr_ready(vrr);
+  query.query_id = 54;
+  enqueue_contract(vrr_tool.get(), GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
+                   GWIPC_FLAG_ACK_REQUIRED, query,
+                   gwipc_contract_encode_output_state_query);
+  const auto ready_types = receive_types(server, vrr_tool.get(), 13);
+  require(ready_types.size() == 13 &&
+              ready_types.front() == GWIPC_MESSAGE_SNAPSHOT_BEGIN &&
+              ready_types.back() ==
+                  GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED &&
+              std::ranges::count(ready_types, GWIPC_MESSAGE_SNAPSHOT_BEGIN) ==
+                  1 &&
+              server.peer_count() == 2,
+          "first ready VRR query succeeds on the retained connection");
+  for (std::uint64_t ordinal = 1; ordinal < 200; ++ordinal) {
+    query.query_id = 100 + ordinal;
+    enqueue_contract(vrr_tool.get(), GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
+                     GWIPC_FLAG_ACK_REQUIRED, query,
+                     gwipc_contract_encode_output_state_query);
+    const auto repeated = receive_types(server, vrr_tool.get(), 13);
+    require(repeated.size() == 13 &&
+                repeated.front() == GWIPC_MESSAGE_SNAPSHOT_BEGIN &&
+                repeated.back() ==
+                    GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,
+            "sequential VRR query completes on the persistent connection");
+  }
+  require(server.peer_count() == 2,
+          "two hundred sequential VRR queries retain the same peer");
+
+  auto unnegotiated = connect_tool(path);
+  establish(server, {tool.get(), vrr_tool.get(), unnegotiated.get()});
+  query.query_id = 55;
+  query.flags = GWIPC_OUTPUT_QUERY_VRR;
+  enqueue_contract(unnegotiated.get(), GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
+                   GWIPC_FLAG_ACK_REQUIRED, query,
+                   gwipc_contract_encode_output_state_query);
+  for (unsigned attempt = 0; attempt < 100 && server.peer_count() != 2;
+       ++attempt)
+    pump(server, {tool.get(), vrr_tool.get(), unnegotiated.get()});
+  require(server.peer_count() == 2 &&
+              gwipc_connection_get_state(vrr_tool.get()) ==
+                  GWIPC_CONNECTION_ESTABLISHED,
+          "VRR query without negotiated capabilities remains a strict failure");
+  unnegotiated.reset();
+  vrr_tool.reset();
+  for (unsigned attempt = 0; attempt < 100 && server.peer_count() != 1;
+       ++attempt)
+    pump(server, {tool.get()});
+  require(server.peer_count() == 1,
+          "closing the VRR tool leaves the original peer isolated");
 
   constexpr std::uint64_t configuration = 77;
   gwipc_snapshot_begin begin{};

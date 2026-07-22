@@ -42,6 +42,10 @@ struct OutputInventoryVrr {
   std::span<const gwipc_surface_vrr_state> windows;
 };
 
+[[nodiscard]] bool
+validate_output_inventory_query(const gwipc_output_state_query &query,
+                                std::uint64_t query_sequence) noexcept;
+
 // Builds one atomic reply to an already validated compositor OutputStateQuery.
 // The caller owns snapshot identity and enqueues the returned messages in
 // order.

@@ -58,19 +58,27 @@ gwipc_status append_control(std::vector<OutputInventoryMessage> &messages,
   return GWIPC_STATUS_OK;
 }
 
-bool valid_query(const gwipc_output_state_query &query,
-                 const std::uint64_t query_sequence,
-                 const std::uint64_t snapshot_id) noexcept {
+bool valid_snapshot_id(const std::uint64_t snapshot_id) noexcept {
+  return snapshot_id != 0;
+}
+
+} // namespace
+
+bool validate_output_inventory_query(
+    const gwipc_output_state_query &query,
+    const std::uint64_t query_sequence) noexcept {
   constexpr auto known_flags =
       GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_MODES |
       GWIPC_OUTPUT_QUERY_LAYOUT | GWIPC_OUTPUT_QUERY_WINDOWS |
       GWIPC_OUTPUT_QUERY_VRR;
   return query.struct_size >= sizeof(query) && query.query_id != 0 &&
          query.flags != 0 && (query.flags & ~known_flags) == 0 &&
-         query_sequence != 0 && snapshot_id != 0 &&
+         query_sequence != 0 &&
          std::ranges::all_of(query.reserved,
                              [](const auto value) { return value == 0; });
 }
+
+namespace {
 
 std::uint32_t capability_flags(const output::OutputDescriptor &descriptor) {
   std::uint32_t flags = 0;
@@ -314,7 +322,8 @@ OutputInventoryPublication build_output_inventory_publication(
     const std::span<const OutputInventoryWindow> windows,
     const OutputInventoryVrr* vrr) {
   OutputInventoryPublication result;
-  if (!valid_query(query, query_sequence, snapshot_id)) {
+  if (!validate_output_inventory_query(query, query_sequence) ||
+      !valid_snapshot_id(snapshot_id)) {
     result.status = GWIPC_STATUS_INVALID_ARGUMENT;
     return result;
   }
