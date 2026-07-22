@@ -35,6 +35,14 @@ if get_option('gwcomp') and get_option('headless_backend')
   )
   test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10)
 
+  scene_manifest_rollback_test = executable(
+    'scene_manifest_rollback_test',
+    files(tests_source_dir / 'unit/scene_manifest_rollback_test.cpp'),
+    dependencies: [gwcomp_options_dep, gwipc_dep],
+    include_directories: test_source_root_include,
+  )
+  test('scene-manifest-rollback', scene_manifest_rollback_test, timeout: 10)
+
   gwcomp_cursor_surface_test = executable(
     'gwcomp_cursor_surface_test',
     files(tests_source_dir / 'unit/gwcomp_cursor_surface_test.cpp'),
