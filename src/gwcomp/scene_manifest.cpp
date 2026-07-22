@@ -291,8 +291,10 @@ bool SceneManifest::publish(PreparedSceneManifest &prepared,
   if (ok)
     ok = write_all(fd, prepared.json) && ::fdatasync(fd) == 0;
   if (!ok && original_size >= 0) {
-    (void)::ftruncate(fd, original_size);
-    (void)::fdatasync(fd);
+    const auto truncated = ::ftruncate(fd, original_size);
+    const auto synchronized = ::fdatasync(fd);
+    static_cast<void>(truncated);
+    static_cast<void>(synchronized);
   }
   const int saved_errno = errno;
   if (original_size >= 0)
