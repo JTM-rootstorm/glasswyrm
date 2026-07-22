@@ -263,6 +263,9 @@ if get_option('physical_validation_provenance')
   if not xcb_test_dependency.found()
     error('physical_validation_provenance requires XCB for the M14 hardware client')
   endif
+  if get_option('optimization') not in ['1', '2', '3', 's']
+    error('physical_validation_provenance requires an optimized build; use --buildtype=debugoptimized or release')
+  endif
 
   git_program = find_program('git', required: true)
   source_commit_result = run_command(
