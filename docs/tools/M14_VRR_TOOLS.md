@@ -82,4 +82,6 @@ manifest.
 The hardware command may take DRM master, switch VTs, stop the selected getty,
 and reconfigure the display. Never run it from the current graphical session
 or a TTY whose interruption is unacceptable; follow the safety requirements
-in the M14 hardware validation document first.
+in the M14 hardware validation document first. The live command must run in
+the fixed `glasswyrm-m14-harness.scope` transient scope documented there;
+direct execution is rejected before artifact creation or hardware takeover.

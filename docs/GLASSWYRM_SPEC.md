@@ -1230,7 +1230,9 @@ meson compile -C /var/tmp/glasswyrm-build-m14
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-doctor
-./tools/gw-hw milestone14-vrr-test \
+systemd-run --scope --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-vrr-test \
   --config /path/to/reviewed.toml \
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
@@ -1241,6 +1243,9 @@ The physical harness fails closed unless the fixed build contains the
 Meson-generated provenance manifest for the exact clean tested commit and the
 current sizes and SHA-256 hashes of all seven repository executables match it.
 The validated manifest is part of the checksummed evidence archive.
+Direct live execution is rejected before artifact creation or hardware
+takeover: the fixed transient scope keeps the harness alive when it stops the
+configured getty and retains the unconditional restoration guard.
 
 ## 26. Definition of done
 
