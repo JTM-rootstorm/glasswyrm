@@ -231,11 +231,18 @@ void OutputControlPeer::service_peer(const std::uint64_t peer_id,
   const auto found = peers_.find(peer_id);
   if (found == peers_.end())
     return;
-  if (revents != 0 &&
-      gwipc_connection_process_poll_events(found->second.connection.get(),
-                                           revents) != GWIPC_STATUS_OK) {
-    disconnect(peer_id);
-    return;
+  if (revents != 0) {
+    const auto status = gwipc_connection_process_poll_events(
+        found->second.connection.get(), revents);
+    if (status != GWIPC_STATUS_OK) {
+      std::fprintf(stderr,
+                   "glasswyrmd: output control peer transport failed "
+                   "id=%llu status=%s\n",
+                   static_cast<unsigned long long>(peer_id),
+                   gwipc_status_string(status));
+      disconnect(peer_id);
+      return;
+    }
   }
   const auto current = peers_.find(peer_id);
   if (current == peers_.end())
@@ -244,8 +251,14 @@ void OutputControlPeer::service_peer(const std::uint64_t peer_id,
   const auto after = peers_.find(peer_id);
   if (after != peers_.end() &&
       gwipc_connection_get_state(after->second.connection.get()) ==
-          GWIPC_CONNECTION_CLOSED)
+          GWIPC_CONNECTION_CLOSED) {
+    std::fprintf(stderr,
+                 "glasswyrmd: output control peer reached closed state "
+                 "id=%llu revents=0x%x\n",
+                 static_cast<unsigned long long>(peer_id),
+                 static_cast<unsigned>(static_cast<unsigned short>(revents)));
     disconnect(peer_id);
+  }
 }
 
 void OutputControlPeer::drain(Peer &peer) {
@@ -256,12 +269,24 @@ void OutputControlPeer::drain(Peer &peer) {
     if (status == GWIPC_STATUS_WOULD_BLOCK)
       return;
     if (status != GWIPC_STATUS_OK) {
+      std::fprintf(stderr,
+                   "glasswyrmd: output control peer receive failed "
+                   "id=%llu status=%s\n",
+                   static_cast<unsigned long long>(peer.id),
+                   gwipc_status_string(status));
       disconnect(peer.id);
       return;
     }
     std::unique_ptr<gwipc_message, decltype(&gwipc_message_destroy)> message(
         raw, gwipc_message_destroy);
     if (!consume(peer, message.get())) {
+      std::fprintf(stderr,
+                   "glasswyrmd: output control peer sent invalid message "
+                   "id=%llu type=%u sequence=%llu\n",
+                   static_cast<unsigned long long>(peer.id),
+                   static_cast<unsigned>(gwipc_message_type(message.get())),
+                   static_cast<unsigned long long>(
+                       gwipc_message_sequence(message.get())));
       disconnect(peer.id);
       return;
     }
@@ -370,70 +395,83 @@ bool OutputControlPeer::consume_query(Peer &peer,
   const auto decoded = decode_contract(message);
   const auto *query =
       decoded ? gwipc_decoded_output_state_query(decoded.get()) : nullptr;
-  const auto snapshot_id = take_snapshot_id();
-  if (query == nullptr || snapshot_id == 0)
+  const auto query_sequence = gwipc_message_sequence(message);
+  if (query == nullptr ||
+      gwipc_message_flags(message) != GWIPC_FLAG_ACK_REQUIRED ||
+      gwipc_message_reply_to(message) != 0 ||
+      !glasswyrm::compositor::validate_output_inventory_query(*query,
+                                                              query_sequence))
     return false;
+  const auto &layout = coordinator_.committed_layout();
   std::vector<glasswyrm::compositor::OutputInventoryWindow> windows;
   if ((query->flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0 &&
       window_snapshot_provider_) {
-    auto built = build_output_control_windows(
-        window_snapshot_provider_(), coordinator_.committed_layout());
+    auto built =
+        build_output_control_windows(window_snapshot_provider_(), layout);
     if (!built)
       return false;
     windows = std::move(*built);
   }
 
-  std::vector<gwipc_output_vrr_capability_upsert> vrr_capabilities;
-  std::vector<gwipc_output_vrr_policy_upsert> vrr_policies;
-  std::vector<gwipc_output_vrr_state_upsert> vrr_states;
-  std::vector<gwipc_presentation_timing> vrr_timings;
-  std::vector<gwipc_surface_vrr_state> vrr_windows;
+  VrrQuerySnapshot vrr_snapshot;
   std::optional<glasswyrm::compositor::OutputInventoryVrr> vrr_inventory;
   if ((query->flags & GWIPC_OUTPUT_QUERY_VRR) != 0) {
     if (!vrr_ || !vrr_negotiated(peer.connection.get()))
       return false;
-    const auto& layout = coordinator_.committed_layout();
-    const auto& committed_policies = coordinator_.committed_vrr_policies();
-    vrr_capabilities.reserve(layout.output_order.size());
-    vrr_policies.reserve(layout.output_order.size());
-    vrr_states.reserve(layout.output_order.size());
-    vrr_timings.reserve(layout.output_order.size());
-    for (const auto output_id : layout.output_order) {
-      const auto cached = vrr_->outputs().find(output_id.value);
-      const auto mode = committed_policies.find(output_id.value);
-      if (cached == vrr_->outputs().end() || mode == committed_policies.end() ||
-          !cached->second.compositor_state)
-        return false;
-      vrr_capabilities.push_back(cached->second.capability);
-      auto policy = cached->second.policy;
-      policy.mode = mode->second;
-      vrr_policies.push_back(policy);
-      vrr_states.push_back(*cached->second.compositor_state);
-      if (cached->second.timing)
-        vrr_timings.push_back(*cached->second.timing);
-    }
+    std::vector<VrrQueryWindow> query_windows;
     if ((query->flags & GWIPC_OUTPUT_QUERY_WINDOWS) != 0) {
-      vrr_windows.reserve(windows.size());
-      for (const auto& window : windows) {
-        const auto cached =
-            vrr_->windows().find(window.surface.x11_window_id);
-        if (cached == vrr_->windows().end() ||
-            !cached->second.compositor_state)
-          return false;
-        vrr_windows.push_back(*cached->second.compositor_state);
-      }
+      query_windows.reserve(windows.size());
+      for (const auto &window : windows)
+        query_windows.push_back(
+            {window.surface.x11_window_id, window.surface.surface_id});
     }
+    auto projected = project_vrr_query(
+        vrr_, layout, coordinator_.committed_vrr_policies(), query_windows);
+    if (projected.readiness == VrrQueryReadiness::FatalInvariant) {
+      std::fprintf(stderr,
+                   "glasswyrmd: output query violates VRR cache invariant "
+                   "query=%llu sequence=%llu reason=%s\n",
+                   static_cast<unsigned long long>(query->query_id),
+                   static_cast<unsigned long long>(query_sequence),
+                   vrr_query_reason_name(projected.reason));
+      return false;
+    }
+    if (projected.readiness == VrrQueryReadiness::RetryableNotReady) {
+      std::fprintf(stderr,
+                   "glasswyrmd: output query temporarily unavailable "
+                   "query=%llu sequence=%llu reason=%s\n",
+                   static_cast<unsigned long long>(query->query_id),
+                   static_cast<unsigned long long>(query_sequence),
+                   vrr_query_reason_name(projected.reason));
+      return enqueue_acknowledgement(
+          peer, query_sequence,
+          {query->query_id, layout.generation,
+           gw::ipc::wire::OutputConfigurationResult::Busy, 0,
+           layout.primary_output_id.value, layout.root_logical_width,
+           layout.root_logical_height,
+           static_cast<std::uint32_t>(layout.enabled_output_count)});
+    }
+    vrr_snapshot = std::move(*projected.snapshot);
     vrr_inventory.emplace(glasswyrm::compositor::OutputInventoryVrr{
-        vrr_capabilities, vrr_policies, vrr_states, vrr_timings,
-        vrr_windows});
+        vrr_snapshot.capabilities, vrr_snapshot.policies, vrr_snapshot.states,
+        vrr_snapshot.timings, vrr_snapshot.windows});
   }
+  const auto snapshot_id = take_snapshot_id();
+  if (snapshot_id == 0)
+    return false;
   const auto publication =
       glasswyrm::compositor::build_output_inventory_publication(
-          *query, gwipc_message_sequence(message), snapshot_id,
-          coordinator_.committed_layout(), windows,
+          *query, query_sequence, snapshot_id, layout, windows,
           vrr_inventory ? &*vrr_inventory : nullptr);
-  if (!publication)
+  if (!publication) {
+    std::fprintf(stderr,
+                 "glasswyrmd: output query publication failed query=%llu "
+                 "sequence=%llu status=%s\n",
+                 static_cast<unsigned long long>(query->query_id),
+                 static_cast<unsigned long long>(query_sequence),
+                 gwipc_status_string(publication.status));
     return false;
+  }
   for (const auto &item : publication.messages) {
     gwipc_outgoing_message outgoing{};
     outgoing.struct_size = sizeof(outgoing);
@@ -526,8 +564,15 @@ bool OutputControlPeer::enqueue_acknowledgement(
   outgoing.reply_to = reply_to;
   outgoing.payload = data;
   outgoing.payload_size = size;
-  return gwipc_connection_enqueue(peer.connection.get(), &outgoing) ==
-         GWIPC_STATUS_OK;
+  const auto status =
+      gwipc_connection_enqueue(peer.connection.get(), &outgoing);
+  if (status != GWIPC_STATUS_OK)
+    std::fprintf(stderr,
+                 "glasswyrmd: could not enqueue output acknowledgement "
+                 "request=%llu status=%s\n",
+                 static_cast<unsigned long long>(acknowledgement.request_id),
+                 gwipc_status_string(status));
+  return status == GWIPC_STATUS_OK;
 }
 
 bool OutputControlPeer::finish_transaction(
