@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import signal
 import shutil
 import stat
 import struct
@@ -22,6 +23,7 @@ from common import (
 from provenance import PROVENANCE_BINARIES
 
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
+LIVE_HARNESS_SCOPE = "glasswyrm-m14-harness.scope"
 FIXED_BINARIES = {
     **PROVENANCE_BINARIES,
     "systemctl": Path("/usr/bin/systemctl"),
@@ -34,6 +36,28 @@ LIVE_UNITS = {
     "gwcomp": "gwcomp-m14-hardware.service",
     "server": "glasswyrmd-m14-hardware.service",
 }
+
+
+def _control_group_has_live_scope(contents: str) -> bool:
+    """Return whether the process belongs to the fixed detached live scope."""
+    for line in contents.splitlines():
+        fields = line.split(":", 2)
+        if len(fields) == 3 and LIVE_HARNESS_SCOPE in Path(fields[2]).parts:
+            return True
+    return False
+
+
+def require_live_harness_scope(
+        path: Path = Path("/proc/self/cgroup")) -> None:
+    try:
+        contents = path.read_text(encoding="ascii")
+    except (OSError, UnicodeError) as error:
+        raise HarnessError(
+            "live run cannot verify its detached systemd scope") from error
+    if not _control_group_has_live_scope(contents):
+        raise HarnessError(
+            "live run requires systemd-run --scope "
+            "--unit=glasswyrm-m14-harness")
 
 
 class FixedLiveRunner:
@@ -396,6 +420,7 @@ class FixedLiveRunner:
 
     def preflight(self) -> None:
         if self.verify_paths:
+            require_live_harness_scope()
             for path in FIXED_BINARIES.values():
                 if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
                     raise HarnessError(f"fixed executable is unavailable or unsafe: {path}")
@@ -511,6 +536,8 @@ class FixedLiveRunner:
                               str(self.config["mode"]).split("@", 1)[0], "--snapshot-state", "--output",
                               str(self.artifacts / "kms-before.json")])
             self.verify_live_console()
+            if self.verify_paths:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
             self.command([str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit])
             self.getty_stopped = True
             self._step(2); self.start_unit(LIVE_UNITS["gwm"], "gwm", ["--ipc-socket", str(RUNTIME_ROOT / "gwm.sock")]); self.wait_path(RUNTIME_ROOT / "gwm.sock")

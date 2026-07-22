@@ -24,7 +24,10 @@ from evidence import (
     _copy_fixture_artifacts, _create_archive, analyze_cadence, finalize_live,
     validate_archive, validate_restore,
 )
-from live_runner import BUILD_ROOT, FIXED_BINARIES, LIVE_UNITS, RUNTIME_ROOT, FixedLiveRunner
+from live_runner import (
+    BUILD_ROOT, FIXED_BINARIES, LIVE_UNITS, RUNTIME_ROOT, FixedLiveRunner,
+    _control_group_has_live_scope, require_live_harness_scope,
+)
 
 def dry_run(config_path: Path, required_base: str, tested_commit: str,
             fixture_dir: Path, artifact_dir: Path) -> int:
@@ -153,6 +156,7 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
                        fixture_dir, artifact_dir)
     runner: FixedLiveRunner | None = None
     try:
+        require_live_harness_scope()
         _prepare_private_empty_directory(artifact_dir, "live artifact directory")
         _prepare_private_empty_directory(RUNTIME_ROOT, "live runtime directory")
         config = parse_config(config_path)
@@ -634,6 +638,13 @@ id fb pos size
             raise AssertionError("active graphical session was accepted")
     if len(RUN_STEPS) != 29:
         raise AssertionError("fixed hardware run order changed")
+    if (not _control_group_has_live_scope(
+            "0::/system.slice/glasswyrm-m14-harness.scope\n") or
+            _control_group_has_live_scope(
+                "0::/system.slice/not-glasswyrm-m14-harness.scope\n") or
+            _control_group_has_live_scope(
+                "0::/system.slice/glasswyrm-m14-harness.service\n")):
+        raise AssertionError("live harness scope identity is not exact")
     print("gw-hw self-test: ok")
     return 0
 

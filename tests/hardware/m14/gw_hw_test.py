@@ -228,6 +228,14 @@ def main() -> int:
                           "--artifact-dir", str(root / "unconfirmed"), "--dry-run",
                           "--fixture-dir", str(fixture))
         assert unconfirmed.returncode == 2 and "literal --yes" in unconfirmed.stderr
+        direct_artifacts = root / "direct-live"
+        direct = run("milestone14-vrr-test", "--config", str(config),
+                     "--required-base", REQUIRED_BASE,
+                     "--tested-commit", TESTED_COMMIT,
+                     "--artifact-dir", str(direct_artifacts), "--yes")
+        assert direct.returncode == 1
+        assert "requires systemd-run --scope" in direct.stderr
+        assert not direct_artifacts.exists()
         doctor_artifacts = root / "doctor-artifacts"
         checked = run("doctor", "--config", str(config),
                       "--required-base", REQUIRED_BASE,

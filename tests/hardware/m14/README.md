@@ -48,14 +48,23 @@ discovery. It copies the validated manifest into the evidence archive.
 ./tools/gw-hw doctor --config /path/to/reviewed.toml \
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit COMMIT
-./tools/gw-hw milestone14-vrr-test \
+systemd-run --scope --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-vrr-test \
   --config /path/to/reviewed.toml \
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit COMMIT \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
-`doctor` is bounded discovery. The live command is deliberately disruptive: it
+`doctor` is bounded discovery. The fixed transient scope is mandatory: a
+direct live invocation is rejected before artifact creation or hardware
+takeover because stopping a getty-owned login shell would otherwise terminate
+the harness itself. The scope isolates the harness from the configured getty;
+the runner ignores only the resulting terminal hangup while it performs its
+unconditional cleanup and exact restoration checks.
+
+The live command is deliberately disruptive: it
 may take DRM master, stop the configured getty, switch VTs, and reconfigure the
 selected display. Invoke it only from the configured spare text VT, with the
 display manager inactive and independent recovery access available. Do not run

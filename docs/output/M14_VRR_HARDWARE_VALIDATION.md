@@ -37,7 +37,9 @@ meson compile -C /var/tmp/glasswyrm-build-m14
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-doctor
-./tools/gw-hw milestone14-vrr-test \
+systemd-run --scope --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-vrr-test \
   --config PATH \
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
@@ -57,6 +59,13 @@ to the reviewed configuration, doctor report, and final summary.
 
 The doctor currently requires the libdrm `modetest` executable at
 `/usr/bin/modetest` or `/bin/modetest` for exact mode and property discovery.
+
+The live command refuses direct execution and requires the exact
+`glasswyrm-m14-harness.scope` transient scope shown above. This prevents
+stopping the configured getty from terminating the harness with its login
+shell. The detached runner ignores the getty's terminal hangup, retains its
+unconditional cleanup guard, and still requires invocation from the configured
+active physical text VT.
 
 Before using it, arrange console access and recovery independent of the tested
 display. Record the current KMS, VRR, KD, VT, getty, device, and session state.
