@@ -15,7 +15,8 @@ sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 
 from common import HarnessError  # noqa: E402
 from live_runner import (  # noqa: E402
-    FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS, FixedLiveRunner,
+    CLIENT_RESULT_WAIT_ATTEMPTS, FIXED_BINARIES, LIVE_MANAGED_UNITS,
+    LIVE_UNITS, FixedLiveRunner,
 )
 
 
@@ -99,6 +100,52 @@ def test_start_unit_contract(root: Path) -> None:
     assert argv[separator + 1:] == [
         str(FIXED_BINARIES["gwm"]), "--ipc-socket", "/run/test.sock",
     ]
+
+
+def test_client_result_uses_bounded_live_deadline(root: Path) -> None:
+    calls: list[tuple[list[str], Path | None]] = []
+    waits: list[tuple[Path, str, int]] = []
+
+    def execute(argv: list[str], output: Path | None) -> int:
+        calls.append((argv, output))
+        return 0
+
+    runner = make_runner(root, execute)
+    runner.wait_path = lambda path, kind, attempts: waits.append(
+        (path, kind, attempts),
+    )
+    result = runner.start_client("off-cadence", "cadence", "default", True)
+
+    assert result == root / "client-off-cadence.json"
+    assert waits == [(result, "file", CLIENT_RESULT_WAIT_ATTEMPTS)]
+    launches = [argv for argv, _ in calls
+                if launched_unit(argv) ==
+                "m14-hardware-client-off-cadence.service"]
+    assert len(launches) == 1
+    assert "--frames" in launches[0]
+    assert "180" in launches[0]
+
+
+def test_client_result_timeout_reports_unit_and_log(root: Path) -> None:
+    def execute(argv: list[str], output: Path | None) -> int:
+        if is_systemctl(argv, "show"):
+            write_unit_state(output, "loaded", "active")
+        return 0
+
+    runner = make_runner(root, execute)
+
+    def timed_out(path: Path, kind: str, attempts: int) -> None:
+        assert attempts == CLIENT_RESULT_WAIT_ATTEMPTS
+        raise HarnessError(f"timed out waiting for {kind}: {path}")
+
+    runner.wait_path = timed_out
+    expect_harness_error(
+        lambda: runner.start_client(
+            "off-cadence", "cadence", "default", True,
+        ),
+        "client off-cadence did not publish its bounded result "
+        f"(loaded/active); inspect {root / 'm14-hardware-client-off-cadence.log'}",
+    )
 
 
 def test_compositor_restart_recreates_transient_unit(root: Path) -> None:
@@ -323,6 +370,14 @@ def main() -> int:
         contract = root / "contract"
         contract.mkdir()
         test_start_unit_contract(contract)
+
+        client_wait = root / "client-wait"
+        client_wait.mkdir()
+        test_client_result_uses_bounded_live_deadline(client_wait)
+
+        client_timeout = root / "client-timeout"
+        client_timeout.mkdir()
+        test_client_result_timeout_reports_unit_and_log(client_timeout)
 
         restart = root / "restart"
         restart.mkdir()
