@@ -47,6 +47,9 @@ LIVE_MANAGED_UNITS = (
     *(f"m14-hardware-client-{tag}.service" for tag in LIVE_CLIENT_TAGS),
 )
 
+PATH_WAIT_ATTEMPTS = 200
+CLIENT_RESULT_WAIT_ATTEMPTS = 1200
+
 
 def _control_group_has_live_scope(contents: str) -> bool:
     """Return whether the process belongs to the fixed detached live scope."""
@@ -133,8 +136,9 @@ class FixedLiveRunner:
                 return False
         return path.is_file() and path.stat().st_size > 0
 
-    def wait_path(self, path: Path, kind: str = "socket") -> None:
-        for _ in range(200):
+    def wait_path(self, path: Path, kind: str = "socket",
+                  attempts: int = PATH_WAIT_ATTEMPTS) -> None:
+        for _ in range(attempts):
             if self.ready(path, kind):
                 return
             time.sleep(.05)
@@ -332,7 +336,14 @@ class FixedLiveRunner:
                           "--repaint-count", "2"]
         self.start_unit(unit, "client", arguments,
                         ["KillMode=mixed", "SuccessExitStatus=143"])
-        self.wait_path(result, "file")
+        try:
+            self.wait_path(result, "file", CLIENT_RESULT_WAIT_ATTEMPTS)
+        except HarnessError as error:
+            load_state, active_state = self.unit_state(unit)
+            raise HarnessError(
+                f"client {tag} did not publish its bounded result "
+                f"({load_state}/{active_state}); inspect "
+                f"{self.artifacts / unit.removesuffix('.service')}.log") from error
         if self.validate_runtime:
             state = _read_json(result)
             if (state.get("schema") != "glasswyrm.m14-vrr-client.v2" or
