@@ -226,6 +226,7 @@ bool SceneModel::apply(const gwipc_surface_remove &surface) {
   pending_.surface_policies.erase(surface.surface_id);
   pending_.surface_outputs.erase(surface.surface_id);
   pending_.vrr.surfaces.erase(surface.surface_id);
+  explicit_damage_.erase(surface.surface_id);
   return true;
 }
 
@@ -240,9 +241,16 @@ bool SceneModel::apply(const gwipc_surface_damage &damage) {
         !checked_extent(rectangle.y, rectangle.height))
       return false;
   }
-  explicit_damage_.push_back(
-      {damage.surface_id,
-       {damage.rectangles, damage.rectangles + damage.rectangle_count}});
+  const auto &surface = pending_.surfaces.at(damage.surface_id);
+  auto [pending, inserted] = explicit_damage_.try_emplace(
+      damage.surface_id,
+      Rectangle{0, 0, surface.logical_width, surface.logical_height});
+  (void)inserted;
+  for (std::size_t index = 0; index < damage.rectangle_count; ++index) {
+    const auto &rectangle = damage.rectangles[index];
+    pending->second.region.add(
+        {rectangle.x, rectangle.y, rectangle.width, rectangle.height});
+  }
   return true;
 }
 
@@ -287,6 +295,15 @@ CommitResult SceneModel::commit(const gwipc_frame_commit &frame) {
         result.result = GWIPC_FRAME_REJECTED_UNKNOWN_SURFACE;
         return result;
       }
+    }
+    for (const auto &[surface_id, pending_damage] : explicit_damage_) {
+      SurfaceDamageState damage;
+      damage.local_rectangles = pending_damage.region.rectangles();
+      damage.trusted_complete = true;
+      damage.fallback_reason = pending_damage.region.is_full_output()
+                                   ? SurfaceDamageFallbackReason::RectangleLimit
+                                   : SurfaceDamageFallbackReason::None;
+      result.surface_damage.surfaces.emplace(surface_id, std::move(damage));
     }
     committed_ = pending_;
     pending_ = committed_;
@@ -390,13 +407,11 @@ CommitResult SceneModel::commit(const gwipc_frame_commit &frame) {
       if (auto bounds = effective_bounds(now->second, *pending_.output))
         damage.add(*bounds);
   }
-  for (const auto &item : explicit_damage_) {
-    const auto found = pending_.surfaces.find(item.surface_id);
+  for (const auto &[surface_id, pending_damage] : explicit_damage_) {
+    const auto found = pending_.surfaces.find(surface_id);
     if (found == pending_.surfaces.end())
       continue;
-    for (const auto &rectangle : item.rectangles) {
-      Rectangle local{rectangle.x, rectangle.y, rectangle.width,
-                      rectangle.height};
+    for (const auto &local : pending_damage.region.rectangles()) {
       auto clipped =
           intersection(local, Rectangle{0, 0, found->second.logical_width,
                                         found->second.logical_height});
@@ -429,10 +444,10 @@ void SceneModel::disconnect() { *this = SceneModel(profile_); }
 std::vector<std::uint64_t> SceneModel::pending_damage_surface_ids() const {
   std::vector<std::uint64_t> result;
   result.reserve(explicit_damage_.size());
-  for (const auto &damage : explicit_damage_)
-    result.push_back(damage.surface_id);
-  std::ranges::sort(result);
-  result.erase(std::unique(result.begin(), result.end()), result.end());
+  for (const auto &[surface_id, unused] : explicit_damage_) {
+    (void)unused;
+    result.push_back(surface_id);
+  }
   return result;
 }
 

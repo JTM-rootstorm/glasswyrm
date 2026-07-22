@@ -9,7 +9,9 @@ namespace gw::compositor {
 
 class DamageRegion {
 public:
-  static constexpr std::size_t maximum_rectangles = 4096;
+  // Matches the largest region that can cross the public GWIPC damage
+  // contract. More complex input is conservatively collapsed to full bounds.
+  static constexpr std::size_t maximum_rectangles = 1024;
 
   explicit DamageRegion(Rectangle output_bounds);
 

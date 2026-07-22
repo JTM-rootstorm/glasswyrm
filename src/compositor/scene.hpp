@@ -44,10 +44,30 @@ struct Scene {
   std::uint64_t configuration_generation{};
 };
 
+enum class SurfaceDamageFallbackReason : std::uint8_t {
+  None = 0,
+  RectangleLimit = 1,
+  NewBuffer = 2,
+  ReplacementBuffer = 3,
+  Untrusted = 4,
+};
+
+struct SurfaceDamageState {
+  std::vector<Rectangle> local_rectangles;
+  bool trusted_complete{};
+  SurfaceDamageFallbackReason fallback_reason{
+      SurfaceDamageFallbackReason::Untrusted};
+};
+
+struct SceneDamageResult {
+  std::map<std::uint64_t, SurfaceDamageState> surfaces;
+};
+
 struct CommitResult {
   gwipc_frame_result result{GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA};
   std::uint64_t presented_generation{};
   std::vector<Rectangle> damage;
+  SceneDamageResult surface_damage;
 
   [[nodiscard]] bool accepted() const noexcept {
     return result == GWIPC_FRAME_ACCEPTED || result == GWIPC_FRAME_DROPPED;
@@ -97,16 +117,16 @@ public:
 
 private:
   struct PendingDamage {
-    std::uint64_t surface_id{};
-    std::vector<gwipc_damage_rectangle> rectangles;
+    explicit PendingDamage(Rectangle bounds) : region(bounds) {}
+    DamageRegion region;
   };
   [[nodiscard]] bool mutations_allowed() const noexcept;
 
   Scene committed_;
   Scene pending_;
   std::optional<Scene> pre_snapshot_pending_;
-  std::vector<PendingDamage> explicit_damage_;
-  std::vector<PendingDamage> pre_snapshot_damage_;
+  std::map<std::uint64_t, PendingDamage> explicit_damage_;
+  std::map<std::uint64_t, PendingDamage> pre_snapshot_damage_;
   std::uint64_t presented_generation_{};
   SceneProfile profile_{SceneProfile::Historical};
   bool snapshot_active_{};
