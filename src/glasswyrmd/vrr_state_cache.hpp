@@ -1,11 +1,14 @@
 #pragma once
 
+#include "output/model/layout.hpp"
+
 #include <glasswyrm/ipc.h>
 
 #include <cstdint>
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <vector>
 
 namespace glasswyrm::server {
@@ -37,6 +40,47 @@ struct VrrResponseBatch {
   std::vector<gwipc_presentation_timing> timings;
   std::vector<std::uint64_t> released_buffer_ids;
   std::optional<gwipc_frame_acknowledged> acknowledgement;
+};
+
+struct VrrQueryWindow {
+  std::uint32_t window_id{};
+  std::uint64_t surface_id{};
+};
+
+struct VrrQuerySnapshot {
+  std::vector<gwipc_output_vrr_capability_upsert> capabilities;
+  std::vector<gwipc_output_vrr_policy_upsert> policies;
+  std::vector<gwipc_output_vrr_state_upsert> states;
+  std::vector<gwipc_presentation_timing> timings;
+  std::vector<gwipc_surface_vrr_state> windows;
+};
+
+enum class VrrQueryReadiness {
+  Ready,
+  RetryableNotReady,
+  FatalInvariant,
+};
+
+enum class VrrQueryReason {
+  None,
+  CacheUnavailable,
+  OutputCacheMissing,
+  OutputCapabilityIncoherent,
+  CommittedPolicyIncoherent,
+  OutputStateMissing,
+  OutputStateStale,
+  OutputStateIncoherent,
+  WindowCacheMissing,
+  WindowPolicyMissing,
+  WindowStateMissing,
+  WindowStateStale,
+  WindowStateIncoherent,
+};
+
+struct VrrQueryResult {
+  VrrQueryReadiness readiness{VrrQueryReadiness::FatalInvariant};
+  VrrQueryReason reason{VrrQueryReason::None};
+  std::optional<VrrQuerySnapshot> snapshot;
 };
 
 enum class VrrResponseStatus {
@@ -106,5 +150,12 @@ class VrrStateCache final {
 
 [[nodiscard]] const char* vrr_response_status_name(
     VrrResponseStatus status) noexcept;
+
+[[nodiscard]] VrrQueryResult project_vrr_query(
+    const VrrStateCache *cache, const output::OutputLayout &layout,
+    const std::map<std::uint64_t, gwipc_vrr_policy_mode> &committed_policies,
+    std::span<const VrrQueryWindow> windows = {});
+
+[[nodiscard]] const char *vrr_query_reason_name(VrrQueryReason reason) noexcept;
 
 }  // namespace glasswyrm::server
