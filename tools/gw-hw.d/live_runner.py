@@ -54,6 +54,7 @@ CLIENT_RESULT_WAIT_ATTEMPTS = 1200
 COMMAND_TIMEOUT_SECONDS = 120
 COMMAND_TAIL_BYTES = 2048
 QUERY_ATTEMPTS = 3
+CLEANUP_QUERY_ATTEMPTS = 5
 QUERY_SLOW_NS = 1_000_000_000
 QUERY_DIAGNOSTIC_SCHEMA = "glasswyrm.m14-query-diagnostic.v1"
 RETRYABLE_QUERY_TAILS = (
@@ -262,7 +263,8 @@ class FixedLiveRunner:
     def _write_query_diagnostic(
             self, name: str, outcome: str, attempts: list[dict[str, object]],
             last_error: str,
-            last_coherent: Path | None = None) -> Path:
+            last_coherent: Path | None = None,
+            attempt_limit: int = QUERY_ATTEMPTS) -> Path:
         destination = self._query_diagnostic_path(name)
         temporary = destination.with_name(f".{destination.name}.tmp")
         payload = {
@@ -270,7 +272,7 @@ class FixedLiveRunner:
             "query": name,
             "outcome": outcome,
             "attempt_count": len(attempts),
-            "attempt_limit": QUERY_ATTEMPTS,
+            "attempt_limit": attempt_limit,
             "last_error": last_error,
             "last_coherent_json": (str(last_coherent)
                                    if last_coherent is not None else None),
@@ -599,17 +601,55 @@ class FixedLiveRunner:
         if not self.validate_runtime:
             return
         last_error = "state was not observed"
-        path = self.artifacts / ".policy-cleanup.tmp"
-        for _ in range(400):
+        name = "policy-cleanup"
+        path = self.artifacts / ".policy-cleanup.query.tmp"
+        attempts: list[dict[str, object]] = []
+        last_coherent: Path | None = None
+        for attempt in range(CLEANUP_QUERY_ATTEMPTS):
             path.unlink(missing_ok=True)
             argv = [str(FIXED_BINARIES["gwinfo"]), "--socket",
                     str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"]
-            if not self.command_result(argv, path).succeeded:
-                last_error = "gwinfo query failed"
-                time.sleep(.05)
-                continue
+            result = self.command_result(argv, path)
+            record: dict[str, object] = {
+                "attempt": attempt + 1,
+                "command": self._command_evidence(result),
+            }
+            failure = self._query_failure(result)
+            if failure is not None:
+                last_error, retryable = failure
+                record["classification"] = (
+                    "retryable-command-failure" if retryable
+                    else "fatal-command-failure"
+                )
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "retrying" if retryable else "fatal",
+                    attempts, last_error, last_coherent,
+                    CLEANUP_QUERY_ATTEMPTS,
+                )
+                path.unlink(missing_ok=True)
+                if retryable and attempt + 1 < CLEANUP_QUERY_ATTEMPTS:
+                    time.sleep(.05)
+                    continue
+                raise HarnessError(
+                    f"coordinated client cleanup query failed: {last_error}")
             try:
                 value = _read_json(path)
+            except HarnessError as error:
+                last_error = str(error)
+                record["classification"] = "malformed-json"
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "fatal", attempts, last_error, last_coherent,
+                    CLEANUP_QUERY_ATTEMPTS,
+                )
+                path.unlink(missing_ok=True)
+                raise HarnessError(
+                    "coordinated client cleanup query returned malformed JSON: "
+                    f"{last_error}") from error
+            try:
                 outputs = value.get("vrr")
                 windows = value.get("windows")
                 if (not isinstance(outputs, list) or len(outputs) != 1 or
@@ -623,12 +663,39 @@ class FixedLiveRunner:
                         candidate != 0):
                     raise HarnessError("a VRR candidate remains in the committed snapshot")
                 path.unlink(missing_ok=True)
+                if attempts or result.elapsed_ns >= QUERY_SLOW_NS:
+                    record["classification"] = (
+                        "slow-success" if result.elapsed_ns >= QUERY_SLOW_NS
+                        else "success"
+                    )
+                    attempts.append(record)
+                    self._write_query_diagnostic(
+                        name, "converged", attempts, "", last_coherent,
+                        CLEANUP_QUERY_ATTEMPTS,
+                    )
                 return
             except HarnessError as error:
                 last_error = str(error)
-                time.sleep(.05)
+                record["classification"] = "coherent-state-pending"
+                record["error"] = last_error
+                attempts.append(record)
+                last_coherent = self._query_diagnostic_path(name).with_name(
+                    f"{self._query_safe_name(name)}.last-coherent.json",
+                )
+                os.replace(path, last_coherent)
+                self._write_query_diagnostic(
+                    name,
+                    ("retrying" if attempt + 1 < CLEANUP_QUERY_ATTEMPTS
+                     else "exhausted"),
+                    attempts, last_error, last_coherent,
+                    CLEANUP_QUERY_ATTEMPTS,
+                )
+                if attempt + 1 < CLEANUP_QUERY_ATTEMPTS:
+                    time.sleep(.05)
+        path.unlink(missing_ok=True)
         raise HarnessError(
-            f"timed out waiting for coordinated client cleanup: {last_error}")
+            "timed out waiting for coordinated client cleanup after "
+            f"{CLEANUP_QUERY_ATTEMPTS} queries: {last_error}")
 
     def snapshot(self, name: str, policy: str, effective: bool,
                  preference: str | None = None,
