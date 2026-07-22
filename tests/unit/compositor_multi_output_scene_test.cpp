@@ -94,12 +94,14 @@ gwipc_surface_output_state membership(
   return value;
 }
 
-gwipc_frame_commit frame(const std::uint64_t output_id = 0) {
+gwipc_frame_commit frame(const std::uint64_t output_id = 0,
+                         const std::uint64_t commit_id = 1,
+                         const std::uint64_t generation = 7) {
   gwipc_frame_commit value{};
   value.struct_size = sizeof(value);
-  value.commit_id = 1;
+  value.commit_id = commit_id;
   value.output_id = output_id;
-  value.producer_generation = 7;
+  value.producer_generation = generation;
   return value;
 }
 
@@ -223,6 +225,72 @@ void test_output_bound_is_enforced_during_staging() {
           "ninth output rejects before map growth");
 }
 
+void test_commit_preserves_typed_local_damage() {
+  SceneModel model(SceneProfile::OutputModel);
+  require(model.begin_complete_snapshot(1, 9) &&
+              model.apply(output(1, 0, 2560, 1440)) &&
+              model.apply(surface(10, 1, 0, 0, 2560, 1440)),
+          "exact-damage output scene stages");
+  const std::vector<std::uint64_t> outputs{1};
+  require(model.apply(membership(10, 1, outputs, 1, 1, 9)) &&
+              model.end_complete_snapshot() &&
+              model.commit(frame(0, 1, 1)).accepted(),
+          "exact-damage output scene commits");
+
+  const std::array rectangles{
+      gwipc_damage_rectangle{100, 200, 64, 64},
+      gwipc_damage_rectangle{-8, -4, 16, 12},
+  };
+  gwipc_surface_damage damage{};
+  damage.struct_size = sizeof(damage);
+  damage.surface_id = 10;
+  damage.rectangles = rectangles.data();
+  damage.rectangle_count = rectangles.size();
+  require(model.apply(damage), "exact local damage stages");
+  const auto committed = model.commit(frame(0, 2, 2));
+  const auto& exact = committed.surface_damage.surfaces.at(10);
+  require(committed.accepted() && exact.trusted_complete &&
+              exact.fallback_reason ==
+                  gw::compositor::SurfaceDamageFallbackReason::None &&
+              exact.local_rectangles ==
+                  std::vector<gw::compositor::Rectangle>{
+                      {0, 0, 8, 8}, {100, 200, 64, 64}},
+          "commit retains clipped normalized local rectangles with trust");
+}
+
+void test_damage_complexity_collapses_to_typed_full_surface() {
+  SceneModel model(SceneProfile::OutputModel);
+  require(model.begin_complete_snapshot(1, 3) &&
+              model.apply(output(1, 0, 4096, 3)) &&
+              model.apply(surface(10, 1, 0, 0, 4096, 3)),
+          "complex-damage scene stages");
+  const std::vector<std::uint64_t> outputs{1};
+  require(model.apply(membership(10, 1, outputs, 1, 1, 3)) &&
+              model.end_complete_snapshot() &&
+              model.commit(frame(0, 1, 1)).accepted(),
+          "complex-damage scene commits");
+
+  std::vector<gwipc_damage_rectangle> rectangles;
+  rectangles.reserve(GWIPC_MAXIMUM_DAMAGE_RECTANGLES);
+  for (std::size_t index = 0; index < GWIPC_MAXIMUM_DAMAGE_RECTANGLES; ++index)
+    rectangles.push_back(
+        {static_cast<std::int32_t>(index * 2), 0, 1, 1});
+  gwipc_surface_damage first{sizeof(first), 10, rectangles.data(),
+                             rectangles.size(), {}};
+  const gwipc_damage_rectangle extra{1, 2, 1, 1};
+  gwipc_surface_damage second{sizeof(second), 10, &extra, 1, {}};
+  require(model.apply(first) && model.apply(second),
+          "bounded damage batches normalize together");
+  const auto committed = model.commit(frame(0, 2, 2));
+  const auto& collapsed = committed.surface_damage.surfaces.at(10);
+  require(collapsed.trusted_complete &&
+              collapsed.fallback_reason ==
+                  gw::compositor::SurfaceDamageFallbackReason::RectangleLimit &&
+              collapsed.local_rectangles ==
+                  std::vector<gw::compositor::Rectangle>{{0, 0, 4096, 3}},
+          "rectangle limit records a conservative typed full-surface fallback");
+}
+
 } // namespace
 
 int main() {
@@ -233,4 +301,6 @@ int main() {
   test_duplicate_and_stale_memberships_reject();
   test_hidden_surface_may_have_empty_membership();
   test_output_bound_is_enforced_during_staging();
+  test_commit_preserves_typed_local_damage();
+  test_damage_complexity_collapses_to_typed_full_surface();
 }
