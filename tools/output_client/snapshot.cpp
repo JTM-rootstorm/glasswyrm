@@ -61,8 +61,17 @@ bool SnapshotDecoder::consume_contract(const gwipc_message *message,
   if (type == GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED) {
     const auto *ack =
         gwipc_decoded_output_configuration_acknowledged(decoded.get());
-    if (!ack || ack->request_id != request_id_ ||
-        ack->result != GWIPC_OUTPUT_CONFIGURATION_ACCEPTED ||
+    if (!ack || ack->request_id != request_id_)
+      return fail(error, "control server rejected the output query");
+    if (ack->result == GWIPC_OUTPUT_CONFIGURATION_BUSY) {
+      if (reading_ || ended_ || acknowledged_ || complete_ ||
+          retryable_not_ready_)
+        return fail(error, "control server sent BUSY after starting an output "
+                           "snapshot");
+      retryable_not_ready_ = true;
+      return true;
+    }
+    if (ack->result != GWIPC_OUTPUT_CONFIGURATION_ACCEPTED || !ended_ ||
         ack->applied_generation != snapshot_.generation)
       return fail(error, "control server rejected the output query");
     snapshot_.primary_output_id = ack->primary_output_id;
@@ -180,6 +189,8 @@ bool SnapshotDecoder::consume_contract(const gwipc_message *message,
 
 bool SnapshotDecoder::consume(const gwipc_message *message,
                               std::string &error) {
+  if (retryable_not_ready_)
+    return fail(error, "control server sent output data after a BUSY reply");
   const auto type = gwipc_message_type(message);
   if (type == GWIPC_MESSAGE_SNAPSHOT_BEGIN ||
       type == GWIPC_MESSAGE_SNAPSHOT_END)

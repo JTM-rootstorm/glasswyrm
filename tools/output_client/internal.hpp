@@ -11,6 +11,9 @@ public:
 
   [[nodiscard]] bool consume(const gwipc_message *message, std::string &error);
   [[nodiscard]] bool complete() const noexcept { return complete_; }
+  [[nodiscard]] bool retryable_not_ready() const noexcept {
+    return retryable_not_ready_;
+  }
   [[nodiscard]] Snapshot take() { return std::move(snapshot_); }
 
 private:
@@ -28,6 +31,7 @@ private:
   bool ended_{};
   bool acknowledged_{};
   bool complete_{};
+  bool retryable_not_ready_{};
 };
 
 } // namespace glasswyrm::tools::output_client

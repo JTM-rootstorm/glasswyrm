@@ -1,6 +1,9 @@
 #include "output_client/internal.hpp"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <limits>
 #include <memory>
 #include <poll.h>
 
@@ -10,7 +13,18 @@ namespace {
 constexpr std::uint32_t kMaximumPayload = 4096;
 constexpr std::uint32_t kMaximumQueuedBytes = 2U * 1024U * 1024U;
 constexpr std::uint16_t kMaximumQueuedMessages = 2048;
-constexpr unsigned kPollAttempts = 500;
+constexpr auto kOperationTimeout = std::chrono::seconds(5);
+constexpr auto kPollSlice = std::chrono::milliseconds(10);
+constexpr auto kRetryBackoff = std::chrono::milliseconds(10);
+using Clock = std::chrono::steady_clock;
+
+int poll_timeout(const Clock::time_point deadline) noexcept {
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - Clock::now());
+  if (remaining <= std::chrono::milliseconds::zero())
+    return 0;
+  return static_cast<int>(std::min(remaining, kPollSlice).count());
+}
 
 template <typename Value>
 bool enqueue_contract(gwipc_connection *connection, const std::uint16_t type,
@@ -75,10 +89,10 @@ bool enqueue_control(gwipc_connection *connection, const std::uint16_t type,
   return false;
 }
 
-bool pump(gwipc_connection *connection, std::string &error) {
+bool pump(gwipc_connection *connection, const int timeout, std::string &error) {
   pollfd descriptor{gwipc_connection_fd(connection),
                     gwipc_connection_wanted_poll_events(connection), 0};
-  const auto count = ::poll(&descriptor, 1, 10);
+  const auto count = ::poll(&descriptor, 1, timeout);
   if (count < 0) {
     error = "polling the output control socket failed";
     return false;
@@ -131,11 +145,19 @@ public_vrr_policy(const std::uint64_t output_id,
 
 } // namespace
 
-Client::~Client() { gwipc_connection_destroy(connection_); }
+Client::~Client() { reset_connection(); }
+
+void Client::reset_connection() noexcept {
+  gwipc_connection_destroy(connection_);
+  connection_ = nullptr;
+}
 
 bool Client::connect(std::string &error) {
-  if (connection_)
-    return true;
+  if (connection_) {
+    if (gwipc_connection_get_state(connection_) == GWIPC_CONNECTION_ESTABLISHED)
+      return true;
+    reset_connection();
+  }
   gwipc_connection_options options{};
   options.struct_size = sizeof(options);
   options.path = socket_path_.c_str();
@@ -160,48 +182,64 @@ bool Client::connect(std::string &error) {
             gwipc_status_string(status);
     return false;
   }
-  return wait_established(error);
+  if (wait_established(error))
+    return true;
+  reset_connection();
+  return false;
 }
 
 bool Client::wait_established(std::string &error) {
-  for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
+  const auto deadline = Clock::now() + kOperationTimeout;
+  while (Clock::now() < deadline) {
     if (gwipc_connection_get_state(connection_) == GWIPC_CONNECTION_ESTABLISHED)
       return true;
-    if (!pump(connection_, error))
+    if (!pump(connection_, poll_timeout(deadline), error))
       return false;
   }
   error = "timed out establishing the output control connection";
   return false;
 }
 
-bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
-                   std::string &error, const bool complete_configuration) {
+QueryResult Client::query_attempt(const std::uint32_t flags, Snapshot &snapshot,
+                                  const bool complete_configuration,
+                                  const Clock::time_point deadline) {
+  std::string error;
   if (!connect(error))
-    return false;
+    return {QueryOutcome::Fatal, std::move(error)};
   const auto negotiated = gwipc_connection_peer_info(connection_).capabilities;
   constexpr auto vrr_profile = GWIPC_CAP_VRR_METADATA | GWIPC_CAP_VRR_POLICY;
   if ((flags & GWIPC_OUTPUT_QUERY_VRR) != 0 &&
       (negotiated & vrr_profile) != vrr_profile) {
-    error = "output control peer does not support VRR queries";
-    return false;
+    return {QueryOutcome::Fatal,
+            "output control peer does not support VRR queries"};
   }
   const auto effective_flags =
       complete_configuration && (negotiated & vrr_profile) == vrr_profile
           ? flags | GWIPC_OUTPUT_QUERY_VRR
           : flags;
-  const auto request_id = next_request_id_++;
+  if (next_request_id_ == 0)
+    return {QueryOutcome::Fatal, "output query identity was exhausted"};
+  const auto request_id = next_request_id_;
+  next_request_id_ = request_id == std::numeric_limits<std::uint64_t>::max()
+                         ? 0
+                         : request_id + 1;
   gwipc_output_state_query query{};
   query.struct_size = sizeof(query);
   query.query_id = request_id;
   query.flags = effective_flags;
   if (!enqueue_contract(connection_, GWIPC_MESSAGE_OUTPUT_STATE_QUERY,
                         GWIPC_FLAG_ACK_REQUIRED, query,
-                        gwipc_contract_encode_output_state_query, error))
-    return false;
+                        gwipc_contract_encode_output_state_query, error)) {
+    if (gwipc_connection_get_state(connection_) == GWIPC_CONNECTION_CLOSED)
+      reset_connection();
+    return {QueryOutcome::Fatal, std::move(error)};
+  }
   SnapshotDecoder decoder(request_id, effective_flags);
-  for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
-    if (!pump(connection_, error))
-      return false;
+  while (Clock::now() < deadline) {
+    if (!pump(connection_, poll_timeout(deadline), error)) {
+      reset_connection();
+      return {QueryOutcome::Fatal, std::move(error)};
+    }
     while (true) {
       gwipc_message *message = nullptr;
       const auto status = gwipc_connection_receive(connection_, &message);
@@ -212,17 +250,53 @@ bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
       if (status != GWIPC_STATUS_OK) {
         error = std::string("could not receive output snapshot: ") +
                 gwipc_status_string(status);
-        return false;
+        reset_connection();
+        return {QueryOutcome::Fatal, std::move(error)};
       }
-      if (!decoder.consume(owned.get(), error))
-        return false;
+      if (!decoder.consume(owned.get(), error)) {
+        reset_connection();
+        return {QueryOutcome::Fatal, std::move(error)};
+      }
+      if (decoder.retryable_not_ready())
+        return {QueryOutcome::RetryableNotReady,
+                "output snapshot is temporarily unavailable"};
       if (decoder.complete()) {
         snapshot = decoder.take();
-        return true;
+        return {QueryOutcome::Complete, {}};
       }
     }
   }
-  error = "timed out waiting for a complete output snapshot";
+  reset_connection();
+  return {QueryOutcome::Fatal,
+          "timed out waiting for a complete output snapshot"};
+}
+
+QueryResult Client::query_once(const std::uint32_t flags, Snapshot &snapshot,
+                               const bool complete_configuration) {
+  return query_attempt(flags, snapshot, complete_configuration,
+                       Clock::now() + kOperationTimeout);
+}
+
+bool Client::query(const std::uint32_t flags, Snapshot &snapshot,
+                   std::string &error, const bool complete_configuration) {
+  const auto deadline = Clock::now() + kOperationTimeout;
+  while (Clock::now() < deadline) {
+    auto result =
+        query_attempt(flags, snapshot, complete_configuration, deadline);
+    if (result.outcome == QueryOutcome::Complete) {
+      error.clear();
+      return true;
+    }
+    if (result.outcome == QueryOutcome::Fatal) {
+      error = std::move(result.detail);
+      return false;
+    }
+    const auto timeout =
+        poll_timeout(std::min(deadline, Clock::now() + kRetryBackoff));
+    if (timeout > 0)
+      (void)::poll(nullptr, 0, timeout);
+  }
+  error = "timed out waiting for output snapshot readiness";
   return false;
 }
 
@@ -231,7 +305,15 @@ bool Client::commit(const Snapshot &snapshot,
                     std::string &error) {
   if (!connect(error) || snapshot.outputs.empty())
     return false;
-  const auto configuration_id = next_request_id_++;
+  if (next_request_id_ == 0) {
+    error = "output configuration identity was exhausted";
+    return false;
+  }
+  const auto configuration_id = next_request_id_;
+  next_request_id_ =
+      configuration_id == std::numeric_limits<std::uint64_t>::max()
+          ? 0
+          : configuration_id + 1;
   gwipc_snapshot_begin begin{};
   begin.struct_size = sizeof(begin);
   begin.snapshot_id = configuration_id;
@@ -284,9 +366,12 @@ bool Client::commit(const Snapshot &snapshot,
                         gwipc_contract_encode_output_configuration_commit,
                         error))
     return false;
-  for (unsigned attempt = 0; attempt < kPollAttempts; ++attempt) {
-    if (!pump(connection_, error))
+  const auto deadline = Clock::now() + kOperationTimeout;
+  while (Clock::now() < deadline) {
+    if (!pump(connection_, poll_timeout(deadline), error)) {
+      reset_connection();
       return false;
+    }
     while (true) {
       gwipc_message *message = nullptr;
       const auto status = gwipc_connection_receive(connection_, &message);
@@ -296,6 +381,7 @@ bool Client::commit(const Snapshot &snapshot,
         break;
       if (status != GWIPC_STATUS_OK) {
         error = "could not receive the output configuration acknowledgement";
+        reset_connection();
         return false;
       }
       gwipc_decoded_contract *decoded_raw = nullptr;
@@ -316,6 +402,7 @@ bool Client::commit(const Snapshot &snapshot,
       return true;
     }
   }
+  reset_connection();
   error = "timed out waiting for output configuration acknowledgement";
   return false;
 }

@@ -78,6 +78,9 @@ enum class ServerMode {
   VrrQuery,
   VrrCommit,
   DuplicateVrr,
+  Busy,
+  BusyReady,
+  Close,
 };
 
 ServerMode parse_mode(const std::string &value) {
@@ -89,12 +92,19 @@ ServerMode parse_mode(const std::string &value) {
     return ServerMode::VrrCommit;
   if (value == "duplicate-vrr")
     return ServerMode::DuplicateVrr;
+  if (value == "busy")
+    return ServerMode::Busy;
+  if (value == "busy-ready")
+    return ServerMode::BusyReady;
+  if (value == "close")
+    return ServerMode::Close;
   return ServerMode::Query;
 }
 
 bool offers_vrr(const ServerMode mode) {
   return mode == ServerMode::VrrQuery || mode == ServerMode::VrrCommit ||
-         mode == ServerMode::DuplicateVrr;
+         mode == ServerMode::DuplicateVrr || mode == ServerMode::Busy ||
+         mode == ServerMode::BusyReady || mode == ServerMode::Close;
 }
 
 bool pump(gwipc_connection *connection) {
@@ -439,6 +449,30 @@ bool send_query_reply(gwipc_connection *connection,
              gwipc_contract_encode_output_configuration_acknowledged);
 }
 
+bool send_busy(gwipc_connection *connection, const gwipc_message *message) {
+  gwipc_decoded_contract *raw = nullptr;
+  if (gwipc_contract_decode_message(message, &raw) != GWIPC_STATUS_OK)
+    return false;
+  Owned<gwipc_decoded_contract, gwipc_decoded_contract_destroy> decoded(
+      raw, gwipc_decoded_contract_destroy);
+  const auto *query = gwipc_decoded_output_state_query(decoded.get());
+  if (!query)
+    return false;
+  gwipc_output_configuration_acknowledged ack{};
+  ack.struct_size = sizeof(ack);
+  ack.request_id = query->query_id;
+  ack.applied_generation = 1;
+  ack.result = GWIPC_OUTPUT_CONFIGURATION_BUSY;
+  ack.primary_output_id = 11;
+  ack.root_logical_width = 1280;
+  ack.root_logical_height = 480;
+  ack.enabled_output_count = 2;
+  return send_contract(connection,
+                       GWIPC_MESSAGE_OUTPUT_CONFIGURATION_ACKNOWLEDGED,
+                       GWIPC_FLAG_REPLY, gwipc_message_sequence(message), ack,
+                       gwipc_contract_encode_output_configuration_acknowledged);
+}
+
 bool handle_commit(gwipc_connection *connection, const ServerMode server_mode) {
   bool saw_begin = false;
   bool saw_end = false;
@@ -614,10 +648,25 @@ int main(const int argc, char **argv) {
   }
   auto query = receive(connection.get());
   if (!query ||
-      gwipc_message_type(query.get()) != GWIPC_MESSAGE_OUTPUT_STATE_QUERY ||
-      !send_query_reply(connection.get(), query.get(), server_mode,
-                        GWIPC_VRR_POLICY_OFF, 1))
+      gwipc_message_type(query.get()) != GWIPC_MESSAGE_OUTPUT_STATE_QUERY)
     return 1;
+  if (server_mode == ServerMode::Close)
+    return 0;
+  if (server_mode == ServerMode::Busy || server_mode == ServerMode::BusyReady) {
+    if (!send_busy(connection.get(), query.get()))
+      return 1;
+    if (server_mode == ServerMode::BusyReady) {
+      query = receive(connection.get());
+      if (!query ||
+          gwipc_message_type(query.get()) != GWIPC_MESSAGE_OUTPUT_STATE_QUERY ||
+          !send_query_reply(connection.get(), query.get(), ServerMode::VrrQuery,
+                            GWIPC_VRR_POLICY_OFF, 1))
+        return 1;
+    }
+  } else if (!send_query_reply(connection.get(), query.get(), server_mode,
+                               GWIPC_VRR_POLICY_OFF, 1)) {
+    return 1;
+  }
   if (expect_commit && !handle_commit(connection.get(), server_mode))
     return 1;
   if (server_mode == ServerMode::VrrCommit) {

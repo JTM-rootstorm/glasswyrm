@@ -27,6 +27,19 @@ if get_option('tools') and get_option('libgwipc')
     files(tests_source_dir / 'tools/output_tools_fake_server.cpp'),
     dependencies: gwipc_dep,
   )
+  output_client_query_outcomes_test = executable(
+    'output_client_query_outcomes_test',
+    files(tests_source_dir / 'tools/output_client_query_outcomes_test.cpp'),
+    dependencies: output_client_dep,
+    include_directories: test_source_root_include,
+  )
+  test(
+    'output-client-query-outcomes',
+    output_client_query_outcomes_test,
+    args: [output_tools_fake_server],
+    depends: output_tools_fake_server,
+    timeout: 20,
+  )
   output_tools_test = find_program(
     tests_source_dir / 'tools/output_tools_test.sh',
   )

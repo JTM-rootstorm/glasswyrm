@@ -55,6 +55,13 @@ Command-line JSON and text deliberately present the same bits as stable
 kebab-case names, such as `window-did-not-request`. This is a one-to-one
 presentation mapping; bit ordering and precedence do not change.
 
+The shared output client exposes one-attempt results as complete, retryable
+not-ready, or fatal. Command-line queries retain one connection and retry a
+server `Busy` response with a monotonic five-second deadline and explicit
+backoff. A closed transport is destroyed before a later query reconnects;
+closure, malformed replies, and incomplete snapshots are never reported as
+success. Successful JSON output is nonempty, parseable, and newline-terminated.
+
 ## gwcomp diagnostics
 
 `gwcomp --vrr-report PATH` creates a private new JSONL report and refuses to
