@@ -39,7 +39,7 @@ private:
   struct ValidatedCommit {
     SceneModel candidate;
     CommitResult result;
-    std::vector<std::uint64_t> content_changed;
+    SceneDamageResult damage;
     bool metadata_only_peer{};
     bool protocol_server{};
   };

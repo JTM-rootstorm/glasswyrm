@@ -167,10 +167,9 @@ PresentationTransaction::validate_scene(Compositor& compositor,
   }
   compositor.last_commit_id_ = value.commit_id;
 
-  ValidatedCommit validated{compositor.scene_, {},
-                            compositor.scene_.pending_damage_surface_ids(),
-                            false, false};
+  ValidatedCommit validated{compositor.scene_, {}, {}, false, false};
   validated.result = validated.candidate.commit(value);
+  validated.damage = validated.result.surface_damage;
   presented.result = validated.result.result;
   presented.generation = validated.result.presented_generation;
   if (!validated.result.accepted())
