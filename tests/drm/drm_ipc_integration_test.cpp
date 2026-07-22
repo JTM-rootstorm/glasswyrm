@@ -102,7 +102,7 @@ void m4_async_ipc_ordering_and_vt() {
                         rig.presenter->front_framebuffer() == front,
                     "later producer frame remains queued behind pending scanout");
 
-  publish_completion(rig, ipc, pending, 77);
+  publish_completion(rig, ipc, pending, 0);
   const auto completed = ipc.drain_client();
   const auto acknowledgement = std::ranges::find_if(
       completed, [](const auto& event) {
@@ -123,10 +123,23 @@ void m4_async_ipc_ordering_and_vt() {
   const auto queued = ipc.dispatch_until_frame(*rig.compositor);
   gw::test::require(queued.pending_frame,
                     "queued third producer frame dispatches only after completion");
-  publish_completion(rig, ipc, queued, 78);
+  publish_completion(rig, ipc, queued, 0);
+  constexpr std::string_view zero_sequence = "\"page_flip_sequence\":0";
+  const auto report = rig.report_contents();
+  const auto first_zero = report.find(zero_sequence);
+  const auto second_zero =
+      first_zero == std::string::npos
+          ? std::string::npos
+          : report.find(zero_sequence, first_zero + zero_sequence.size());
   gw::test::require(gw::test::drm_ipc::has_ack(ipc.drain_client(), 3) &&
-                        rig.compositor->accepted_frames() == 3,
-                    "queued producer frame receives its later acknowledgement");
+                        rig.compositor->accepted_frames() == 3 &&
+                        first_zero != std::string::npos &&
+                        second_zero != std::string::npos &&
+                        report.find(zero_sequence,
+                                    second_zero + zero_sequence.size()) ==
+                            std::string::npos,
+                    "consecutive zero-sequence flips rearm and acknowledge the "
+                    "queued producer frame");
 
   std::string error;
   gw::test::require(rig.compositor->suspend_presentation(error) &&
@@ -203,6 +216,8 @@ void timeout_hup_and_disconnect_restore() {
   PresenterHarness timeout_rig(std::move(timing));
   IpcHarness timeout_ipc(timeout_rig.root / "timeout.sock", ProducerKind::M4);
   start_pending(timeout_rig, timeout_ipc);
+  timeout_ipc.send_damage_commit(3);
+  timeout_ipc.pump_transport();
   now += std::chrono::milliseconds(2000);
   std::string error;
   gw::test::require(
@@ -210,10 +225,13 @@ void timeout_hup_and_disconnect_restore() {
               PresentationCompletionKind::Fatal &&
           error.find("timeout") != std::string::npos &&
           timeout_ipc.drain_client().empty() &&
+          timeout_rig.compositor->accepted_frames() == 1 &&
           !std::filesystem::exists(timeout_rig.mirror_frame(2)) &&
+          !std::filesystem::exists(timeout_rig.mirror_frame(3)) &&
           timeout_rig.report_contents().find("completion timeout") !=
               std::string::npos,
-      "page-flip timeout is fatal without publishing producer evidence");
+      "page-flip timeout is fatal without acknowledging the pending or queued "
+      "producer frame");
   require_clean_restore(timeout_rig);
 
   PresenterHarness hup_rig;
