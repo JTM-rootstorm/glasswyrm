@@ -116,6 +116,14 @@ if get_option('glasswyrmd')
     )
     test('output-control-peer-process', output_control_peer_process_test,
          timeout: 10)
+    output_control_vrr_readiness_test = executable(
+      'output_control_vrr_readiness_test',
+      files(tests_source_dir / 'unit/output_control_vrr_readiness_test.cpp'),
+      dependencies: gw_server_core_dep,
+      include_directories: test_source_root_include,
+    )
+    test('output-control-vrr-readiness', output_control_vrr_readiness_test,
+         timeout: 10)
     output_control_windows_test = executable(
       'output_control_windows_test',
       files(tests_source_dir / 'unit/output_control_windows_test.cpp'),

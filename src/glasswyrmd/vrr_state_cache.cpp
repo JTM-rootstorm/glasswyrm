@@ -18,6 +18,11 @@ bool valid_preference(const gwipc_vrr_window_preference value) noexcept {
 
 bool valid_bool(const std::uint8_t value) noexcept { return value <= 1; }
 
+VrrQueryResult query_result(const VrrQueryReadiness readiness,
+                            const VrrQueryReason reason) {
+  return {readiness, reason, std::nullopt};
+}
+
 bool valid_capability(const gwipc_output_vrr_capability_upsert& value) {
   return value.struct_size >= sizeof(value) && value.output_id != 0 &&
          valid_bool(value.connector_property_present) &&
@@ -47,6 +52,125 @@ bool exact_ids(const std::vector<T>& values, const std::set<Id>& expected,
 }
 
 }  // namespace
+
+VrrQueryResult project_vrr_query(
+    const VrrStateCache *cache, const output::OutputLayout &layout,
+    const std::map<std::uint64_t, gwipc_vrr_policy_mode> &committed_policies,
+    const std::span<const VrrQueryWindow> windows) {
+  if (!cache)
+    return query_result(VrrQueryReadiness::RetryableNotReady,
+                        VrrQueryReason::CacheUnavailable);
+  if (!output::validate_layout(layout) ||
+      committed_policies.size() != layout.output_order.size())
+    return query_result(VrrQueryReadiness::FatalInvariant,
+                        VrrQueryReason::CommittedPolicyIncoherent);
+
+  VrrQuerySnapshot snapshot;
+  snapshot.capabilities.reserve(layout.output_order.size());
+  snapshot.policies.reserve(layout.output_order.size());
+  snapshot.states.reserve(layout.output_order.size());
+  snapshot.timings.reserve(layout.output_order.size());
+  snapshot.windows.reserve(windows.size());
+
+  for (const auto output_id : layout.output_order) {
+    const auto cached = cache->outputs().find(output_id.value);
+    if (cached == cache->outputs().end())
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::OutputCacheMissing);
+    const auto committed = committed_policies.find(output_id.value);
+    if (committed == committed_policies.end() ||
+        !valid_policy(committed->second))
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::CommittedPolicyIncoherent);
+    const auto &value = cached->second;
+    if (!valid_capability(value.capability) ||
+        value.capability.output_id != output_id.value)
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::OutputCapabilityIncoherent);
+    if (!valid_policy_record(value.policy) ||
+        value.policy.output_id != output_id.value)
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::CommittedPolicyIncoherent);
+    if (value.policy.mode != committed->second)
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::CommittedPolicyIncoherent);
+    if (!value.compositor_state)
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::OutputStateMissing);
+    const auto &state = *value.compositor_state;
+    if (state.state_generation != cache->generation())
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::OutputStateStale);
+    if (state.struct_size < sizeof(state) ||
+        state.output_id != output_id.value ||
+        state.requested_mode != committed->second)
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::OutputStateIncoherent);
+    if (value.policy_result &&
+        (value.policy_result->output_id != output_id.value ||
+         value.policy_result->mode != committed->second ||
+         value.policy_result->desired_enabled != state.desired_enabled ||
+         value.policy_result->selected_window_id != state.candidate_window_id))
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::OutputStateIncoherent);
+    if (value.timing &&
+        (value.timing->output_id != output_id.value ||
+         value.timing->commit_id != state.last_commit_id ||
+         value.timing->presented_generation !=
+             state.last_presented_generation ||
+         value.timing->effective_vrr_enabled != state.effective_enabled ||
+         value.timing->interval_nanoseconds != state.last_interval_nanoseconds))
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::OutputStateIncoherent);
+
+    snapshot.capabilities.push_back(value.capability);
+    snapshot.policies.push_back(value.policy);
+    snapshot.states.push_back(state);
+    if (value.timing)
+      snapshot.timings.push_back(*value.timing);
+  }
+
+  for (const auto &window : windows) {
+    const auto cached = cache->windows().find(window.window_id);
+    if (cached == cache->windows().end())
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::WindowCacheMissing);
+    const auto &value = cached->second;
+    if (value.policy_candidate && !value.policy_result)
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::WindowPolicyMissing);
+    if (!value.compositor_state)
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::WindowStateMissing);
+    const auto &state = *value.compositor_state;
+    if (state.policy_generation != cache->generation())
+      return query_result(VrrQueryReadiness::RetryableNotReady,
+                          VrrQueryReason::WindowStateStale);
+    if (state.struct_size < sizeof(state) ||
+        state.window_id != window.window_id ||
+        state.surface_id != window.surface_id ||
+        !layout.states.contains(output::OutputId{state.output_id}))
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::WindowStateIncoherent);
+    if (value.policy_result &&
+        (state.output_id != value.policy_result->output_id ||
+         state.preference != value.policy_result->preference ||
+         state.policy_selected != value.policy_result->selected ||
+         state.policy_eligible != value.policy_result->eligible ||
+         state.focused != value.policy_result->focused ||
+         state.fullscreen != value.policy_result->fullscreen ||
+         state.borderless_fullscreen !=
+             value.policy_result->borderless_fullscreen ||
+         state.exclusive_output_membership !=
+             value.policy_result->exclusive_output_membership ||
+         state.reason_flags != value.policy_result->reason_flags))
+      return query_result(VrrQueryReadiness::FatalInvariant,
+                          VrrQueryReason::WindowStateIncoherent);
+    snapshot.windows.push_back(state);
+  }
+
+  return {VrrQueryReadiness::Ready, VrrQueryReason::None, std::move(snapshot)};
+}
 
 bool VrrStateCache::replace_inventory(
     std::vector<gwipc_output_vrr_capability_upsert> capabilities,
@@ -391,6 +515,38 @@ const char* vrr_response_status_name(const VrrResponseStatus status) noexcept {
     case VrrResponseStatus::DuplicateTiming: return "duplicate-timing";
     case VrrResponseStatus::InvalidTiming: return "invalid-timing";
     case VrrResponseStatus::ReleaseMismatch: return "release-mismatch";
+  }
+  return "unknown";
+}
+
+const char *vrr_query_reason_name(const VrrQueryReason reason) noexcept {
+  switch (reason) {
+  case VrrQueryReason::None:
+    return "none";
+  case VrrQueryReason::CacheUnavailable:
+    return "cache-unavailable";
+  case VrrQueryReason::OutputCacheMissing:
+    return "output-cache-missing";
+  case VrrQueryReason::OutputCapabilityIncoherent:
+    return "output-capability-incoherent";
+  case VrrQueryReason::CommittedPolicyIncoherent:
+    return "committed-policy-incoherent";
+  case VrrQueryReason::OutputStateMissing:
+    return "output-state-missing";
+  case VrrQueryReason::OutputStateStale:
+    return "output-state-stale";
+  case VrrQueryReason::OutputStateIncoherent:
+    return "output-state-incoherent";
+  case VrrQueryReason::WindowCacheMissing:
+    return "window-cache-missing";
+  case VrrQueryReason::WindowPolicyMissing:
+    return "window-policy-missing";
+  case VrrQueryReason::WindowStateMissing:
+    return "window-state-missing";
+  case VrrQueryReason::WindowStateStale:
+    return "window-state-stale";
+  case VrrQueryReason::WindowStateIncoherent:
+    return "window-state-incoherent";
   }
   return "unknown";
 }
