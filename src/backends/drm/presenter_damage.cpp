@@ -30,8 +30,14 @@ bool DrmPresenter::copy_frame_to(
                           ? target.copy_from(frame.pixels, error)
                           : target.copy_rectangles_from(frame.pixels,
                                                         plan.rectangles, error);
-  if (!copied || plan.full_copy() || target.visible_hash() == expected_hash)
-    return copied;
+  if (!copied)
+    return false;
+  if (target.verify_visible_pixels(frame.pixels, expected_hash))
+    return true;
+  if (plan.full_copy()) {
+    error = "canonical and scanout pixels differ after a complete copy";
+    return false;
+  }
 
   // Damage is an optimization hint, never a correctness boundary. If an
   // upstream producer changed pixels outside its advertised region, recover
@@ -40,7 +46,13 @@ bool DrmPresenter::copy_frame_to(
                                target.completed_generation(),
                                frame.generation, frame.damage,
                                FullCopyReason::CanonicalMismatch);
-  return target.copy_from(frame.pixels, error);
+  if (!target.copy_from(frame.pixels, error))
+    return false;
+  if (!target.verify_visible_pixels(frame.pixels, expected_hash)) {
+    error = "canonical and scanout pixels differ after mismatch recovery";
+    return false;
+  }
+  return true;
 }
 
 DamageCopyReport DrmPresenter::damage_copy_report(

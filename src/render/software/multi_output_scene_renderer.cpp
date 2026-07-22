@@ -367,14 +367,15 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
                         output.logical_width, output.logical_height};
     rendered.scale = {output.scale_numerator, output.scale_denominator};
     rendered.transform = static_cast<OutputTransform>(output.transform);
-    if (!rendered.frame.configure(output_id, output.physical_pixel_width,
-                                  output.physical_pixel_height, result.error))
-      return result;
-
     const OutputFrameResult *previous = nullptr;
     const bool copied = compatible_previous(request.previous, output, previous);
-    if (copied)
-      std::ranges::copy(previous->frame.pixels(), rendered.frame.pixels().begin());
+    if (copied) {
+      rendered.frame = previous->frame;
+    } else if (!rendered.frame.configure(
+                   output_id, output.physical_pixel_width,
+                   output.physical_pixel_height, result.error)) {
+      return result;
+    }
     const auto supplied_damage = request.damage.find(output_id);
     if (!copied) {
       rendered.damage.push_back(

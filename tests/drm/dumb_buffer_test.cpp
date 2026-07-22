@@ -178,7 +178,9 @@ int main() {
         "pitch padding remains zero");
   }
   gw::test::require(
-      buffer.visible_hash() ==
+      buffer.verify_visible_pixels(
+          pixels, glasswyrm::output::hash_visible_xrgb8888(pixels)) &&
+          buffer.visible_hash() ==
               glasswyrm::output::hash_visible_xrgb8888(pixels) &&
           buffer.visible_hash() == 0x4d1416c2755838b5ULL,
       "scanout visible RGB hash equals canonical software-frame hash");
@@ -187,9 +189,20 @@ int main() {
       0xff112233U, 0xff010203U, 0xff778899U, 0xffaabbccU};
   const std::array partial{gw::compositor::Rectangle{1, 0, 1, 1}};
   gw::test::require(buffer.copy_rectangles_from(changed, partial, error) &&
+                        buffer.verify_visible_pixels(
+                            changed,
+                            glasswyrm::output::hash_visible_xrgb8888(changed)) &&
                         buffer.visible_hash() ==
                             glasswyrm::output::hash_visible_xrgb8888(changed),
                     "bounded partial copy updates only selected pixels");
+  api.mapping[0] ^= std::byte{1};
+  gw::test::require(
+      !buffer.verify_visible_pixels(
+          changed, glasswyrm::output::hash_visible_xrgb8888(changed)) &&
+          buffer.copy_from(changed, error) &&
+          buffer.verify_visible_pixels(
+              changed, glasswyrm::output::hash_visible_xrgb8888(changed)),
+      "exact scanout verification rejects and recovers external pixel drift");
   gw::test::require(buffer.content_valid() &&
                         buffer.completed_generation() == 1,
                     "copy does not advance completion metadata");
