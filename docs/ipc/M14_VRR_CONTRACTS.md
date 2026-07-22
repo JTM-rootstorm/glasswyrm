@@ -41,6 +41,15 @@ compositor, and effective state and emits no success event.
 
 ## Output control and lifecycle
 
+An output-control VRR query is published only from one coherent cache
+projection. When policy, compositor, or window state is still catching up, the
+server sends a correlated `OutputConfigurationAcknowledged` with result `Busy`
+as the query's only reply: no `SnapshotBegin` or snapshot identity is emitted.
+The connection remains usable for a later query. Malformed requests,
+unnegotiated VRR requests, and impossible cache identities remain protocol or
+server-invariant failures. Presentation timing is optional; its absence does
+not make an otherwise coherent snapshot busy.
+
 `gwout --vrr` reuses the complete-layout output-control transaction even when
 geometry is unchanged. Focus, map, unmap, fullscreen, borderless geometry,
 preference, and destruction reuse the lifecycle transaction. In both cases

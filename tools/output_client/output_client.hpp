@@ -2,6 +2,7 @@
 
 #include <glasswyrm/ipc.h>
 
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -161,6 +162,21 @@ struct Edit {
   bool primary{};
 };
 
+enum class QueryOutcome {
+  Complete,
+  RetryableNotReady,
+  Fatal,
+};
+
+struct QueryResult {
+  QueryOutcome outcome{QueryOutcome::Fatal};
+  std::string detail;
+
+  [[nodiscard]] bool complete() const noexcept {
+    return outcome == QueryOutcome::Complete;
+  }
+};
+
 class Client final {
 public:
   explicit Client(std::string socket_path)
@@ -172,6 +188,8 @@ public:
   [[nodiscard]] bool query(std::uint32_t flags, Snapshot &snapshot,
                            std::string &error,
                            bool complete_configuration = false);
+  [[nodiscard]] QueryResult query_once(std::uint32_t flags, Snapshot &snapshot,
+                                       bool complete_configuration = false);
   [[nodiscard]] bool commit(const Snapshot &snapshot,
                             gwipc_output_configuration_acknowledged &ack,
                             std::string &error);
@@ -179,6 +197,11 @@ public:
 private:
   [[nodiscard]] bool connect(std::string &error);
   [[nodiscard]] bool wait_established(std::string &error);
+  [[nodiscard]] QueryResult
+  query_attempt(std::uint32_t flags, Snapshot &snapshot,
+                bool complete_configuration,
+                std::chrono::steady_clock::time_point deadline);
+  void reset_connection() noexcept;
   std::string socket_path_;
   gwipc_connection *connection_{};
   std::uint64_t next_request_id_{1};

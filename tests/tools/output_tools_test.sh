@@ -36,6 +36,35 @@ finish_server() {
 expected_outputs='{"layout_generation":1,"root_width":1280,"root_height":480,"primary_output_id":"000000000000000b","outputs":[{"id":"000000000000000b","name":"LEFT","kind":"headless","enabled":true,"connected":true,"primary":true,"physical_width":640,"physical_height":480,"physical_width_mm":0,"physical_height_mm":0,"refresh_millihertz":60000,"logical_x":0,"logical_y":0,"logical_width":640,"logical_height":480,"scale_numerator":1,"scale_denominator":1,"transform":"normal","capabilities":59,"modes":[{"id":"0000000000000015","width":640,"height":480,"refresh_millihertz":60000,"preferred":true,"current":true}]},{"id":"000000000000000c","name":"RIGHT","kind":"headless","enabled":true,"connected":true,"primary":false,"physical_width":640,"physical_height":480,"physical_width_mm":0,"physical_height_mm":0,"refresh_millihertz":60000,"logical_x":640,"logical_y":0,"logical_width":640,"logical_height":480,"scale_numerator":1,"scale_denominator":1,"transform":"normal","capabilities":59,"modes":[{"id":"0000000000000016","width":640,"height":480,"refresh_millihertz":60000,"preferred":true,"current":true}]}]}'
 expected_windows='{"layout_generation":1,"windows":[{"window_id":41,"logical_x":600,"logical_y":40,"logical_width":100,"logical_height":80,"primary_output_id":"000000000000000c","output_ids":["000000000000000b","000000000000000c"],"preferred_scale_numerator":5,"preferred_scale_denominator":4,"client_buffer_scale":2,"scale_mode":"scaled-pixmap","visible":true,"focused":true,"fullscreen":true}]}'
 
+start_server gwinfo-json-contract query
+${gwinfo} --socket "${socket}" outputs --json \
+  >"${directory}/gwinfo-json.out" 2>"${directory}/gwinfo-json.err"
+finish_server
+[[ -s ${directory}/gwinfo-json.out ]]
+python3 -c \
+  'import json,pathlib,sys; data=pathlib.Path(sys.argv[1]).read_bytes(); assert data.endswith(b"\n"); json.loads(data)' \
+  "${directory}/gwinfo-json.out"
+
+start_server gwinfo-busy-ready busy-ready
+${gwinfo} --socket "${socket}" vrr --json \
+  >"${directory}/gwinfo-busy-ready.out" \
+  2>"${directory}/gwinfo-busy-ready.err"
+finish_server
+[[ -s ${directory}/gwinfo-busy-ready.out ]]
+python3 -c \
+  'import json,pathlib,sys; data=pathlib.Path(sys.argv[1]).read_bytes(); assert data.endswith(b"\n"); json.loads(data)' \
+  "${directory}/gwinfo-busy-ready.out"
+
+start_server gwinfo-closed close
+if ${gwinfo} --socket "${socket}" vrr --json \
+    >"${directory}/gwinfo-closed.out" \
+    2>"${directory}/gwinfo-closed.err"; then
+  echo 'gwinfo reported success after its control peer closed' >&2
+  exit 1
+fi
+finish_server
+[[ -s ${directory}/gwinfo-closed.err ]]
+
 start_server gwinfo-outputs query
 outputs=$(${gwinfo} --socket "${socket}" outputs --json)
 finish_server
