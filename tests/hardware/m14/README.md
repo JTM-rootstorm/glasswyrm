@@ -38,8 +38,8 @@ meson compile -C /var/tmp/glasswyrm-build-m14
 ```
 
 The optimized build type is required because the positive gate measures
-physical 4K presentation cadence; the separate debug and sanitizer builds
-remain the correctness gates. The opt-in Meson target records the configured
+physical presentation cadence; the separate debug and sanitizer builds remain
+the correctness gates. The opt-in Meson target records the configured
 Git commit and refuses to emit
 `glasswyrm-m14-build-manifest.json` if `HEAD` changed or any tracked source is
 dirty. It hashes `gwm`, `gwcomp`, `glasswyrmd`, `gwout`, `gwinfo`, the M14 XCB
@@ -95,6 +95,6 @@ traffic. After cadence collection and restart recovery, the runner explicitly
 converges compositor-authoritative policy, arms exactly one mirror, requests a
 bounded repaint from the held client, and does this once with VRR off and once
 with VRR enabled. It compares the resulting canonical pixels and removes any
-unconsumed runtime trigger during cleanup. This bounds a 4K run to two
-full-size PPM proof frames while preserving the default
+unconsumed runtime trigger during cleanup. This bounds a high-resolution run
+to two full-size PPM proof frames while preserving the default
 `gwcomp --mirror-dump-dir` behavior for other workflows.
