@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 from common import HarnessError  # noqa: E402
 from live_runner import (  # noqa: E402
     CLIENT_RESULT_WAIT_ATTEMPTS, FIXED_BINARIES, LIVE_MANAGED_UNITS,
-    LIVE_UNITS, FixedLiveRunner,
+    LIVE_UNITS, CommandResult, FixedLiveRunner,
 )
 
 
@@ -31,7 +31,7 @@ CONFIG: dict[str, object] = {
     "target_refresh_hz": 70,
 }
 CONSOLE_STATE = {"active_vt": 2, "kd_mode": 0, "getty_active": True}
-Execute = Callable[[list[str], Path | None], int]
+Execute = Callable[[list[str], Path | None], int | CommandResult]
 
 
 def make_runner(artifacts: Path, execute: Execute,
@@ -68,6 +68,53 @@ def expect_harness_error(action: Callable[[], None], message: str) -> None:
         assert str(error) == message
     else:
         raise AssertionError("expected the fixed live runner to fail closed")
+
+
+def test_command_result_contract(root: Path) -> None:
+    output = root / "query.json"
+    output.write_text("{}\n", encoding="utf-8")
+    expected = CommandResult(
+        exit_status=0,
+        signal=None,
+        timed_out=False,
+        stdout_bytes=3,
+        stderr_bytes=17,
+        elapsed_ns=42,
+        output_path=output,
+        bounded_tail="fixture diagnostic",
+    )
+    calls: list[list[str]] = []
+
+    def execute(argv: list[str], path: Path | None) -> CommandResult:
+        calls.append(argv)
+        assert path == output
+        return expected
+
+    runner = make_runner(root, execute)
+    argv = [str(FIXED_BINARIES["gwinfo"]), "--help"]
+    assert runner.command_result(argv, output) == expected
+    assert calls == [argv]
+    expect_harness_error(
+        lambda: runner.command_result(["/bin/sh", "-c", "true"]),
+        "live runner rejected a non-fixed executable",
+    )
+    assert calls == [argv]
+
+    signal_result = CommandResult(
+        exit_status=None,
+        signal=15,
+        timed_out=False,
+        stdout_bytes=0,
+        stderr_bytes=0,
+        elapsed_ns=10,
+        output_path=None,
+        bounded_tail="",
+    )
+    runner.execute = lambda _argv, _output: signal_result
+    expect_harness_error(
+        lambda: runner.command([str(FIXED_BINARIES["gwinfo"])]),
+        "fixed command failed: gwinfo",
+    )
 
 
 def test_start_unit_contract(root: Path) -> None:
@@ -370,6 +417,10 @@ def main() -> int:
         contract = root / "contract"
         contract.mkdir()
         test_start_unit_contract(contract)
+
+        command_result = root / "command-result"
+        command_result.mkdir()
+        test_command_result_contract(command_result)
 
         client_wait = root / "client-wait"
         client_wait.mkdir()
