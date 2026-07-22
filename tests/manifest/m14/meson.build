@@ -1,5 +1,14 @@
 m14_fixture_root = tests_source_dir / 'fixtures/m14'
 
+m14_live_runner_test = find_program(
+  tests_source_dir / 'hardware/m14/live_runner_test.py',
+)
+test(
+  'm14-live-runner-lifecycle',
+  m14_live_runner_test,
+  timeout: 10,
+)
+
 m14_host_fixture_validator = find_program(
   tests_source_dir / 'compat/m14/validate_host_fixtures.py',
 )

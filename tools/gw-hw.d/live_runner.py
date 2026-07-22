@@ -37,6 +37,16 @@ LIVE_UNITS = {
     "server": "glasswyrmd-m14-hardware.service",
 }
 
+LIVE_CLIENT_TAGS = (
+    "off-cadence", "on-cadence", "borderless", "focus-a", "focus-b",
+    "app-default", "app-prefer", "app-preferences", "always",
+)
+
+LIVE_MANAGED_UNITS = (
+    *LIVE_UNITS.values(),
+    *(f"m14-hardware-client-{tag}.service" for tag in LIVE_CLIENT_TAGS),
+)
+
 
 def _control_group_has_live_scope(contents: str) -> bool:
     """Return whether the process belongs to the fixed detached live scope."""
@@ -87,7 +97,7 @@ class FixedLiveRunner:
         self.getty_unit = f"getty@tty{tty_number}.service"
         self.alternate_tty = TTY_PATTERN.fullmatch(
             str(config["alternate_tty"])).group(1)  # type: ignore[union-attr]
-        self.client_units: list[str] = []
+        self.managed_units: list[str] = []
         self.before_state: dict[str, object] | None = None
         self.after_state: dict[str, object] | None = None
         self.restoration_evidence: dict[str, object] | None = None
@@ -204,18 +214,100 @@ class FixedLiveRunner:
                     f"live run requires KD_TEXT on {tty}; observed KD mode "
                     f"{modes.get(tty)}")
 
+    def unit_state(self, name: str) -> tuple[str, str]:
+        path = self.artifacts / ".systemd-unit-state.tmp"
+        path.unlink(missing_ok=True)
+        argv = [str(FIXED_BINARIES["systemctl"]), "show",
+                "--property=LoadState", "--property=ActiveState", name]
+        try:
+            if self.execute(argv, path) != 0:
+                raise HarnessError(
+                    f"cannot inspect fixed transient unit: {name}")
+            fields: dict[str, str] = {}
+            for line in _read_regular(path, 4096).decode("ascii").splitlines():
+                key, separator, value = line.partition("=")
+                if not separator or key in fields:
+                    raise HarnessError(
+                        f"fixed transient unit returned malformed state: {name}")
+                fields[key] = value
+            if set(fields) != {"LoadState", "ActiveState"}:
+                raise HarnessError(
+                    f"fixed transient unit omitted exact state: {name}")
+            return fields["LoadState"], fields["ActiveState"]
+        except UnicodeError as error:
+            raise HarnessError(
+                f"fixed transient unit returned non-ASCII state: {name}") from error
+        finally:
+            path.unlink(missing_ok=True)
+
+    def prepare_unit_names(self) -> None:
+        for name in LIVE_MANAGED_UNITS:
+            load_state, active_state = self.unit_state(name)
+            if load_state == "not-found" and active_state == "inactive":
+                continue
+            if (load_state == "loaded" and
+                    active_state in {"inactive", "failed"}):
+                self.command([str(FIXED_BINARIES["systemctl"]),
+                              "reset-failed", name])
+                for _ in range(20):
+                    load_state, active_state = self.unit_state(name)
+                    if (load_state == "not-found" and
+                            active_state == "inactive"):
+                        break
+                    time.sleep(.05)
+                else:
+                    raise HarnessError(
+                        f"stale fixed transient unit did not unload: {name}")
+                continue
+            raise HarnessError(
+                f"fixed transient unit name is already in use: {name} "
+                f"({load_state}/{active_state})")
+
+    def stop_unit(self, name: str) -> None:
+        argv = [str(FIXED_BINARIES["systemctl"]), "stop", name]
+        stop_result = self.execute(argv, None)
+        if self.verify_paths:
+            reset_attempted = False
+            for _ in range(20):
+                load_state, active_state = self.unit_state(name)
+                if load_state == "not-found" and active_state == "inactive":
+                    break
+                if (load_state == "loaded" and
+                        active_state in {"inactive", "failed"} and
+                        not reset_attempted):
+                    if self.execute([str(FIXED_BINARIES["systemctl"]),
+                                     "reset-failed", name], None) != 0:
+                        raise HarnessError(
+                            f"fixed transient unit could not be reset: {name}")
+                    reset_attempted = True
+                elif active_state not in {
+                        "active", "activating", "deactivating", "inactive",
+                        "failed"}:
+                    raise HarnessError(
+                        f"fixed transient unit returned unsafe state: {name}")
+                time.sleep(.05)
+            else:
+                raise HarnessError(
+                    f"fixed transient unit did not unload after stop: {name} "
+                    f"(stop={stop_result}, {load_state}/{active_state})")
+        elif stop_result != 0:
+            raise HarnessError(f"fixed transient unit did not stop: {name}")
+        self.managed_units = [unit for unit in self.managed_units
+                              if unit != name]
+
     def start_unit(self, name: str, executable: str, arguments: list[str],
                    properties: list[str] | None = None) -> None:
         unit_name = name.removesuffix(".service")
         unit_log = self.artifacts / f"{unit_name}.log"
         argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={unit_name}",
-                "--property=Type=simple", "--no-block"]
+                "--collect", "--quiet", "--property=Type=exec"]
         for value in properties or []:
             argv.append(f"--property={value}")
         argv += [f"--property=StandardOutput=append:{unit_log}",
                  f"--property=StandardError=append:{unit_log}"]
         argv += ["--", str(FIXED_BINARIES[executable]), *arguments]
-        self.command(argv)
+        self.command(argv, f"{unit_name}.log")
+        self.managed_units.append(name)
 
     def set_policy(self, policy: str) -> None:
         self.command([str(FIXED_BINARIES["gwout"]), "--socket",
@@ -240,7 +332,6 @@ class FixedLiveRunner:
                           "--repaint-count", "2"]
         self.start_unit(unit, "client", arguments,
                         ["KillMode=mixed", "SuccessExitStatus=143"])
-        self.client_units.append(unit)
         self.wait_path(result, "file")
         if self.validate_runtime:
             state = _read_json(result)
@@ -299,7 +390,7 @@ class FixedLiveRunner:
 
     def stop_client(self, tag: str) -> None:
         unit = f"m14-hardware-client-{tag}.service"
-        self.command([str(FIXED_BINARIES["systemctl"]), "stop", unit])
+        self.stop_unit(unit)
 
     def wait_policy_cleanup(self) -> None:
         self.cleanup_wait_count += 1
@@ -438,6 +529,8 @@ class FixedLiveRunner:
             raise HarnessError("live run refused the wrong active VT")
         if self.execute([str(FIXED_BINARIES["systemctl"]), "is-active", "display-manager.service"], None) == 0:
             raise HarnessError("live run refused an active graphical display manager")
+        if self.verify_paths:
+            self.prepare_unit_names()
         self.verify_live_console()
 
     def record_restoration_evidence(self) -> None:
@@ -479,13 +572,7 @@ class FixedLiveRunner:
     def cleanup(self) -> None:
         self.cleanup_attempted = True
         operations: list[list[str]] = []
-        for unit in reversed(self.client_units):
-            operations.append([str(FIXED_BINARIES["systemctl"]), "stop", unit])
-        operations += [
-            [str(FIXED_BINARIES["systemctl"]), "stop", LIVE_UNITS["server"]],
-            [str(FIXED_BINARIES["systemctl"]), "stop", LIVE_UNITS["gwcomp"]],
-            [str(FIXED_BINARIES["systemctl"]), "stop", LIVE_UNITS["gwm"]],
-        ]
+        managed_units = list(reversed(self.managed_units))
         if self.before_state and self.before_state.get("active_vt"):
             operations.append([str(FIXED_BINARIES["chvt"]),
                                str(self.before_state["active_vt"])])
@@ -493,6 +580,11 @@ class FixedLiveRunner:
             operations.append([str(FIXED_BINARIES["systemctl"]),
                                "start" if self.getty_was_active else "stop",
                                self.getty_unit])
+        for unit in managed_units:
+            try:
+                self.stop_unit(unit)
+            except Exception as error:  # restoration must continue after every failure
+                self.cleanup_errors.append(f"cleanup exception: {error}")
         for argv in operations:
             try:
                 if self.execute(argv, None) != 0:
@@ -567,11 +659,11 @@ class FixedLiveRunner:
             self._step(20); shutil.copyfile(self.artifacts / "milestone14-vt-inactive.json", self.artifacts / "milestone14-vt.log") if self.validate_runtime else None
             self._step(21); self.snapshot("milestone14-vt-active.json", "always-eligible", True)
             self._step(22); gwm_socket = RUNTIME_ROOT / "gwm.sock"; old_inode = gwm_socket.stat().st_ino if self.validate_runtime else 0; self.command([str(FIXED_BINARIES["systemctl"]), "restart", LIVE_UNITS["gwm"]]); self.wait_replaced(gwm_socket, old_inode); self.snapshot("milestone14-restart-gwm.json", "always-eligible", True)
-            self._step(23); compositor_socket = RUNTIME_ROOT / "gwcomp.sock"; self.command([str(FIXED_BINARIES["systemctl"]), "stop", LIVE_UNITS["gwcomp"]]); self.wait_absent(compositor_socket)
+            self._step(23); compositor_socket = RUNTIME_ROOT / "gwcomp.sock"; self.stop_unit(LIVE_UNITS["gwcomp"]); self.wait_absent(compositor_socket)
             if self.validate_runtime:
                 os.replace(self.artifacts / "vrr-part-1.jsonl", self.artifacts / "vrr-part-0.jsonl")
                 os.replace(self.artifacts / "milestone14-drm-report.jsonl", self.artifacts / "drm-part-0.jsonl")
-            self.command([str(FIXED_BINARIES["systemctl"]), "start", LIVE_UNITS["gwcomp"]]); self.wait_path(compositor_socket)
+            self.start_stack_after_gwm()
             self._step(24); self.snapshot("milestone14-restart.log", "always-eligible", True)
             self._step(25); self.capture_pixels()
             self._step(26); self.stop_client("always")
