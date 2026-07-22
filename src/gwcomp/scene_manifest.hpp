@@ -21,6 +21,9 @@ struct PreparedSceneManifest {
   SceneManifestResult result;
   std::string json;
   bool active{};
+  bool publication_uncertain{};
+  std::uint64_t uncertain_original_size{};
+  std::uint64_t uncertain_expected_size{};
 };
 
 class SceneManifestIo {
@@ -33,6 +36,8 @@ public:
   [[nodiscard]] virtual int lock(int fd, int operation) const = 0;
   [[nodiscard]] virtual ssize_t write(int fd, const void *data,
                                       std::size_t size) const = 0;
+  [[nodiscard]] virtual ssize_t read_at(int fd, void *data, std::size_t size,
+                                        off_t offset) const = 0;
   [[nodiscard]] virtual int synchronize(int fd) const = 0;
   [[nodiscard]] virtual int truncate(int fd, off_t size) const = 0;
   [[nodiscard]] virtual int close(int fd) const = 0;
