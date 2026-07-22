@@ -60,6 +60,11 @@ to the reviewed configuration, doctor report, and final summary.
 The doctor currently requires the libdrm `modetest` executable at
 `/usr/bin/modetest` or `/bin/modetest` for exact mode and property discovery.
 
+Every fixed transient service writes standard output and standard error to a
+private, per-unit `*.log` file in the live artifact directory. These diagnostic
+sidecars survive early service failure without weakening the accepted
+archive's exact artifact allowlist.
+
 The live command refuses direct execution and requires the exact
 `glasswyrm-m14-harness.scope` transient scope shown above. This prevents
 stopping the configured getty from terminating the harness with its login

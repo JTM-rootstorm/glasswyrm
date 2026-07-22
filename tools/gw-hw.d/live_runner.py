@@ -206,10 +206,14 @@ class FixedLiveRunner:
 
     def start_unit(self, name: str, executable: str, arguments: list[str],
                    properties: list[str] | None = None) -> None:
-        argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={name.removesuffix('.service')}",
+        unit_name = name.removesuffix(".service")
+        unit_log = self.artifacts / f"{unit_name}.log"
+        argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={unit_name}",
                 "--property=Type=simple", "--no-block"]
         for value in properties or []:
             argv.append(f"--property={value}")
+        argv += [f"--property=StandardOutput=append:{unit_log}",
+                 f"--property=StandardError=append:{unit_log}"]
         argv += ["--", str(FIXED_BINARIES[executable]), *arguments]
         self.command(argv)
 

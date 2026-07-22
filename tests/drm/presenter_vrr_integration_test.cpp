@@ -336,6 +336,29 @@ void initial_enable_waits_for_real_flip() {
   complete_flip(rig, pending, 1, 1'000'000'000);
 }
 
+void zero_sequence_with_kernel_timestamp_is_valid() {
+  Rig rig;
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto off = frame_set(pixels, 1, false, output::vrr::Decision::Disabled);
+  gw::test::require(rig.presenter->present(off.view()).disposition ==
+                        output::PresentDisposition::Complete,
+                    "zero-sequence fixture initializes");
+  const auto enabled = frame_set(pixels, 2, true);
+  const auto pending = rig.presenter->present(enabled.view());
+  rig.drm.queue_page_flip(pending.token, 40, 0, 1'000'000'000, true);
+  const auto event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.vrr_feedback.contains(1) &&
+          event.vrr_feedback.at(1).flip_sequence == 0 &&
+          event.vrr_feedback.at(1).timestamp_available &&
+          event.vrr_feedback.at(1).kernel_timestamp_nanoseconds ==
+              1'000'000'000 &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      event.error.empty() ? rig.error : event.error);
+}
+
 void historical_profile_does_not_probe_vrr() {
   Rig rig(DrmPresentationApi::Atomic, true, false, false);
   const auto property_reads = std::ranges::count(rig.kms.calls,
@@ -426,6 +449,11 @@ void invalid_timing_restores_saved_state() {
   gw::test::require(
       event.kind == output::BackendEventKind::Fatal &&
           event.error.find("timing") != std::string::npos &&
+          event.error.find("sequence=0") != std::string::npos &&
+          event.error.find("timestamp_available=false") != std::string::npos &&
+          event.error.find("kernel_timestamp_nanoseconds=0") !=
+              std::string::npos &&
+          event.error.find("timestamp_monotonic=true") != std::string::npos &&
           rig.kms.atomic_commits.size() == commits_before + 2 &&
           property_value(rig.kms.atomic_commits[commits_before], 22) == 0 &&
           property_value(rig.kms.atomic_commits.back(), 22) == 1,
@@ -476,6 +504,7 @@ void incapable_output_accepts_unavailable_timing() {
 int main() {
   atomic_transition_suspend_restore();
   initial_enable_waits_for_real_flip();
+  zero_sequence_with_kernel_timestamp_is_valid();
   historical_profile_does_not_probe_vrr();
   legacy_and_test_rejection();
   readback_mismatch_is_fatal();
