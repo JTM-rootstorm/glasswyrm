@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -15,8 +16,9 @@ sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 
 from common import HarnessError  # noqa: E402
 from live_runner import (  # noqa: E402
-    CLIENT_RESULT_WAIT_ATTEMPTS, FIXED_BINARIES, LIVE_MANAGED_UNITS,
-    LIVE_UNITS, CommandResult, FixedLiveRunner,
+    CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES, FIXED_BINARIES,
+    LIVE_MANAGED_UNITS, LIVE_UNITS, QUERY_ATTEMPTS,
+    QUERY_DIAGNOSTIC_SCHEMA, CommandResult, FixedLiveRunner,
 )
 
 
@@ -35,10 +37,11 @@ Execute = Callable[[list[str], Path | None], int | CommandResult]
 
 
 def make_runner(artifacts: Path, execute: Execute,
-                verify_paths: bool = False) -> FixedLiveRunner:
+                verify_paths: bool = False,
+                validate_runtime: bool = False) -> FixedLiveRunner:
     return FixedLiveRunner(
         dict(CONFIG), artifacts, execute, "/dev/tty2", verify_paths,
-        lambda path, kind: True, lambda: dict(CONSOLE_STATE), False,
+        lambda path, kind: True, lambda: dict(CONSOLE_STATE), validate_runtime,
     )
 
 
@@ -70,6 +73,51 @@ def expect_harness_error(action: Callable[[], None], message: str) -> None:
         raise AssertionError("expected the fixed live runner to fail closed")
 
 
+def expect_harness_error_contains(action: Callable[[], None], message: str) -> None:
+    try:
+        action()
+    except HarnessError as error:
+        assert message in str(error), str(error)
+    else:
+        raise AssertionError("expected the fixed live runner to fail closed")
+
+
+def query_result(output: Path | None, *, status: int | None = 0,
+                 terminating_signal: int | None = None,
+                 timed_out: bool = False, stdout_bytes: int | None = None,
+                 stderr_bytes: int = 0, elapsed_ns: int = 10,
+                 tail: str = "") -> CommandResult:
+    if stdout_bytes is None:
+        stdout_bytes = output.stat().st_size if output and output.exists() else 0
+    return CommandResult(
+        exit_status=status,
+        signal=terminating_signal,
+        timed_out=timed_out,
+        stdout_bytes=stdout_bytes,
+        stderr_bytes=stderr_bytes,
+        elapsed_ns=elapsed_ns,
+        output_path=output,
+        bounded_tail=tail,
+    )
+
+
+def write_snapshot(output: Path | None, policy: str = "always-eligible",
+                   effective: bool = True) -> None:
+    assert output is not None
+    output.write_text(
+        '{"vrr":[{"name":"DP-1","policy":"' + policy + '",'
+        '"effective_enabled":' + str(effective).lower() + ','
+        '"hardware_capable":true,"kms_controllable":true,'
+        '"simulated":false}],"windows":[]}\n',
+        encoding="utf-8",
+    )
+
+
+def read_query_diagnostic(root: Path, name: str) -> dict[str, object]:
+    path = root / ".query-diagnostics" / f"{name}.diagnostic.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_command_result_contract(root: Path) -> None:
     output = root / "query.json"
     output.write_text("{}\n", encoding="utf-8")
@@ -90,7 +138,7 @@ def test_command_result_contract(root: Path) -> None:
         assert path == output
         return expected
 
-    runner = make_runner(root, execute)
+    runner = make_runner(root, execute, validate_runtime=True)
     argv = [str(FIXED_BINARIES["gwinfo"]), "--help"]
     assert runner.command_result(argv, output) == expected
     assert calls == [argv]
@@ -115,6 +163,154 @@ def test_command_result_contract(root: Path) -> None:
         lambda: runner.command([str(FIXED_BINARIES["gwinfo"])]),
         "fixed command failed: gwinfo",
     )
+
+
+def test_snapshot_busy_then_success_is_bounded_and_atomic(root: Path) -> None:
+    calls = 0
+    destination = root / "state.json"
+    destination.write_text("previous\n", encoding="utf-8")
+    old_inode = destination.stat().st_ino
+
+    def execute(argv: list[str], output: Path | None) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        assert argv[0] == str(FIXED_BINARIES["gwinfo"])
+        if calls == 1:
+            return query_result(
+                output, status=1, stderr_bytes=51,
+                tail="gwinfo: output snapshot is temporarily unavailable",
+            )
+        write_snapshot(output)
+        return query_result(output)
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    value = runner.snapshot("state.json", "always-eligible", True)
+
+    assert calls == 2
+    assert value["vrr"][0]["effective_enabled"] is True
+    assert destination.stat().st_ino != old_inode
+    assert "previous" not in destination.read_text(encoding="utf-8")
+    diagnostic = read_query_diagnostic(root, "state.json")
+    assert diagnostic["schema"] == QUERY_DIAGNOSTIC_SCHEMA
+    assert diagnostic["outcome"] == "converged"
+    assert diagnostic["attempt_count"] == 2
+    assert diagnostic["attempt_limit"] == QUERY_ATTEMPTS
+    assert len(diagnostic["attempts"]) == 2
+
+
+def test_snapshot_command_failures_are_typed(root: Path) -> None:
+    cases = (
+        ("zero", query_result(None, stdout_bytes=0),
+         "exited successfully with zero output bytes"),
+        ("status", query_result(None, status=2, stderr_bytes=17,
+                                tail="permission denied"),
+         "exited with status 2: permission denied"),
+        ("timeout", query_result(None, status=None, timed_out=True),
+         "exceeded its command deadline"),
+        ("signal", query_result(None, status=None, terminating_signal=9),
+         "terminated by signal 9"),
+    )
+    for label, result, message in cases:
+        case_root = root / label
+        case_root.mkdir()
+        calls = 0
+
+        def execute(_argv: list[str], output: Path | None,
+                    result: CommandResult = result) -> CommandResult:
+            nonlocal calls
+            calls += 1
+            return CommandResult(
+                result.exit_status, result.signal, result.timed_out,
+                result.stdout_bytes, result.stderr_bytes, result.elapsed_ns,
+                output, result.bounded_tail,
+            )
+
+        runner = make_runner(case_root, execute, validate_runtime=True)
+        expect_harness_error_contains(
+            lambda: runner.snapshot("state.json", "always-eligible", True),
+            message,
+        )
+        assert calls == 1
+        diagnostic = read_query_diagnostic(case_root, "state.json")
+        assert diagnostic["outcome"] == "fatal"
+        assert diagnostic["attempt_count"] == 1
+        assert not (case_root / ".state.json.query.tmp").exists()
+
+
+def test_snapshot_rejects_malformed_json_without_retry(root: Path) -> None:
+    calls = 0
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        assert output is not None
+        output.write_text("{", encoding="utf-8")
+        return query_result(output)
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    expect_harness_error_contains(
+        lambda: runner.snapshot("state.json", "always-eligible", True),
+        "query returned malformed JSON",
+    )
+    assert calls == 1
+    diagnostic = read_query_diagnostic(root, "state.json")
+    assert diagnostic["attempts"][0]["classification"] == "malformed-json"
+    assert not (root / ".state.json.query.tmp").exists()
+
+
+def test_snapshot_preserves_last_coherent_state_and_caps_queries(
+        root: Path) -> None:
+    calls = 0
+    destination = root / "state.json"
+    destination.write_text("previous\n", encoding="utf-8")
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        nonlocal calls
+        calls += 1
+        write_snapshot(output, "off", False)
+        return query_result(output)
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    expect_harness_error_contains(
+        lambda: runner.snapshot("state.json", "always-eligible", True),
+        f"after {QUERY_ATTEMPTS} queries",
+    )
+
+    assert calls == QUERY_ATTEMPTS
+    assert calls < 200
+    assert destination.read_text(encoding="utf-8") == "previous\n"
+    diagnostic = read_query_diagnostic(root, "state.json")
+    assert diagnostic["outcome"] == "exhausted"
+    assert diagnostic["attempt_count"] == QUERY_ATTEMPTS
+    coherent_path = Path(str(diagnostic["last_coherent_json"]))
+    assert coherent_path.is_file()
+    assert json.loads(
+        coherent_path.read_text(encoding="utf-8"),
+    )["vrr"][0]["policy"] == "off"
+    assert not (root / ".state.json.query.tmp").exists()
+
+
+def test_query_diagnostic_tail_is_bounded(root: Path) -> None:
+    tail = "x" * (COMMAND_TAIL_BYTES * 4)
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        return query_result(
+            output, status=3, stderr_bytes=len(tail), tail=tail,
+        )
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    expect_harness_error_contains(
+        lambda: runner.snapshot("state.json", "always-eligible", True),
+        "exited with status 3",
+    )
+    diagnostic = read_query_diagnostic(root, "state.json")
+    recorded = diagnostic["attempts"][0]["command"]["bounded_tail"]
+    assert len(recorded.encode("utf-8")) <= COMMAND_TAIL_BYTES
+    diagnostic_path = (
+        root / ".query-diagnostics" / "state.json.diagnostic.json"
+    )
+    assert diagnostic_path.stat().st_size <= 32 * 1024
+    assert diagnostic_path.stat().st_mode & 0o077 == 0
 
 
 def test_start_unit_contract(root: Path) -> None:
@@ -421,6 +617,28 @@ def main() -> int:
         command_result = root / "command-result"
         command_result.mkdir()
         test_command_result_contract(command_result)
+
+        snapshot_busy = root / "snapshot-busy"
+        snapshot_busy.mkdir()
+        test_snapshot_busy_then_success_is_bounded_and_atomic(snapshot_busy)
+
+        snapshot_failures = root / "snapshot-failures"
+        snapshot_failures.mkdir()
+        test_snapshot_command_failures_are_typed(snapshot_failures)
+
+        snapshot_malformed = root / "snapshot-malformed"
+        snapshot_malformed.mkdir()
+        test_snapshot_rejects_malformed_json_without_retry(snapshot_malformed)
+
+        snapshot_pending = root / "snapshot-pending"
+        snapshot_pending.mkdir()
+        test_snapshot_preserves_last_coherent_state_and_caps_queries(
+            snapshot_pending,
+        )
+
+        snapshot_tail = root / "snapshot-tail"
+        snapshot_tail.mkdir()
+        test_query_diagnostic_tail_is_bounded(snapshot_tail)
 
         client_wait = root / "client-wait"
         client_wait.mkdir()

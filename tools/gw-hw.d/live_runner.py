@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from common import (
@@ -54,6 +54,12 @@ CLIENT_RESULT_WAIT_ATTEMPTS = 1200
 COMMAND_TIMEOUT_SECONDS = 120
 COMMAND_TAIL_BYTES = 2048
 QUERY_ATTEMPTS = 3
+QUERY_SLOW_NS = 1_000_000_000
+QUERY_DIAGNOSTIC_SCHEMA = "glasswyrm.m14-query-diagnostic.v1"
+RETRYABLE_QUERY_TAILS = (
+    "output snapshot is temporarily unavailable",
+    "timed out waiting for output snapshot readiness",
+)
 
 
 @dataclass(frozen=True)
@@ -190,7 +196,16 @@ class FixedLiveRunner:
         started = time.monotonic_ns()
         raw = self.execute(argv, output)
         if isinstance(raw, CommandResult):
-            return raw
+            tail = raw.bounded_tail.encode("utf-8", errors="replace")
+            if len(tail) > COMMAND_TAIL_BYTES:
+                tail = tail[-COMMAND_TAIL_BYTES:]
+                while tail and tail[0] & 0xC0 == 0x80:
+                    tail = tail[1:]
+            return replace(
+                raw,
+                output_path=output,
+                bounded_tail=tail.decode("utf-8", errors="replace"),
+            )
         if isinstance(raw, bool) or not isinstance(raw, int):
             raise HarnessError("live runner executor returned an invalid result")
         size = 0
@@ -218,6 +233,87 @@ class FixedLiveRunner:
         )
         if not result.succeeded:
             raise HarnessError(f"fixed command failed: {Path(argv[0]).name}")
+
+    @staticmethod
+    def _command_evidence(result: CommandResult) -> dict[str, object]:
+        value = asdict(result)
+        value["output_path"] = (str(result.output_path)
+                                if result.output_path is not None else None)
+        return value
+
+    @staticmethod
+    def _query_safe_name(name: str) -> str:
+        return "".join(
+            character if character.isalnum() or character in ".-_" else "_"
+            for character in name
+        )
+
+    def _query_diagnostic_path(self, name: str) -> Path:
+        directory = self.artifacts / ".query-diagnostics"
+        if directory.exists():
+            status = directory.lstat()
+            if (not stat.S_ISDIR(status.st_mode) or status.st_mode & 0o077):
+                raise HarnessError(
+                    "query diagnostics path must be a private directory")
+        else:
+            directory.mkdir(mode=0o700)
+        return directory / f"{self._query_safe_name(name)}.diagnostic.json"
+
+    def _write_query_diagnostic(
+            self, name: str, outcome: str, attempts: list[dict[str, object]],
+            last_error: str,
+            last_coherent: Path | None = None) -> Path:
+        destination = self._query_diagnostic_path(name)
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        payload = {
+            "schema": QUERY_DIAGNOSTIC_SCHEMA,
+            "query": name,
+            "outcome": outcome,
+            "attempt_count": len(attempts),
+            "attempt_limit": QUERY_ATTEMPTS,
+            "last_error": last_error,
+            "last_coherent_json": (str(last_coherent)
+                                   if last_coherent is not None else None),
+            "attempts": attempts,
+        }
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8",
+        )
+        if len(encoded) > 32 * 1024:
+            raise HarnessError("query diagnostic exceeded its bounded schema")
+        temporary.unlink(missing_ok=True)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC |
+            os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            offset = 0
+            while offset < len(encoded):
+                offset += os.write(descriptor, encoded[offset:])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, destination)
+        return destination
+
+    @staticmethod
+    def _query_failure(result: CommandResult) -> tuple[str, bool] | None:
+        if result.timed_out:
+            return "gwinfo query exceeded its command deadline", False
+        if result.signal is not None:
+            return f"gwinfo query terminated by signal {result.signal}", False
+        if result.exit_status != 0:
+            detail = result.bounded_tail.strip()
+            message = f"gwinfo query exited with status {result.exit_status}"
+            if detail:
+                message += f": {detail}"
+            retryable = any(marker in detail for marker in RETRYABLE_QUERY_TAILS)
+            return message, retryable
+        if result.stdout_bytes == 0:
+            return "gwinfo query exited successfully with zero output bytes", False
+        return None
 
     @staticmethod
     def _ready(path: Path, kind: str) -> bool:
@@ -549,14 +645,54 @@ class FixedLiveRunner:
             return {}
         path = self.artifacts / name
         last_error = "state was not observed"
-        for attempt in range(200):
-            temporary = self.artifacts / f".{name}.attempt-{attempt}.tmp"
+        attempts: list[dict[str, object]] = []
+        last_coherent: Path | None = None
+        temporary = self.artifacts / f".{name}.query.tmp"
+        for attempt in range(QUERY_ATTEMPTS):
             temporary.unlink(missing_ok=True)
-            self.command([str(FIXED_BINARIES["gwinfo"]), "--socket",
-                          str(RUNTIME_ROOT / "control.sock"), "vrr",
-                          str(self.config["connector"]), "--json"], temporary.name)
+            result = self.command_result(
+                [str(FIXED_BINARIES["gwinfo"]), "--socket",
+                 str(RUNTIME_ROOT / "control.sock"), "vrr",
+                 str(self.config["connector"]), "--json"],
+                temporary,
+            )
+            record: dict[str, object] = {
+                "attempt": attempt + 1,
+                "command": self._command_evidence(result),
+            }
+            failure = self._query_failure(result)
+            if failure is not None:
+                last_error, retryable = failure
+                record["classification"] = (
+                    "retryable-command-failure" if retryable
+                    else "fatal-command-failure"
+                )
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "retrying" if retryable else "fatal",
+                    attempts, last_error, last_coherent,
+                )
+                temporary.unlink(missing_ok=True)
+                if retryable and attempt + 1 < QUERY_ATTEMPTS:
+                    time.sleep(.05)
+                    continue
+                raise HarnessError(f"{name} query failed: {last_error}")
             try:
                 value = _read_json(temporary)
+            except HarnessError as error:
+                last_error = str(error)
+                record["classification"] = "malformed-json"
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "fatal", attempts, last_error, last_coherent,
+                )
+                temporary.unlink(missing_ok=True)
+                raise HarnessError(
+                    f"{name} query returned malformed JSON: {last_error}",
+                ) from error
+            try:
                 outputs = value.get("vrr")
                 if not isinstance(outputs, list) or len(outputs) != 1:
                     raise HarnessError("expected exactly one VRR output")
@@ -585,12 +721,36 @@ class FixedLiveRunner:
                         raise HarnessError(
                             "exact VRR window reasons have not converged")
                 os.replace(temporary, path)
+                if attempts or result.elapsed_ns >= QUERY_SLOW_NS:
+                    record["classification"] = (
+                        "slow-success" if result.elapsed_ns >= QUERY_SLOW_NS
+                        else "success"
+                    )
+                    attempts.append(record)
+                    self._write_query_diagnostic(
+                        name, "converged", attempts, "", last_coherent,
+                    )
                 return value
             except HarnessError as error:
                 last_error = str(error)
-                temporary.unlink(missing_ok=True)
-                time.sleep(.05)
-        raise HarnessError(f"{name} timed out waiting for exact VRR state: {last_error}")
+                record["classification"] = "coherent-state-pending"
+                record["error"] = last_error
+                attempts.append(record)
+                last_coherent = self._query_diagnostic_path(name).with_name(
+                    f"{self._query_safe_name(name)}.last-coherent.json",
+                )
+                os.replace(temporary, last_coherent)
+                self._write_query_diagnostic(
+                    name,
+                    "retrying" if attempt + 1 < QUERY_ATTEMPTS else "exhausted",
+                    attempts, last_error, last_coherent,
+                )
+                if attempt + 1 < QUERY_ATTEMPTS:
+                    time.sleep(.05)
+        temporary.unlink(missing_ok=True)
+        raise HarnessError(
+            f"{name} timed out waiting for exact VRR state after "
+            f"{QUERY_ATTEMPTS} queries: {last_error}")
 
     def _step(self, number: int) -> None:
         if number != len(self.steps) + 1:
