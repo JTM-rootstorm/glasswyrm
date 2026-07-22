@@ -18,8 +18,9 @@ void request_stop_signal(int) {
   runtime_stop_requested = 1;
   if (signal_write_descriptor >= 0) {
     const std::uint8_t byte = 1;
-    (void)::write(static_cast<int>(signal_write_descriptor), &byte,
-                  sizeof(byte));
+    const auto written = ::write(
+        static_cast<int>(signal_write_descriptor), &byte, sizeof(byte));
+    static_cast<void>(written);
   }
   errno = saved_errno;
 }

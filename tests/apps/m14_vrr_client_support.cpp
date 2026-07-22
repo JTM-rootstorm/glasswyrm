@@ -58,7 +58,8 @@ EventfdDamageProducer::EventfdDamageProducer()
 EventfdDamageProducer::~EventfdDamageProducer() noexcept {
   stop_.store(true);
   const std::uint64_t one = 1;
-  (void)::write(request_, &one, sizeof(one));
+  const auto written = ::write(request_, &one, sizeof(one));
+  static_cast<void>(written);
   if (worker_.joinable())
     worker_.join();
   (void)::close(request_);

@@ -23,7 +23,8 @@ void signal_handler(const int signal) noexcept {
   const int fd = signal_pipe_fd;
   if (fd >= 0) {
     const unsigned char tag = signal_tag(signal);
-    (void)::write(fd, &tag, sizeof(tag));
+    const auto written = ::write(fd, &tag, sizeof(tag));
+    static_cast<void>(written);
   }
   errno = saved_errno;
 }
