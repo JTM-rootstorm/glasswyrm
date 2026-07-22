@@ -112,6 +112,12 @@ output, and the existing composited primary-plane path. QXL, headless
 simulation, a virtual display, legacy KMS, or property readback without cadence
 evidence cannot satisfy this gate.
 
+The M14 acceptance profile may use a reviewed non-native mode that preserves
+the display's VRR range and target-cadence distinction. Native 4K cadence is a
+project requirement, but sustained 4K performance is deferred until the
+accelerated rendering path; the scalar software reference renderer is not used
+to make that performance claim.
+
 ## Evidence
 
 The archive contains the reviewed configuration without secrets, exact-commit
