@@ -69,6 +69,7 @@ DumbBuffer &DumbBuffer::operator=(DumbBuffer &&other) noexcept {
   framebuffer_id_ = std::exchange(other.framebuffer_id_, 0);
   completed_generation_ = std::exchange(other.completed_generation_, 0);
   content_valid_ = std::exchange(other.content_valid_, false);
+  visible_hash_ = std::exchange(other.visible_hash_, std::nullopt);
   return *this;
 }
 
@@ -118,6 +119,7 @@ bool DumbBuffer::copy_from(const std::span<const std::uint32_t> pixels,
     error = "canonical software frame does not match the DRM dumb buffer";
     return false;
   }
+  visible_hash_.reset();
   std::memset(mapping_, 0, size_);
   const auto row_bytes = static_cast<std::size_t>(width_) * kBytesPerPixel;
   for (std::uint32_t row = 0; row < height_; ++row) {
@@ -147,6 +149,7 @@ bool DumbBuffer::copy_rectangles_from(
       return false;
     }
   }
+  visible_hash_.reset();
   for (const auto& rectangle : rectangles) {
     const auto bytes = static_cast<std::size_t>(rectangle.width) *
                        kBytesPerPixel;
@@ -166,6 +169,8 @@ bool DumbBuffer::copy_rectangles_from(
 std::uint64_t DumbBuffer::visible_hash() const noexcept {
   if (!valid())
     return 0;
+  if (visible_hash_)
+    return *visible_hash_;
   std::uint64_t hash = 14695981039346656037ULL;
   for (std::uint32_t row = 0; row < height_; ++row) {
     const auto *row_bytes = mapping_ + static_cast<std::size_t>(row) * pitch_;
@@ -182,7 +187,26 @@ std::uint64_t DumbBuffer::visible_hash() const noexcept {
       }
     }
   }
-  return hash;
+  visible_hash_ = hash;
+  return *visible_hash_;
+}
+
+bool DumbBuffer::verify_visible_pixels(
+    const std::span<const std::uint32_t> pixels,
+    const std::uint64_t verified_hash) const noexcept {
+  visible_hash_.reset();
+  const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
+  if (!valid() || pixel_count != pixels.size())
+    return false;
+  const auto row_bytes = static_cast<std::size_t>(width_) * kBytesPerPixel;
+  for (std::uint32_t row = 0; row < height_; ++row) {
+    if (std::memcmp(mapping_ + static_cast<std::size_t>(row) * pitch_,
+                    pixels.data() + static_cast<std::size_t>(row) * width_,
+                    row_bytes) != 0)
+      return false;
+  }
+  visible_hash_ = verified_hash;
+  return true;
 }
 
 void DumbBuffer::reset() noexcept {
@@ -230,6 +254,7 @@ bool DumbBuffer::release(std::string &error) noexcept {
   framebuffer_id_ = 0;
   completed_generation_ = 0;
   content_valid_ = false;
+  visible_hash_.reset();
   return success;
 }
 
@@ -244,6 +269,7 @@ void DumbBuffer::abandon() noexcept {
   framebuffer_id_ = 0;
   completed_generation_ = 0;
   content_valid_ = false;
+  visible_hash_.reset();
 }
 
 bool DumbBufferPair::create(DumbBufferApi &api, const std::uint32_t width,

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -32,6 +33,9 @@ public:
       std::span<const gw::compositor::Rectangle> rectangles,
       std::string &error);
   [[nodiscard]] std::uint64_t visible_hash() const noexcept;
+  [[nodiscard]] bool verify_visible_pixels(
+      std::span<const std::uint32_t> pixels,
+      std::uint64_t verified_hash) const noexcept;
   [[nodiscard]] bool release(std::string &error) noexcept;
   void abandon() noexcept;
   void reset() noexcept;
@@ -72,6 +76,7 @@ private:
   std::uint32_t framebuffer_id_{};
   std::uint64_t completed_generation_{};
   bool content_valid_{};
+  mutable std::optional<std::uint64_t> visible_hash_;
 };
 
 class DumbBufferPair {
