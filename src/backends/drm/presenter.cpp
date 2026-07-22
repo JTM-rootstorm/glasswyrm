@@ -470,7 +470,7 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
         *pending_->vrr_request, pending_->commit_id,
         pending_->generation, feedback.effective_enabled)}};
-    if (feedback.flip_sequence == 0) {
+    if (!feedback.timestamp_available) {
       if (!vrr_report_->stage(decision, pending_->vrr_report, error))
         return fatal_event("page-flip-vrr-report", std::move(error));
     } else {

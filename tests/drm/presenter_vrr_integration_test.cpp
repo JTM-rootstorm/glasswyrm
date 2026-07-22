@@ -357,6 +357,13 @@ void zero_sequence_with_kernel_timestamp_is_valid() {
               1'000'000'000 &&
           rig.presenter->finalize_pending(pending.token, rig.error),
       event.error.empty() ? rig.error : event.error);
+  const auto report = contents(rig.report.path());
+  gw::test::require(
+      report.find("\"record\":\"vrr-timing\"") != std::string::npos &&
+          report.find("\"sequence\":0") != std::string::npos &&
+          report.find("\"kernel_timestamp_nanoseconds\":1000000000") !=
+              std::string::npos,
+      "zero-sequence completion retains valid kernel timing evidence");
 }
 
 void historical_profile_does_not_probe_vrr() {
@@ -483,7 +490,7 @@ void incapable_output_accepts_unavailable_timing() {
   const auto pending = rig.presenter->present(second.view());
   gw::test::require(pending.disposition == output::PresentDisposition::Pending,
                     "incapable output still submits an ordinary page flip");
-  rig.drm.queue_page_flip(pending.token, 40, 0, 0, false);
+  rig.drm.queue_page_flip(pending.token, 40, 7, 0, false);
   const auto event = rig.presenter->service(POLLIN);
   gw::test::require(
       event.kind == output::BackendEventKind::Complete &&

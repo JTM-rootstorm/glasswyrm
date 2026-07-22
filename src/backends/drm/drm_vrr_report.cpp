@@ -177,7 +177,8 @@ bool valid(const DrmVrrDecisionReport &value) noexcept {
 }
 
 bool valid(const DrmVrrTimingReport &value) noexcept {
-  return value.commit_id != 0 && value.generation != 0 && value.sequence != 0;
+  return value.commit_id != 0 && value.generation != 0 &&
+         value.kernel_timestamp_nanoseconds != 0;
 }
 
 bool valid(const DrmVrrSummaryReport &value) noexcept {
