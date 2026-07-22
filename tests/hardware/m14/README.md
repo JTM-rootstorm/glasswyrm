@@ -31,12 +31,16 @@ existing fixed build after `HEAD` changes:
 
 ```sh
 meson setup /var/tmp/glasswyrm-build-m14 \
+  --buildtype=debugoptimized \
   -Ddrm_backend=true -Dlibinput_backend=true \
   -Dphysical_validation_provenance=true
 meson compile -C /var/tmp/glasswyrm-build-m14
 ```
 
-The opt-in Meson target records the configured Git commit and refuses to emit
+The optimized build type is required because the positive gate measures
+physical 4K presentation cadence; the separate debug and sanitizer builds
+remain the correctness gates. The opt-in Meson target records the configured
+Git commit and refuses to emit
 `glasswyrm-m14-build-manifest.json` if `HEAD` changed or any tracked source is
 dirty. It hashes `gwm`, `gwcomp`, `glasswyrmd`, `gwout`, `gwinfo`, the M14 XCB
 client, and `gw_drm_probe`. Untracked local plans do not invalidate the build.

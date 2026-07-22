@@ -1223,6 +1223,7 @@ unacceptable:
 ```sh
 tested_commit=$(git rev-parse HEAD)
 meson setup /var/tmp/glasswyrm-build-m14 \
+  --buildtype=debugoptimized \
   -Ddrm_backend=true -Dlibinput_backend=true \
   -Dphysical_validation_provenance=true
 meson compile -C /var/tmp/glasswyrm-build-m14

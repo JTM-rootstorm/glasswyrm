@@ -512,6 +512,7 @@ commit at the fixed path with physical-validation provenance enabled:
 
 ```sh
 meson setup /var/tmp/glasswyrm-build-m14 --wipe \
+  --buildtype=debugoptimized \
   -Dwerror=true \
   -Dexperimental=true \
   -Drender_gl=true \
