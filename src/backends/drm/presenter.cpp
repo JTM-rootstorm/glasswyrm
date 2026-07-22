@@ -428,11 +428,16 @@ output::BackendEvent DrmPresenter::service(const short revents) {
   }
   if (vrr_contract_enabled_ && vrr_state_initialized_) {
     if (vrr_state_.kms_state().controllable && pending_->vrr_request &&
-        (event.sequence == 0 ||
-         (device_.snapshot().timestamp_monotonic &&
-          (!event.timestamp_available ||
-           event.kernel_timestamp_nanoseconds == 0)))) {
-      error = "DRM page-flip timing is unavailable or invalid";
+        device_.snapshot().timestamp_monotonic &&
+        (!event.timestamp_available ||
+         event.kernel_timestamp_nanoseconds == 0)) {
+      error =
+          "DRM page-flip timing is unavailable or invalid (sequence=" +
+          std::to_string(event.sequence) + ", timestamp_available=" +
+          (event.timestamp_available ? "true" : "false") +
+          ", kernel_timestamp_nanoseconds=" +
+          std::to_string(event.kernel_timestamp_nanoseconds) +
+          ", timestamp_monotonic=true)";
       recover_vrr_divergence(error);
       return fatal_event("page-flip-vrr-timing", std::move(error));
     }

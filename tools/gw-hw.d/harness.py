@@ -351,6 +351,21 @@ id fb pos size
         if (runner.steps != list(RUN_STEPS) or not runner.cleanup_attempted or
                 runner.cleanup_wait_count != 7 or console_rechecks != 2):
             raise AssertionError("fixed live runner order or cleanup changed")
+        transient_units = [argv for argv in commands
+                           if argv and argv[0] ==
+                           str(FIXED_BINARIES["systemd-run"])]
+        if not transient_units:
+            raise AssertionError("fixed live runner did not start transient units")
+        for argv in transient_units:
+            unit = next((value.removeprefix("--unit=") for value in argv
+                         if value.startswith("--unit=")), None)
+            if unit is None:
+                raise AssertionError("transient unit omitted its fixed name")
+            expected = str(Path(directory) / f"{unit}.log")
+            if (f"--property=StandardOutput=append:{expected}" not in argv or
+                    f"--property=StandardError=append:{expected}" not in argv):
+                raise AssertionError(
+                    "transient unit output is not preserved in its artifact log")
         replay_names = {item["name"] for item in runner.snapshot_expectations}
         if not {"milestone14-restart-gwm.json", "milestone14-restart.log"}.issubset(replay_names):
             raise AssertionError("distinct GWM/compositor replay snapshots are absent")
