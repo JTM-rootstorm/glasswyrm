@@ -26,21 +26,30 @@ PresentationTransaction::prepare_output_frame_set(
        compositor.pending_attachments_) {
     const auto previous = compositor.committed_attachments_.find(surface_id);
     if (previous == compositor.committed_attachments_.end() ||
-        previous->second != buffer_id)
-      validated.content_changed.push_back(surface_id);
+        previous->second != buffer_id) {
+      const auto surface = staged.surfaces.find(surface_id);
+      if (surface == staged.surfaces.end())
+        continue;
+      auto &damage = validated.damage.surfaces[surface_id];
+      damage.local_rectangles = {{0, 0, surface->second.logical_width,
+                                  surface->second.logical_height}};
+      damage.trusted_complete = false;
+      damage.fallback_reason =
+          previous == compositor.committed_attachments_.end()
+              ? SurfaceDamageFallbackReason::NewBuffer
+              : SurfaceDamageFallbackReason::ReplacementBuffer;
+    }
   }
-  std::ranges::sort(validated.content_changed);
-  validated.content_changed.erase(
-      std::unique(validated.content_changed.begin(),
-                  validated.content_changed.end()),
-      validated.content_changed.end());
-  const auto damage = calculate_output_damage(
-      compositor.scene_.committed(), staged, validated.content_changed);
+  const auto damage = calculate_output_damage(compositor.scene_.committed(),
+                                              staged, validated.damage);
   const render::software::SoftwareFrameSetRenderRequest request{
-      validated.candidate, compositor.mappings_,
-      compositor.pending_attachments_, damage,
+      validated.candidate,
+      compositor.mappings_,
+      compositor.pending_attachments_,
+      damage.regions,
       compositor.output_set_ ? &*compositor.output_set_ : nullptr,
-      value.commit_id, value.producer_generation,
+      value.commit_id,
+      value.producer_generation,
       compositor.frame_ordinal_ + 1U};
   render::OutputSceneRenderResult rendered;
   if (compositor.output_renderer_) {
