@@ -41,8 +41,11 @@ void require(bool condition, const char *message) {
 
 extern "C" void fixture_signal(int signal) {
   if (fixture_log_fd >= 0 && fixture_name) {
-    (void)::write(fixture_log_fd, fixture_name, std::strlen(fixture_name));
-    (void)::write(fixture_log_fd, "\n", 1);
+    const auto name_written =
+        ::write(fixture_log_fd, fixture_name, std::strlen(fixture_name));
+    const auto newline_written = ::write(fixture_log_fd, "\n", 1);
+    static_cast<void>(name_written);
+    static_cast<void>(newline_written);
   }
   _exit(128 + signal);
 }

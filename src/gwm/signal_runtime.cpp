@@ -12,7 +12,10 @@ int signal_write_fd = -1;
 
 void wake_for_signal(int) {
   const std::uint8_t byte = 1;
-  if (signal_write_fd >= 0) (void)::write(signal_write_fd, &byte, sizeof(byte));
+  if (signal_write_fd >= 0) {
+    const auto written = ::write(signal_write_fd, &byte, sizeof(byte));
+    static_cast<void>(written);
+  }
 }
 
 }  // namespace
