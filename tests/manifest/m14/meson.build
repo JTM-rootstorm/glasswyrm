@@ -86,7 +86,8 @@ if get_option('glasswyrmd')
     timeout: 10,
   )
 
-  if xcb_test_dependency.found() and get_option('libgwipc')
+  if (xcb_test_dependency.found() and get_option('libgwipc') and
+      get_option('tools'))
     m14_vrr_client = executable(
       'm14_vrr_client',
       files(

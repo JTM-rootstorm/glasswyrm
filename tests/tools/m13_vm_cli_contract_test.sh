@@ -87,6 +87,8 @@ done
 
 require_text "$library" 'reset; milestone12-runtime-test; reset; milestone13-runtime-test'
 require_text "$library" '--no-suite m14-runtime'
+require_text "$repo_root/tests/manifest/m14/meson.build" \
+  "get_option('tools')"
 require_text "$library" '[[ $name == milestone13-runtime-test.log ]] && continue'
 require_text "$library" "record.get('schema')=='glasswyrm-scene-v2'"
 require_text "$library" "record.get('cursors',[])"
