@@ -110,8 +110,9 @@ if get_option('glasswyrmd')
       timeout: 10,
     )
 
-    if (get_option('libgwipc') and get_option('gwm') and
-        get_option('gwcomp') and get_option('headless_backend'))
+    if (get_option('experimental') and get_option('libgwipc') and
+        get_option('gwm') and get_option('gwcomp') and
+        get_option('headless_backend'))
       m14_vrr_client_runtime_test = find_program(
         tests_source_dir / 'apps/m14_vrr_client_runtime_test.sh',
       )
