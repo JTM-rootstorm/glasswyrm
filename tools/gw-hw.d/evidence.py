@@ -248,14 +248,35 @@ def finalize_live(config: dict[str, object], artifacts: Path,
         raise HarnessError("live exact restoration validation failed")
     for tag in ("off-cadence", "on-cadence"):
         state = _read_json(artifacts / f"client-{tag}.json")
-        if (state.get("schema") != "glasswyrm.m14-vrr-client.v2" or
+        presented = state.get("presented_frame_count")
+        if (state.get("schema") != "glasswyrm.m14-vrr-client.v3" or
                 state.get("mode") != "cadence" or
                 state.get("frame_count") != 180 or
                 state.get("eventfd_synchronized") is not True or
-                state.get("events_selected") is not True):
-            raise HarnessError(f"{tag} omitted bounded eventfd cadence evidence")
+                state.get("events_selected") is not True or
+                state.get("selected_output") != config["connector"] or
+                state.get("presentation_paced") is not True or
+                state.get("scheduled_frame_count") != 180 or
+                state.get("submitted_frame_count") != 180 or
+                type(presented) is not int or presented < 121 or presented > 180 or
+                state.get("maximum_outstanding_updates") != 1 or
+                type(state.get("first_observed_commit_id")) is not int or
+                state["first_observed_commit_id"] <= 0 or
+                type(state.get("last_observed_commit_id")) is not int or
+                state["last_observed_commit_id"] <=
+                state["first_observed_commit_id"] or
+                type(state.get("first_presented_generation")) is not int or
+                state["first_presented_generation"] <= 0 or
+                type(state.get("last_presented_generation")) is not int or
+                state["last_presented_generation"] <=
+                state["first_presented_generation"] or
+                type(state.get("maximum_completion_latency_nanoseconds"))
+                is not int or
+                state["maximum_completion_latency_nanoseconds"] <= 0):
+            raise HarnessError(
+                f"{tag} omitted presentation-paced cadence evidence")
     preference = _read_json(artifacts / "client-app-preferences.json")
-    if (preference.get("schema") != "glasswyrm.m14-vrr-client.v2" or
+    if (preference.get("schema") != "glasswyrm.m14-vrr-client.v3" or
             preference.get("mode") != "preference" or
             preference.get("preference") != "Disable" or
             preference.get("preference_sequence") !=
