@@ -18,26 +18,6 @@ inline constexpr std::uint16_t kDamageWidth = 64;
 inline constexpr std::uint16_t kDamageHeight = 64;
 inline constexpr std::uint64_t kFinalSpinNanoseconds = 200'000;
 
-struct ClientState {
-  ClientMode mode{ClientMode::Windowed};
-  std::uint32_t window{};
-  std::uint16_t width{};
-  std::uint16_t height{};
-  bool prefer{};
-  bool fullscreen_requested{};
-  bool borderless{};
-  std::uint32_t frame_count{};
-  std::uint32_t target_refresh_hz{};
-  std::uint64_t target_interval_nanoseconds{};
-  ClientPreference preference{ClientPreference::Default};
-  bool events_selected{};
-  std::uint32_t preference_reply_count{};
-  std::uint32_t notify_event_count{};
-  std::uint32_t notify_change_mask{};
-  std::uint64_t reason_mask{};
-  bool eventfd_synchronized{};
-};
-
 struct PresentationMarker {
   std::uint64_t commit_id{};
   std::uint64_t presented_generation{};
@@ -89,6 +69,29 @@ struct PresentationPacerStats {
   std::uint32_t retryable_query_count{};
   std::uint32_t missed_deadline_count{};
   std::uint64_t maximum_completion_latency_nanoseconds{};
+};
+
+struct ClientState {
+  ClientMode mode{ClientMode::Windowed};
+  std::uint32_t window{};
+  std::uint16_t width{};
+  std::uint16_t height{};
+  bool prefer{};
+  bool fullscreen_requested{};
+  bool borderless{};
+  std::uint32_t frame_count{};
+  std::uint32_t target_refresh_hz{};
+  std::uint64_t target_interval_nanoseconds{};
+  ClientPreference preference{ClientPreference::Default};
+  bool events_selected{};
+  std::uint32_t preference_reply_count{};
+  std::uint32_t notify_event_count{};
+  std::uint32_t notify_change_mask{};
+  std::uint64_t reason_mask{};
+  bool eventfd_synchronized{};
+  std::string selected_output;
+  PresentationPacerStats presentation;
+  bool presentation_paced{};
 };
 
 class PresentationPacer {

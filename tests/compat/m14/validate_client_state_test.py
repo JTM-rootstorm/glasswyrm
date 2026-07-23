@@ -10,7 +10,7 @@ from validate_client_state import validate, validate_path
 
 def valid_state() -> dict[str, object]:
     return {
-        "schema": "glasswyrm.m14-vrr-client.v2",
+        "schema": "glasswyrm.m14-vrr-client.v3",
         "mode": "cadence",
         "window": 42,
         "width": 640,
@@ -31,6 +31,19 @@ def valid_state() -> dict[str, object]:
         "cadence_absolute_monotonic": True,
         "bounded_damage_width": 64,
         "bounded_damage_height": 64,
+        "selected_output": "DP-1",
+        "scheduled_frame_count": 120,
+        "submitted_frame_count": 120,
+        "presented_frame_count": 120,
+        "first_observed_commit_id": 4,
+        "last_observed_commit_id": 124,
+        "first_presented_generation": 6,
+        "last_presented_generation": 126,
+        "maximum_outstanding_updates": 1,
+        "retryable_query_count": 2,
+        "missed_deadline_count": 1,
+        "maximum_completion_latency_nanoseconds": 10_000_000,
+        "presentation_paced": True,
     }
 
 
@@ -46,6 +59,18 @@ def rejected(change) -> None:
 
 def main() -> int:
     validate(valid_state())
+    legacy = valid_state()
+    legacy["schema"] = "glasswyrm.m14-vrr-client.v2"
+    for name in (
+        "selected_output", "scheduled_frame_count", "submitted_frame_count",
+        "presented_frame_count", "first_observed_commit_id",
+        "last_observed_commit_id", "first_presented_generation",
+        "last_presented_generation", "maximum_outstanding_updates",
+        "retryable_query_count", "missed_deadline_count",
+        "maximum_completion_latency_nanoseconds", "presentation_paced",
+    ):
+        del legacy[name]
+    validate(legacy)
     requested = valid_state()
     requested["mode"] = "app-requested"
     requested["preference"] = "Prefer"
@@ -55,6 +80,19 @@ def main() -> int:
     requested["preference_reply_count"] = 1
     requested["notify_event_count"] = 1
     requested["frame_count"] = 1
+    requested["selected_output"] = ""
+    requested["scheduled_frame_count"] = 0
+    requested["submitted_frame_count"] = 0
+    requested["presented_frame_count"] = 0
+    requested["first_observed_commit_id"] = 0
+    requested["last_observed_commit_id"] = 0
+    requested["first_presented_generation"] = 0
+    requested["last_presented_generation"] = 0
+    requested["maximum_outstanding_updates"] = 0
+    requested["retryable_query_count"] = 0
+    requested["missed_deadline_count"] = 0
+    requested["maximum_completion_latency_nanoseconds"] = 0
+    requested["presentation_paced"] = False
     validate(requested)
     preference = valid_state()
     preference.update(
@@ -69,6 +107,19 @@ def main() -> int:
         notify_change_mask=1,
         reason_mask=1 << 19,
         preference_sequence=["Default", "Allow", "Prefer", "Disable"],
+        selected_output="",
+        scheduled_frame_count=0,
+        submitted_frame_count=0,
+        presented_frame_count=0,
+        first_observed_commit_id=0,
+        last_observed_commit_id=0,
+        first_presented_generation=0,
+        last_presented_generation=0,
+        maximum_outstanding_updates=0,
+        retryable_query_count=0,
+        missed_deadline_count=0,
+        maximum_completion_latency_nanoseconds=0,
+        presentation_paced=False,
     )
     validate(preference)
     rejected(lambda value: value.update(command="anything"))
@@ -80,6 +131,9 @@ def main() -> int:
     rejected(lambda value: value.update(notify_change_mask=8))
     rejected(lambda value: value.update(reason_mask=1 << 40))
     rejected(lambda value: value.update(eventfd_synchronized=False))
+    rejected(lambda value: value.update(presented_frame_count=119))
+    rejected(lambda value: value.update(maximum_outstanding_updates=2))
+    rejected(lambda value: value.update(last_presented_generation=5))
     rejected(
         lambda value: value.update(
             mode="windowed",

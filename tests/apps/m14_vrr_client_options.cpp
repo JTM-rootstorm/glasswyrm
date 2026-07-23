@@ -72,6 +72,14 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
       options.display = argv[++index];
     } else if (argument == "--result" && index + 1 < argc) {
       options.result_path = argv[++index];
+    } else if (argument == "--control-socket" && index + 1 < argc) {
+      if (!options.control_socket.empty())
+        return false;
+      options.control_socket = argv[++index];
+    } else if (argument == "--output" && index + 1 < argc) {
+      if (!options.output.empty())
+        return false;
+      options.output = argv[++index];
     } else if (argument == "--repaint-trigger" && index + 1 < argc) {
       if (!options.repaint_trigger.empty())
         return false;
@@ -118,6 +126,10 @@ bool parse_client_options(const int argc, char **argv, ClientOptions &options) {
   }
   if (options.repaint_trigger.empty() != (options.repaint_count == 0) ||
       (options.repaint_count != 0 && options.hold_ms == 0))
+    return false;
+  if (options.control_socket.empty() != options.output.empty() ||
+      (options.mode == ClientMode::Cadence && options.control_socket.empty()) ||
+      (options.mode != ClientMode::Cadence && !options.control_socket.empty()))
     return false;
   if (options.help || options.self_test)
     return true;

@@ -26,6 +26,7 @@ inline constexpr std::string_view kClientUsage =
     "Usage: m14_vrr_client --display :N --mode "
     "fullscreen|borderless|windowed|app-requested|preference|cadence --result PATH "
     "[--frames 1..10000] [--target-refresh-hz 1..1000] "
+    "[--control-socket PATH --output NAME] "
     "[--hold-ms 0..60000] [--prefer] "
     "[--preference default|disable|allow|prefer] "
     "[--repaint-trigger PATH --repaint-count 1..16]\n"
@@ -34,6 +35,8 @@ inline constexpr std::string_view kClientUsage =
 struct ClientOptions {
   std::string display;
   std::string result_path;
+  std::string control_socket;
+  std::string output;
   std::string repaint_trigger;
   ClientMode mode{ClientMode::Windowed};
   std::uint32_t frame_count{1};
