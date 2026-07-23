@@ -100,7 +100,10 @@ bool SoftwareFrameSet::append(OutputFrameResult output, std::string &error) {
     error = "software frame set exceeds the total pixel limit";
     return false;
   }
-  output.visible_hash = output.frame.visible_hash();
+  const auto hash = hash_visible_xrgb8888_measured(output.frame.pixels());
+  output.visible_hash = hash.hash;
+  output.frame_hash_bytes = hash.bytes;
+  output.frame_hash_nanoseconds = hash.nanoseconds;
   const auto id = output.output.output_id;
   if (!outputs_.emplace(id, std::move(output)).second) {
     error = "software frame set contains a duplicate output ID";

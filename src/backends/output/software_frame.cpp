@@ -1,11 +1,13 @@
 #include "backends/output/software_frame.hpp"
 
+#include <chrono>
 #include <limits>
 
 namespace glasswyrm::output {
 
-std::uint64_t hash_visible_xrgb8888(
+FrameHashMeasurement hash_visible_xrgb8888_measured(
     const std::span<const std::uint32_t> pixels) noexcept {
+  const auto started = std::chrono::steady_clock::now();
   std::uint64_t hash = 14695981039346656037ULL;
   for (const auto pixel : pixels) {
     const std::uint8_t bytes[3] = {
@@ -17,7 +19,20 @@ std::uint64_t hash_visible_xrgb8888(
       hash *= 1099511628211ULL;
     }
   }
-  return hash;
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started);
+  constexpr auto maximum = std::numeric_limits<std::uint64_t>::max();
+  const auto bytes = pixels.size() > maximum / 3U
+                         ? maximum
+                         : static_cast<std::uint64_t>(pixels.size()) * 3U;
+  return {hash, bytes,
+          elapsed.count() < 0 ? 0U
+                              : static_cast<std::uint64_t>(elapsed.count())};
+}
+
+std::uint64_t hash_visible_xrgb8888(
+    const std::span<const std::uint32_t> pixels) noexcept {
+  return hash_visible_xrgb8888_measured(pixels).hash;
 }
 
 bool SoftwareFrame::configure(const std::uint64_t id,

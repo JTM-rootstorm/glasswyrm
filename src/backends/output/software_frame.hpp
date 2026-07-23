@@ -25,6 +25,15 @@ struct SoftwareFrameView {
   std::uint64_t ordinal{};
 };
 
+struct FrameHashMeasurement {
+  std::uint64_t hash{};
+  std::uint64_t bytes{};
+  std::uint64_t nanoseconds{};
+};
+
+[[nodiscard]] FrameHashMeasurement hash_visible_xrgb8888_measured(
+    std::span<const std::uint32_t> pixels) noexcept;
+
 [[nodiscard]] std::uint64_t hash_visible_xrgb8888(
     std::span<const std::uint32_t> pixels) noexcept;
 

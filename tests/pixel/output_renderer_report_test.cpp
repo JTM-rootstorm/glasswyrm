@@ -145,7 +145,7 @@ void test_output_metrics(const std::filesystem::path& root) {
   const auto output_record = contents.find("{\"record\":\"output-frame\"");
   gw::test::require(
       output_record != std::string::npos &&
-          contents.find("\"schema_version\":13", output_record) !=
+          contents.find("\"schema_version\":14", output_record) !=
               std::string::npos &&
           contents.find("\"output_id\":\"0000000000000001\"", output_record) !=
               std::string::npos &&
@@ -156,6 +156,12 @@ void test_output_metrics(const std::filesystem::path& root) {
           contents.find("\"physical_damage_rectangles\":[{\"x\":0,\"y\":0,"
                         "\"width\":3,\"height\":3}]",
                         output_record) != std::string::npos &&
+          contents.find("\"rendered_pixels\":9", output_record) !=
+              std::string::npos &&
+          contents.find("\"frame_hash_bytes\":27", output_record) !=
+              std::string::npos &&
+          contents.find("\"frame_hash_nanoseconds\":", output_record) !=
+              std::string::npos &&
           contents.find("\"readback_bytes\":0", output_record) !=
               std::string::npos &&
           contents.find("\"texture_cache_bytes\":0", output_record) !=
@@ -291,6 +297,10 @@ void test_accelerated_metric_serialization(const std::filesystem::path& root) {
   metrics.texture_uploads = 11;
   metrics.texture_upload_bytes = 12;
   metrics.physical_damage_rectangles = {{1, 0, 2, 3}};
+  metrics.rendered_pixels = 6;
+  metrics.render_nanoseconds = 7;
+  metrics.frame_hash_bytes = 27;
+  metrics.frame_hash_nanoseconds = 8;
   metrics.readback_bytes = 13;
   metrics.texture_cache_bytes = 14;
   metrics.scale = {5, 4};
@@ -309,6 +319,10 @@ void test_accelerated_metric_serialization(const std::filesystem::path& root) {
           contents.find("\"texture_uploads\":11,\"texture_upload_bytes\":12",
                         record) != std::string::npos &&
           contents.find("\"readback_bytes\":13,\"texture_cache_bytes\":14",
+                        record) != std::string::npos &&
+          contents.find("\"rendered_pixels\":6,\"render_nanoseconds\":7,"
+                        "\"frame_hash_bytes\":27,"
+                        "\"frame_hash_nanoseconds\":8",
                         record) != std::string::npos &&
           contents.find("\"filtering_modes\":[\"nearest\",\"bilinear\"]",
                         record) != std::string::npos &&

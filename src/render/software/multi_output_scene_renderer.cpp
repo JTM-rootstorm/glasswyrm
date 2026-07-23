@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -359,6 +360,7 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
       result.error = "output has invalid software mapping metadata";
       return result;
     }
+    const auto render_started = std::chrono::steady_clock::now();
     OutputFrameResult rendered;
     rendered.output = {output_id, output.physical_pixel_width,
                        output.physical_pixel_height,
@@ -400,6 +402,13 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
         result.error = "physical damage is outside its output";
         return result;
       }
+      const auto pixel_count =
+          std::uint64_t{rectangle.width} * rectangle.height;
+      metrics.rendered_pixels =
+          pixel_count > std::numeric_limits<std::uint64_t>::max() -
+                            metrics.rendered_pixels
+              ? std::numeric_limits<std::uint64_t>::max()
+              : metrics.rendered_pixels + pixel_count;
       auto pixels = rendered.frame.pixels();
       for (std::uint32_t y = 0; y < rectangle.height; ++y)
         std::fill_n(pixels.begin() +
@@ -422,6 +431,10 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
         }
       }
     }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - render_started);
+    metrics.render_nanoseconds =
+        elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count());
     if (!staged_frames.append(std::move(rendered), result.error))
       return result;
   }

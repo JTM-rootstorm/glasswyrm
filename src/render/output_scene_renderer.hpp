@@ -14,6 +14,10 @@ struct OutputRendererMetrics {
   std::uint64_t texture_uploads{};
   std::uint64_t texture_upload_bytes{};
   std::vector<compositor::Rectangle> physical_damage_rectangles;
+  std::uint64_t rendered_pixels{};
+  std::uint64_t render_nanoseconds{};
+  std::uint64_t frame_hash_bytes{};
+  std::uint64_t frame_hash_nanoseconds{};
   std::uint64_t readback_bytes{};
   std::uint64_t texture_cache_bytes{};
   glasswyrm::output::RationalScale scale;

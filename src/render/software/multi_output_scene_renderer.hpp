@@ -25,6 +25,8 @@ enum class SamplingFilter : std::uint8_t {
 
 struct OutputSoftwareRenderMetrics {
   std::uint64_t damage_rectangles{};
+  std::uint64_t rendered_pixels{};
+  std::uint64_t render_nanoseconds{};
   std::uint64_t sampled_pixels{};
   bool used_direct{};
   bool used_nearest{};

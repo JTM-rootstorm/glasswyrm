@@ -36,6 +36,8 @@ struct OutputFrameResult {
   SoftwareFrame frame;
   std::vector<gw::compositor::Rectangle> damage;
   std::uint64_t visible_hash{};
+  std::uint64_t frame_hash_bytes{};
+  std::uint64_t frame_hash_nanoseconds{};
   VrrPresentationRequest vrr;
 };
 
