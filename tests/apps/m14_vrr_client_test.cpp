@@ -128,6 +128,80 @@ void test_cadence_and_pixels() {
           "eventfd producer synchronizes exact cadence damage publication");
 }
 
+void test_presentation_pacer() {
+  PresentationPacer pacer(3, 10, 50);
+  std::string error;
+  require(pacer.begin({7, 9}, 100, error), "pacer accepts an initial marker");
+  require(pacer.next(109).action == PresentationPacerAction::Wait &&
+              pacer.next(110).action == PresentationPacerAction::SubmitNow &&
+              pacer.submitted(1, 110, error),
+          "pacer waits for an absolute deadline before one submission");
+  require(pacer.observe({PresentationObservationKind::Complete, {7, 9}, 111,
+                         {}}).action == PresentationPacerAction::Wait &&
+              pacer.observe({PresentationObservationKind::RetryableNotReady,
+                              {}, 112, {}}).action ==
+                  PresentationPacerAction::Wait &&
+              pacer.observe({PresentationObservationKind::Complete, {8, 10},
+                              113, {}}).action ==
+                  PresentationPacerAction::FramePresented,
+          "duplicate and retryable observations do not count presentations");
+  require(pacer.next(145).action == PresentationPacerAction::MissedDeadline &&
+              pacer.next(145).action == PresentationPacerAction::MissedDeadline &&
+              pacer.next(145).action == PresentationPacerAction::MissedDeadline &&
+              pacer.next(145).action == PresentationPacerAction::Wait &&
+              pacer.next(150).action == PresentationPacerAction::SubmitNow &&
+              pacer.submitted(2, 150, error),
+          "late work skips absolute slots instead of burst catch-up");
+  require(pacer.observe({PresentationObservationKind::Complete, {9, 11}, 155,
+                         {}}).action == PresentationPacerAction::FramePresented &&
+              pacer.next(160).action == PresentationPacerAction::SubmitNow &&
+              pacer.submitted(3, 160, error) &&
+              pacer.observe({PresentationObservationKind::Complete, {10, 12},
+                              166, {}}).action ==
+                  PresentationPacerAction::FramePresented &&
+              pacer.next(166).action == PresentationPacerAction::Complete,
+          "pacer completes only after every submitted frame is presented");
+  const auto &stats = pacer.stats();
+  require(stats.scheduled_frame_count == 3 &&
+              stats.submitted_frame_count == 3 &&
+              stats.presented_frame_count == 3 &&
+              stats.maximum_outstanding_updates == 1 &&
+              stats.retryable_query_count == 1 &&
+              stats.missed_deadline_count == 3 &&
+              stats.maximum_completion_latency_nanoseconds == 6,
+          "pacer publishes bounded deterministic counters");
+}
+
+void test_presentation_pacer_failures() {
+  std::string error;
+  PresentationPacer regression(1, 10, 50);
+  require(regression.begin({10, 20}, 100, error) &&
+              regression.next(110).action == PresentationPacerAction::SubmitNow &&
+              regression.submitted(1, 110, error) &&
+              regression.observe({PresentationObservationKind::Complete,
+                                  {11, 19}, 111, {}}).action ==
+                  PresentationPacerAction::Fatal,
+          "generation regression is fatal");
+
+  PresentationPacer fatal_query(1, 10, 50);
+  require(fatal_query.begin({1, 1}, 100, error) &&
+              fatal_query.next(110).action == PresentationPacerAction::SubmitNow &&
+              fatal_query.submitted(1, 110, error) &&
+              fatal_query.observe({PresentationObservationKind::Fatal, {}, 111,
+                                   "peer closed"}).action ==
+                  PresentationPacerAction::Fatal,
+          "fatal observer errors fail immediately");
+
+  PresentationPacer timeout(1, 10, 5);
+  require(timeout.begin({1, 1}, 100, error) &&
+              timeout.next(110).action == PresentationPacerAction::SubmitNow &&
+              timeout.submitted(1, 110, error) &&
+              timeout.observe({PresentationObservationKind::Complete, {1, 1},
+                               115, {}}).action ==
+                  PresentationPacerAction::Timeout,
+          "a stalled marker times out at the bounded deadline");
+}
+
 void test_state_json_and_private_publish() {
   const ClientState state{
       ClientMode::Cadence, 42, 640, 480, true, true, false, 120, 72,
@@ -182,6 +256,8 @@ void test_state_json_and_private_publish() {
 int main() {
   test_options();
   test_cadence_and_pixels();
+  test_presentation_pacer();
+  test_presentation_pacer_failures();
   test_state_json_and_private_publish();
   return 0;
 }

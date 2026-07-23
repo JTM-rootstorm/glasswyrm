@@ -43,6 +43,149 @@ void write_all(const int descriptor, const std::string_view contents) {
 
 } // namespace
 
+PresentationPacer::PresentationPacer(
+    const std::uint32_t frame_count, const std::uint64_t interval_nanoseconds,
+    const std::uint64_t completion_timeout_nanoseconds) noexcept
+    : interval_nanoseconds_(interval_nanoseconds),
+      completion_timeout_nanoseconds_(completion_timeout_nanoseconds) {
+  stats_.scheduled_frame_count = frame_count;
+}
+
+bool PresentationPacer::begin(const PresentationMarker initial,
+                              const std::uint64_t start_nanoseconds,
+                              std::string &error) noexcept {
+  if (started_ || terminal_ || stats_.scheduled_frame_count == 0 ||
+      interval_nanoseconds_ == 0 || completion_timeout_nanoseconds_ == 0 ||
+      !initial.valid() || start_nanoseconds == 0 ||
+      start_nanoseconds >
+          std::numeric_limits<std::uint64_t>::max() - interval_nanoseconds_) {
+    error = "invalid initial presentation pacing state";
+    return false;
+  }
+  started_ = true;
+  stats_.first_observed = initial;
+  stats_.last_observed = initial;
+  next_deadline_nanoseconds_ = start_nanoseconds + interval_nanoseconds_;
+  error.clear();
+  return true;
+}
+
+PresentationPacerEvent PresentationPacer::fatal(std::string detail) noexcept {
+  terminal_ = true;
+  return {PresentationPacerAction::Fatal, stats_.submitted_frame_count,
+          next_deadline_nanoseconds_, std::move(detail)};
+}
+
+PresentationPacerEvent
+PresentationPacer::next(const std::uint64_t now_nanoseconds) noexcept {
+  if (!started_)
+    return fatal("presentation pacer was not initialized");
+  if (terminal_)
+    return {PresentationPacerAction::Fatal, stats_.submitted_frame_count,
+            next_deadline_nanoseconds_, "presentation pacer is terminal"};
+  if (frame_outstanding_) {
+    if (now_nanoseconds >= completion_deadline_nanoseconds_) {
+      terminal_ = true;
+      return {PresentationPacerAction::Timeout, stats_.submitted_frame_count,
+              next_deadline_nanoseconds_,
+              "presentation marker did not advance before the frame timeout"};
+    }
+    return {PresentationPacerAction::Wait, stats_.submitted_frame_count,
+            completion_deadline_nanoseconds_, {}};
+  }
+  if (stats_.presented_frame_count == stats_.scheduled_frame_count) {
+    terminal_ = true;
+    return {PresentationPacerAction::Complete, stats_.submitted_frame_count,
+            next_deadline_nanoseconds_, {}};
+  }
+  if (now_nanoseconds > next_deadline_nanoseconds_) {
+    if (next_deadline_nanoseconds_ >
+        std::numeric_limits<std::uint64_t>::max() - interval_nanoseconds_)
+      return fatal("absolute cadence deadline overflowed");
+    ++stats_.missed_deadline_count;
+    const auto missed = next_deadline_nanoseconds_;
+    next_deadline_nanoseconds_ += interval_nanoseconds_;
+    return {PresentationPacerAction::MissedDeadline,
+            stats_.submitted_frame_count + 1U, missed, {}};
+  }
+  if (now_nanoseconds < next_deadline_nanoseconds_)
+    return {PresentationPacerAction::Wait,
+            stats_.submitted_frame_count + 1U, next_deadline_nanoseconds_, {}};
+  return {PresentationPacerAction::SubmitNow,
+          stats_.submitted_frame_count + 1U, next_deadline_nanoseconds_, {}};
+}
+
+bool PresentationPacer::submitted(const std::uint32_t frame_ordinal,
+                                   const std::uint64_t now_nanoseconds,
+                                   std::string &error) noexcept {
+  if (!started_ || terminal_ || frame_outstanding_ || now_nanoseconds == 0 ||
+      frame_ordinal != stats_.submitted_frame_count + 1U ||
+      frame_ordinal > stats_.scheduled_frame_count ||
+      now_nanoseconds < next_deadline_nanoseconds_ ||
+      now_nanoseconds > std::numeric_limits<std::uint64_t>::max() -
+                            completion_timeout_nanoseconds_ ||
+      next_deadline_nanoseconds_ >
+          std::numeric_limits<std::uint64_t>::max() - interval_nanoseconds_) {
+    error = "invalid presentation submission transition";
+    return false;
+  }
+  ++stats_.submitted_frame_count;
+  stats_.maximum_outstanding_updates = 1;
+  frame_outstanding_ = true;
+  submission_nanoseconds_ = now_nanoseconds;
+  completion_deadline_nanoseconds_ =
+      now_nanoseconds + completion_timeout_nanoseconds_;
+  next_deadline_nanoseconds_ += interval_nanoseconds_;
+  error.clear();
+  return true;
+}
+
+PresentationPacerEvent PresentationPacer::observe(
+    const PresentationObservation &observation) noexcept {
+  if (!started_ || terminal_ || !frame_outstanding_)
+    return fatal("presentation observation has no outstanding frame");
+  if (observation.timestamp_nanoseconds < submission_nanoseconds_)
+    return fatal("presentation observation predates its submission");
+  if (observation.kind == PresentationObservationKind::Fatal)
+    return fatal(observation.detail.empty() ? "fatal presentation query"
+                                            : observation.detail);
+  if (observation.kind == PresentationObservationKind::RetryableNotReady) {
+    ++stats_.retryable_query_count;
+    if (observation.timestamp_nanoseconds >= completion_deadline_nanoseconds_) {
+      terminal_ = true;
+      return {PresentationPacerAction::Timeout, stats_.submitted_frame_count,
+              completion_deadline_nanoseconds_,
+              "presentation query remained retryable through the frame timeout"};
+    }
+    return {PresentationPacerAction::Wait, stats_.submitted_frame_count,
+            completion_deadline_nanoseconds_, {}};
+  }
+  if (!observation.marker.valid())
+    return fatal("presentation query returned an invalid marker");
+  if (observation.marker.commit_id < stats_.last_observed.commit_id ||
+      observation.marker.presented_generation <
+          stats_.last_observed.presented_generation)
+    return fatal("presentation marker regressed");
+  if (observation.marker == stats_.last_observed) {
+    if (observation.timestamp_nanoseconds >= completion_deadline_nanoseconds_) {
+      terminal_ = true;
+      return {PresentationPacerAction::Timeout, stats_.submitted_frame_count,
+              completion_deadline_nanoseconds_,
+              "presentation marker stalled through the frame timeout"};
+    }
+    return {PresentationPacerAction::Wait, stats_.submitted_frame_count,
+            completion_deadline_nanoseconds_, {}};
+  }
+  stats_.last_observed = observation.marker;
+  ++stats_.presented_frame_count;
+  const auto latency = observation.timestamp_nanoseconds - submission_nanoseconds_;
+  stats_.maximum_completion_latency_nanoseconds =
+      std::max(stats_.maximum_completion_latency_nanoseconds, latency);
+  frame_outstanding_ = false;
+  return {PresentationPacerAction::FramePresented,
+          stats_.presented_frame_count, next_deadline_nanoseconds_, {}};
+}
+
 EventfdDamageProducer::EventfdDamageProducer()
     : request_(::eventfd(0, EFD_CLOEXEC)), ready_(::eventfd(0, EFD_CLOEXEC)) {
   if (request_ < 0 || ready_ < 0) {

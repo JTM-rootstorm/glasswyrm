@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <optional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -35,6 +36,95 @@ struct ClientState {
   std::uint32_t notify_change_mask{};
   std::uint64_t reason_mask{};
   bool eventfd_synchronized{};
+};
+
+struct PresentationMarker {
+  std::uint64_t commit_id{};
+  std::uint64_t presented_generation{};
+
+  [[nodiscard]] bool valid() const noexcept {
+    return commit_id != 0 && presented_generation != 0;
+  }
+  friend bool operator==(const PresentationMarker &,
+                         const PresentationMarker &) = default;
+};
+
+enum class PresentationObservationKind : std::uint8_t {
+  Complete,
+  RetryableNotReady,
+  Fatal,
+};
+
+struct PresentationObservation {
+  PresentationObservationKind kind{PresentationObservationKind::Fatal};
+  PresentationMarker marker;
+  std::uint64_t timestamp_nanoseconds{};
+  std::string detail;
+};
+
+enum class PresentationPacerAction : std::uint8_t {
+  SubmitNow,
+  Wait,
+  FramePresented,
+  MissedDeadline,
+  Timeout,
+  Complete,
+  Fatal,
+};
+
+struct PresentationPacerEvent {
+  PresentationPacerAction action{PresentationPacerAction::Fatal};
+  std::uint32_t frame_ordinal{};
+  std::uint64_t scheduled_deadline_nanoseconds{};
+  std::string detail;
+};
+
+struct PresentationPacerStats {
+  std::uint32_t scheduled_frame_count{};
+  std::uint32_t submitted_frame_count{};
+  std::uint32_t presented_frame_count{};
+  PresentationMarker first_observed;
+  PresentationMarker last_observed;
+  std::uint32_t maximum_outstanding_updates{};
+  std::uint32_t retryable_query_count{};
+  std::uint32_t missed_deadline_count{};
+  std::uint64_t maximum_completion_latency_nanoseconds{};
+};
+
+class PresentationPacer {
+public:
+  PresentationPacer(std::uint32_t frame_count,
+                    std::uint64_t interval_nanoseconds,
+                    std::uint64_t completion_timeout_nanoseconds) noexcept;
+
+  [[nodiscard]] bool begin(PresentationMarker initial,
+                           std::uint64_t start_nanoseconds,
+                           std::string &error) noexcept;
+  [[nodiscard]] PresentationPacerEvent
+  next(std::uint64_t now_nanoseconds) noexcept;
+  [[nodiscard]] bool submitted(std::uint32_t frame_ordinal,
+                               std::uint64_t now_nanoseconds,
+                               std::string &error) noexcept;
+  [[nodiscard]] PresentationPacerEvent
+  observe(const PresentationObservation &observation) noexcept;
+  [[nodiscard]] const PresentationPacerStats &stats() const noexcept {
+    return stats_;
+  }
+  [[nodiscard]] bool frame_outstanding() const noexcept {
+    return frame_outstanding_;
+  }
+
+private:
+  [[nodiscard]] PresentationPacerEvent fatal(std::string detail) noexcept;
+  std::uint64_t interval_nanoseconds_{};
+  std::uint64_t completion_timeout_nanoseconds_{};
+  std::uint64_t next_deadline_nanoseconds_{};
+  std::uint64_t submission_nanoseconds_{};
+  std::uint64_t completion_deadline_nanoseconds_{};
+  PresentationPacerStats stats_;
+  bool started_{};
+  bool frame_outstanding_{};
+  bool terminal_{};
 };
 
 class EventfdDamageProducer {
