@@ -62,6 +62,8 @@ def main() -> int:
               if first_commit < value.get("commit_id", 0) <= last_commit]
     if len(steady) != 180:
         raise ValueError("renderer report does not match the client marker range")
+    total_render_nanoseconds = 0
+    total_hash_nanoseconds = 0
     for value in steady:
         outputs = value.get("outputs")
         if not isinstance(outputs, list) or len(outputs) != 1:
@@ -71,6 +73,17 @@ def main() -> int:
             if isinstance(output, dict) else None
         if not isinstance(damage, list) or not damage:
             raise ValueError("renderer cadence record lacks bounded damage")
+        if (output.get("rendered_pixels") != 64 * 64
+                or output.get("frame_hash_bytes") != 2560 * 1440 * 3
+                or isinstance(output.get("render_nanoseconds"), bool)
+                or not isinstance(output.get("render_nanoseconds"), int)
+                or output["render_nanoseconds"] < 0
+                or isinstance(output.get("frame_hash_nanoseconds"), bool)
+                or not isinstance(output.get("frame_hash_nanoseconds"), int)
+                or output["frame_hash_nanoseconds"] < 0):
+            raise ValueError("renderer scalar counters are incomplete")
+        total_render_nanoseconds += output["render_nanoseconds"]
+        total_hash_nanoseconds += output["frame_hash_nanoseconds"]
         for rectangle in damage:
             if (not isinstance(rectangle, dict)
                     or rectangle.get("width", 0) > 66
@@ -91,7 +104,9 @@ def main() -> int:
             and isinstance(outputs[0], dict) else None
         if physical != {"width": 2560, "height": 1440}:
             raise ValueError("headless cadence output is not 2560x1440")
-    print("m14 integrated cadence: valid (headless and fake DRM only)")
+    print("m14 integrated cadence: valid (headless and fake DRM only); "
+          f"render_ns={total_render_nanoseconds} "
+          f"frame_hash_ns={total_hash_nanoseconds}")
     return 0
 
 

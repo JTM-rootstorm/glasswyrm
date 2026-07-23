@@ -57,7 +57,11 @@ records unchanged. Output-model frames add a versioned `output-frame` record
 with deterministic output-ID order. Each output reports physical damage,
 texture upload and cache work, readback bytes, active sampling filters,
 rational scale, transform, bounded fallback reason, and the maximum
-software-reference channel error observed by fractional GLES sampling.
+software-reference channel error observed by fractional GLES sampling. Schema
+14 also reports rendered pixels plus render and visible-frame-hash byte/time
+costs. DRM damage-copy reports independently record planned and actual copied
+bytes, copy time, and full parity-verification byte/time costs, including any
+recovery copy after a parity mismatch.
 
 Milestone 14 preserves trusted content damage as normalized local rectangles
 through scene commit and maps those rectangles independently into every current
@@ -68,6 +72,10 @@ output-configuration changes, and new or replacement buffers remain
 conservative old/new or full-surface invalidations with typed fallback reasons.
 DRM damage history may optimize copies from this result, but canonical-to-scanout
 hash parity remains authoritative and forces a full-copy recovery on mismatch.
+The optimized integrated 2560x1440 cadence gate completes well below the
+60-second optimization trigger while retaining full visible-frame hashing and
+full scanout parity verification. Those correctness checks therefore remain
+intentionally unweakened; their scalar costs are exposed for later profiling.
 
 `GW_SCALE` 0.1 is an explicit experimental client contract for preferred
 scale, membership notifications, and retained scaled-pixmap presentation. It
