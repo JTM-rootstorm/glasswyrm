@@ -126,9 +126,10 @@ if get_option('glasswyrmd')
           glasswyrmd_program.full_path(),
           m14_vrr_client.full_path(),
           m14_client_state_validator.full_path(),
+          gwinfo_program.full_path(),
         ],
         depends: [gwm_program, gwcomp_program, glasswyrmd_program,
-                  m14_vrr_client],
+                  m14_vrr_client, gwinfo_program],
         suite: 'm14-runtime',
         timeout: 20,
       )

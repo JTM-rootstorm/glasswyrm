@@ -72,6 +72,14 @@ Positive hardware evidence requires monotonic kernel page-flip timestamps that
 demonstrate in-range cadence while VRR is effective and a changed cadence when
 it is disabled.
 
+`OutputVrrStateUpsert.state_generation` normally names the GWM policy
+generation carried by the scene's `SurfaceVrrState` records. A complete scene
+with no nonmetadata window surfaces has no surface record that can carry that
+generation, so the compositor uses the stable output-layout generation
+instead. The protocol server accepts that fallback only while its VRR window
+cache is empty and still requires the returned policy decision to match the
+current per-output policy result.
+
 ## Compatibility proof
 
 The staged install matrix compiles, links, and runs C and C++ consumers for API

@@ -200,6 +200,19 @@ void test_output_readiness_matrix() {
               projected.snapshot->states.size() == 1,
           "timing omission is explicit inside an otherwise complete view");
 
+  auto empty_scene_fallback = ready;
+  gwipc_policy_output_vrr_state newer_policy{};
+  newer_policy.struct_size = sizeof(newer_policy);
+  newer_policy.output_id = kOutputId;
+  newer_policy.mode = GWIPC_VRR_POLICY_FOCUSED;
+  newer_policy.candidate_required = 1;
+  require(empty_scene_fallback.stage_policy_result(8, {newer_policy}, {}),
+          "advance an empty scene beyond its output-layout generation");
+  expect(project_vrr_query(&empty_scene_fallback, output_layout, kPolicies),
+         VrrQueryReadiness::Ready, VrrQueryReason::None,
+         "an empty scene accepts compositor state stamped with the stable "
+         "output-layout generation");
+
   auto stale = ready;
   auto &stale_outputs =
       const_cast<std::map<std::uint64_t, ServerVrrOutputState> &>(
