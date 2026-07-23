@@ -59,10 +59,16 @@ exact_damage(std::vector<gw::compositor::Rectangle> rectangles,
   return result;
 }
 
-gw::compositor::SurfaceOutputMembership membership(
-    std::vector<std::uint64_t> outputs) {
-  return {outputs.front(), std::move(outputs), 1, 1, 1,
-          GWIPC_SURFACE_SCALE_LEGACY, 9, 0};
+gw::compositor::SurfaceOutputMembership
+membership(std::vector<std::uint64_t> outputs) {
+  return {outputs.front(),
+          std::move(outputs),
+          1,
+          1,
+          1,
+          GWIPC_SURFACE_SCALE_LEGACY,
+          9,
+          0};
 }
 
 gw::compositor::Scene scene(const std::int32_t surface_x,
@@ -207,6 +213,13 @@ void test_trust_and_structural_fallbacks() {
           hide.regions.at(1) ==
               std::vector<gw::compositor::Rectangle>{{0, 0, 2, 2}},
       "hide and show invalidate the visible structural bounds");
+  const auto hidden_content = gw::compositor::calculate_output_damage(
+      hidden, hidden,
+      exact_damage({{0, 0, 1, 1}}, false,
+                   gw::compositor::SurfaceDamageFallbackReason::Untrusted));
+  gw::test::require(hidden_content.regions.empty() &&
+                        hidden_content.fallback_reasons.empty(),
+                    "hidden content damage does not invent output fallback");
 
   auto restacked = value;
   restacked.surfaces.at(10).stacking = 99;
@@ -250,7 +263,8 @@ int main() {
   test_trust_and_structural_fallbacks();
   const auto left = scene(0, {1});
   const auto spanning = scene(3, {1, 2});
-  const auto moved = gw::compositor::calculate_output_damage(left, spanning, {});
+  const auto moved =
+      gw::compositor::calculate_output_damage(left, spanning, {});
   gw::test::require(
       moved.regions.size() == 2 && moved.regions.at(1).size() == 2 &&
           moved.regions.at(2).size() == 1 &&
@@ -258,8 +272,8 @@ int main() {
       "old/new memberships map to conservative native damage");
 
   const auto changed = exact_damage({{0, 0, 2, 2}});
-  const auto pixels = gw::compositor::calculate_output_damage(
-      spanning, spanning, changed);
+  const auto pixels =
+      gw::compositor::calculate_output_damage(spanning, spanning, changed);
   gw::test::require(
       pixels.regions.size() == 2 && !pixels.regions.at(1).empty() &&
           pixels.regions.at(2).front() == gw::compositor::Rectangle{0, 0, 3, 4},
