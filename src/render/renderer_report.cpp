@@ -217,7 +217,7 @@ bool RendererReport::append_output_frame(
     return false;
   }
   std::ostringstream line;
-  line << "{\"record\":\"output-frame\",\"schema_version\":13"
+  line << "{\"record\":\"output-frame\",\"schema_version\":14"
        << ",\"selected\":" << json_quote(result.selected_renderer)
        << ",\"commit_id\":" << request.commit_id
        << ",\"generation\":" << request.generation
@@ -239,7 +239,12 @@ bool RendererReport::append_output_frame(
          << ",\"texture_upload_bytes\":" << metrics.texture_upload_bytes
          << ",\"physical_damage_rectangles\":";
     append_physical_damage(line, metrics);
-    line << ",\"readback_bytes\":" << metrics.readback_bytes
+    line << ",\"rendered_pixels\":" << metrics.rendered_pixels
+         << ",\"render_nanoseconds\":" << metrics.render_nanoseconds
+         << ",\"frame_hash_bytes\":" << metrics.frame_hash_bytes
+         << ",\"frame_hash_nanoseconds\":"
+         << metrics.frame_hash_nanoseconds
+         << ",\"readback_bytes\":" << metrics.readback_bytes
          << ",\"texture_cache_bytes\":" << metrics.texture_cache_bytes
          << ",\"filtering_modes\":";
     append_filters(line, metrics);

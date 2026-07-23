@@ -19,6 +19,10 @@ OutputRendererMetrics adapt_metrics(
     const glasswyrm::output::OutputFrameResult& frame) {
   OutputRendererMetrics result;
   result.physical_damage_rectangles = frame.damage;
+  result.rendered_pixels = source.rendered_pixels;
+  result.render_nanoseconds = source.render_nanoseconds;
+  result.frame_hash_bytes = frame.frame_hash_bytes;
+  result.frame_hash_nanoseconds = frame.frame_hash_nanoseconds;
   result.scale = frame.scale;
   result.transform = frame.transform;
   result.used_direct = source.used_direct;
@@ -35,6 +39,8 @@ OutputRendererMetrics adapt_metrics(
   result.texture_uploads = source.texture_uploads;
   result.texture_upload_bytes = source.texture_upload_bytes;
   result.physical_damage_rectangles = frame.damage;
+  result.frame_hash_bytes = frame.frame_hash_bytes;
+  result.frame_hash_nanoseconds = frame.frame_hash_nanoseconds;
   result.readback_bytes = source.readback_bytes;
   result.texture_cache_bytes = source.texture_cache_bytes;
   result.scale = frame.scale;

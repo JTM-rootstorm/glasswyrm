@@ -40,6 +40,11 @@ int main() {
   frame.pixels()[3] = 0xffaabbccU;
   gw::test::require(frame.visible_hash() == 0x4d1416c2755838b5ULL,
                     "visible software-frame hash uses canonical RGB bytes");
+  const auto measured = glasswyrm::output::hash_visible_xrgb8888_measured(
+      frame.pixels());
+  gw::test::require(measured.hash == frame.visible_hash() &&
+                        measured.bytes == 12,
+                    "visible hash measurement preserves identity and RGB bytes");
   gw::test::require(!frame.configure(26, 0, 2, error),
                     "invalid reconfiguration is rejected");
   gw::test::require(frame.enabled() && frame.width() == 2 &&
