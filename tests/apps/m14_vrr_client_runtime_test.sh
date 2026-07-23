@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( $# != 5 )); then
-  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT VALIDATOR\n' "$0" >&2
+if (( $# != 6 )); then
+  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT VALIDATOR GWINFO\n' "$0" >&2
   exit 2
 fi
 
@@ -11,6 +11,7 @@ gwcomp=$2
 glasswyrmd=$3
 client=$4
 validator=$5
+gwinfo=$6
 root=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m14-client-runtime-XXXXXX")
 display=
 x_socket=
@@ -44,7 +45,12 @@ cleanup() {
     for log in "$root"/*.log; do
       [[ -f $log ]] || continue
       printf '\n--- %s ---\n' "${log##*/}" >&2
-      sed -n '1,240p' "$log" >&2
+      if [[ ${log##*/} == glasswyrmd.log ]]; then
+        grep -Fv 'output query temporarily unavailable' "$log" |
+          tail -240 >&2
+      else
+        tail -240 "$log" >&2
+      fi
     done
   fi
   rm -rf "$root"
@@ -118,6 +124,10 @@ wait "$client_pid"
 client_pid=
 
 "$validator" "$root/client.json"
+"$gwinfo" --socket "$root/control.sock" vrr --json \
+  >"$root/cleanup.json"
+grep -Fq '"windows":[]' "$root/cleanup.json"
+grep -Fq '"candidate_window":0' "$root/cleanup.json"
 for pid in "$gwm_pid" "$gwcomp_pid" "$server_pid"; do
   kill -0 "$pid"
 done

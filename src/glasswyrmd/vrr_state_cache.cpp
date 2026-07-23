@@ -98,7 +98,12 @@ VrrQueryResult project_vrr_query(
       return query_result(VrrQueryReadiness::RetryableNotReady,
                           VrrQueryReason::OutputStateMissing);
     const auto &state = *value.compositor_state;
-    if (state.state_generation != cache->generation())
+    const bool current_policy_generation =
+        state.state_generation == cache->generation();
+    const bool empty_scene_layout_generation =
+        cache->windows().empty() &&
+        state.state_generation == layout.generation;
+    if (!current_policy_generation && !empty_scene_layout_generation)
       return query_result(VrrQueryReadiness::RetryableNotReady,
                           VrrQueryReason::OutputStateStale);
     if (state.struct_size < sizeof(state) ||

@@ -446,7 +446,10 @@ bool RuntimeBridge::policy_rejected_ready() const noexcept {
 
 bool RuntimeBridge::submit_compositor(
     const CompositorSnapshotSubmission& submission, std::string& error) {
-  if (!ready() || transaction_stage_ != TransactionStage::PolicyReady) return false;
+  if (!ready() || transaction_stage_ != TransactionStage::PolicyReady) {
+    error = "compositor submission attempted without a ready policy result";
+    return false;
+  }
   if (!compositor_.submit(submission, error)) return false;
   pending_compositor_ = submission;
   transaction_stage_ = TransactionStage::Compositor;

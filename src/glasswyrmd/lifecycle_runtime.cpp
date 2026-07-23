@@ -138,11 +138,17 @@ bool ServerRuntime::send_compositor(const LifecycleSnapshot& snapshot) {
       server_.options_.output_model ? bridge_->output_layout() : nullptr,
       server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
   if (content_presenter_ && !content_presenter_->prepare_lifecycle(
-                                snapshot, server_.state_.resources(), submission))
+                                snapshot, server_.state_.resources(),
+                                submission)) {
+    std::fprintf(stderr,
+                 "glasswyrmd: content lifecycle preparation failed\n");
     return false;
+  }
   if (bridge_->submit_compositor(submission, error)) return true;
   if (content_presenter_)
     content_presenter_->cancel_lifecycle_submission();
+  std::fprintf(stderr, "glasswyrmd: compositor lifecycle submission failed: %s\n",
+               error.c_str());
   return false;
 }
 
