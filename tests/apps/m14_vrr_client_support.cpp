@@ -322,7 +322,7 @@ deterministic_damage(const std::uint32_t frame_index) {
 
 std::string client_state_json(const ClientState &state) {
   return "{\n"
-         "  \"schema\": \"glasswyrm.m14-vrr-client.v2\",\n"
+         "  \"schema\": \"glasswyrm.m14-vrr-client.v3\",\n"
          "  \"mode\": \"" +
          std::string(client_mode_name(state.mode)) +
          "\",\n"
@@ -375,6 +375,45 @@ std::string client_state_json(const ClientState &state) {
          "  \"eventfd_synchronized\": " +
          (state.eventfd_synchronized ? "true" : "false") +
          ",\n"
+         "  \"selected_output\": \"" + state.selected_output +
+         "\",\n"
+         "  \"scheduled_frame_count\": " +
+         std::to_string(state.presentation.scheduled_frame_count) +
+         ",\n"
+         "  \"submitted_frame_count\": " +
+         std::to_string(state.presentation.submitted_frame_count) +
+         ",\n"
+         "  \"presented_frame_count\": " +
+         std::to_string(state.presentation.presented_frame_count) +
+         ",\n"
+         "  \"first_observed_commit_id\": " +
+         std::to_string(state.presentation.first_observed.commit_id) +
+         ",\n"
+         "  \"last_observed_commit_id\": " +
+         std::to_string(state.presentation.last_observed.commit_id) +
+         ",\n"
+         "  \"first_presented_generation\": " +
+         std::to_string(state.presentation.first_observed.presented_generation) +
+         ",\n"
+         "  \"last_presented_generation\": " +
+         std::to_string(state.presentation.last_observed.presented_generation) +
+         ",\n"
+         "  \"maximum_outstanding_updates\": " +
+         std::to_string(state.presentation.maximum_outstanding_updates) +
+         ",\n"
+         "  \"retryable_query_count\": " +
+         std::to_string(state.presentation.retryable_query_count) +
+         ",\n"
+         "  \"missed_deadline_count\": " +
+         std::to_string(state.presentation.missed_deadline_count) +
+         ",\n"
+         "  \"maximum_completion_latency_nanoseconds\": " +
+         std::to_string(
+             state.presentation.maximum_completion_latency_nanoseconds) +
+         ",\n"
+         "  \"presentation_paced\": " +
+         (state.presentation_paced ? "true" : "false") +
+         ",\n"
          "  \"preference_sequence\": " +
          (state.mode == ClientMode::Preference
               ? "[\"Default\",\"Allow\",\"Prefer\",\"Disable\"]"
@@ -393,10 +432,13 @@ std::string client_state_json(const ClientState &state) {
 void write_client_state(const std::string &path, const ClientState &state) {
   if (path.empty())
     throw std::runtime_error("client-state path is empty");
-  const int descriptor = ::open(
-      path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+  const std::string temporary = path + ".tmp." + std::to_string(::getpid());
+  const int descriptor = ::open(temporary.c_str(),
+                                O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC |
+                                    O_NOFOLLOW,
+                                0600);
   if (descriptor < 0)
-    throw std::runtime_error("client-state path must name a new file");
+    throw std::runtime_error("client-state temporary path is unavailable");
   try {
     const auto contents = client_state_json(state);
     write_all(descriptor, contents);
@@ -404,12 +446,20 @@ void write_client_state(const std::string &path, const ClientState &state) {
       throw std::runtime_error("client-state sync failed");
   } catch (...) {
     (void)::close(descriptor);
-    (void)::unlink(path.c_str());
+    (void)::unlink(temporary.c_str());
     throw;
   }
   if (::close(descriptor) != 0) {
-    (void)::unlink(path.c_str());
+    (void)::unlink(temporary.c_str());
     throw std::runtime_error("client-state close failed");
+  }
+  if (::link(temporary.c_str(), path.c_str()) != 0) {
+    (void)::unlink(temporary.c_str());
+    throw std::runtime_error("client-state path must name a new file");
+  }
+  if (::unlink(temporary.c_str()) != 0) {
+    (void)::unlink(path.c_str());
+    throw std::runtime_error("client-state atomic publication cleanup failed");
   }
 }
 

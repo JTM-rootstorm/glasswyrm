@@ -11,7 +11,7 @@ import stat
 import sys
 
 
-KEYS = {
+V2_KEYS = {
     "schema",
     "mode",
     "window",
@@ -34,6 +34,21 @@ KEYS = {
     "bounded_damage_width",
     "bounded_damage_height",
 }
+V3_ONLY_KEYS = {
+    "selected_output",
+    "scheduled_frame_count",
+    "submitted_frame_count",
+    "presented_frame_count",
+    "first_observed_commit_id",
+    "last_observed_commit_id",
+    "first_presented_generation",
+    "last_presented_generation",
+    "maximum_outstanding_updates",
+    "retryable_query_count",
+    "missed_deadline_count",
+    "maximum_completion_latency_nanoseconds",
+    "presentation_paced",
+}
 MODES = {
     "fullscreen", "borderless", "windowed", "app-requested", "preference",
     "cadence",
@@ -43,10 +58,16 @@ KNOWN_REASON_MASK = 0x00000001FFFFFFFF
 
 
 def validate(value: object) -> None:
-    if not isinstance(value, dict) or set(value) != KEYS:
-        raise ValueError("client state must contain exactly the v2 fields")
-    if value["schema"] != "glasswyrm.m14-vrr-client.v2":
+    if not isinstance(value, dict):
+        raise ValueError("client state must be an object")
+    schema = value.get("schema")
+    expected_keys = (V2_KEYS if schema == "glasswyrm.m14-vrr-client.v2"
+                     else V2_KEYS | V3_ONLY_KEYS)
+    if schema not in {"glasswyrm.m14-vrr-client.v2",
+                      "glasswyrm.m14-vrr-client.v3"}:
         raise ValueError("unknown client-state schema")
+    if set(value) != expected_keys:
+        raise ValueError(f"client state must contain exactly the {schema[-2:]} fields")
     mode = value["mode"]
     if mode not in MODES:
         raise ValueError("unknown client mode")
@@ -126,6 +147,48 @@ def validate(value: object) -> None:
         raise ValueError("target interval does not match integer cadence")
     if value["bounded_damage_width"] != 64 or value["bounded_damage_height"] != 64:
         raise ValueError("cadence damage rectangle changed")
+    if schema == "glasswyrm.m14-vrr-client.v2":
+        return
+    for name in (
+        "scheduled_frame_count",
+        "submitted_frame_count",
+        "presented_frame_count",
+        "first_observed_commit_id",
+        "last_observed_commit_id",
+        "first_presented_generation",
+        "last_presented_generation",
+        "maximum_outstanding_updates",
+        "retryable_query_count",
+        "missed_deadline_count",
+        "maximum_completion_latency_nanoseconds",
+    ):
+        if isinstance(value[name], bool) or not isinstance(value[name], int) \
+                or value[name] < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    if not isinstance(value["selected_output"], str) \
+            or len(value["selected_output"]) > 128:
+        raise ValueError("selected_output must be a bounded string")
+    if not isinstance(value["presentation_paced"], bool):
+        raise ValueError("presentation_paced must be boolean")
+    if mode == "cadence":
+        if (not value["presentation_paced"] or not value["selected_output"]
+                or value["scheduled_frame_count"] != value["frame_count"]
+                or value["submitted_frame_count"] != value["frame_count"]
+                or value["presented_frame_count"] < min(121, value["frame_count"])
+                or value["presented_frame_count"] > value["submitted_frame_count"]
+                or value["maximum_outstanding_updates"] != 1
+                or value["first_observed_commit_id"] == 0
+                or value["first_presented_generation"] == 0
+                or value["last_observed_commit_id"]
+                < value["first_observed_commit_id"]
+                or value["last_presented_generation"]
+                < value["first_presented_generation"]
+                or value["maximum_completion_latency_nanoseconds"] == 0):
+            raise ValueError("cadence mode lacks presentation-paced evidence")
+    elif (value["presentation_paced"] or value["selected_output"]
+          or any(value[name] != 0 for name in V3_ONLY_KEYS
+                 if name not in {"selected_output", "presentation_paced"})):
+        raise ValueError("non-cadence mode contains presentation-paced evidence")
 
 
 def validate_path(path: Path) -> None:

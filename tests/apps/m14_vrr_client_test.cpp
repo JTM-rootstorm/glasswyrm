@@ -35,13 +35,22 @@ void test_options() {
   for (const auto *mode :
        {"fullscreen", "borderless", "windowed", "app-requested", "preference", "cadence"}) {
     require(
-        parses({"client", "--display", ":4", "--mode", mode, "--result",
-                "/tmp/result", "--target-refresh-hz", "72", "--hold-ms", "0"}),
+        parses(mode == std::string_view("cadence")
+                   ? std::vector<std::string>{
+                         "client", "--display", ":4", "--mode", mode,
+                         "--result", "/tmp/result", "--target-refresh-hz",
+                         "72", "--hold-ms", "0", "--control-socket",
+                         "/tmp/control", "--output", "DP-1"}
+                   : std::vector<std::string>{
+                         "client", "--display", ":4", "--mode", mode,
+                         "--result", "/tmp/result", "--target-refresh-hz",
+                         "72", "--hold-ms", "0"}),
         "all six fixed client modes parse");
   }
   ClientOptions options;
   require(parses({"client", "--display", ":4", "--mode", "cadence", "--result",
-                  "/tmp/result"},
+                  "/tmp/result", "--control-socket", "/tmp/control",
+                  "--output", "DP-1"},
                  options) &&
               options.frame_count == 180 && !options.prefer,
           "cadence uses a bounded default run without implicit app request");
@@ -75,11 +84,20 @@ void test_options() {
                    "/tmp/result"}) &&
               !parses({"client", "--display", ":4", "--mode", "cadence"}) &&
               !parses({"client", "--display", ":4", "--mode", "cadence",
-                       "--result", "/tmp/result", "--frames", "0"}) &&
+                       "--result", "/tmp/result", "--frames", "0",
+                       "--control-socket", "/tmp/control", "--output", "DP-1"}) &&
               !parses({"client", "--display", ":4", "--mode", "cadence",
-                       "--result", "/tmp/result", "--frames", "10001"}) &&
+                       "--result", "/tmp/result", "--frames", "10001",
+                       "--control-socket", "/tmp/control", "--output", "DP-1"}) &&
               !parses({"client", "--display", ":4", "--mode", "cadence",
-                       "--result", "/tmp/result", "--hold-ms", "60001"}) &&
+                       "--result", "/tmp/result", "--hold-ms", "60001",
+                       "--control-socket", "/tmp/control", "--output", "DP-1"}) &&
+              !parses({"client", "--display", ":4", "--mode", "cadence",
+                       "--result", "/tmp/result", "--control-socket",
+                       "/tmp/control"}) &&
+              !parses({"client", "--display", ":4", "--mode", "windowed",
+                       "--result", "/tmp/result", "--control-socket",
+                       "/tmp/control", "--output", "DP-1"}) &&
               !parses({"client", "--display", ":4", "--mode", "windowed",
                        "--result", "/tmp/result", "--preference", "bogus"}) &&
               !parses({"client", "--display", ":4", "--mode", "windowed",
@@ -206,9 +224,10 @@ void test_state_json_and_private_publish() {
   const ClientState state{
       ClientMode::Cadence, 42, 640, 480, true, true, false, 120, 72,
       13'888'888, ClientPreference::Prefer, true, 4, 3, 7,
-      UINT64_C(0x1020), true};
+      UINT64_C(0x1020), true, "DP-1",
+      {120, 120, 119, {40, 50}, {160, 170}, 1, 3, 2, 9000}, true};
   const auto json = client_state_json(state);
-  require(json.find("\"schema\": \"glasswyrm.m14-vrr-client.v2\"") !=
+  require(json.find("\"schema\": \"glasswyrm.m14-vrr-client.v3\"") !=
                   std::string::npos &&
               json.find("\"mode\": \"cadence\"") != std::string::npos &&
               json.find("\"preference\": \"Prefer\"") != std::string::npos &&
@@ -218,6 +237,14 @@ void test_state_json_and_private_publish() {
               json.find("\"eventfd_synchronized\": true") != std::string::npos &&
               json.find("\"preference_sequence\": []") != std::string::npos &&
               json.find("\"cadence_absolute_monotonic\": true") !=
+                  std::string::npos &&
+              json.find("\"selected_output\": \"DP-1\"") !=
+                  std::string::npos &&
+              json.find("\"presented_frame_count\": 119") !=
+                  std::string::npos &&
+              json.find("\"maximum_outstanding_updates\": 1") !=
+                  std::string::npos &&
+              json.find("\"presentation_paced\": true") !=
                   std::string::npos &&
               json.find("timestamp") == std::string::npos,
           "client-state JSON is stable and excludes nondeterministic clocks");
