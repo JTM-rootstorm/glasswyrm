@@ -142,6 +142,24 @@ bool ServerRuntime::service_peer_replay(std::string& error) {
                  "glasswyrmd: compositor rejected full content replay\n");
     return false;
   }
+  if (bridge_->replay_interrupted_ready()) {
+    content_presenter_->reject_lifecycle();
+    bridge_->clear_transaction_result();
+    auto replay = project_compositor(
+        lifecycle_->committed(), next_compositor_commit_++,
+        next_compositor_generation_++, true,
+        server_.options_.output_model ? bridge_->output_layout() : nullptr,
+        server_.options_.vrr_protocol ? bridge_->vrr_cache() : nullptr);
+    if (!content_presenter_->prepare_replay(
+            lifecycle_->committed(), server_.state_.resources(), replay) ||
+        !bridge_->submit_replay(replay, error)) {
+      content_presenter_->cancel_lifecycle_submission();
+      std::fprintf(stderr,
+                   "glasswyrmd: interrupted content replay rebuild failed: %s\n",
+                   error.c_str());
+      return false;
+    }
+  }
   if (bridge_->replay_result_ready()) {
     content_presenter_->accept_lifecycle(lifecycle_->committed(),
                                          server_.state_.resources());
