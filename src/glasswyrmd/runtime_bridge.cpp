@@ -401,10 +401,17 @@ bool RuntimeBridge::service(const short policy_revents,
           }
           transaction_stage_ = TransactionStage::Cursor;
         }
-        if (resume_transaction_stage_ == TransactionStage::Replay &&
-            !submit_replay(pending_compositor_, resume_error)) {
-          error = resume_error;
-          return false;
+        if (resume_transaction_stage_ == TransactionStage::Replay) {
+          if (software_content_ && output_model_) {
+            // The presenter owns the raw buffer descriptors referenced by a
+            // full replay. It discards staged buffers when the compositor
+            // disconnects, so only a fresh canonical projection may resume
+            // this transaction.
+            transaction_stage_ = TransactionStage::ReplayInterrupted;
+          } else if (!submit_replay(pending_compositor_, resume_error)) {
+            error = resume_error;
+            return false;
+          }
         }
         if (resume_transaction_stage_ == TransactionStage::PolicyReady ||
             resume_transaction_stage_ == TransactionStage::PolicyRejected ||
@@ -541,6 +548,9 @@ bool RuntimeBridge::cursor_rejected_ready() const noexcept {
 }
 bool RuntimeBridge::replay_result_ready() const noexcept {
   return transaction_stage_ == TransactionStage::ReplayComplete;
+}
+bool RuntimeBridge::replay_interrupted_ready() const noexcept {
+  return transaction_stage_ == TransactionStage::ReplayInterrupted;
 }
 bool RuntimeBridge::replay_rejected_ready() const noexcept {
   return transaction_stage_ == TransactionStage::ReplayRejected;

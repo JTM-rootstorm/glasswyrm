@@ -91,6 +91,7 @@ public:
   [[nodiscard]] bool cursor_result_ready() const noexcept;
   [[nodiscard]] bool cursor_rejected_ready() const noexcept;
   [[nodiscard]] bool replay_result_ready() const noexcept;
+  [[nodiscard]] bool replay_interrupted_ready() const noexcept;
   [[nodiscard]] bool replay_rejected_ready() const noexcept;
   [[nodiscard]] bool transaction_idle() const noexcept;
   [[nodiscard]] bool take_compositor_reset() noexcept {
@@ -121,7 +122,8 @@ private:
                                 CompositorInterrupted, CompositorRejected,
                                 ContentRejected,
                                 CursorRejected, Replay,
-                                ReplayComplete, ReplayRejected };
+                                ReplayComplete, ReplayInterrupted,
+                                ReplayRejected };
   TransactionStage transaction_stage_{TransactionStage::None};
   TransactionStage resume_transaction_stage_{TransactionStage::None};
   PolicySnapshotSubmission pending_policy_;

@@ -80,6 +80,11 @@ instead. The protocol server accepts that fallback only while its VRR window
 cache is empty and still requires the returned policy decision to match the
 current per-output policy result.
 
+An interrupted full software-content replay is rebuilt from canonical server
+state after the compositor reconnects. The bridge never resumes the saved
+submission directly because its buffer descriptors are presenter-owned and
+the presenter discards staged buffers when their consumer disconnects.
+
 ## Compatibility proof
 
 The staged install matrix compiles, links, and runs C and C++ consumers for API

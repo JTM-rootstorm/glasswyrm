@@ -488,6 +488,36 @@ int main(int argc, char** argv) {
           "content reconnect preserves the accepted VRR checkpoint");
   vrr_bridge.clear_transaction_result();
 
+  auto replay_replacement = glasswyrm::server::PublishedWindowBuffer::create(
+      101, 10, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);
+  require(replay_replacement && replay_replacement->signal_ready(),
+          "create synchronized interrupted replay replacement");
+  auto interrupted_replay = glasswyrm::server::project_compositor(
+      *rollback_snapshot, 28, 28, true, vrr_layout, vrr_cache);
+  auto replay_attachment = attachment;
+  replay_attachment.attach.buffer_id = replay_replacement->buffer_id();
+  replay_attachment.fd = replay_replacement->fd();
+  replay_attachment.synchronization_fd =
+      replay_replacement->synchronization_fd();
+  interrupted_replay.buffers.push_back(replay_attachment);
+  interrupted_replay.damages.push_back(damage);
+  require(::kill(vrr_compositor_process, SIGSTOP) == 0,
+          "suspend compositor before interrupted full replay");
+  require(vrr_bridge.submit_replay(interrupted_replay, error),
+          "submit interrupted full content replay");
+  stop_while_suspended(vrr_compositor_process);
+  drive_until(vrr_bridge, [&] { return !vrr_bridge.ready(); },
+              "in-flight full replay disconnect was not reported");
+  replay_replacement.reset();
+  vrr_compositor_process = launch_output_model_vrr(
+      argv[2], vrr_compositor_socket, root + "/vrr-reconnect-dump-5");
+  drive_until(vrr_bridge,
+              [&] { return vrr_bridge.replay_interrupted_ready(); },
+              "reconnected full replay did not request canonical rebuild");
+  require(vrr_cache->generation() == 24,
+          "interrupted replay reconnect preserves the accepted VRR checkpoint");
+  vrr_bridge.clear_transaction_result();
+
   require(vrr_cache->set_policy(changed_output, GWIPC_VRR_POLICY_FOCUSED),
           "stage focused policy for membership reconciliation");
   glasswyrm::server::LifecycleSnapshot membership_snapshot;
