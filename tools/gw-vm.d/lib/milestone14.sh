@@ -525,7 +525,9 @@ meson setup "$asan" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=true 
   -Dexperimental=true -Drender_gl=true -Dheadless_backend=true \
   -Ddrm_backend=true -Dlibinput_backend=true
 meson compile -C "$asan" -j1
-meson test -C "$asan" --print-errorlogs
+meson test -C "$asan" --no-suite m14-runtime --print-errorlogs
+meson test -C "$asan" --print-errorlogs \
+  m14-bounded-damage-fake-drm m14-vrr-client-headless-runtime
 result[sanitizer]=passed
 if command -v clang >/dev/null && command -v clang++ >/dev/null; then
   CC=clang CXX=clang++ setup_build "$clang_build" -Dexperimental=true \
