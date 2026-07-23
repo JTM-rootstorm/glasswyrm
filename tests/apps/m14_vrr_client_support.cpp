@@ -98,7 +98,11 @@ PresentationPacer::next(const std::uint64_t now_nanoseconds) noexcept {
     return {PresentationPacerAction::Complete, stats_.submitted_frame_count,
             next_deadline_nanoseconds_, {}};
   }
-  if (now_nanoseconds > next_deadline_nanoseconds_) {
+  const auto lateness_tolerance =
+      std::max(UINT64_C(1),
+               std::min(UINT64_C(1'000'000), interval_nanoseconds_ / 20U));
+  if (now_nanoseconds > next_deadline_nanoseconds_ &&
+      now_nanoseconds - next_deadline_nanoseconds_ > lateness_tolerance) {
     if (next_deadline_nanoseconds_ >
         std::numeric_limits<std::uint64_t>::max() - interval_nanoseconds_)
       return fatal("absolute cadence deadline overflowed");
@@ -184,6 +188,11 @@ PresentationPacerEvent PresentationPacer::observe(
   frame_outstanding_ = false;
   return {PresentationPacerAction::FramePresented,
           stats_.presented_frame_count, next_deadline_nanoseconds_, {}};
+}
+
+PresentationPacerEvent observe_presentation(PresentationPacer &pacer,
+                                            PresentationObserver &observer) {
+  return pacer.observe(observer.observe());
 }
 
 EventfdDamageProducer::EventfdDamageProducer()

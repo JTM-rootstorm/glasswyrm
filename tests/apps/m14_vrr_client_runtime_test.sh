@@ -98,6 +98,7 @@ x_socket_inode=$(stat -c %i "$x_socket")
 "$client" --display ":$display" --mode cadence \
   --result "$root/client.json" --hold-ms 0 --frames 180 \
   --target-refresh-hz 70 --preference default \
+  --control-socket "$root/control.sock" --output DP-1 \
   >"$root/client.log" 2>&1 &
 client_pid=$!
 

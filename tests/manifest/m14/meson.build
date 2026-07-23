@@ -86,7 +86,7 @@ if get_option('glasswyrmd')
     timeout: 10,
   )
 
-  if xcb_test_dependency.found()
+  if xcb_test_dependency.found() and get_option('libgwipc')
     m14_vrr_client = executable(
       'm14_vrr_client',
       files(
@@ -94,7 +94,7 @@ if get_option('glasswyrmd')
         tests_source_dir / 'apps/m14_vrr_client_options.cpp',
         tests_source_dir / 'apps/m14_vrr_client_support.cpp',
       ),
-      dependencies: xcb_test_dependency,
+      dependencies: [xcb_test_dependency, output_client_dep],
       include_directories: test_source_root_include,
     )
     test(
