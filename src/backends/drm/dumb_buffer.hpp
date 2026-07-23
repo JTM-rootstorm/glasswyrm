@@ -12,6 +12,11 @@
 
 namespace glasswyrm::drm {
 
+struct BufferOperationMetrics {
+  std::uint64_t bytes{};
+  std::uint64_t nanoseconds{};
+};
+
 class DumbBuffer {
 public:
   static constexpr std::uint64_t kMaximumBytes = 64U * 1024U * 1024U;
@@ -36,6 +41,12 @@ public:
   [[nodiscard]] bool verify_visible_pixels(
       std::span<const std::uint32_t> pixels,
       std::uint64_t verified_hash) const noexcept;
+  [[nodiscard]] BufferOperationMetrics last_copy_metrics() const noexcept {
+    return last_copy_metrics_;
+  }
+  [[nodiscard]] BufferOperationMetrics last_parity_metrics() const noexcept {
+    return last_parity_metrics_;
+  }
   [[nodiscard]] bool release(std::string &error) noexcept;
   void abandon() noexcept;
   void reset() noexcept;
@@ -77,6 +88,8 @@ private:
   std::uint64_t completed_generation_{};
   bool content_valid_{};
   mutable std::optional<std::uint64_t> visible_hash_;
+  BufferOperationMetrics last_copy_metrics_;
+  mutable BufferOperationMetrics last_parity_metrics_;
 };
 
 class DumbBufferPair {

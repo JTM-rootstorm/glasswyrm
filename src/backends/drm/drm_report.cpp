@@ -161,6 +161,11 @@ std::string serialize(const DamageCopyReport& value) {
            << rectangle.height << '}';
   }
   stream << "],\"history_span\":" << value.history_span
+         << ",\"drm_copied_bytes\":" << value.drm_copied_bytes
+         << ",\"copy_nanoseconds\":" << value.copy_nanoseconds
+         << ",\"parity_verified_bytes\":"
+         << value.parity_verified_bytes
+         << ",\"parity_nanoseconds\":" << value.parity_nanoseconds
          << ",\"full_copy_reason\":"
          << json_quote(full_copy_reason_name(value.full_copy_reason))
          << ",\"cumulative_full_frame_bytes\":"
@@ -248,6 +253,8 @@ bool valid(const DamageCopyReport& value) {
          value.cumulative_copied_bytes <=
              value.cumulative_full_frame_bytes &&
          !value.rectangles.empty() &&
+         value.drm_copied_bytes >= value.copied_bytes &&
+         value.parity_verified_bytes >= value.full_frame_bytes &&
          (value.full_copy_reason == FullCopyReason::None
               ? value.history_span != 0
               : value.copied_bytes == value.full_frame_bytes);

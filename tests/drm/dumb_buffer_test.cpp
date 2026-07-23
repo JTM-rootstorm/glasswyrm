@@ -184,6 +184,9 @@ int main() {
               glasswyrm::output::hash_visible_xrgb8888(pixels) &&
           buffer.visible_hash() == 0x4d1416c2755838b5ULL,
       "scanout visible RGB hash equals canonical software-frame hash");
+  gw::test::require(buffer.last_copy_metrics().bytes == 16 &&
+                        buffer.last_parity_metrics().bytes == 16,
+                    "full copy and parity metrics cover visible bytes");
   buffer.mark_completed(1);
   const std::vector<std::uint32_t> changed{
       0xff112233U, 0xff010203U, 0xff778899U, 0xffaabbccU};
@@ -195,6 +198,9 @@ int main() {
                         buffer.visible_hash() ==
                             glasswyrm::output::hash_visible_xrgb8888(changed),
                     "bounded partial copy updates only selected pixels");
+  gw::test::require(buffer.last_copy_metrics().bytes == 4 &&
+                        buffer.last_parity_metrics().bytes == 16,
+                    "partial copy and full parity costs remain distinct");
   api.mapping[0] ^= std::byte{1};
   gw::test::require(
       !buffer.verify_visible_pixels(

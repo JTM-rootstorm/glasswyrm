@@ -99,6 +99,10 @@ int main() {
   copy.full_frame_bytes = 128;
   copy.copied_bytes = 24;
   copy.history_span = 2;
+  copy.drm_copied_bytes = 24;
+  copy.copy_nanoseconds = 17;
+  copy.parity_verified_bytes = 128;
+  copy.parity_nanoseconds = 19;
   copy.cumulative_full_frame_bytes = 384;
   copy.cumulative_copied_bytes = 280;
   copy.rectangles = {{1, 2, 3, 2}};
@@ -108,6 +112,8 @@ int main() {
       "\"framebuffer_id\":56,\"full_frame_bytes\":128,"
       "\"copied_bytes\":24,\"copy_rectangles\":[{\"x\":1,\"y\":2,"
       "\"width\":3,\"height\":2}],\"history_span\":2,"
+      "\"drm_copied_bytes\":24,\"copy_nanoseconds\":17,"
+      "\"parity_verified_bytes\":128,\"parity_nanoseconds\":19,"
       "\"full_copy_reason\":\"none\","
       "\"cumulative_full_frame_bytes\":384,"
       "\"cumulative_copied_bytes\":280,"

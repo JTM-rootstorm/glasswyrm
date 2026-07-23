@@ -30,6 +30,10 @@ struct DamageCopyPlan {
   std::uint64_t full_frame_bytes{};
   std::uint64_t copied_bytes{};
   std::uint64_t history_span{};
+  std::uint64_t drm_copied_bytes{};
+  std::uint64_t copy_nanoseconds{};
+  std::uint64_t parity_verified_bytes{};
+  std::uint64_t parity_nanoseconds{};
   FullCopyReason full_copy_reason{FullCopyReason::None};
 
   [[nodiscard]] bool full_copy() const noexcept {

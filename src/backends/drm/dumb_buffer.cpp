@@ -2,6 +2,7 @@
 
 #include "backends/drm/resources.hpp"
 
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <utility>
@@ -70,6 +71,8 @@ DumbBuffer &DumbBuffer::operator=(DumbBuffer &&other) noexcept {
   completed_generation_ = std::exchange(other.completed_generation_, 0);
   content_valid_ = std::exchange(other.content_valid_, false);
   visible_hash_ = std::exchange(other.visible_hash_, std::nullopt);
+  last_copy_metrics_ = std::exchange(other.last_copy_metrics_, {});
+  last_parity_metrics_ = std::exchange(other.last_parity_metrics_, {});
   return *this;
 }
 
@@ -114,11 +117,13 @@ bool DumbBuffer::create(DumbBufferApi &api, const std::uint32_t width,
 
 bool DumbBuffer::copy_from(const std::span<const std::uint32_t> pixels,
                            std::string &error) {
+  last_copy_metrics_ = {};
   const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
   if (!valid() || pixel_count != pixels.size()) {
     error = "canonical software frame does not match the DRM dumb buffer";
     return false;
   }
+  const auto started = std::chrono::steady_clock::now();
   visible_hash_.reset();
   std::memset(mapping_, 0, size_);
   const auto row_bytes = static_cast<std::size_t>(width_) * kBytesPerPixel;
@@ -127,6 +132,11 @@ bool DumbBuffer::copy_from(const std::span<const std::uint32_t> pixels,
                 pixels.data() + static_cast<std::size_t>(row) * width_,
                 row_bytes);
   }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started);
+  last_copy_metrics_ = {
+      pixel_count * kBytesPerPixel,
+      elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count())};
   error.clear();
   return true;
 }
@@ -135,6 +145,7 @@ bool DumbBuffer::copy_rectangles_from(
     const std::span<const std::uint32_t> pixels,
     const std::span<const gw::compositor::Rectangle> rectangles,
     std::string &error) {
+  last_copy_metrics_ = {};
   const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
   if (!valid() || !content_valid_ || pixel_count != pixels.size()) {
     error = "partial copy requires a valid matching DRM dumb buffer";
@@ -150,9 +161,18 @@ bool DumbBuffer::copy_rectangles_from(
     }
   }
   visible_hash_.reset();
+  const auto started = std::chrono::steady_clock::now();
+  std::uint64_t copied_bytes = 0;
   for (const auto& rectangle : rectangles) {
     const auto bytes = static_cast<std::size_t>(rectangle.width) *
                        kBytesPerPixel;
+    const auto rectangle_bytes = static_cast<std::uint64_t>(bytes) *
+                                 rectangle.height;
+    copied_bytes = rectangle_bytes >
+                           std::numeric_limits<std::uint64_t>::max() -
+                               copied_bytes
+                       ? std::numeric_limits<std::uint64_t>::max()
+                       : copied_bytes + rectangle_bytes;
     for (std::uint32_t row = 0; row < rectangle.height; ++row) {
       const auto y = static_cast<std::uint32_t>(rectangle.y) + row;
       const auto x = static_cast<std::uint32_t>(rectangle.x);
@@ -162,6 +182,11 @@ bool DumbBuffer::copy_rectangles_from(
                   bytes);
     }
   }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started);
+  last_copy_metrics_ = {
+      copied_bytes,
+      elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count())};
   error.clear();
   return true;
 }
@@ -195,16 +220,30 @@ bool DumbBuffer::verify_visible_pixels(
     const std::span<const std::uint32_t> pixels,
     const std::uint64_t verified_hash) const noexcept {
   visible_hash_.reset();
+  last_parity_metrics_ = {};
   const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
   if (!valid() || pixel_count != pixels.size())
     return false;
+  const auto started = std::chrono::steady_clock::now();
   const auto row_bytes = static_cast<std::size_t>(width_) * kBytesPerPixel;
   for (std::uint32_t row = 0; row < height_; ++row) {
+    last_parity_metrics_.bytes += row_bytes;
     if (std::memcmp(mapping_ + static_cast<std::size_t>(row) * pitch_,
                     pixels.data() + static_cast<std::size_t>(row) * width_,
-                    row_bytes) != 0)
+                    row_bytes) != 0) {
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - started);
+      last_parity_metrics_.nanoseconds =
+          elapsed.count() < 0 ? 0U
+                              : static_cast<std::uint64_t>(elapsed.count());
       return false;
+    }
   }
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started);
+  last_parity_metrics_.nanoseconds =
+      elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count());
   visible_hash_ = verified_hash;
   return true;
 }
@@ -255,6 +294,8 @@ bool DumbBuffer::release(std::string &error) noexcept {
   completed_generation_ = 0;
   content_valid_ = false;
   visible_hash_.reset();
+  last_copy_metrics_ = {};
+  last_parity_metrics_ = {};
   return success;
 }
 
@@ -270,6 +311,8 @@ void DumbBuffer::abandon() noexcept {
   completed_generation_ = 0;
   content_valid_ = false;
   visible_hash_.reset();
+  last_copy_metrics_ = {};
+  last_parity_metrics_ = {};
 }
 
 bool DumbBufferPair::create(DumbBufferApi &api, const std::uint32_t width,
