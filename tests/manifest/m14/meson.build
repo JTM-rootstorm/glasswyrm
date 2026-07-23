@@ -129,6 +129,31 @@ if get_option('glasswyrmd')
                   m14_vrr_client],
         timeout: 20,
       )
+
+      if get_option('drm_backend')
+        m14_vrr_integrated_validator = find_program(
+          tests_source_dir / 'compat/m14/validate_integrated_cadence.py',
+        )
+        m14_vrr_integrated_test = find_program(
+          tests_source_dir / 'apps/m14_vrr_integrated_test.sh',
+        )
+        test(
+          'm14-vrr-180-frame-integrated',
+          m14_vrr_integrated_test,
+          args: [
+            gwm_program.full_path(),
+            gwcomp_program.full_path(),
+            glasswyrmd_program.full_path(),
+            m14_vrr_client.full_path(),
+            m14_client_state_validator.full_path(),
+            m14_vrr_integrated_validator.full_path(),
+            m14_bounded_damage_test.full_path(),
+          ],
+          depends: [gwm_program, gwcomp_program, glasswyrmd_program,
+                    m14_vrr_client, m14_bounded_damage_test],
+          timeout: 90,
+        )
+      endif
     endif
   endif
 endif
