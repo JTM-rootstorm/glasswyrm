@@ -66,6 +66,15 @@ private, per-unit `*.log` file in the live artifact directory. These diagnostic
 sidecars survive early service failure without weakening the accepted
 archive's exact artifact allowlist.
 
+Snapshot observation uses the output client's bounded readiness retry rather
+than launching hundreds of fresh `gwinfo` processes. The harness permits at
+most three snapshot convergence queries and five client-cleanup queries. It
+records exit status, terminating signal, timeout state, byte counts, elapsed
+time, output path, and a bounded output tail in private
+`.query-diagnostics/*.diagnostic.json` files after a failed or slow query.
+Malformed or zero-byte successful output fails immediately, while a coherent
+but not-yet-converged JSON snapshot is retained privately for diagnosis.
+
 Before takeover, the live runner checks its bounded core and client unit-name
 set. Active collisions are rejected; inactive or failed stale transient units
 are reset by exact name and must unload before the run proceeds. New units use
@@ -90,6 +99,14 @@ takeover. Failure artifacts preserve exact before/after VT, KD, and getty
 values and report each mismatch without masking the primary failure.
 
 ## Required behavior
+
+Before any physical run, `m14-bounded-damage-fake-drm` exercises a
+2560x1440@120000 in-process fake DRM/KMS target. After the two scanout buffers
+are seeded, 180 steady 64x64 updates must avoid full-copy fallbacks, remain at
+or below 256 KiB per copy, and total less than ten percent of the equivalent
+full-frame copies. The fixture also proves skipped-generation history union,
+exact canonical/scanout parity, and full-copy recovery after an injected pixel
+change outside advertised damage.
 
 The fixed run exercises policy Off, Fullscreen enter/exit,
 borderless-fullscreen, Focused, AppRequested Default/Prefer/Disable,
