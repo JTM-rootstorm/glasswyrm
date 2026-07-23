@@ -232,6 +232,8 @@ for expected in \
   /var/tmp/glasswyrm-m14-artifacts /run/glasswyrm-m14 \
   '-Dexperimental=false' '-Dexperimental=true' '-Drender_gl=false' \
   '-Drender_gl=true' '-Dasan=true' '-Dubsan=true' \
+  '--no-suite m14-runtime' 'm14-bounded-damage-fake-drm' \
+  'm14-vrr-client-headless-runtime' \
   server-historical server-m14 compositor-headless-vrr 'setup_build "$drm"' \
   compositor-software compositor-gles api_consumer_versions=0.1-0.9 \
   gwipc_staged_consumers_test.sh source_layout_test.sh \
