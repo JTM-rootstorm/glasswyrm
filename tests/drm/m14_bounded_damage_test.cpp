@@ -216,9 +216,16 @@ int main() {
     if (generation < 3)
       continue;
     const auto copied = unsigned_field(line, "\"copied_bytes\":");
+    const auto actual_copied =
+        unsigned_field(line, "\"drm_copied_bytes\":");
+    const auto parity =
+        unsigned_field(line, "\"parity_verified_bytes\":");
     gw::test::require(
         line.find("\"full_copy_reason\":\"none\"") != std::string::npos &&
-            copied <= kMaximumSteadyCopyBytes,
+            copied <= kMaximumSteadyCopyBytes && actual_copied == copied &&
+            parity == kFullFrameBytes &&
+            line.find("\"copy_nanoseconds\":") != std::string::npos &&
+            line.find("\"parity_nanoseconds\":") != std::string::npos,
         "steady fake DRM damage never falls back or exceeds 256 KiB");
     steady_copied += copied;
     steady_baseline += kFullFrameBytes;
@@ -247,7 +254,11 @@ int main() {
   const auto recovered = damage_reports(report.path());
   gw::test::require(
       recovered.back().find("\"full_copy_reason\":\"canonical-mismatch\"") !=
-          std::string::npos,
+              std::string::npos &&
+          unsigned_field(recovered.back(), "\"drm_copied_bytes\":") >
+              kFullFrameBytes &&
+          unsigned_field(recovered.back(), "\"parity_verified_bytes\":") >=
+              kFullFrameBytes,
       "parity mismatch records a conservative canonical recovery");
 
   gw::test::require(presenter.shutdown(error) ==

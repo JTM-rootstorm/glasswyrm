@@ -77,6 +77,10 @@ struct DamageCopyReport {
   std::uint64_t full_frame_bytes{};
   std::uint64_t copied_bytes{};
   std::uint64_t history_span{};
+  std::uint64_t drm_copied_bytes{};
+  std::uint64_t copy_nanoseconds{};
+  std::uint64_t parity_verified_bytes{};
+  std::uint64_t parity_nanoseconds{};
   std::uint64_t cumulative_full_frame_bytes{};
   std::uint64_t cumulative_copied_bytes{};
   std::vector<gw::compositor::Rectangle> rectangles;

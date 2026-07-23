@@ -32,8 +32,16 @@ bool DrmPresenter::copy_frame_to(
                                                         plan.rectangles, error);
   if (!copied)
     return false;
-  if (target.verify_visible_pixels(frame.pixels, expected_hash))
+  const auto first_copy = target.last_copy_metrics();
+  plan.drm_copied_bytes = first_copy.bytes;
+  plan.copy_nanoseconds = first_copy.nanoseconds;
+  if (target.verify_visible_pixels(frame.pixels, expected_hash)) {
+    const auto parity = target.last_parity_metrics();
+    plan.parity_verified_bytes = parity.bytes;
+    plan.parity_nanoseconds = parity.nanoseconds;
     return true;
+  }
+  const auto first_parity = target.last_parity_metrics();
   if (plan.full_copy()) {
     error = "canonical and scanout pixels differ after a complete copy";
     return false;
@@ -48,10 +56,20 @@ bool DrmPresenter::copy_frame_to(
                                FullCopyReason::CanonicalMismatch);
   if (!target.copy_from(frame.pixels, error))
     return false;
+  const auto recovery_copy = target.last_copy_metrics();
   if (!target.verify_visible_pixels(frame.pixels, expected_hash)) {
     error = "canonical and scanout pixels differ after mismatch recovery";
     return false;
   }
+  const auto recovery_parity = target.last_parity_metrics();
+  plan.drm_copied_bytes =
+      saturating_add(first_copy.bytes, recovery_copy.bytes);
+  plan.copy_nanoseconds =
+      saturating_add(first_copy.nanoseconds, recovery_copy.nanoseconds);
+  plan.parity_verified_bytes =
+      saturating_add(first_parity.bytes, recovery_parity.bytes);
+  plan.parity_nanoseconds =
+      saturating_add(first_parity.nanoseconds, recovery_parity.nanoseconds);
   return true;
 }
 
@@ -66,6 +84,10 @@ DamageCopyReport DrmPresenter::damage_copy_report(
   report.full_frame_bytes = plan.full_frame_bytes;
   report.copied_bytes = plan.copied_bytes;
   report.history_span = plan.history_span;
+  report.drm_copied_bytes = plan.drm_copied_bytes;
+  report.copy_nanoseconds = plan.copy_nanoseconds;
+  report.parity_verified_bytes = plan.parity_verified_bytes;
+  report.parity_nanoseconds = plan.parity_nanoseconds;
   report.cumulative_full_frame_bytes = saturating_add(
       cumulative_full_frame_bytes_, plan.full_frame_bytes);
   report.cumulative_copied_bytes = saturating_add(
