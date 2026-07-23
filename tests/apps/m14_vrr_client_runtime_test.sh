@@ -102,7 +102,9 @@ x_socket_inode=$(stat -c %i "$x_socket")
   >"$root/client.log" 2>&1 &
 client_pid=$!
 
-for ((attempt = 0; attempt < 600; ++attempt)); do
+# Leave room for debug-build contention when this smoke test runs beside the
+# full-resolution integrated fixture; Meson's 20-second cap remains authoritative.
+for ((attempt = 0; attempt < 1500; ++attempt)); do
   if ! kill -0 "$client_pid" 2>/dev/null; then
     break
   fi
