@@ -374,12 +374,13 @@ int run_client(const ClientOptions &options) {
     const bool borderless = options.mode == ClientMode::Borderless;
     const bool fullscreen = options.mode == ClientMode::Fullscreen ||
                             options.mode == ClientMode::Cadence;
+    const bool native_extent = borderless || options.mode == ClientMode::Cadence;
     const auto width =
-        borderless ? screen.width_in_pixels
-                   : std::min<std::uint16_t>(640, screen.width_in_pixels);
+        native_extent ? screen.width_in_pixels
+                      : std::min<std::uint16_t>(640, screen.width_in_pixels);
     const auto height =
-        borderless ? screen.height_in_pixels
-                   : std::min<std::uint16_t>(480, screen.height_in_pixels);
+        native_extent ? screen.height_in_pixels
+                      : std::min<std::uint16_t>(480, screen.height_in_pixels);
     require(width >= gw::test::m14::kDamageWidth &&
                 height >= gw::test::m14::kDamageHeight,
             "X11 screen is too small for the bounded pattern");
