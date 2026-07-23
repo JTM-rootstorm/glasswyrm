@@ -105,6 +105,8 @@ require_text "$library" '[[ -S $runtime/control.sock && -S /tmp/.X11-unix/X99 ]]
 require_text "$library" "\$line == '?? '*'/__pycache__/'*.pyc"
 require_text "$library" 'PYTHONDONTWRITEBYTECODE=1 "${command[@]}"'
 require_text "$library" '--scenario pointer-anchor --result-json "$control_data/post-vt-pointer-anchor.json"'
+require_text "$library" "cursor.get('x')==64 and cursor.get('y')==64"
+require_text "$library" "'pointer anchor did not reach the completed DRM scanout'"
 require_text "$library" "assert any(state!=baseline for state in states)"
 require_text "$library" 'output=int(output,16) if isinstance(output,str) else output'
 require_text "$library" 'STOP_MAIN_IDENTITY_GONE'
