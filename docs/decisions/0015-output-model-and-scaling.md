@@ -59,6 +59,16 @@ texture upload and cache work, readback bytes, active sampling filters,
 rational scale, transform, bounded fallback reason, and the maximum
 software-reference channel error observed by fractional GLES sampling.
 
+Milestone 14 preserves trusted content damage as normalized local rectangles
+through scene commit and maps those rectangles independently into every current
+output membership. Mapping clips in local and global logical space, rounds
+outward for rational output scale and transform, and includes the renderer's
+bilinear filter footprint. Moves, resizes, visibility, stacking, membership,
+output-configuration changes, and new or replacement buffers remain
+conservative old/new or full-surface invalidations with typed fallback reasons.
+DRM damage history may optimize copies from this result, but canonical-to-scanout
+hash parity remains authoritative and forces a full-copy recovery on mismatch.
+
 `GW_SCALE` 0.1 is an explicit experimental client contract for preferred
 scale, membership notifications, and retained scaled-pixmap presentation. It
 does not imply toolkit support. RANDR remains the standard output-reporting and
