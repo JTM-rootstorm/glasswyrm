@@ -1169,6 +1169,39 @@ for _ in {1..400}; do
   sleep .05
 done
 (( $(find "$drm" -type f -name '*.ppm' | wc -l) > drm_frames_before ))
+python3 - "$control_data/drm-scene.jsonl" \
+  "$artifact_dir/milestone13-drm-report.jsonl" <<'PY'
+import json,pathlib,sys,time
+scenes=pathlib.Path(sys.argv[1]); report=pathlib.Path(sys.argv[2])
+deadline=time.monotonic()+10
+while True:
+    try:
+        scene_records=[
+            json.loads(line) for line in scenes.read_text().splitlines()
+            if line.strip()
+        ]
+        anchored=[
+            record for record in scene_records
+            if record.get('surface_count')==1 and
+            any(cursor.get('x')==64 and cursor.get('y')==64
+                for cursor in record.get('cursors',[]))
+        ]
+        assert anchored
+        generation=anchored[-1]['generation']
+        drm_records=[
+            json.loads(line) for line in report.read_text().splitlines()
+            if line.strip()
+        ]
+        assert any(record.get('record')=='flip' and
+                   record.get('generation',0)>=generation
+                   for record in drm_records)
+        break
+    except (AssertionError,KeyError,json.JSONDecodeError):
+        if time.monotonic()>=deadline:
+            raise SystemExit(
+                'pointer anchor did not reach the completed DRM scanout')
+        time.sleep(.05)
+PY
 printf 'ready\nmode=1024x768\n' >"$control/drm-screen-ready"
 for _ in {1..18000}; do [[ -f $control/drm-screen-captured ]] && break; sleep .1; done
 grep -Fxq screen-captured "$control/drm-screen-captured"
