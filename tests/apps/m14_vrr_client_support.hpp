@@ -42,6 +42,12 @@ struct PresentationObservation {
   std::string detail;
 };
 
+class PresentationObserver {
+public:
+  virtual ~PresentationObserver() = default;
+  [[nodiscard]] virtual PresentationObservation observe() = 0;
+};
+
 enum class PresentationPacerAction : std::uint8_t {
   SubmitNow,
   Wait,
@@ -129,6 +135,9 @@ private:
   bool frame_outstanding_{};
   bool terminal_{};
 };
+
+[[nodiscard]] PresentationPacerEvent
+observe_presentation(PresentationPacer &pacer, PresentationObserver &observer);
 
 class EventfdDamageProducer {
 public:

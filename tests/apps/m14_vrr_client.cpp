@@ -1,6 +1,8 @@
 #include "m14_vrr_client_options.hpp"
 #include "m14_vrr_client_support.hpp"
 
+#include "output_client/output_client.hpp"
+
 #include <xcb/xcb.h>
 #include <xcb/xcbext.h>
 
@@ -25,12 +27,103 @@ using gw::test::m14::ClientOptions;
 using gw::test::m14::ClientState;
 using gw::test::m14::ClientPreference;
 using gw::test::m14::EventfdDamageProducer;
+using gw::test::m14::PresentationMarker;
+using gw::test::m14::PresentationObservation;
+using gw::test::m14::PresentationObservationKind;
+using gw::test::m14::PresentationObserver;
+using gw::test::m14::PresentationPacer;
+using gw::test::m14::PresentationPacerAction;
+
+using glasswyrm::tools::output_client::Client;
+using glasswyrm::tools::output_client::QueryOutcome;
+using glasswyrm::tools::output_client::Snapshot;
 
 xcb_extension_t gw_vrr_extension{"GW_VRR", 0};
 
 void require(const bool condition, const char *message) {
   if (!condition)
     throw std::runtime_error(message);
+}
+
+std::uint64_t monotonic_nanoseconds() {
+  timespec value{};
+  require(::clock_gettime(CLOCK_MONOTONIC, &value) == 0,
+          "could not read monotonic cadence clock");
+  return static_cast<std::uint64_t>(value.tv_sec) * UINT64_C(1'000'000'000) +
+         static_cast<std::uint64_t>(value.tv_nsec);
+}
+
+class BinaryPresentationObserver final : public PresentationObserver {
+public:
+  BinaryPresentationObserver(std::string socket_path, std::string output)
+      : client_(std::move(socket_path)), output_(std::move(output)) {}
+
+  PresentationObservation observe() override {
+    Snapshot snapshot;
+    auto result = client_.query_once(GWIPC_OUTPUT_QUERY_DESCRIPTORS |
+                                         GWIPC_OUTPUT_QUERY_LAYOUT |
+                                         GWIPC_OUTPUT_QUERY_VRR,
+                                     snapshot);
+    const auto timestamp = monotonic_nanoseconds();
+    if (result.outcome == QueryOutcome::RetryableNotReady)
+      return {PresentationObservationKind::RetryableNotReady, {}, timestamp,
+              std::move(result.detail)};
+    if (result.outcome == QueryOutcome::Fatal)
+      return {PresentationObservationKind::Fatal, {}, timestamp,
+              "output-control presentation query failed: " + result.detail};
+
+    std::uint64_t matched_id{};
+    for (const auto &[output_id, descriptor] : snapshot.descriptors) {
+      if (descriptor.name != output_)
+        continue;
+      if (matched_id != 0)
+        return {PresentationObservationKind::Fatal, {}, timestamp,
+                "selected output name is not unique"};
+      matched_id = output_id;
+    }
+    if (matched_id == 0 || !snapshot.outputs.contains(matched_id))
+      return {PresentationObservationKind::Fatal, {}, timestamp,
+              "selected output is absent from the output snapshot"};
+    if (output_id_ != 0 && output_id_ != matched_id)
+      return {PresentationObservationKind::Fatal, {}, timestamp,
+              "selected output identity changed during cadence"};
+    output_id_ = matched_id;
+
+    PresentationMarker marker;
+    if (const auto timing = snapshot.vrr_timings.find(output_id_);
+        timing != snapshot.vrr_timings.end()) {
+      marker = {timing->second.commit_id,
+                timing->second.presented_generation};
+    } else if (const auto state = snapshot.vrr_outputs.find(output_id_);
+               state != snapshot.vrr_outputs.end()) {
+      marker = {state->second.last_commit_id,
+                state->second.last_presented_generation};
+    }
+    if (!marker.valid())
+      return {PresentationObservationKind::RetryableNotReady, {}, timestamp,
+              "selected output has no complete presentation marker yet"};
+    return {PresentationObservationKind::Complete, marker, timestamp, {}};
+  }
+
+private:
+  Client client_;
+  std::string output_;
+  std::uint64_t output_id_{};
+};
+
+PresentationObservation initial_presentation(BinaryPresentationObserver &observer,
+                                             const std::uint64_t deadline) {
+  for (;;) {
+    auto observation = observer.observe();
+    if (observation.kind == PresentationObservationKind::Complete)
+      return observation;
+    if (observation.kind == PresentationObservationKind::Fatal)
+      throw std::runtime_error(observation.detail);
+    if (observation.timestamp_nanoseconds >= deadline)
+      throw std::runtime_error(
+          "selected output did not publish an initial presentation marker");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 }
 
 void checked(xcb_connection_t *connection, const xcb_void_cookie_t cookie,
@@ -365,28 +458,57 @@ int run_client(const ClientOptions &options) {
     const auto interval =
         gw::test::m14::target_interval_nanoseconds(options.target_refresh_hz);
     bool eventfd_synchronized = false;
+    gw::test::m14::PresentationPacerStats presentation;
     if (options.mode == ClientMode::Cadence) {
       EventfdDamageProducer producer;
       eventfd_synchronized = true;
-      timespec start_time{};
-      require(::clock_gettime(CLOCK_MONOTONIC, &start_time) == 0,
-              "could not read monotonic cadence clock");
-      const auto start = static_cast<std::uint64_t>(start_time.tv_sec) *
-                             UINT64_C(1'000'000'000) +
-                         static_cast<std::uint64_t>(start_time.tv_nsec);
-      for (std::uint32_t frame = 0; frame < options.frame_count; ++frame) {
-        std::uint64_t deadline{};
-        require(gw::test::m14::absolute_deadline(start, interval, frame,
-                                                 deadline) &&
-                    gw::test::m14::wait_until_monotonic(deadline),
-                "absolute monotonic cadence scheduling failed");
-        const auto pixels = producer.produce(frame);
+      BinaryPresentationObserver observer(options.control_socket, options.output);
+      const auto initial_deadline =
+          monotonic_nanoseconds() + UINT64_C(5'000'000'000);
+      const auto initial = initial_presentation(observer, initial_deadline);
+      const auto completion_timeout =
+          std::max(UINT64_C(250'000'000), interval * UINT64_C(4));
+      PresentationPacer pacer(options.frame_count, interval, completion_timeout);
+      std::string pacing_error;
+      require(pacer.begin(initial.marker, monotonic_nanoseconds(), pacing_error),
+              "could not initialize presentation cadence pacing");
+      for (;;) {
+        const auto event = pacer.next(monotonic_nanoseconds());
+        if (event.action == PresentationPacerAction::Complete)
+          break;
+        if (event.action == PresentationPacerAction::Fatal ||
+            event.action == PresentationPacerAction::Timeout)
+          throw std::runtime_error(event.detail);
+        if (event.action == PresentationPacerAction::MissedDeadline)
+          continue;
+        if (event.action == PresentationPacerAction::Wait) {
+          if (pacer.frame_outstanding()) {
+            const auto observed =
+                gw::test::m14::observe_presentation(pacer, observer);
+            if (observed.action == PresentationPacerAction::Fatal ||
+                observed.action == PresentationPacerAction::Timeout)
+              throw std::runtime_error(observed.detail);
+            if (observed.action == PresentationPacerAction::Wait)
+              std::this_thread::sleep_for(std::chrono::milliseconds(1));
+          } else {
+            require(gw::test::m14::wait_until_monotonic(
+                        event.scheduled_deadline_nanoseconds),
+                    "absolute monotonic cadence scheduling failed");
+          }
+          continue;
+        }
+        require(event.action == PresentationPacerAction::SubmitNow,
+                "presentation pacer emitted an invalid action");
+        const auto pixels = producer.produce(event.frame_ordinal - 1U);
         put_pixels(connection, window, gc, gw::test::m14::kDamageWidth,
                    gw::test::m14::kDamageHeight, 0, 0, pixels,
                    screen.root_depth);
         require(xcb_flush(connection) > 0, "could not flush cadence frame");
+        const auto submitted_at = monotonic_nanoseconds();
+        if (!pacer.submitted(event.frame_ordinal, submitted_at, pacing_error))
+          throw std::runtime_error(pacing_error);
       }
-      synchronize(connection);
+      presentation = pacer.stats();
     }
 
     const ClientState state{options.mode,
@@ -407,7 +529,10 @@ int run_client(const ClientOptions &options) {
                             vrr_evidence.events,
                             vrr_evidence.change_mask,
                             vrr_evidence.reason_mask,
-                            eventfd_synchronized};
+                            eventfd_synchronized,
+                            options.output,
+                            presentation,
+                            options.mode == ClientMode::Cadence};
     gw::test::m14::write_client_state(options.result_path, state);
     service_bounded_repaints(connection, options, window, gc, pattern_width,
                              pattern_height, screen.root_depth);

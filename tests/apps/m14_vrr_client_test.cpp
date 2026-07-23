@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <deque>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -220,6 +221,39 @@ void test_presentation_pacer_failures() {
           "a stalled marker times out at the bounded deadline");
 }
 
+class FakeObserver final : public PresentationObserver {
+public:
+  explicit FakeObserver(std::deque<PresentationObservation> values)
+      : values_(std::move(values)) {}
+
+  PresentationObservation observe() override {
+    require(!values_.empty(), "fake observer has a queued result");
+    auto value = std::move(values_.front());
+    values_.pop_front();
+    return value;
+  }
+
+private:
+  std::deque<PresentationObservation> values_;
+};
+
+void test_injected_presentation_observer() {
+  std::string error;
+  PresentationPacer pacer(1, 10, 50);
+  FakeObserver observer({
+      {PresentationObservationKind::RetryableNotReady, {}, 111, {}},
+      {PresentationObservationKind::Complete, {2, 2}, 112, {}},
+  });
+  require(pacer.begin({1, 1}, 100, error) &&
+              pacer.next(110).action == PresentationPacerAction::SubmitNow &&
+              pacer.submitted(1, 110, error) &&
+              observe_presentation(pacer, observer).action ==
+                  PresentationPacerAction::Wait &&
+              observe_presentation(pacer, observer).action ==
+                  PresentationPacerAction::FramePresented,
+          "injected observer drives the transport-neutral pacer");
+}
+
 void test_state_json_and_private_publish() {
   const ClientState state{
       ClientMode::Cadence, 42, 640, 480, true, true, false, 120, 72,
@@ -285,6 +319,7 @@ int main() {
   test_cadence_and_pixels();
   test_presentation_pacer();
   test_presentation_pacer_failures();
+  test_injected_presentation_observer();
   test_state_json_and_private_publish();
   return 0;
 }
