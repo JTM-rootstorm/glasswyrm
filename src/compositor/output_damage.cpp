@@ -16,7 +16,7 @@ using glasswyrm::output::OutputTransform;
 using glasswyrm::output::PhysicalRectangle;
 using glasswyrm::output::RationalScale;
 
-OutputMapping mapping(const gwipc_output_upsert& output) noexcept {
+OutputMapping mapping(const gwipc_output_upsert &output) noexcept {
   return {{output.logical_x, output.logical_y},
           {output.logical_width, output.logical_height},
           {output.physical_pixel_width, output.physical_pixel_height},
@@ -24,22 +24,22 @@ OutputMapping mapping(const gwipc_output_upsert& output) noexcept {
           static_cast<OutputTransform>(output.transform)};
 }
 
-bool same_shape(const gwipc_output_upsert& left,
-                const gwipc_output_upsert& right) noexcept {
-  return left.enabled == right.enabled &&
-         left.logical_x == right.logical_x &&
+bool same_shape(const gwipc_output_upsert &left,
+                const gwipc_output_upsert &right) noexcept {
+  return left.enabled == right.enabled && left.logical_x == right.logical_x &&
          left.logical_y == right.logical_y &&
          left.logical_width == right.logical_width &&
          left.logical_height == right.logical_height &&
          left.physical_pixel_width == right.physical_pixel_width &&
          left.physical_pixel_height == right.physical_pixel_height &&
+         left.refresh_millihertz == right.refresh_millihertz &&
          left.scale_numerator == right.scale_numerator &&
          left.scale_denominator == right.scale_denominator &&
          left.transform == right.transform;
 }
 
-bool same_surface(const gwipc_surface_upsert& left,
-                  const gwipc_surface_upsert& right) noexcept {
+bool same_surface(const gwipc_surface_upsert &left,
+                  const gwipc_surface_upsert &right) noexcept {
   return left.logical_x == right.logical_x &&
          left.logical_y == right.logical_y &&
          left.logical_width == right.logical_width &&
@@ -55,12 +55,12 @@ bool same_surface(const gwipc_surface_upsert& left,
 }
 
 std::optional<LogicalRectangle>
-surface_bounds(const gwipc_surface_upsert& surface) noexcept {
+surface_bounds(const gwipc_surface_upsert &surface) noexcept {
   Rectangle local{0, 0, surface.logical_width, surface.logical_height};
   if (surface.clipping) {
-    const auto clipped = intersection(
-        local, {surface.clip_x, surface.clip_y, surface.clip_width,
-                surface.clip_height});
+    const auto clipped =
+        intersection(local, {surface.clip_x, surface.clip_y, surface.clip_width,
+                             surface.clip_height});
     if (!clipped)
       return std::nullopt;
     local = *clipped;
@@ -68,11 +68,10 @@ surface_bounds(const gwipc_surface_upsert& surface) noexcept {
   const auto placed = translate(local, surface.logical_x, surface.logical_y);
   if (!placed)
     return std::nullopt;
-  return LogicalRectangle{placed->x, placed->y, placed->width,
-                          placed->height};
+  return LogicalRectangle{placed->x, placed->y, placed->width, placed->height};
 }
 
-bool member_of(const Scene& scene, const std::uint64_t surface_id,
+bool member_of(const Scene &scene, const std::uint64_t surface_id,
                const std::uint64_t output_id) noexcept {
   const auto membership = scene.surface_outputs.find(surface_id);
   if (membership == scene.surface_outputs.end())
@@ -81,8 +80,8 @@ bool member_of(const Scene& scene, const std::uint64_t surface_id,
   return std::find(outputs.begin(), outputs.end(), output_id) != outputs.end();
 }
 
-DamageFilterFootprint footprint(const gwipc_output_upsert& output,
-                                const gwipc_surface_upsert& surface) noexcept {
+DamageFilterFootprint footprint(const gwipc_output_upsert &output,
+                                const gwipc_surface_upsert &surface) noexcept {
   const auto filter = render::software::select_sampling_filter(
       RationalScale{output.scale_numerator, output.scale_denominator},
       surface.scale_numerator);
@@ -91,36 +90,37 @@ DamageFilterFootprint footprint(const gwipc_output_upsert& output,
              : DamageFilterFootprint::Point;
 }
 
-void add_full_surface(DamageRegion &damage, const Scene &scene,
+bool add_full_surface(DamageRegion &damage, const Scene &scene,
                       const std::uint64_t surface_id,
                       const gwipc_output_upsert &output) {
   const auto surface = scene.surfaces.find(surface_id);
   if (surface == scene.surfaces.end() || !surface->second.visible ||
       !member_of(scene, surface_id, output.output_id))
-    return;
+    return false;
   const auto bounds = surface_bounds(surface->second);
   if (!bounds)
-    return;
+    return false;
   const auto native = glasswyrm::output::map_logical_damage_to_native(
       mapping(output), *bounds, footprint(output, surface->second));
-  if (native)
-    damage.add({static_cast<std::int32_t>(native->x),
-                static_cast<std::int32_t>(native->y), native->width,
-                native->height});
+  if (!native)
+    return false;
+  damage.add({static_cast<std::int32_t>(native->x),
+              static_cast<std::int32_t>(native->y), native->width,
+              native->height});
+  return true;
 }
 
-void add_exact_surface(DamageRegion &damage, const Scene &scene,
+bool add_exact_surface(DamageRegion &damage, const Scene &scene,
                        const std::uint64_t surface_id,
                        const gwipc_output_upsert &output,
                        const SurfaceDamageState &exact) {
   const auto surface = scene.surfaces.find(surface_id);
   if (surface == scene.surfaces.end() || !surface->second.visible ||
       !member_of(scene, surface_id, output.output_id))
-    return;
+    return false;
   if (!exact.trusted_complete ||
       exact.fallback_reason != SurfaceDamageFallbackReason::None) {
-    add_full_surface(damage, scene, surface_id, output);
-    return;
+    return add_full_surface(damage, scene, surface_id, output);
   }
 
   const Rectangle surface_local{0, 0, surface->second.logical_width,
@@ -147,6 +147,7 @@ void add_exact_surface(DamageRegion &damage, const Scene &scene,
                   static_cast<std::int32_t>(native->y), native->width,
                   native->height});
   }
+  return false;
 }
 
 void add_reason(OutputDamageResult &result, const std::uint64_t output_id,
@@ -180,11 +181,11 @@ calculate_output_damage(const Scene &before, const Scene &after,
                         const SceneDamageResult &content_damage) {
   OutputDamageResult result;
   std::set<std::uint64_t> surface_ids;
-  for (const auto& [id, unused] : before.surfaces) {
+  for (const auto &[id, unused] : before.surfaces) {
     (void)unused;
     surface_ids.insert(id);
   }
-  for (const auto& [id, unused] : after.surfaces) {
+  for (const auto &[id, unused] : after.surfaces) {
     (void)unused;
     surface_ids.insert(id);
   }
@@ -193,7 +194,7 @@ calculate_output_damage(const Scene &before, const Scene &after,
     surface_ids.insert(id);
   }
 
-  for (const auto& [output_id, output] : after.outputs) {
+  for (const auto &[output_id, output] : after.outputs) {
     if (!output.enabled)
       continue;
     DamageRegion damage(
@@ -219,17 +220,20 @@ calculate_output_damage(const Scene &before, const Scene &after,
                               new_membership == after.surface_outputs.end() ||
                               old_membership->second != new_membership->second;
       if (structural) {
-        add_full_surface(damage, before, surface_id, previous_output->second);
-        add_full_surface(damage, after, surface_id, output);
-        add_reason(result, output_id,
-                   OutputDamageFallbackReason::SurfaceStructural);
+        const bool old_damage = add_full_surface(damage, before, surface_id,
+                                                 previous_output->second);
+        const bool new_damage =
+            add_full_surface(damage, after, surface_id, output);
+        if (old_damage || new_damage)
+          add_reason(result, output_id,
+                     OutputDamageFallbackReason::SurfaceStructural);
         continue;
       }
       const auto exact = content_damage.surfaces.find(surface_id);
       if (exact != content_damage.surfaces.end()) {
-        add_exact_surface(damage, after, surface_id, output, exact->second);
-        if (!exact->second.trusted_complete ||
-            exact->second.fallback_reason != SurfaceDamageFallbackReason::None)
+        const bool fallback =
+            add_exact_surface(damage, after, surface_id, output, exact->second);
+        if (fallback)
           add_reason(result, output_id,
                      output_reason(exact->second.fallback_reason));
       }
