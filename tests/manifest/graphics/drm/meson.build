@@ -67,7 +67,12 @@ if get_option('drm_backend')
     dependencies: gw_drm_presenter_dep,
     include_directories: test_source_root_include,
   )
-  test('m14-bounded-damage-fake-drm', m14_bounded_damage_test, timeout: 60)
+  test(
+    'm14-bounded-damage-fake-drm',
+    m14_bounded_damage_test,
+    suite: 'm14-runtime',
+    timeout: 60,
+  )
 
   foreach presenter_vrr_test : [
     ['drm-presenter-vrr-state', 'presenter_vrr_state_test.cpp'],

@@ -128,6 +128,7 @@ if get_option('glasswyrmd')
         ],
         depends: [gwm_program, gwcomp_program, glasswyrmd_program,
                   m14_vrr_client],
+        suite: 'm14-runtime',
         timeout: 20,
       )
 
@@ -152,6 +153,7 @@ if get_option('glasswyrmd')
           ],
           depends: [gwm_program, gwcomp_program, glasswyrmd_program,
                     m14_vrr_client, m14_bounded_damage_test],
+          suite: 'm14-runtime',
           timeout: 90,
         )
       endif

@@ -268,29 +268,30 @@ cc -std=c11 -Wall -Wextra -Werror \
 failure_stage='build-matrix'
 setup_build() { local directory=$1; shift; meson setup "$directory" "$source_dir" --wipe -Dwerror=true "$@"; meson compile -C "$directory"; }
 setup_build "$default" -Dexperimental=false -Drender_gl=false
-meson test -C "$default" --print-errorlogs
+meson test -C "$default" --no-suite m14-runtime --print-errorlogs
 result[historical_default]=passed
 setup_build "$software" -Dexperimental=true -Drender_gl=false \
   -Dheadless_backend=true -Ddrm_backend=true -Dlibinput_backend=true
-meson test -C "$software" --print-errorlogs | tee "$artifact_dir/milestone13-meson-test.log"
+meson test -C "$software" --no-suite m14-runtime --print-errorlogs | \
+  tee "$artifact_dir/milestone13-meson-test.log"
 result[strict_software]=passed
 setup_build "$build" -Dexperimental=true -Drender_gl=false \
   -Dheadless_backend=true -Ddrm_backend=true -Dlibinput_backend=true
 setup_build "$gles" -Dexperimental=true -Drender_gl=true \
   -Dheadless_backend=true -Ddrm_backend=true -Dlibinput_backend=true
-meson test -C "$gles" --print-errorlogs
+meson test -C "$gles" --no-suite m14-runtime --print-errorlogs
 result[strict_gles]=passed
 meson setup "$asan" "$source_dir" --wipe -Dwerror=true -Dasan=true -Dubsan=true \
   -Dexperimental=true -Drender_gl=true -Dheadless_backend=true \
   -Ddrm_backend=true -Dlibinput_backend=true
 meson compile -C "$asan" -j1
-meson test -C "$asan" --print-errorlogs
+meson test -C "$asan" --no-suite m14-runtime --print-errorlogs
 result[sanitizer]=passed
 if command -v clang >/dev/null && command -v clang++ >/dev/null; then
   CC=clang CXX=clang++ setup_build "${build}-clang" -Dexperimental=true \
     -Drender_gl=true -Dheadless_backend=true -Ddrm_backend=true \
     -Dlibinput_backend=true
-  meson test -C "${build}-clang" --print-errorlogs
+  meson test -C "${build}-clang" --no-suite m14-runtime --print-errorlogs
   clang=passed
 fi
 
