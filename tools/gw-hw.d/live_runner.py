@@ -520,7 +520,10 @@ class FixedLiveRunner:
                      "--hold-ms", hold_ms]
         if cadence:
             arguments += ["--frames", "180", "--target-refresh-hz",
-                          str(self.config["target_refresh_hz"])]
+                          str(self.config["target_refresh_hz"]),
+                          "--control-socket",
+                          str(RUNTIME_ROOT / "control.sock"),
+                          "--output", str(self.config["connector"])]
         if preference is not None:
             arguments += ["--preference", preference]
         if repaint:
@@ -539,10 +542,21 @@ class FixedLiveRunner:
                 f"{self.artifacts / unit.removesuffix('.service')}.log") from error
         if self.validate_runtime:
             state = _read_json(result)
-            if (state.get("schema") != "glasswyrm.m14-vrr-client.v2" or
+            if (state.get("schema") != "glasswyrm.m14-vrr-client.v3" or
                     state.get("mode") != mode or (preference is not None and
                     state.get("preference", "").lower() != preference)):
                 raise HarnessError(f"client {tag} published unexpected state")
+            if cadence and (
+                    state.get("selected_output") != self.config["connector"] or
+                    state.get("presentation_paced") is not True or
+                    state.get("scheduled_frame_count") != 180 or
+                    state.get("submitted_frame_count") != 180 or
+                    not isinstance(state.get("presented_frame_count"), int) or
+                    state["presented_frame_count"] < MIN_ENABLED_INTERVALS + 1 or
+                    state["presented_frame_count"] > 180 or
+                    state.get("maximum_outstanding_updates") != 1):
+                raise HarnessError(
+                    f"client {tag} omitted presentation-paced state")
         return result
 
     def begin_cadence(self, tag: str) -> None:

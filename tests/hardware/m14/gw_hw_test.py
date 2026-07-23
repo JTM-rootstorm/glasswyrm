@@ -120,9 +120,17 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
     for name in TEXT_ARTIFACTS:
         (fixture / name).write_text(f"fixture {name}\n", encoding="utf-8")
     client = {
-        "schema": "glasswyrm.m14-vrr-client.v2", "mode": "windowed",
+        "schema": "glasswyrm.m14-vrr-client.v3", "mode": "windowed",
         "window": 101, "preference": "Default", "frame_count": 1,
         "eventfd_synchronized": False, "events_selected": True,
+        "selected_output": "", "scheduled_frame_count": 0,
+        "submitted_frame_count": 0, "presented_frame_count": 0,
+        "first_observed_commit_id": 0, "last_observed_commit_id": 0,
+        "first_presented_generation": 0, "last_presented_generation": 0,
+        "maximum_outstanding_updates": 0, "retryable_query_count": 0,
+        "missed_deadline_count": 0,
+        "maximum_completion_latency_nanoseconds": 0,
+        "presentation_paced": False,
     }
     write_json(fixture / "client-app-default.json",
                dict(client, preference_reply_count=1, notify_event_count=0,

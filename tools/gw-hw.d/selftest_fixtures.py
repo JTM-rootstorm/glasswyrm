@@ -78,13 +78,38 @@ def populate_live_evidence(
             offset += len(line.encode("utf-8"))
 
     base_client = {
-        "schema": "glasswyrm.m14-vrr-client.v2", "mode": "windowed",
-        "window": 100, "preference": "Default", "frame_count": 1,
+        "schema": "glasswyrm.m14-vrr-client.v3", "mode": "windowed",
+        "window": 100, "width": 640, "height": 480,
+        "preference": "Default", "fullscreen_requested": False,
+        "borderless": False, "frame_count": 1, "target_refresh_hz": 70,
+        "target_interval_nanoseconds": 14_285_714,
         "eventfd_synchronized": False, "events_selected": True,
+        "preference_reply_count": 0, "notify_event_count": 0,
+        "notify_change_mask": 0, "reason_mask": 0,
+        "preference_sequence": [], "cadence_absolute_monotonic": False,
+        "bounded_damage_width": 64, "bounded_damage_height": 64,
+        "selected_output": "", "scheduled_frame_count": 0,
+        "submitted_frame_count": 0, "presented_frame_count": 0,
+        "first_observed_commit_id": 0, "last_observed_commit_id": 0,
+        "first_presented_generation": 0, "last_presented_generation": 0,
+        "maximum_outstanding_updates": 0, "retryable_query_count": 0,
+        "missed_deadline_count": 0,
+        "maximum_completion_latency_nanoseconds": 0,
+        "presentation_paced": False,
     }
     for tag in ("off-cadence", "on-cadence"):
-        value = dict(base_client, mode="cadence", frame_count=180,
-                     eventfd_synchronized=True)
+        value = dict(
+            base_client, mode="cadence", width=2560, height=1440,
+            fullscreen_requested=True, frame_count=180,
+            eventfd_synchronized=True, cadence_absolute_monotonic=True,
+            selected_output=config["connector"], scheduled_frame_count=180,
+            submitted_frame_count=180, presented_frame_count=180,
+            first_observed_commit_id=1, last_observed_commit_id=180,
+            first_presented_generation=1, last_presented_generation=180,
+            maximum_outstanding_updates=1,
+            maximum_completion_latency_nanoseconds=14_285_714,
+            presentation_paced=True,
+        )
         _write(root / f"client-{tag}.json", value)
     preference = dict(base_client, mode="preference", window=101,
                       preference="Disable", preference_reply_count=4,

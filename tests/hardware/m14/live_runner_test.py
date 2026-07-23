@@ -425,6 +425,42 @@ def test_client_result_uses_bounded_live_deadline(root: Path) -> None:
     assert len(launches) == 1
     assert "--frames" in launches[0]
     assert "180" in launches[0]
+    assert launches[0][launches[0].index("--control-socket") + 1] == \
+        "/run/glasswyrm-m14-hardware/control.sock"
+    assert launches[0][launches[0].index("--output") + 1] == "DP-1"
+
+
+def test_cadence_client_requires_v3_presentation_state(root: Path) -> None:
+    state = {
+        "schema": "glasswyrm.m14-vrr-client.v3",
+        "mode": "cadence",
+        "preference": "Default",
+        "selected_output": "DP-1",
+        "presentation_paced": True,
+        "scheduled_frame_count": 180,
+        "submitted_frame_count": 180,
+        "presented_frame_count": 121,
+        "maximum_outstanding_updates": 1,
+    }
+
+    def execute(_argv: list[str], _output: Path | None) -> int:
+        return 0
+
+    def publish(path: Path, kind: str, attempts: int) -> None:
+        assert kind == "file" and attempts == CLIENT_RESULT_WAIT_ATTEMPTS
+        path.write_text(json.dumps(state) + "\n", encoding="utf-8")
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    runner.wait_path = publish
+    runner.start_client("on-cadence", "cadence", "default", True)
+
+    state["presented_frame_count"] = 120
+    expect_harness_error(
+        lambda: runner.start_client(
+            "off-cadence", "cadence", "default", True,
+        ),
+        "client off-cadence omitted presentation-paced state",
+    )
 
 
 def test_client_result_timeout_reports_unit_and_log(root: Path) -> None:
@@ -713,6 +749,10 @@ def main() -> int:
         client_timeout = root / "client-timeout"
         client_timeout.mkdir()
         test_client_result_timeout_reports_unit_and_log(client_timeout)
+
+        client_presentation = root / "client-presentation"
+        client_presentation.mkdir()
+        test_cadence_client_requires_v3_presentation_state(client_presentation)
 
         restart = root / "restart"
         restart.mkdir()
