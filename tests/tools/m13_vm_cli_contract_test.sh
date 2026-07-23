@@ -86,6 +86,7 @@ for artifact in milestone13-runtime-test.log milestone13-meson-test.log \
 done
 
 require_text "$library" 'reset; milestone12-runtime-test; reset; milestone13-runtime-test'
+require_text "$library" '--no-suite m14-runtime'
 require_text "$library" '[[ $name == milestone13-runtime-test.log ]] && continue'
 require_text "$library" "record.get('schema')=='glasswyrm-scene-v2'"
 require_text "$library" "record.get('cursors',[])"
