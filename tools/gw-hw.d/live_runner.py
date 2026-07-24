@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -317,6 +318,95 @@ class FixedLiveRunner:
             return "gwinfo query exited successfully with zero output bytes", False
         return None
 
+    def _bounded_json_query(
+            self, name: str, description: str, argv: list[str],
+            temporary: Path, attempt_limit: int,
+            validate: Callable[[dict[str, Any]], None],
+            destination: Path | None = None) -> dict[str, Any]:
+        last_error = "state was not observed"
+        attempts: list[dict[str, object]] = []
+        last_coherent: Path | None = None
+        for attempt in range(attempt_limit):
+            temporary.unlink(missing_ok=True)
+            result = self.command_result(argv, temporary)
+            record: dict[str, object] = {
+                "attempt": attempt + 1,
+                "command": self._command_evidence(result),
+            }
+            failure = self._query_failure(result)
+            if failure is not None:
+                last_error, retryable = failure
+                record["classification"] = (
+                    "retryable-command-failure" if retryable
+                    else "fatal-command-failure"
+                )
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "retrying" if retryable else "fatal",
+                    attempts, last_error, last_coherent, attempt_limit,
+                )
+                temporary.unlink(missing_ok=True)
+                if retryable and attempt + 1 < attempt_limit:
+                    time.sleep(.05)
+                    continue
+                raise HarnessError(
+                    f"{description} query failed: {last_error}")
+            try:
+                value = _read_json(temporary)
+            except HarnessError as error:
+                last_error = str(error)
+                record["classification"] = "malformed-json"
+                record["error"] = last_error
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "fatal", attempts, last_error, last_coherent,
+                    attempt_limit,
+                )
+                temporary.unlink(missing_ok=True)
+                raise HarnessError(
+                    f"{description} query returned malformed JSON: "
+                    f"{last_error}") from error
+            try:
+                validate(value)
+            except HarnessError as error:
+                last_error = str(error)
+                record["classification"] = "coherent-state-pending"
+                record["error"] = last_error
+                attempts.append(record)
+                last_coherent = self._query_diagnostic_path(name).with_name(
+                    f"{self._query_safe_name(name)}.last-coherent.json",
+                )
+                os.replace(temporary, last_coherent)
+                self._write_query_diagnostic(
+                    name,
+                    ("retrying" if attempt + 1 < attempt_limit
+                     else "exhausted"),
+                    attempts, last_error, last_coherent, attempt_limit,
+                )
+                if attempt + 1 < attempt_limit:
+                    time.sleep(.05)
+                continue
+            if destination is None:
+                temporary.unlink(missing_ok=True)
+            else:
+                os.replace(temporary, destination)
+            if attempts or result.elapsed_ns >= QUERY_SLOW_NS:
+                record["classification"] = (
+                    "slow-success" if result.elapsed_ns >= QUERY_SLOW_NS
+                    else "success"
+                )
+                attempts.append(record)
+                self._write_query_diagnostic(
+                    name, "converged", attempts, "", last_coherent,
+                    attempt_limit,
+                )
+            return value
+        temporary.unlink(missing_ok=True)
+        raise HarnessError(
+            f"{description} query did not converge after "
+            f"{attempt_limit} queries: {last_error}")
+
     @staticmethod
     def _ready(path: Path, kind: str) -> bool:
         if kind == "socket":
@@ -614,102 +704,30 @@ class FixedLiveRunner:
         self.cleanup_wait_count += 1
         if not self.validate_runtime:
             return
-        last_error = "state was not observed"
-        name = "policy-cleanup"
-        path = self.artifacts / ".policy-cleanup.query.tmp"
-        attempts: list[dict[str, object]] = []
-        last_coherent: Path | None = None
-        for attempt in range(CLEANUP_QUERY_ATTEMPTS):
-            path.unlink(missing_ok=True)
-            argv = [str(FIXED_BINARIES["gwinfo"]), "--socket",
-                    str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"]
-            result = self.command_result(argv, path)
-            record: dict[str, object] = {
-                "attempt": attempt + 1,
-                "command": self._command_evidence(result),
-            }
-            failure = self._query_failure(result)
-            if failure is not None:
-                last_error, retryable = failure
-                record["classification"] = (
-                    "retryable-command-failure" if retryable
-                    else "fatal-command-failure"
-                )
-                record["error"] = last_error
-                attempts.append(record)
-                self._write_query_diagnostic(
-                    name, "retrying" if retryable else "fatal",
-                    attempts, last_error, last_coherent,
-                    CLEANUP_QUERY_ATTEMPTS,
-                )
-                path.unlink(missing_ok=True)
-                if retryable and attempt + 1 < CLEANUP_QUERY_ATTEMPTS:
-                    time.sleep(.05)
-                    continue
+
+        def validate(value: dict[str, Any]) -> None:
+            outputs = value.get("vrr")
+            windows = value.get("windows")
+            if (not isinstance(outputs, list) or len(outputs) != 1 or
+                    not isinstance(outputs[0], dict) or
+                    outputs[0].get("name") != self.config["connector"]):
+                raise HarnessError("expected exactly the selected VRR output")
+            if windows != []:
                 raise HarnessError(
-                    f"coordinated client cleanup query failed: {last_error}")
-            try:
-                value = _read_json(path)
-            except HarnessError as error:
-                last_error = str(error)
-                record["classification"] = "malformed-json"
-                record["error"] = last_error
-                attempts.append(record)
-                self._write_query_diagnostic(
-                    name, "fatal", attempts, last_error, last_coherent,
-                    CLEANUP_QUERY_ATTEMPTS,
-                )
-                path.unlink(missing_ok=True)
+                    "client windows remain in the committed snapshot")
+            candidate = outputs[0].get("candidate_window")
+            if (isinstance(candidate, bool) or
+                    not isinstance(candidate, int) or candidate != 0):
                 raise HarnessError(
-                    "coordinated client cleanup query returned malformed JSON: "
-                    f"{last_error}") from error
-            try:
-                outputs = value.get("vrr")
-                windows = value.get("windows")
-                if (not isinstance(outputs, list) or len(outputs) != 1 or
-                        not isinstance(outputs[0], dict) or
-                        outputs[0].get("name") != self.config["connector"]):
-                    raise HarnessError("expected exactly the selected VRR output")
-                if windows != []:
-                    raise HarnessError("client windows remain in the committed snapshot")
-                candidate = outputs[0].get("candidate_window")
-                if (isinstance(candidate, bool) or not isinstance(candidate, int) or
-                        candidate != 0):
-                    raise HarnessError("a VRR candidate remains in the committed snapshot")
-                path.unlink(missing_ok=True)
-                if attempts or result.elapsed_ns >= QUERY_SLOW_NS:
-                    record["classification"] = (
-                        "slow-success" if result.elapsed_ns >= QUERY_SLOW_NS
-                        else "success"
-                    )
-                    attempts.append(record)
-                    self._write_query_diagnostic(
-                        name, "converged", attempts, "", last_coherent,
-                        CLEANUP_QUERY_ATTEMPTS,
-                    )
-                return
-            except HarnessError as error:
-                last_error = str(error)
-                record["classification"] = "coherent-state-pending"
-                record["error"] = last_error
-                attempts.append(record)
-                last_coherent = self._query_diagnostic_path(name).with_name(
-                    f"{self._query_safe_name(name)}.last-coherent.json",
-                )
-                os.replace(path, last_coherent)
-                self._write_query_diagnostic(
-                    name,
-                    ("retrying" if attempt + 1 < CLEANUP_QUERY_ATTEMPTS
-                     else "exhausted"),
-                    attempts, last_error, last_coherent,
-                    CLEANUP_QUERY_ATTEMPTS,
-                )
-                if attempt + 1 < CLEANUP_QUERY_ATTEMPTS:
-                    time.sleep(.05)
-        path.unlink(missing_ok=True)
-        raise HarnessError(
-            "timed out waiting for coordinated client cleanup after "
-            f"{CLEANUP_QUERY_ATTEMPTS} queries: {last_error}")
+                    "a VRR candidate remains in the committed snapshot")
+
+        self._bounded_json_query(
+            "policy-cleanup", "coordinated client cleanup",
+            [str(FIXED_BINARIES["gwinfo"]), "--socket",
+             str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"],
+            self.artifacts / ".policy-cleanup.query.tmp",
+            CLEANUP_QUERY_ATTEMPTS, validate,
+        )
 
     def snapshot(self, name: str, policy: str, effective: bool,
                  preference: str | None = None,
@@ -725,113 +743,49 @@ class FixedLiveRunner:
                           str(self.config["connector"]), "--json"], name)
             return {}
         path = self.artifacts / name
-        last_error = "state was not observed"
-        attempts: list[dict[str, object]] = []
-        last_coherent: Path | None = None
         temporary = self.artifacts / f".{name}.query.tmp"
-        for attempt in range(QUERY_ATTEMPTS):
-            temporary.unlink(missing_ok=True)
-            result = self.command_result(
-                [str(FIXED_BINARIES["gwinfo"]), "--socket",
-                 str(RUNTIME_ROOT / "control.sock"), "vrr",
-                 str(self.config["connector"]), "--json"],
-                temporary,
-            )
-            record: dict[str, object] = {
-                "attempt": attempt + 1,
-                "command": self._command_evidence(result),
-            }
-            failure = self._query_failure(result)
-            if failure is not None:
-                last_error, retryable = failure
-                record["classification"] = (
-                    "retryable-command-failure" if retryable
-                    else "fatal-command-failure"
-                )
-                record["error"] = last_error
-                attempts.append(record)
-                self._write_query_diagnostic(
-                    name, "retrying" if retryable else "fatal",
-                    attempts, last_error, last_coherent,
-                )
-                temporary.unlink(missing_ok=True)
-                if retryable and attempt + 1 < QUERY_ATTEMPTS:
-                    time.sleep(.05)
-                    continue
-                raise HarnessError(f"{name} query failed: {last_error}")
-            try:
-                value = _read_json(temporary)
-            except HarnessError as error:
-                last_error = str(error)
-                record["classification"] = "malformed-json"
-                record["error"] = last_error
-                attempts.append(record)
-                self._write_query_diagnostic(
-                    name, "fatal", attempts, last_error, last_coherent,
-                )
-                temporary.unlink(missing_ok=True)
+
+        def validate(value: dict[str, Any]) -> None:
+            outputs = value.get("vrr")
+            if not isinstance(outputs, list) or len(outputs) != 1:
+                raise HarnessError("expected exactly one VRR output")
+            output = outputs[0]
+            if (output.get("name") != self.config["connector"] or
+                    output.get("policy") != policy or
+                    output.get("effective_enabled") is not effective or
+                    output.get("hardware_capable") is not True or
+                    output.get("kms_controllable") is not True or
+                    output.get("simulated") is not False):
+                raise HarnessError("exact VRR output state has not converged")
+            if (output_reasons is not None and
+                    vrr_rejection_reasons(output.get("reasons")) !=
+                    list(output_reasons)):
                 raise HarnessError(
-                    f"{name} query returned malformed JSON: {last_error}",
-                ) from error
-            try:
-                outputs = value.get("vrr")
-                if not isinstance(outputs, list) or len(outputs) != 1:
-                    raise HarnessError("expected exactly one VRR output")
-                output = outputs[0]
-                if (output.get("name") != self.config["connector"] or
-                        output.get("policy") != policy or
-                        output.get("effective_enabled") is not effective or
-                        output.get("hardware_capable") is not True or
-                        output.get("kms_controllable") is not True or
-                        output.get("simulated") is not False):
-                    raise HarnessError("exact VRR output state has not converged")
-                if (output_reasons is not None and
-                        vrr_rejection_reasons(output.get("reasons")) !=
-                        list(output_reasons)):
-                    raise HarnessError("exact VRR output reasons have not converged")
-                if preference is not None:
-                    windows = value.get("windows")
-                    window = next((item for item in windows
-                                   if isinstance(item, dict) and
-                                   item.get("preference", "").lower() == preference),
-                                  None) if isinstance(windows, list) else None
-                    if window is None:
-                        raise HarnessError(f"{preference} window state has not converged")
-                    if (window_reasons is not None and
-                            window.get("reasons") != list(window_reasons)):
-                        raise HarnessError(
-                            "exact VRR window reasons have not converged")
-                os.replace(temporary, path)
-                if attempts or result.elapsed_ns >= QUERY_SLOW_NS:
-                    record["classification"] = (
-                        "slow-success" if result.elapsed_ns >= QUERY_SLOW_NS
-                        else "success"
-                    )
-                    attempts.append(record)
-                    self._write_query_diagnostic(
-                        name, "converged", attempts, "", last_coherent,
-                    )
-                return value
-            except HarnessError as error:
-                last_error = str(error)
-                record["classification"] = "coherent-state-pending"
-                record["error"] = last_error
-                attempts.append(record)
-                last_coherent = self._query_diagnostic_path(name).with_name(
-                    f"{self._query_safe_name(name)}.last-coherent.json",
-                )
-                os.replace(temporary, last_coherent)
-                self._write_query_diagnostic(
-                    name,
-                    "retrying" if attempt + 1 < QUERY_ATTEMPTS else "exhausted",
-                    attempts, last_error, last_coherent,
-                )
-                if attempt + 1 < QUERY_ATTEMPTS:
-                    time.sleep(.05)
-        temporary.unlink(missing_ok=True)
-        raise HarnessError(
-            f"{name} timed out waiting for exact VRR state after "
-            f"{QUERY_ATTEMPTS} queries: {last_error}")
+                    "exact VRR output reasons have not converged")
+            if preference is None:
+                return
+            windows = value.get("windows")
+            window = next(
+                (item for item in windows
+                 if isinstance(item, dict) and
+                 item.get("preference", "").lower() == preference),
+                None,
+            ) if isinstance(windows, list) else None
+            if window is None:
+                raise HarnessError(
+                    f"{preference} window state has not converged")
+            if (window_reasons is not None and
+                    window.get("reasons") != list(window_reasons)):
+                raise HarnessError(
+                    "exact VRR window reasons have not converged")
+
+        return self._bounded_json_query(
+            name, name,
+            [str(FIXED_BINARIES["gwinfo"]), "--socket",
+             str(RUNTIME_ROOT / "control.sock"), "vrr",
+             str(self.config["connector"]), "--json"],
+            temporary, QUERY_ATTEMPTS, validate, path,
+        )
 
     def _step(self, number: int) -> None:
         if number != len(self.steps) + 1:
