@@ -18,7 +18,7 @@ from common import (
 from config_doctor import (
     _modetest_connector_property_value, _modetest_crtc_property_value,
     _modetest_has_selected_mode, _modetest_selected_crtc_id, doctor,
-    parse_config, validate_cli_identity,
+    doctor_config, parse_config, validate_cli_identity,
 )
 from evidence import (
     _copy_fixture_artifacts, _create_archive, analyze_cadence, finalize_live,
@@ -43,8 +43,7 @@ def dry_run(config_path: Path, required_base: str, tested_commit: str,
     try:
         config = parse_config(config_path)
         validate_cli_identity(config, required_base, tested_commit)
-        if doctor(config_path, required_base, tested_commit,
-                  fixture_dir, artifact_dir) != 0:
+        if doctor_config(config, fixture_dir, artifact_dir) != 0:
             raise HarnessError("doctor failed")
         stage = "artifact collection"
         _copy_fixture_artifacts(fixture_dir, artifact_dir)
@@ -161,8 +160,7 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
         _prepare_private_empty_directory(RUNTIME_ROOT, "live runtime directory")
         config = parse_config(config_path)
         validate_cli_identity(config, required_base, tested_commit)
-        if doctor(config_path, required_base, tested_commit,
-                  None, artifact_dir) != 0:
+        if doctor_config(config, None, artifact_dir) != 0:
             raise HarnessError("live doctor failed")
         runner = FixedLiveRunner(config, artifact_dir)
         runner.run()

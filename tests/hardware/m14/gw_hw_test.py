@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 from config_doctor import (  # noqa: E402
     ConfigError, _connector_profile, _modetest_commands,
-    _parse_debugfs_refresh_range, _reviewed_range_source, parse_config,
+    _parse_debugfs_refresh_range, _reviewed_range_source, doctor_config,
+    parse_config,
 )
 
 TOOL = ROOT / "tools" / "gw-hw"
@@ -253,6 +254,24 @@ def main() -> int:
         assert checked.returncode == 0, checked.stderr
         report = json.loads((doctor_artifacts / "milestone14-hardware-doctor.json").read_text())
         assert report["passed"] is True
+
+        parsed_config = parse_config(config)
+        config.write_text(
+            CONFIG_TEXT.replace(TESTED_COMMIT, "c" * 40),
+            encoding="utf-8",
+        )
+        supplied_artifacts = root / "supplied-config-doctor-artifacts"
+        assert doctor_config(
+            parsed_config, fixture, supplied_artifacts,
+        ) == 0
+        supplied_config = json.loads(
+            (supplied_artifacts / "milestone14-hardware-config.json").read_text(
+                encoding="utf-8",
+            ),
+        )
+        assert supplied_config["tested_commit"] == TESTED_COMMIT
+        config.write_text(CONFIG_TEXT, encoding="utf-8")
+
         identity_rejected = run("doctor", "--config", str(config),
                                 "--required-base", REQUIRED_BASE,
                                 "--tested-commit", "c" * 40,
