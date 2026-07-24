@@ -210,21 +210,13 @@ CreateWindowStatus ResourceTable::create_window(
   }
 
   try {
-    resources_.emplace(
+    insert_resource(
         spec.xid,
         ResourceRecord{ResourceType::Window, owner, std::move(window)});
     try {
-      resources_by_owner_[owner].push_back(spec.xid);
       find_window(spec.parent)->children.push_back(spec.xid);
     } catch (...) {
-      auto owner_iterator = resources_by_owner_.find(owner);
-      if (owner_iterator != resources_by_owner_.end()) {
-        std::erase(owner_iterator->second, spec.xid);
-        if (owner_iterator->second.empty()) {
-          resources_by_owner_.erase(owner_iterator);
-        }
-      }
-      resources_.erase(spec.xid);
+      erase_resource(spec.xid);
       throw;
     }
   } catch (const std::bad_alloc&) {

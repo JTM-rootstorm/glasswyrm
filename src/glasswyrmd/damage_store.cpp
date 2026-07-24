@@ -25,15 +25,6 @@ std::optional<geometry::Rectangle> drawable_geometry(
   return std::nullopt;
 }
 
-void remove_owned_id(
-    std::unordered_map<ClientId, std::vector<std::uint32_t>>& owners,
-    const ClientId owner, const std::uint32_t xid) {
-  const auto found = owners.find(owner);
-  if (found == owners.end()) return;
-  std::erase(found->second, xid);
-  if (found->second.empty()) owners.erase(found);
-}
-
 }  // namespace
 
 DamageStatus ResourceTable::create_damage(
@@ -47,15 +38,10 @@ DamageStatus ResourceTable::create_damage(
       limits_.maximum_damage_resources_per_client)
     return DamageStatus::BadAlloc;
   try {
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::Damage, owner,
-                            DamageResource{drawable, level, {}, false}});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Damage, owner,
+                       DamageResource{drawable, level, {}, false}});
   } catch (const std::bad_alloc&) {
     return DamageStatus::BadAlloc;
   }
@@ -64,9 +50,7 @@ DamageStatus ResourceTable::create_damage(
 
 DamageStatus ResourceTable::destroy_damage(const std::uint32_t xid) {
   if (!find_damage(xid)) return DamageStatus::BadDamage;
-  const auto owner = *find(xid)->owner;
-  resources_.erase(xid);
-  remove_owned_id(resources_by_owner_, owner, xid);
+  erase_resource(xid);
   return DamageStatus::Success;
 }
 

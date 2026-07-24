@@ -1,6 +1,5 @@
 #include "glasswyrmd/resource_table.hpp"
 
-#include <algorithm>
 #include <new>
 
 namespace glasswyrm::server {
@@ -23,11 +22,10 @@ OpenFontStatus ResourceTable::open_font(
       total_fonts >= limits_.maximum_total_fonts)
     return OpenFontStatus::BadAlloc;
   try {
-    resources_.emplace(xid, ResourceRecord{ResourceType::Font, owner,
-                                           FontResource{kDefaultFontXid,
-                                                        identity}});
-    try { resources_by_owner_[owner].push_back(xid); }
-    catch (...) { resources_.erase(xid); throw; }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Font, owner,
+                       FontResource{kDefaultFontXid, identity}});
   } catch (const std::bad_alloc&) { return OpenFontStatus::BadAlloc; }
   return OpenFontStatus::Success;
 }
@@ -36,13 +34,7 @@ CloseFontStatus ResourceTable::close_font(const std::uint32_t xid) {
   const auto* font = find_font(xid);
   const auto* record = find(xid);
   if (!font || !record || !record->owner) return CloseFontStatus::BadFont;
-  const auto owner = *record->owner;
-  resources_.erase(xid);
-  auto iterator = resources_by_owner_.find(owner);
-  if (iterator != resources_by_owner_.end()) {
-    std::erase(iterator->second, xid);
-    if (iterator->second.empty()) resources_by_owner_.erase(iterator);
-  }
+  erase_resource(xid);
   return CloseFontStatus::Success;
 }
 

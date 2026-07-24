@@ -38,6 +38,31 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
                                     FontResource{}});
 }
 
+void ResourceTable::insert_resource(const std::uint32_t xid,
+                                    ResourceRecord resource) {
+  const auto owner = resource.owner;
+  resources_.emplace(xid, std::move(resource));
+  if (!owner) return;
+  try {
+    resources_by_owner_[*owner].push_back(xid);
+  } catch (...) {
+    resources_.erase(xid);
+    throw;
+  }
+}
+
+void ResourceTable::erase_resource(const std::uint32_t xid) noexcept {
+  const auto resource = resources_.find(xid);
+  if (resource == resources_.end()) return;
+  const auto owner = resource->second.owner;
+  resources_.erase(resource);
+  if (!owner) return;
+  const auto found = resources_by_owner_.find(*owner);
+  if (found == resources_by_owner_.end()) return;
+  std::erase(found->second, xid);
+  if (found->second.empty()) resources_by_owner_.erase(found);
+}
+
 bool ResourceTable::update_screen_geometry(const ScreenModel screen) noexcept {
   if (screen.root_window != screen_.root_window ||
       screen.default_colormap != screen_.default_colormap ||

@@ -22,15 +22,9 @@ CreateColormapStatus ResourceTable::create_colormap(
       limits_.maximum_colormaps_per_client)
     return CreateColormapStatus::BadAlloc;
   try {
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::Colormap, owner,
-                            ColormapResource{visual}});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Colormap, owner, ColormapResource{visual}});
   } catch (const std::bad_alloc&) {
     return CreateColormapStatus::BadAlloc;
   }
@@ -42,13 +36,7 @@ FreeColormapStatus ResourceTable::free_colormap(const std::uint32_t xid) {
   const auto* record = find(xid);
   if (!record || record->type != ResourceType::Colormap)
     return FreeColormapStatus::BadColormap;
-  const auto owner = *record->owner;
-  resources_.erase(xid);
-  auto owner_iterator = resources_by_owner_.find(owner);
-  if (owner_iterator != resources_by_owner_.end()) {
-    std::erase(owner_iterator->second, xid);
-    if (owner_iterator->second.empty()) resources_by_owner_.erase(owner_iterator);
-  }
+  erase_resource(xid);
   return FreeColormapStatus::Success;
 }
 
