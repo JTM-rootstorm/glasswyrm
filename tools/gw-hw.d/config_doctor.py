@@ -538,16 +538,17 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
     }
 
 
-def doctor(config_path: Path, required_base: str, tested_commit: str,
-           fixture_dir: Path | None = None,
-           artifact_dir: Path | None = None) -> int:
+def doctor_config(config: dict[str, object],
+                  fixture_dir: Path | None = None,
+                  artifact_dir: Path | None = None) -> int:
+    """Run the doctor against one already parsed and identity-checked config."""
     try:
-        config = parse_config(config_path)
-        validate_cli_identity(config, required_base, tested_commit)
         if fixture_dir is None:
-            validate_build_provenance(tested_commit, artifact_dir)
+            validate_build_provenance(
+                str(config["tested_commit"]), artifact_dir)
             print("[ok] exact physical build provenance")
-        facts = _read_json(fixture_dir / "doctor.json") if fixture_dir else _live_doctor_facts(config)
+        facts = (_read_json(fixture_dir / "doctor.json")
+                 if fixture_dir else _live_doctor_facts(config))
         passed, checks = _validate_doctor_facts(config, facts)
         report = {"schema": ARTIFACT_SCHEMA, "passed": passed,
                   "required_base_commit": config["required_base_commit"],
@@ -570,3 +571,15 @@ def doctor(config_path: Path, required_base: str, tested_commit: str,
     except (HarnessError, OSError, subprocess.SubprocessError) as error:
         print(f"[failed] hardware doctor: {error}", file=sys.stderr)
         return 1
+
+
+def doctor(config_path: Path, required_base: str, tested_commit: str,
+           fixture_dir: Path | None = None,
+           artifact_dir: Path | None = None) -> int:
+    try:
+        config = parse_config(config_path)
+        validate_cli_identity(config, required_base, tested_commit)
+    except (HarnessError, OSError) as error:
+        print(f"[failed] hardware doctor: {error}", file=sys.stderr)
+        return 1
+    return doctor_config(config, fixture_dir, artifact_dir)
