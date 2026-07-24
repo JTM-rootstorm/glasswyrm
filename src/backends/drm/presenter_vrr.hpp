@@ -14,7 +14,6 @@ struct PresenterVrrPlan {
   bool accepted{};
   bool desired_enabled{};
   bool include_property{};
-  bool requires_flip{};
   std::string error;
 };
 

@@ -41,7 +41,7 @@ output::PresentResult DrmPresenter::present_validated(
   const auto vrr_plan =
       vrr_contract_enabled_ && vrr_state_initialized_
           ? vrr_state_.plan(request, config_.reaffirm_vrr_on_flip)
-          : PresenterVrrPlan{true, false, false, true, {}};
+          : PresenterVrrPlan{true, false, false, {}};
   if (!vrr_plan.accepted)
     return {output::PresentDisposition::Rejected, 0, 0, vrr_plan.error};
   const auto hash = trusted_visible_hash

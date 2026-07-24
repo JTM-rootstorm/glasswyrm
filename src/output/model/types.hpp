@@ -78,31 +78,6 @@ inline constexpr std::uint32_t kAllOutputTransformsMask =
 
 enum class OutputKind : std::uint8_t { Headless = 1, Drm = 2 };
 
-enum class OutputCapabilityFlags : std::uint32_t {
-  None = 0,
-  Connected = UINT32_C(1) << 0U,
-  ArbitraryHeadlessMode = UINT32_C(1) << 1U,
-  ModeFixed = UINT32_C(1) << 2U,
-  ScaleConfigurable = UINT32_C(1) << 3U,
-  TransformConfigurable = UINT32_C(1) << 4U,
-  PrimaryEligible = UINT32_C(1) << 5U,
-  PhysicalDimensionsKnown = UINT32_C(1) << 6U,
-};
-
-[[nodiscard]] constexpr OutputCapabilityFlags
-operator|(const OutputCapabilityFlags left,
-          const OutputCapabilityFlags right) noexcept {
-  return static_cast<OutputCapabilityFlags>(static_cast<std::uint32_t>(left) |
-                                            static_cast<std::uint32_t>(right));
-}
-
-[[nodiscard]] constexpr bool
-has_capability(const OutputCapabilityFlags flags,
-               const OutputCapabilityFlags capability) noexcept {
-  return (static_cast<std::uint32_t>(flags) &
-          static_cast<std::uint32_t>(capability)) != 0;
-}
-
 enum class SdrColorSpace : std::uint8_t { Srgb = 1, DisplayP3 = 2 };
 enum class SdrTransferFunction : std::uint8_t { Srgb = 1, Linear = 2 };
 enum class SdrColorPrimaries : std::uint8_t { Srgb = 1, DisplayP3 = 2 };
