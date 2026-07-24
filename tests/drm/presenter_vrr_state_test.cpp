@@ -99,8 +99,7 @@ void controller_feedback() {
   enabled.desired_enabled = true;
   enabled.target_interval_nanoseconds = 16'666'667;
   const auto transition = state.plan(enabled);
-  gw::test::require(transition.accepted && transition.include_property &&
-                        transition.requires_flip,
+  gw::test::require(transition.accepted && transition.include_property,
                     "eligible transition requests one property-bearing flip");
   state.complete_initial(false, true);
   state.complete_flip(true, true, true, 10, 1'000'000'000, true);

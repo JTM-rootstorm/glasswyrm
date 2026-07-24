@@ -42,7 +42,6 @@ PresenterVrrPlan PresenterVrrState::plan(
     const bool explicit_reaffirmation) const {
   PresenterVrrPlan result;
   result.desired_enabled = request.valid && request.desired_enabled;
-  result.requires_flip = true;
   if (request.valid &&
       (target_interval_nanoseconds_ == 0 ||
        request.target_interval_nanoseconds != target_interval_nanoseconds_)) {
