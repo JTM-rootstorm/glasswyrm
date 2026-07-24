@@ -2,6 +2,7 @@
 #include "backends/headless/vrr_simulation.hpp"
 
 #include "output/vrr/reasons.hpp"
+#include "output/vrr/timing_stats.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <cstdint>
@@ -112,12 +113,12 @@ void produces_independent_deterministic_timelines() {
   gw::test::require(
       !right_off->effective_enabled && right_off->flip_sequence == 1 &&
           right_off->interval_nanoseconds ==
-              glasswyrm::headless::refresh_interval_nanoseconds(75'000),
+              glasswyrm::output::vrr::refresh_interval_nanoseconds(75'000),
       "independent output uses its nominal disabled cadence");
   gw::test::require(
       !left_off->effective_enabled && left_off->flip_sequence == 2 &&
           left_off->interval_nanoseconds ==
-              glasswyrm::headless::refresh_interval_nanoseconds(60'000) &&
+              glasswyrm::output::vrr::refresh_interval_nanoseconds(60'000) &&
           left_off->kernel_timestamp_nanoseconds ==
               game_interval + left_off->interval_nanoseconds,
       "state transition advances only the selected output timeline");

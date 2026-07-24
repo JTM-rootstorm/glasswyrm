@@ -1,5 +1,7 @@
 #include "gwcomp/vrr_runtime.hpp"
 
+#include "output/vrr/timing_stats.hpp"
+
 #include <algorithm>
 #include <limits>
 
@@ -14,14 +16,6 @@ using glasswyrm::output::vrr::DecisionInput;
 using glasswyrm::output::vrr::PolicyMode;
 using glasswyrm::output::vrr::Reason;
 using glasswyrm::output::vrr::WindowPreference;
-
-std::uint64_t refresh_interval_nanoseconds(
-    const std::uint32_t refresh_millihertz) noexcept {
-  constexpr std::uint64_t nanoseconds_per_millihertz = UINT64_C(1000000000000);
-  if (refresh_millihertz == 0) return 0;
-  return (nanoseconds_per_millihertz + refresh_millihertz / 2U) /
-         refresh_millihertz;
-}
 
 PolicyMode mode(const gwipc_vrr_policy_mode value) noexcept {
   return static_cast<PolicyMode>(value);
@@ -138,7 +132,8 @@ std::optional<PreparedVrrFrame> VrrRuntime::prepare(
         scene.vrr.policy_generation != 0 ? scene.vrr.policy_generation
                                          : scene.configuration_generation,
         1,
-        refresh_interval_nanoseconds(output.refresh_millihertz)};
+        glasswyrm::output::vrr::refresh_interval_nanoseconds(
+            output.refresh_millihertz)};
     const auto old = committed.outputs().find(output_id);
     if (old != committed.outputs().end()) {
       request.transition_serial = old->second.transition_serial;

@@ -80,6 +80,10 @@ void test_exact_summary() {
   require(timing_tolerance(16'666'667) == 250'000 &&
               timing_tolerance(100'000'000) == 1'000'000,
           "tolerance is max of 250 microseconds and one percent");
+  require(refresh_interval_nanoseconds(0) == 0 &&
+              refresh_interval_nanoseconds(60'000) == 16'666'667 &&
+              refresh_interval_nanoseconds(75'000) == 13'333'333,
+          "refresh conversion rounds the canonical millihertz period");
 }
 
 void test_bounded_ring() {

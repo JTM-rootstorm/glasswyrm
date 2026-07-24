@@ -3,6 +3,7 @@
 #include "backends/headless/vrr_simulation.hpp"
 #include "backends/output/software_frame_set.hpp"
 
+#include "output/vrr/timing_stats.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <filesystem>
@@ -115,7 +116,7 @@ int main() {
   gw::test::require(
       !right_feedback.effective_enabled && right_feedback.flip_sequence == 1 &&
           right_feedback.interval_nanoseconds ==
-              headless::refresh_interval_nanoseconds(75'000),
+              output::vrr::refresh_interval_nanoseconds(75'000),
       "disabled output remains independently on nominal cadence");
 
   gw::test::require(

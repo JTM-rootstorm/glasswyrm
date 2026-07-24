@@ -1,24 +1,13 @@
 #include "backends/headless/vrr_simulation.hpp"
 
+#include "output/vrr/timing_stats.hpp"
+
 #include <algorithm>
 #include <limits>
 #include <set>
 #include <utility>
 
 namespace glasswyrm::headless {
-namespace {
-
-constexpr std::uint64_t kNanosecondsPerMillihertz = UINT64_C(1'000'000'000'000);
-
-} // namespace
-
-std::uint64_t
-refresh_interval_nanoseconds(const std::uint32_t refresh_millihertz) noexcept {
-  if (refresh_millihertz == 0)
-    return 0;
-  return (kNanosecondsPerMillihertz + refresh_millihertz / 2U) /
-         refresh_millihertz;
-}
 
 std::optional<VrrSimulation>
 VrrSimulation::build(const output::OutputLayout &layout,
@@ -116,7 +105,7 @@ std::optional<VrrSimulationPresentation> VrrSimulation::present(
   auto &state = found->second;
   const auto interval = desired_enabled
                             ? target_interval_nanoseconds
-                            : refresh_interval_nanoseconds(
+                            : output::vrr::refresh_interval_nanoseconds(
                                   state.nominal_refresh_millihertz);
   if (interval == 0 ||
       state.timestamp_nanoseconds >

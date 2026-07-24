@@ -12,16 +12,6 @@ void add_reason(output::vrr::ReasonMask &mask,
   mask |= output::vrr::reason_bit(reason);
 }
 
-std::uint64_t target_interval(
-    const std::uint32_t refresh_millihertz) noexcept {
-  if (refresh_millihertz == 0)
-    return 0;
-  constexpr auto nanoseconds_per_millihertz =
-      UINT64_C(1'000'000'000'000);
-  return (nanoseconds_per_millihertz + refresh_millihertz / 2U) /
-         refresh_millihertz;
-}
-
 } // namespace
 
 void PresenterVrrState::initialize(const std::uint64_t output_id,
@@ -37,7 +27,8 @@ void PresenterVrrState::initialize(const std::uint64_t output_id,
   flip_sequence_ = 0;
   kernel_timestamp_nanoseconds_ = 0;
   interval_nanoseconds_ = 0;
-  target_interval_nanoseconds_ = target_interval(refresh_millihertz);
+  target_interval_nanoseconds_ =
+      output::vrr::refresh_interval_nanoseconds(refresh_millihertz);
   timestamp_available_ = false;
   timing_statistics_.reset();
   if (target_interval_nanoseconds_ != 0)

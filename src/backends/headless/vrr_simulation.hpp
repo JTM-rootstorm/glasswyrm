@@ -85,7 +85,4 @@ private:
   std::map<output::OutputId, State> states_;
 };
 
-[[nodiscard]] std::uint64_t
-refresh_interval_nanoseconds(std::uint32_t refresh_millihertz) noexcept;
-
 } // namespace glasswyrm::headless
