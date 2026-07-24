@@ -45,35 +45,30 @@ bool valid_surface_vrr_state(const gwipc_surface_vrr_state& value) noexcept {
          zero_reserved(value.reserved);
 }
 
-bool CommittedVrrState::promote(OutputStateMap states, TimingMap timings,
+bool CommittedVrrState::promote(OutputMap outputs,
                                 const std::uint64_t commit_id,
                                 const std::uint64_t presented_generation,
                                 std::string& error) {
-  if (commit_id == 0 || presented_generation == 0 || states.empty() ||
-      states.size() != timings.size()) {
+  if (commit_id == 0 || presented_generation == 0 || outputs.empty()) {
     error = "VRR presentation result is incomplete";
     return false;
   }
-  for (const auto& [output_id, state] : states) {
-    const auto timing = timings.find(output_id);
+  for (const auto& [output_id, output] : outputs) {
+    const auto& state = output.state;
+    const auto& timing = output.timing;
     if (state.output_id != output_id || state.last_commit_id != commit_id ||
         state.last_presented_generation != presented_generation ||
-        timing == timings.end() || timing->second.output_id != output_id ||
-        timing->second.commit_id != commit_id ||
-        timing->second.presented_generation != presented_generation) {
+        timing.output_id != output_id || timing.commit_id != commit_id ||
+        timing.presented_generation != presented_generation) {
       error = "VRR presentation result does not match its frame";
       return false;
     }
   }
-  outputs_ = std::move(states);
-  timings_ = std::move(timings);
+  outputs_ = std::move(outputs);
   error.clear();
   return true;
 }
 
-void CommittedVrrState::clear() noexcept {
-  outputs_.clear();
-  timings_.clear();
-}
+void CommittedVrrState::clear() noexcept { outputs_.clear(); }
 
 } // namespace gw::compositor

@@ -12,15 +12,23 @@
 
 namespace gw::compositor {
 
+struct PreparedVrrOutput {
+  glasswyrm::output::VrrPresentationRequest request;
+  glasswyrm::output::VrrPresentationCapability capability;
+};
+
 struct PreparedVrrFrame {
-  std::map<std::uint64_t, glasswyrm::output::VrrPresentationRequest> requests;
-  std::map<std::uint64_t, glasswyrm::output::VrrPresentationCapability>
-      capabilities;
+  using OutputMap = std::map<std::uint64_t, PreparedVrrOutput>;
+  using RequestMap =
+      std::map<std::uint64_t, glasswyrm::output::VrrPresentationRequest>;
+
+  OutputMap outputs;
+
+  [[nodiscard]] RequestMap presentation_requests() const;
 };
 
 struct CompletedVrrFrame {
-  CommittedVrrState::OutputStateMap states;
-  CommittedVrrState::TimingMap timings;
+  CommittedVrrState::OutputMap outputs;
 };
 
 class VrrRuntime final {

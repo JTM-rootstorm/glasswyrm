@@ -97,15 +97,15 @@ int main() {
   timing.commit_id = 5;
   timing.presented_generation = 9;
   std::string error;
-  require(committed.promote({{1, state}}, {{1, timing}}, 5, 9, error),
+  require(committed.promote({{1, {state, timing}}}, 5, 9, error),
           "matching state and timing promote atomically");
   const auto before = committed.outputs();
   timing.commit_id = 6;
-  require(!committed.promote({{1, state}}, {{1, timing}}, 5, 9, error) &&
+  require(!committed.promote({{1, {state, timing}}}, 5, 9, error) &&
               committed.outputs().size() == before.size() &&
-              committed.outputs().at(1).last_commit_id ==
-                  before.at(1).last_commit_id &&
-              committed.outputs().at(1).last_presented_generation ==
-                  before.at(1).last_presented_generation,
+              committed.outputs().at(1).state.last_commit_id ==
+                  before.at(1).state.last_commit_id &&
+              committed.outputs().at(1).state.last_presented_generation ==
+                  before.at(1).state.last_presented_generation,
           "invalid presentation result preserves committed VRR state");
 }

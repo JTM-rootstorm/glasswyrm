@@ -87,6 +87,14 @@ CandidateFacts candidate_for(const Scene& scene,
 
 } // namespace
 
+PreparedVrrFrame::RequestMap
+PreparedVrrFrame::presentation_requests() const {
+  RequestMap result;
+  for (const auto& [output_id, output] : outputs)
+    result.emplace(output_id, output.request);
+  return result;
+}
+
 std::optional<PreparedVrrFrame> VrrRuntime::prepare(
     const Scene& scene,
     const glasswyrm::output::PresentationBackend& presenter,
@@ -136,8 +144,8 @@ std::optional<PreparedVrrFrame> VrrRuntime::prepare(
             output.refresh_millihertz)};
     const auto old = committed.outputs().find(output_id);
     if (old != committed.outputs().end()) {
-      request.transition_serial = old->second.transition_serial;
-      if (changed(old->second, request)) {
+      request.transition_serial = old->second.state.transition_serial;
+      if (changed(old->second.state, request)) {
         if (request.transition_serial ==
             std::numeric_limits<std::uint64_t>::max()) {
           error = "VRR transition serial is exhausted";
@@ -146,8 +154,8 @@ std::optional<PreparedVrrFrame> VrrRuntime::prepare(
         ++request.transition_serial;
       }
     }
-    prepared.requests.emplace(output_id, request);
-    prepared.capabilities.emplace(output_id, *capability);
+    prepared.outputs.emplace(
+        output_id, PreparedVrrOutput{request, *capability});
   }
   error.clear();
   return prepared;
@@ -159,16 +167,15 @@ std::optional<CompletedVrrFrame> VrrRuntime::complete(
     const std::uint64_t commit_id,
     const std::uint64_t presented_generation, std::string& error) {
   if (commit_id == 0 || presented_generation == 0 ||
-      prepared.requests.empty() || feedback.size() != prepared.requests.size()) {
+      prepared.outputs.empty() || feedback.size() != prepared.outputs.size()) {
     error = "presentation backend returned an incomplete VRR result";
     return std::nullopt;
   }
   CompletedVrrFrame completed;
-  for (const auto& [output_id, request] : prepared.requests) {
+  for (const auto& [output_id, output] : prepared.outputs) {
+    const auto& request = output.request;
     const auto actual = feedback.find(output_id);
-    const auto capability = prepared.capabilities.find(output_id);
-    if (actual == feedback.end() || capability == prepared.capabilities.end() ||
-        actual->second.output_id != output_id ||
+    if (actual == feedback.end() || actual->second.output_id != output_id ||
         (actual->second.flags &
          ~glasswyrm::output::kVrrPresentationFeedbackSimulated) != 0 ||
         (!actual->second.timestamp_available &&
@@ -181,7 +188,7 @@ std::optional<CompletedVrrFrame> VrrRuntime::complete(
     }
     auto effective_decision = request.decision;
     auto reasons = request.reason_flags;
-    const bool simulated = capability->second.simulated;
+    const bool simulated = output.capability.simulated;
     if (request.desired_enabled && !actual->second.effective_enabled) {
       effective_decision = Decision::Rejected;
       reasons |= glasswyrm::output::vrr::reason_bit(Reason::PresenterRejected);
@@ -212,8 +219,6 @@ std::optional<CompletedVrrFrame> VrrRuntime::complete(
     state.last_flip_timestamp_nanoseconds =
         actual->second.kernel_timestamp_nanoseconds;
     state.last_interval_nanoseconds = actual->second.interval_nanoseconds;
-    completed.states.emplace(output_id, state);
-
     gwipc_presentation_timing timing{};
     timing.struct_size = sizeof(timing);
     timing.output_id = output_id;
@@ -228,7 +233,8 @@ std::optional<CompletedVrrFrame> VrrRuntime::complete(
     timing.interval_nanoseconds = actual->second.interval_nanoseconds;
     timing.effective_vrr_enabled = actual->second.effective_enabled;
     timing.timestamp_available = actual->second.timestamp_available;
-    completed.timings.emplace(output_id, timing);
+    completed.outputs.emplace(
+        output_id, CommittedVrrState::Output{state, timing});
   }
   error.clear();
   return completed;

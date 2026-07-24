@@ -30,26 +30,24 @@ bool append(std::vector<VrrResponseMessage>& messages, const std::uint16_t type,
 }
 
 bool encode_messages(
-    const CommittedVrrState::OutputStateMap& states,
-    const CommittedVrrState::TimingMap& timings,
+    const CommittedVrrState::OutputMap& outputs,
     const gwipc_frame_commit& commit, const gwipc_frame_result result,
     const VrrResponseBatch::ReleaseMap& releases,
-    std::vector<VrrResponseMessage>& messages, std::string& error) {
+  std::vector<VrrResponseMessage>& messages, std::string& error) {
   messages.clear();
-  messages.reserve(states.size() * 2U + releases.size() + 1U);
-  for (const auto& [output_id, state] : states) {
-    if (!timings.contains(output_id) ||
-        !append(messages, GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT,
-                GWIPC_FLAG_REPLY, state,
+  messages.reserve(outputs.size() * 2U + releases.size() + 1U);
+  for (const auto& item : outputs) {
+    if (!append(messages, GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT,
+                GWIPC_FLAG_REPLY, item.second.state,
                 gwipc_contract_encode_output_vrr_state_upsert, error))
       return false;
   }
   // The response contract is grouped by record kind, not interleaved by
   // output: all effective states, then all timing records, then the ack and
   // releases.  Map iteration keeps each group ordered by stable output ID.
-  for (const auto& [output_id, timing] : timings) {
-    if (!states.contains(output_id) ||
-        !append(messages, GWIPC_MESSAGE_PRESENTATION_TIMING, 0, timing,
+  for (const auto& item : outputs) {
+    if (!append(messages, GWIPC_MESSAGE_PRESENTATION_TIMING, 0,
+                item.second.timing,
                 gwipc_contract_encode_presentation_timing, error))
       return false;
   }
@@ -81,14 +79,14 @@ std::optional<VrrResponseBatch> VrrResponseBatch::preflight(
     const PreparedVrrFrame& prepared, const gwipc_frame_commit& commit,
     const gwipc_frame_result result, const ReleaseMap& releases,
     std::string& error) {
-  if (prepared.requests.empty() || commit.commit_id == 0 ||
+  if (prepared.outputs.empty() || commit.commit_id == 0 ||
       commit.producer_generation == 0) {
     error = "VRR response preflight is missing frame state";
     return std::nullopt;
   }
-  CommittedVrrState::OutputStateMap placeholder_states;
-  CommittedVrrState::TimingMap placeholder_timings;
-  for (const auto& [output_id, request] : prepared.requests) {
+  CommittedVrrState::OutputMap placeholders;
+  for (const auto& [output_id, output] : prepared.outputs) {
+    const auto& request = output.request;
     gwipc_output_vrr_state_upsert state{};
     state.struct_size = sizeof(state);
     state.output_id = output_id;
@@ -104,21 +102,20 @@ std::optional<VrrResponseBatch> VrrResponseBatch::preflight(
     state.transition_serial = request.transition_serial;
     state.last_commit_id = commit.commit_id;
     state.last_presented_generation = commit.producer_generation;
-    placeholder_states.emplace(output_id, state);
-
     gwipc_presentation_timing timing{};
     timing.struct_size = sizeof(timing);
     timing.output_id = output_id;
     timing.commit_id = commit.commit_id;
     timing.presented_generation = commit.producer_generation;
-    placeholder_timings.emplace(output_id, timing);
+    placeholders.emplace(
+        output_id, CommittedVrrState::Output{state, timing});
   }
   VrrResponseBatch batch;
   batch.commit_ = commit;
   batch.result_ = result;
   batch.releases_ = releases;
-  if (!encode_messages(placeholder_states, placeholder_timings, commit, result,
-                       releases, batch.messages_, error))
+  if (!encode_messages(placeholders, commit, result, releases,
+                       batch.messages_, error))
     return std::nullopt;
   batch.reserved_messages_ = batch.messages_.size();
   for (const auto& message : batch.messages_)
@@ -130,8 +127,8 @@ std::optional<VrrResponseBatch> VrrResponseBatch::preflight(
 bool VrrResponseBatch::finalize(const CompletedVrrFrame& completed,
                                 std::string& error) {
   std::vector<VrrResponseMessage> messages;
-  if (!encode_messages(completed.states, completed.timings, commit_, result_,
-                       releases_, messages, error))
+  if (!encode_messages(completed.outputs, commit_, result_, releases_,
+                       messages, error))
     return false;
   std::size_t bytes = 0;
   for (const auto& message : messages)
