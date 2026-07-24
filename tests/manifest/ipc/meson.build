@@ -1,66 +1,26 @@
 if get_option('libgwipc')
-  gwipc_vrr_c_consumer = executable(
-    'gwipc_vrr_c_consumer',
-    files(tests_source_dir / 'install/gwipc_vrr_c_consumer.c'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.9-vrr-c-consumer', gwipc_vrr_c_consumer, timeout: 10)
-  gwipc_vrr_cpp_consumer = executable(
-    'gwipc_vrr_cpp_consumer',
-    files(tests_source_dir / 'install/gwipc_vrr_cpp_consumer.cpp'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.9-vrr-cpp-consumer', gwipc_vrr_cpp_consumer, timeout: 10)
-
-  gwipc_output_c_consumer = executable(
-    'gwipc_output_c_consumer',
-    files(tests_source_dir / 'install/gwipc_output_c_consumer.c'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.8-output-c-consumer', gwipc_output_c_consumer, timeout: 10)
-  gwipc_output_cpp_consumer = executable(
-    'gwipc_output_cpp_consumer',
-    files(tests_source_dir / 'install/gwipc_output_cpp_consumer.cpp'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.8-output-cpp-consumer', gwipc_output_cpp_consumer,
-       timeout: 10)
-
-  gwipc_sync_c_consumer = executable(
-    'gwipc_sync_c_consumer',
-    files(tests_source_dir / 'install/gwipc_sync_c_consumer.c'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.7-sync-c-consumer', gwipc_sync_c_consumer, timeout: 10)
-  gwipc_sync_cpp_consumer = executable(
-    'gwipc_sync_cpp_consumer',
-    files(tests_source_dir / 'install/gwipc_sync_cpp_consumer.cpp'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.7-sync-cpp-consumer', gwipc_sync_cpp_consumer, timeout: 10)
-
-  gwipc_session_c_consumer = executable(
-    'gwipc_session_c_consumer',
-    files(tests_source_dir / 'install/gwipc_session_c_consumer.c'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.6-session-c-consumer', gwipc_session_c_consumer,
-       timeout: 10)
-  gwipc_session_cpp_consumer = executable(
-    'gwipc_session_cpp_consumer',
-    files(tests_source_dir / 'install/gwipc_session_cpp_consumer.cpp'),
-    dependencies: gwipc_dep,
-    install: false,
-  )
-  test('gwipc-api-0.6-session-cpp-consumer', gwipc_session_cpp_consumer,
-       timeout: 10)
+  gwipc_consumer_apis = [
+    ['0.9', 'vrr'],
+    ['0.8', 'output'],
+    ['0.7', 'sync'],
+    ['0.6', 'session'],
+  ]
+  foreach consumer_api : gwipc_consumer_apis
+    foreach language : ['c', 'cpp']
+      consumer_name = 'gwipc_' + consumer_api[1] + '_' + language + '_consumer'
+      consumer_program = executable(
+        consumer_name,
+        files(tests_source_dir / ('install/' + consumer_name + '.' + language)),
+        dependencies: gwipc_dep,
+        install: false,
+      )
+      test(
+        'gwipc-api-' + consumer_api[0] + '-' + consumer_api[1] + '-' + language + '-consumer',
+        consumer_program,
+        timeout: 10,
+      )
+    endforeach
+  endforeach
 
   public_control_api_test = executable(
     'public_control_api_test',
