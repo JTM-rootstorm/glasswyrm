@@ -34,15 +34,10 @@ RegionStatus ResourceTable::create_xfixes_region(
   if (normalized->size() > limits_.maximum_xfixes_region_rectangles)
     return RegionStatus::BadAlloc;
   try {
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::XFixesRegion, owner,
-                            XFixesRegionResource{std::move(*normalized)}});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::XFixesRegion, owner,
+                       XFixesRegionResource{std::move(*normalized)}});
   } catch (const std::bad_alloc&) {
     return RegionStatus::BadAlloc;
   }
@@ -51,13 +46,7 @@ RegionStatus ResourceTable::create_xfixes_region(
 
 RegionStatus ResourceTable::destroy_xfixes_region(const std::uint32_t xid) {
   if (!find_xfixes_region(xid)) return RegionStatus::BadRegion;
-  const auto owner = *find(xid)->owner;
-  resources_.erase(xid);
-  if (auto found = resources_by_owner_.find(owner);
-      found != resources_by_owner_.end()) {
-    std::erase(found->second, xid);
-    if (found->second.empty()) resources_by_owner_.erase(found);
-  }
+  erase_resource(xid);
   return RegionStatus::Success;
 }
 

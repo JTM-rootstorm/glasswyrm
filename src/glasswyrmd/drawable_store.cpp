@@ -1,6 +1,5 @@
 #include "glasswyrmd/resource_table.hpp"
 
-#include <algorithm>
 #include <new>
 
 namespace glasswyrm::server {
@@ -52,10 +51,9 @@ CreatePixmapStatus ResourceTable::create_pixmap(
   try {
     PixmapResource pixmap{screen_.root_window, depth, width, height,
                           std::move(storage)};
-    resources_.emplace(xid, ResourceRecord{ResourceType::Pixmap, owner,
-                                           std::move(pixmap)});
-    try { resources_by_owner_[owner].push_back(xid); }
-    catch (...) { resources_.erase(xid); throw; }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Pixmap, owner, std::move(pixmap)});
     recompute_canonical_drawable_bytes();
   } catch (const std::bad_alloc&) { return CreatePixmapStatus::BadAlloc; }
   return CreatePixmapStatus::Success;
@@ -66,15 +64,7 @@ FreePixmapStatus ResourceTable::free_pixmap(const std::uint32_t xid) {
   if (!pixmap) return FreePixmapStatus::BadPixmap;
   (void)remove_damage_for_drawable(xid);
   (void)remove_pictures_for_drawable(xid);
-  const auto owner = find(xid)->owner;
-  resources_.erase(xid);
-  if (owner) {
-    auto iterator = resources_by_owner_.find(*owner);
-    if (iterator != resources_by_owner_.end()) {
-      std::erase(iterator->second, xid);
-      if (iterator->second.empty()) resources_by_owner_.erase(iterator);
-    }
-  }
+  erase_resource(xid);
   recompute_canonical_drawable_bytes();
   return FreePixmapStatus::Success;
 }
@@ -119,14 +109,9 @@ CreatePixmapStatus ResourceTable::name_window_pixmap(
   try {
     PixmapResource named{screen_.root_window, window->depth, window->width,
                          window->height, window->storage};
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::Pixmap, owner, std::move(named)});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Pixmap, owner, std::move(named)});
     recompute_canonical_drawable_bytes();
   } catch (const std::bad_alloc&) {
     return CreatePixmapStatus::BadAlloc;
@@ -181,25 +166,16 @@ CreateGcStatus ResourceTable::create_gc(
     return CreateGcStatus::BadAlloc;
   gc.root = screen_.root_window; gc.depth = depth;
   try {
-    resources_.emplace(xid, ResourceRecord{ResourceType::GraphicsContext, owner,
-                                           std::move(gc)});
-    try { resources_by_owner_[owner].push_back(xid); }
-    catch (...) { resources_.erase(xid); throw; }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::GraphicsContext, owner, std::move(gc)});
   } catch (const std::bad_alloc&) { return CreateGcStatus::BadAlloc; }
   return CreateGcStatus::Success;
 }
 
 FreeGcStatus ResourceTable::free_gc(const std::uint32_t xid) {
   if (!find_gc(xid)) return FreeGcStatus::BadGContext;
-  const auto owner = find(xid)->owner;
-  resources_.erase(xid);
-  if (owner) {
-    auto iterator = resources_by_owner_.find(*owner);
-    if (iterator != resources_by_owner_.end()) {
-      std::erase(iterator->second, xid);
-      if (iterator->second.empty()) resources_by_owner_.erase(iterator);
-    }
-  }
+  erase_resource(xid);
   return FreeGcStatus::Success;
 }
 

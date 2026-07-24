@@ -25,15 +25,10 @@ CreateCursorStatus ResourceTable::create_cursor(
     return CreateCursorStatus::BadAlloc;
   try {
     const auto bytes = image->byte_size();
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::Cursor, owner,
-                            CursorResource{std::move(image)}});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Cursor, owner,
+                       CursorResource{std::move(image)}});
     total_cursor_bytes_ += bytes;
   } catch (const std::bad_alloc&) {
     return CreateCursorStatus::BadAlloc;
@@ -45,7 +40,6 @@ FreeCursorStatus ResourceTable::free_cursor(const std::uint32_t xid) {
   const auto* cursor = find_cursor(xid);
   const auto* record = find(xid);
   if (!cursor || !record || !record->owner) return FreeCursorStatus::BadCursor;
-  const auto owner = *record->owner;
   const auto bytes = cursor->image->byte_size();
   for (auto& [resource_xid, resource] : resources_) {
     static_cast<void>(resource_xid);
@@ -57,12 +51,7 @@ FreeCursorStatus ResourceTable::free_cursor(const std::uint32_t xid) {
       window->attributes.cursor = 0;
     }
   }
-  resources_.erase(xid);
-  auto owned = resources_by_owner_.find(owner);
-  if (owned != resources_by_owner_.end()) {
-    std::erase(owned->second, xid);
-    if (owned->second.empty()) resources_by_owner_.erase(owned);
-  }
+  erase_resource(xid);
   total_cursor_bytes_ -= bytes;
   return FreeCursorStatus::Success;
 }

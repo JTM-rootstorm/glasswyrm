@@ -353,6 +353,8 @@ class ResourceTable {
   [[nodiscard]] bool invariants_hold() const noexcept;
 
  private:
+  void insert_resource(std::uint32_t xid, ResourceRecord resource);
+  void erase_resource(std::uint32_t xid) noexcept;
   void destroy_leaf(std::uint32_t xid, CleanupResult& result);
   std::size_t remove_damage_for_drawable(std::uint32_t drawable);
   std::size_t remove_pictures_for_drawable(std::uint32_t drawable);

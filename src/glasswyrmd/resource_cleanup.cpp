@@ -98,7 +98,6 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
   result.resources_destroyed += remove_damage_for_drawable(xid);
   result.resources_destroyed += remove_pictures_for_drawable(xid);
   const std::size_t property_bytes = window_property_bytes(*window);
-  const auto owner = find(xid)->owner;
   if (auto* parent = find_window(parent_id); parent != nullptr) {
     if (!parent->children.empty() && parent->children.back() == xid) {
       parent->children.pop_back();
@@ -110,16 +109,7 @@ void ResourceTable::destroy_leaf(const std::uint32_t xid,
       }
     }
   }
-  if (owner) {
-    auto owner_iterator = resources_by_owner_.find(*owner);
-    if (owner_iterator != resources_by_owner_.end()) {
-      std::erase(owner_iterator->second, xid);
-      if (owner_iterator->second.empty()) {
-        resources_by_owner_.erase(owner_iterator);
-      }
-    }
-  }
-  resources_.erase(xid);
+  erase_resource(xid);
   total_property_bytes_ -= property_bytes;
   ++result.resources_destroyed;
   result.property_bytes_released += property_bytes;

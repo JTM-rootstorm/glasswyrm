@@ -2,7 +2,6 @@
 
 #include <sys/shm.h>
 
-#include <algorithm>
 #include <limits>
 #include <new>
 
@@ -61,16 +60,11 @@ AttachShmStatus ResourceTable::attach_shm_segment(
     return AttachShmStatus::BadAlloc;
   }
   try {
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::ShmSegment, owner,
-                            ShmSegmentResource{shmid, size, read_only, peer_uid,
-                                               std::move(mapping)}});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::ShmSegment, owner,
+                       ShmSegmentResource{shmid, size, read_only, peer_uid,
+                                          std::move(mapping)}});
   } catch (const std::bad_alloc&) {
     return AttachShmStatus::BadAlloc;
   }
@@ -80,15 +74,7 @@ AttachShmStatus ResourceTable::attach_shm_segment(
 DetachShmStatus ResourceTable::detach_shm_segment(const std::uint32_t xid) {
   const auto* segment = find_shm_segment(xid);
   if (!segment) return DetachShmStatus::BadSegment;
-  const auto owner = find(xid)->owner;
-  resources_.erase(xid);
-  if (owner) {
-    auto iterator = resources_by_owner_.find(*owner);
-    if (iterator != resources_by_owner_.end()) {
-      std::erase(iterator->second, xid);
-      if (iterator->second.empty()) resources_by_owner_.erase(iterator);
-    }
-  }
+  erase_resource(xid);
   return DetachShmStatus::Success;
 }
 

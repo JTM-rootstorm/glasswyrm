@@ -1,6 +1,5 @@
 #include "glasswyrmd/resource_table.hpp"
 
-#include <algorithm>
 #include <new>
 #include <variant>
 
@@ -20,14 +19,9 @@ PictureResourceStatus ResourceTable::create_picture(
   if (owned_pictures >= limits_.maximum_pictures_per_client)
     return PictureResourceStatus::BadAlloc;
   try {
-    resources_.emplace(
-        xid, ResourceRecord{ResourceType::Picture, owner, std::move(picture)});
-    try {
-      resources_by_owner_[owner].push_back(xid);
-    } catch (...) {
-      resources_.erase(xid);
-      throw;
-    }
+    insert_resource(
+        xid,
+        ResourceRecord{ResourceType::Picture, owner, std::move(picture)});
   } catch (const std::bad_alloc&) {
     return PictureResourceStatus::BadAlloc;
   }
@@ -36,15 +30,7 @@ PictureResourceStatus ResourceTable::create_picture(
 
 PictureResourceStatus ResourceTable::free_picture(const std::uint32_t xid) {
   if (!find_picture(xid)) return PictureResourceStatus::BadPicture;
-  const auto owner = find(xid)->owner;
-  resources_.erase(xid);
-  if (owner) {
-    auto found = resources_by_owner_.find(*owner);
-    if (found != resources_by_owner_.end()) {
-      std::erase(found->second, xid);
-      if (found->second.empty()) resources_by_owner_.erase(found);
-    }
-  }
+  erase_resource(xid);
   return PictureResourceStatus::Success;
 }
 
