@@ -60,5 +60,7 @@ private:
 
 [[nodiscard]] std::uint64_t
 timing_tolerance(std::uint64_t target_interval_nanoseconds) noexcept;
+[[nodiscard]] std::uint64_t
+refresh_interval_nanoseconds(std::uint32_t refresh_millihertz) noexcept;
 
 } // namespace glasswyrm::output::vrr

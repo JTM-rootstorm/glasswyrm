@@ -5,6 +5,9 @@
 namespace glasswyrm::output::vrr {
 namespace {
 
+constexpr std::uint64_t kNanosecondsPerMillihertz =
+    UINT64_C(1'000'000'000'000);
+
 std::uint64_t absolute_difference(const std::uint64_t left,
                                   const std::uint64_t right) noexcept {
   return left >= right ? left - right : right - left;
@@ -139,6 +142,14 @@ std::uint64_t
 timing_tolerance(const std::uint64_t target_interval_nanoseconds) noexcept {
   return std::max(kMinimumTimingToleranceNanoseconds,
                   target_interval_nanoseconds / 100U);
+}
+
+std::uint64_t
+refresh_interval_nanoseconds(const std::uint32_t refresh_millihertz) noexcept {
+  if (refresh_millihertz == 0)
+    return 0;
+  return (kNanosecondsPerMillihertz + refresh_millihertz / 2U) /
+         refresh_millihertz;
 }
 
 } // namespace glasswyrm::output::vrr
