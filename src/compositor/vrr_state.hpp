@@ -19,24 +19,24 @@ struct SceneVrrState {
 // unable to advance one half of the externally visible result.
 class CommittedVrrState final {
 public:
-  using OutputStateMap =
-      std::map<std::uint64_t, gwipc_output_vrr_state_upsert>;
-  using TimingMap = std::map<std::uint64_t, gwipc_presentation_timing>;
+  struct Output {
+    gwipc_output_vrr_state_upsert state;
+    gwipc_presentation_timing timing;
+  };
+  using OutputMap = std::map<std::uint64_t, Output>;
 
-  [[nodiscard]] bool promote(OutputStateMap states, TimingMap timings,
+  [[nodiscard]] bool promote(OutputMap outputs,
                              std::uint64_t commit_id,
                              std::uint64_t presented_generation,
                              std::string& error);
   void clear() noexcept;
 
-  [[nodiscard]] const OutputStateMap& outputs() const noexcept {
+  [[nodiscard]] const OutputMap& outputs() const noexcept {
     return outputs_;
   }
-  [[nodiscard]] const TimingMap& timings() const noexcept { return timings_; }
 
 private:
-  OutputStateMap outputs_;
-  TimingMap timings_;
+  OutputMap outputs_;
 };
 
 [[nodiscard]] bool

@@ -90,8 +90,7 @@ PresentedFrame PresentationTransaction::promote(
   if (completed_vrr_) {
     std::string state_error;
     if (!compositor.committed_vrr_.promote(
-            std::move(completed_vrr_->states),
-            std::move(completed_vrr_->timings), commit_.commit_id,
+            std::move(completed_vrr_->outputs), commit_.commit_id,
             commit_.producer_generation, state_error) ||
         !vrr_response_ || !vrr_response_->ready()) {
       presented_.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;

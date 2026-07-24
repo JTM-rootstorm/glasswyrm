@@ -144,15 +144,12 @@ std::optional<VrrInventorySnapshot> Compositor::vrr_inventory(
 
     const auto committed = committed_vrr_.outputs().find(output_id.value);
     if (committed != committed_vrr_.outputs().end()) {
-      if (committed->second.requested_mode != policy.mode) {
+      if (committed->second.state.requested_mode != policy.mode) {
         error = "committed VRR state does not match its output policy";
         return std::nullopt;
       }
-      result.states.push_back(committed->second);
-      if (const auto timing =
-              committed_vrr_.timings().find(output_id.value);
-          timing != committed_vrr_.timings().end())
-        result.timings.push_back(timing->second);
+      result.states.push_back(committed->second.state);
+      result.timings.push_back(committed->second.timing);
       continue;
     }
 

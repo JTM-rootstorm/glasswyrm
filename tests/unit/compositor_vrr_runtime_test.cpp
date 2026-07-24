@@ -85,8 +85,8 @@ int main() {
   std::string error;
   auto prepared = gw::compositor::VrrRuntime::prepare(
       scene(), presenter, committed, error);
-  require(prepared && prepared->requests.at(1).desired_enabled &&
-              prepared->requests.at(1).decision ==
+  require(prepared && prepared->outputs.at(1).request.desired_enabled &&
+              prepared->outputs.at(1).request.decision ==
                   glasswyrm::output::vrr::Decision::Enabled,
           "pure decision is attached before presentation");
 
@@ -100,8 +100,8 @@ int main() {
   disabled.vrr.output_policies.emplace(2, second_policy);
   auto enabled_only = gw::compositor::VrrRuntime::prepare(
       disabled, presenter, committed, error);
-  require(enabled_only && enabled_only->requests.size() == 1 &&
-              enabled_only->requests.contains(1),
+  require(enabled_only && enabled_only->outputs.size() == 1 &&
+              enabled_only->outputs.contains(1),
           "VRR response metadata covers enabled frame-set outputs only");
 
   gwipc_frame_commit commit{};
@@ -133,22 +133,19 @@ int main() {
               messages[2].type == GWIPC_MESSAGE_FRAME_ACKNOWLEDGED &&
               messages[3].type == GWIPC_MESSAGE_BUFFER_RELEASE,
           "final response order is state timing acknowledgement releases");
-  require(completed->states.at(1).last_commit_id == 11 &&
-              completed->states.at(1).last_presented_generation == 12 &&
-              completed->timings.at(1).commit_id == 11 &&
-              completed->timings.at(1).presented_generation == 12,
+  require(completed->outputs.at(1).state.last_commit_id == 11 &&
+              completed->outputs.at(1).state.last_presented_generation == 12 &&
+              completed->outputs.at(1).timing.commit_id == 11 &&
+              completed->outputs.at(1).timing.presented_generation == 12,
           "state and timing correlate to the presented frame");
 
   auto two_outputs = *prepared;
-  two_outputs.requests.emplace(2, two_outputs.requests.at(1));
-  two_outputs.capabilities.emplace(2, two_outputs.capabilities.at(1));
+  two_outputs.outputs.emplace(2, two_outputs.outputs.at(1));
   auto two_completed = *completed;
-  auto second_state = two_completed.states.at(1);
-  second_state.output_id = 2;
-  two_completed.states.emplace(2, second_state);
-  auto second_timing = two_completed.timings.at(1);
-  second_timing.output_id = 2;
-  two_completed.timings.emplace(2, second_timing);
+  auto second_result = two_completed.outputs.at(1);
+  second_result.state.output_id = 2;
+  second_result.timing.output_id = 2;
+  two_completed.outputs.emplace(2, second_result);
   auto ordered = gw::compositor::VrrResponseBatch::preflight(
       two_outputs, commit, GWIPC_FRAME_ACCEPTED, {}, error);
   require(ordered && ordered->finalize(two_completed, error) &&

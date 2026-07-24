@@ -75,10 +75,12 @@ PresentationTransaction::prepare_output_frame_set(
   PreparedOutputFrame prepared;
   prepared.canonical_hash = rendered.frames.aggregate_hash();
   prepared.frame_set.emplace(std::move(rendered.frames));
-  if (prepared_vrr &&
-      !prepared.frame_set->set_vrr_requests(prepared_vrr->requests, error)) {
-    presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
-    return std::nullopt;
+  if (prepared_vrr) {
+    const auto requests = prepared_vrr->presentation_requests();
+    if (!prepared.frame_set->set_vrr_requests(requests, error)) {
+      presented.result = GWIPC_FRAME_REJECTED_INCOMPLETE_METADATA;
+      return std::nullopt;
+    }
   }
   prepared.releases = calculate_retired_buffers(compositor, staged);
   if (prepared_vrr) {
