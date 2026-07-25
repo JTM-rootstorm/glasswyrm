@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( $# != 7 )); then
-  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT CLIENT_VALIDATOR INTEGRATED_VALIDATOR BOUNDED_DAMAGE\n' "$0" >&2
+if (( $# < 7 || $# > 8 )); then
+  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT CLIENT_VALIDATOR INTEGRATED_VALIDATOR BOUNDED_DAMAGE [CLIENT_TIMEOUT_SECONDS]\n' "$0" >&2
   exit 2
 fi
 
@@ -13,6 +13,12 @@ client=$4
 client_validator=$5
 integrated_validator=$6
 bounded_damage=$7
+client_timeout_seconds=${8:-60}
+[[ $client_timeout_seconds =~ ^[1-9][0-9]*$ ]] || {
+  printf 'CLIENT_TIMEOUT_SECONDS must be a positive integer\n' >&2
+  exit 2
+}
+client_timeout_attempts=$((client_timeout_seconds * 100))
 root=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m14-integrated-XXXXXX")
 display=
 x_socket=
@@ -111,12 +117,13 @@ x_socket_inode=$(stat -c %i "$x_socket")
   >"$root/client.log" 2>&1 &
 client_pid=$!
 
-for ((attempt = 0; attempt < 6000; ++attempt)); do
+for ((attempt = 0; attempt < client_timeout_attempts; ++attempt)); do
   kill -0 "$client_pid" 2>/dev/null || break
   sleep .01
 done
 if kill -0 "$client_pid" 2>/dev/null; then
-  printf 'Presentation-paced client exceeded its bounded 60-second run\n' >&2
+  printf 'Presentation-paced client exceeded its bounded %s-second run\n' \
+    "$client_timeout_seconds" >&2
   exit 1
 fi
 wait "$client_pid"
