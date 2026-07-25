@@ -327,9 +327,10 @@ bool dispatch_commit(PeerState& peer, gwipc_connection* connection,
                      const gwipc_message* message,
                      const gwipc_policy_commit& commit, bool& accepted) {
   const bool negotiated_vrr = negotiated_vrr_profile(connection);
-  const auto previous_hash = negotiated_vrr && peer.committed_vrr.hash != 0
-                                 ? peer.committed_vrr.hash
-                                 : peer.transaction.committed_policy().hash;
+  const auto previous_hash =
+      negotiated_vrr && peer.transaction.committed_vrr().hash != 0
+          ? peer.transaction.committed_vrr().hash
+          : peer.transaction.committed_policy().hash;
   if (commit.commit_id <= peer.last_commit_id ||
       commit.producer_generation < peer.last_generation)
     return enqueue_rejection(connection, message, commit,
@@ -371,7 +372,7 @@ bool dispatch_commit(PeerState& peer, gwipc_connection* connection,
   glasswyrm::wm::VrrPolicyState vrr_policy;
   const glasswyrm::wm::VrrPolicyState* vrr_output = nullptr;
   if (negotiated_vrr) {
-    auto inputs = peer.pending_vrr;
+    auto inputs = candidate_transaction.pending_vrr();
     glasswyrm::wm::VrrEvaluation vrr_evaluation;
     if (!populate_vrr_memberships(candidate_transaction.committed_raw(),
                                   inputs))
@@ -402,8 +403,9 @@ bool dispatch_commit(PeerState& peer, gwipc_connection* connection,
                                     evaluation.policy, interactive,
                                     vrr_output))
     return false;
+  if (negotiated_vrr)
+    candidate_transaction.set_committed_vrr(std::move(vrr_policy));
   peer.transaction = std::move(candidate_transaction);
-  if (negotiated_vrr) peer.committed_vrr = std::move(vrr_policy);
   accepted = true;
   std::fprintf(stderr,
                "gwm: policy accepted commit=%llu generation=%llu windows=%zu hash=%016llx\n",
@@ -411,7 +413,7 @@ bool dispatch_commit(PeerState& peer, gwipc_connection* connection,
                static_cast<unsigned long long>(evaluation.policy.generation),
                evaluation.policy.windows.size(),
                static_cast<unsigned long long>(
-                   negotiated_vrr ? peer.committed_vrr.hash
+                   negotiated_vrr ? peer.transaction.committed_vrr().hash
                                   : evaluation.policy.hash));
   return true;
 }
@@ -429,8 +431,6 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
       if (!value || value->domain != GWIPC_SNAPSHOT_WINDOW_POLICY ||
           !peer.transaction.begin_snapshot())
         return false;
-      peer.pre_snapshot_vrr = peer.pending_vrr;
-      peer.pending_vrr = {};
       peer.snapshot_id = value->snapshot_id;
       peer.snapshot_generation = value->generation;
       std::fprintf(stderr, "gwm: snapshot begin id=%llu generation=%llu\n",
@@ -444,8 +444,6 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
                          value->generation == peer.snapshot_generation &&
                          peer.transaction.end_snapshot();
       if (valid) {
-        peer.pending_vrr.complete = true;
-        peer.pre_snapshot_vrr.reset();
         peer.snapshot_id = 0;
         peer.snapshot_generation = 0;
       }
@@ -454,11 +452,8 @@ bool dispatch_control(PeerState& peer, const gwipc_message* message) {
     case GWIPC_MESSAGE_SNAPSHOT_ABORT: {
       const auto* value = gwipc_decoded_snapshot_abort(control.get());
       const bool valid = value && value->snapshot_id == peer.snapshot_id &&
-                         peer.pre_snapshot_vrr &&
                          peer.transaction.abort_snapshot();
       if (valid) {
-        peer.pending_vrr = std::move(*peer.pre_snapshot_vrr);
-        peer.pre_snapshot_vrr.reset();
         peer.snapshot_id = 0;
         peer.snapshot_generation = 0;
       }
@@ -532,11 +527,11 @@ bool dispatch_contract(PeerState& peer, gwipc_connection* connection,
              peer.transaction.upsert(hint_from(*value));
     }
     case GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT: {
-      return consume_vrr_contract(peer, connection, contract.get(),
+      return consume_vrr_contract(peer.transaction, connection, contract.get(),
                                   gwipc_message_type(message));
     }
     case GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT: {
-      return consume_vrr_contract(peer, connection, contract.get(),
+      return consume_vrr_contract(peer.transaction, connection, contract.get(),
                                   gwipc_message_type(message));
     }
     case GWIPC_MESSAGE_POLICY_WINDOW_REMOVE: {

@@ -68,7 +68,6 @@ inline VrrFixture fixture() {
   value.base.windows.emplace(1001, policy_window(1001, 10));
   value.base.output_order.push_back(1001);
 
-  value.inputs.complete = true;
   value.inputs.outputs.emplace(
       10, VrrOutputInput{10, VrrPolicyMode::Off, true, true, 0});
   value.inputs.outputs.emplace(

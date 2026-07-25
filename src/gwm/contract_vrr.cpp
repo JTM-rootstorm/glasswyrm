@@ -89,8 +89,6 @@ bool negotiated_vrr_profile(const gwipc_connection* connection) noexcept {
 gwipc_policy_result vrr_result_from(const VrrEvaluationError error) noexcept {
   switch (error) {
     case VrrEvaluationError::None: return GWIPC_POLICY_ACCEPTED;
-    case VrrEvaluationError::IncompleteSnapshot:
-      return GWIPC_POLICY_REJECTED_INCOMPLETE_SNAPSHOT;
     case VrrEvaluationError::BasePolicyMismatch:
     case VrrEvaluationError::InvalidOutput:
       return GWIPC_POLICY_REJECTED_INVALID_CONTEXT;
@@ -103,36 +101,27 @@ gwipc_policy_result vrr_result_from(const VrrEvaluationError error) noexcept {
   return GWIPC_POLICY_REJECTED_INVALID_WINDOW;
 }
 
-bool consume_vrr_contract(PeerState& peer,
+bool consume_vrr_contract(Transaction& transaction,
                           const gwipc_connection* connection,
                           const gwipc_decoded_contract* contract,
                           const std::uint16_t type) {
   if (!negotiated_vrr_profile(connection) ||
-      !peer.transaction.snapshot_active())
+      !transaction.snapshot_active())
     return false;
   if (type == GWIPC_MESSAGE_POLICY_OUTPUT_VRR_UPSERT) {
     const auto* value = gwipc_decoded_policy_output_vrr_upsert(contract);
-    if (!value || peer.pending_vrr.outputs.contains(value->output_id))
-      return false;
-    return peer.pending_vrr.outputs
-        .emplace(value->output_id,
-                 VrrOutputInput{
-                     value->output_id, static_cast<VrrPolicyMode>(value->mode),
-                     value->hardware_capable != 0,
-                     value->kms_controllable != 0, value->flags})
-        .second;
+    return value &&
+           transaction.upsert(VrrOutputInput{
+               value->output_id, static_cast<VrrPolicyMode>(value->mode),
+               value->hardware_capable != 0,
+               value->kms_controllable != 0, value->flags});
   }
   const auto* value = gwipc_decoded_policy_window_vrr_upsert(contract);
-  if (type != GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT || !value ||
-      peer.pending_vrr.windows.contains(value->window_id))
-    return false;
-  return peer.pending_vrr.windows
-      .emplace(value->window_id,
-               VrrWindowInput{
-                   value->window_id,
-                   static_cast<VrrWindowPreference>(value->preference), {},
-                   value->flags})
-      .second;
+  return type == GWIPC_MESSAGE_POLICY_WINDOW_VRR_UPSERT && value &&
+         transaction.upsert(VrrWindowInput{
+             value->window_id,
+             static_cast<VrrWindowPreference>(value->preference), {},
+             value->flags});
 }
 
 bool populate_vrr_memberships(const RawState& raw, VrrInputs& inputs) {

@@ -5,7 +5,9 @@ namespace glasswyrm::wm {
 bool Transaction::begin_snapshot() {
   if (snapshot_active_) return false;
   pre_snapshot_ = pending_;
+  pre_snapshot_vrr_ = pending_vrr_;
   pending_ = {};
+  pending_vrr_ = {};
   snapshot_active_ = true;
   return true;
 }
@@ -14,14 +16,17 @@ bool Transaction::end_snapshot() {
   if (!snapshot_active_ || !pending_.has_context) return false;
   pending_.complete = true;
   snapshot_active_ = false;
-  pre_snapshot_.reset();
+  pre_snapshot_ = {};
+  pre_snapshot_vrr_ = {};
   return true;
 }
 
 bool Transaction::abort_snapshot() {
-  if (!snapshot_active_ || !pre_snapshot_) return false;
-  pending_ = std::move(*pre_snapshot_);
-  pre_snapshot_.reset();
+  if (!snapshot_active_) return false;
+  pending_ = std::move(pre_snapshot_);
+  pending_vrr_ = std::move(pre_snapshot_vrr_);
+  pre_snapshot_ = {};
+  pre_snapshot_vrr_ = {};
   snapshot_active_ = false;
   return true;
 }
@@ -60,11 +65,26 @@ bool Transaction::upsert(const RawWindow& window) {
   return true;
 }
 
+bool Transaction::upsert(const VrrOutputInput& output) {
+  if (!snapshot_active_ || pending_vrr_.outputs.contains(output.output_id) ||
+      pending_vrr_.outputs.size() >= maximum_outputs)
+    return false;
+  return pending_vrr_.outputs.emplace(output.output_id, output).second;
+}
+
+bool Transaction::upsert(const VrrWindowInput& window) {
+  if (!snapshot_active_ || pending_vrr_.windows.contains(window.window_id) ||
+      pending_vrr_.windows.size() >= maximum_windows)
+    return false;
+  return pending_vrr_.windows.emplace(window.window_id, window).second;
+}
+
 bool Transaction::remove(const std::uint32_t window_id) {
   if (snapshot_active_ || !committed_raw_.complete || window_id == 0 ||
       pending_.windows.erase(window_id) != 1)
     return false;
   pending_.output_hints.erase(window_id);
+  pending_vrr_.windows.erase(window_id);
   return true;
 }
 
@@ -94,7 +114,10 @@ void Transaction::disconnect() noexcept {
   pending_ = {};
   committed_raw_ = {};
   committed_policy_ = {};
-  pre_snapshot_.reset();
+  pre_snapshot_ = {};
+  pending_vrr_ = {};
+  committed_vrr_ = {};
+  pre_snapshot_vrr_ = {};
   snapshot_active_ = false;
 }
 

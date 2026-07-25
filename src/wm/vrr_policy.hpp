@@ -61,7 +61,6 @@ struct VrrWindowInput {
 };
 
 struct VrrInputs {
-  bool complete{};
   std::map<std::uint64_t, VrrOutputInput> outputs;
   std::map<std::uint32_t, VrrWindowInput> windows;
 };
@@ -101,7 +100,6 @@ struct VrrPolicyState {
 
 enum class VrrEvaluationError : std::uint8_t {
   None,
-  IncompleteSnapshot,
   BasePolicyMismatch,
   InvalidOutput,
   InvalidWindow,
