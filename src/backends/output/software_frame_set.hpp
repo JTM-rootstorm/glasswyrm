@@ -25,7 +25,7 @@ struct VrrPresentationRequest {
   vrr::ReasonMask reason_flags{};
   std::uint64_t state_generation{};
   std::uint64_t transition_serial{};
-  std::uint64_t target_interval_nanoseconds{};
+  std::uint64_t nominal_mode_interval_nanoseconds{};
 };
 
 struct OutputFrameResult {

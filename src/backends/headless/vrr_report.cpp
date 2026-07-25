@@ -1,8 +1,6 @@
 #include "backends/headless/vrr_report.hpp"
 
 #include "output/vrr/reasons.hpp"
-#include "output/vrr/timing_stats.hpp"
-
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -144,13 +142,6 @@ bool VrrReport::record_presentation(
     if (!append(decision.str(), error))
       return false;
 
-    const auto target = request.target_interval_nanoseconds != 0
-                            ? request.target_interval_nanoseconds
-                            : state.interval_nanoseconds;
-    const auto tolerance = output::vrr::timing_tolerance(target);
-    const auto difference = state.interval_nanoseconds > target
-                                ? state.interval_nanoseconds - target
-                                : target - state.interval_nanoseconds;
     std::ostringstream timing;
     timing << "{\"record\":\"timing\",\"commit_id\":" << frames.commit_id
            << ",\"generation\":" << frames.generation
@@ -158,10 +149,10 @@ bool VrrReport::record_presentation(
            << state.flip_sequence << ",\"kernel_timestamp_nanoseconds\":"
            << state.kernel_timestamp_nanoseconds
            << ",\"interval_nanoseconds\":" << state.interval_nanoseconds
-           << ",\"target_interval_nanoseconds\":" << target
+           << ",\"nominal_mode_interval_nanoseconds\":"
+           << request.nominal_mode_interval_nanoseconds
            << ",\"effective_enabled\":"
-           << boolean(state.effective_enabled) << ",\"within_threshold\":"
-           << boolean(difference <= tolerance) << ",\"simulated\":true}\n";
+           << boolean(state.effective_enabled) << ",\"simulated\":true}\n";
     if (!append(timing.str(), error))
       return false;
 
@@ -180,10 +171,7 @@ bool VrrReport::record_presentation(
     if (summary.interval_sum <=
         std::numeric_limits<std::uint64_t>::max() - state.interval_nanoseconds)
       summary.interval_sum += state.interval_nanoseconds;
-    if (difference <= tolerance)
-      ++summary.pass_count;
     summary.intervals.push_back(state.interval_nanoseconds);
-    summary.absolute_errors.push_back(difference);
   }
   return true;
 }
@@ -195,24 +183,11 @@ bool VrrReport::finish(std::string &error) noexcept {
   }
   for (const auto &[output_id, summary] : summaries_) {
     auto intervals = summary.intervals;
-    auto absolute_errors = summary.absolute_errors;
     std::sort(intervals.begin(), intervals.end());
-    std::sort(absolute_errors.begin(), absolute_errors.end());
     const auto median = intervals.empty() ? 0 : intervals[intervals.size() / 2];
-    const auto p95_index = absolute_errors.empty()
-                               ? 0
-                               : ((absolute_errors.size() * 95U + 99U) / 100U) -
-                                     1U;
-    const auto p95 = absolute_errors.empty() ? 0 : absolute_errors[p95_index];
     std::ostringstream record;
     record << "{\"record\":\"summary\",\"output_id\":" << output_id
            << ",\"sample_count\":" << summary.sample_count
-           << ",\"pass_count\":" << summary.pass_count
-           << ",\"pass_basis_points\":"
-           << (summary.sample_count == 0
-                   ? 0
-                   : summary.pass_count * UINT64_C(10'000) /
-                         summary.sample_count)
            << ",\"enabled_periods\":" << summary.enabled_count
            << ",\"disabled_periods\":" << summary.disabled_count
            << ",\"minimum_nanoseconds\":" << summary.minimum_interval
@@ -222,7 +197,6 @@ bool VrrReport::finish(std::string &error) noexcept {
                    ? 0
                    : summary.interval_sum / summary.sample_count)
            << ",\"median_nanoseconds\":" << median
-           << ",\"p95_absolute_error_nanoseconds\":" << p95
            << ",\"simulated\":true}\n";
     if (!append(record.str(), error))
       return false;

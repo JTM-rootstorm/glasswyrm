@@ -27,12 +27,15 @@ public:
   plan(const output::VrrPresentationRequest &request,
        bool explicit_reaffirmation = false) const;
 
-  void complete_initial(bool readback_enabled, bool readback_valid) noexcept;
+  void complete_initial(bool readback_enabled, bool readback_valid,
+                        std::uint64_t transition_serial = 0) noexcept;
   void complete_flip(bool desired_enabled, bool readback_enabled,
                      bool readback_valid,
+                     std::uint64_t transition_serial,
                      std::uint32_t sequence,
                      std::uint64_t kernel_timestamp_nanoseconds,
                      bool timestamp_available) noexcept;
+  void reset_timing_period() noexcept;
   void mark_suspended_off() noexcept;
   void mark_acquired_off() noexcept;
   void mark_session_active() noexcept;
@@ -48,6 +51,9 @@ public:
   [[nodiscard]] std::size_t disabled_period_count() const noexcept {
     return disabled_period_count_;
   }
+  [[nodiscard]] std::size_t timestamp_unavailable_count() const noexcept {
+    return timestamp_unavailable_count_;
+  }
 
   [[nodiscard]] const KmsVrrState &kms_state() const noexcept {
     return kms_state_;
@@ -56,8 +62,9 @@ public:
     return effective_enabled_;
   }
   [[nodiscard]] bool session_active() const noexcept { return session_active_; }
-  [[nodiscard]] std::uint64_t target_interval_nanoseconds() const noexcept {
-    return target_interval_nanoseconds_;
+  [[nodiscard]] std::uint64_t
+  nominal_mode_interval_nanoseconds() const noexcept {
+    return nominal_mode_interval_nanoseconds_;
   }
 
 private:
@@ -70,11 +77,17 @@ private:
   std::uint32_t flip_sequence_{};
   std::uint64_t kernel_timestamp_nanoseconds_{};
   std::uint64_t interval_nanoseconds_{};
-  std::uint64_t target_interval_nanoseconds_{};
+  std::uint64_t nominal_mode_interval_nanoseconds_{};
   bool timestamp_available_{};
+  bool timing_baseline_available_{};
+  std::uint32_t timing_baseline_sequence_{};
+  std::uint64_t timing_baseline_timestamp_nanoseconds_{};
+  bool transition_serial_available_{};
+  std::uint64_t last_transition_serial_{};
   std::optional<output::vrr::TimingStatistics> timing_statistics_;
   std::size_t enabled_period_count_{};
   std::size_t disabled_period_count_{};
+  std::size_t timestamp_unavailable_count_{};
 };
 
 } // namespace glasswyrm::drm

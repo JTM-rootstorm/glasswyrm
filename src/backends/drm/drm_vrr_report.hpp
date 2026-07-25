@@ -49,22 +49,19 @@ struct DrmVrrTimingReport {
   std::uint32_t sequence{};
   std::uint64_t kernel_timestamp_nanoseconds{};
   std::uint64_t interval_nanoseconds{};
-  std::uint64_t target_interval_nanoseconds{};
+  std::uint64_t nominal_mode_interval_nanoseconds{};
   bool effective_enabled{};
-  bool within_threshold{};
 };
 
 struct DrmVrrSummaryReport {
   std::size_t sample_count{};
-  std::size_t pass_count{};
-  std::uint32_t pass_basis_points{};
   std::uint64_t minimum_nanoseconds{};
   std::uint64_t maximum_nanoseconds{};
   std::uint64_t mean_nanoseconds{};
   std::uint64_t median_nanoseconds{};
-  std::uint64_t p95_absolute_error_nanoseconds{};
   std::size_t enabled_period_count{};
   std::size_t disabled_period_count{};
+  std::size_t timestamp_unavailable_count{};
 };
 
 struct DrmVrrRestoreReport {

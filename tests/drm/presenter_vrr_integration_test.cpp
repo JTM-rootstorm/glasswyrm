@@ -141,7 +141,7 @@ output::SoftwareFrameSet frame_set(
   item.vrr.candidate_surface_id = desired_enabled ? 200U : 0U;
   item.vrr.state_generation = ordinal;
   item.vrr.transition_serial = ordinal;
-  item.vrr.target_interval_nanoseconds = 16'666'667;
+  item.vrr.nominal_mode_interval_nanoseconds = 16'666'667;
   const auto request = item.vrr;
   gw::test::require(result.append(std::move(item), error), error);
   gw::test::require(result.finalize(1, 1, ordinal, ordinal, ordinal, error),
@@ -433,7 +433,7 @@ void readback_mismatch_is_fatal() {
       "readback divergence attempts VRR-off before saved-state restore");
 }
 
-void invalid_timing_restores_saved_state() {
+void unavailable_timing_is_nonfatal() {
   Rig rig;
   const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
                           0xff404040U};
@@ -442,22 +442,52 @@ void invalid_timing_restores_saved_state() {
                         output::PresentDisposition::Complete,
                     "invalid timing fixture initializes");
   const auto enabled = frame_set(pixels, 2, true);
-  const auto pending = rig.presenter->present(enabled.view());
+  auto pending = rig.presenter->present(enabled.view());
   const auto commits_before = rig.kms.atomic_commits.size();
   rig.drm.queue_page_flip(pending.token, 40, 0, 0, false);
-  const auto event = rig.presenter->service(POLLIN);
+  auto event = rig.presenter->service(POLLIN);
   gw::test::require(
-      event.kind == output::BackendEventKind::Fatal &&
-          event.error.find("timing") != std::string::npos &&
-          event.error.find("sequence=0") != std::string::npos &&
-          event.error.find("timestamp_available=false") != std::string::npos &&
-          event.error.find("kernel_timestamp_nanoseconds=0") !=
-              std::string::npos &&
-          event.error.find("timestamp_monotonic=true") != std::string::npos &&
-          rig.kms.atomic_commits.size() == commits_before + 2 &&
-          property_value(rig.kms.atomic_commits[commits_before], 22) == 0 &&
-          property_value(rig.kms.atomic_commits.back(), 22) == 1,
-      "invalid page-flip timing disables VRR before saved-state restore");
+      event.kind == output::BackendEventKind::Complete &&
+          event.vrr_feedback.contains(1) &&
+          event.vrr_feedback.at(1).effective_enabled &&
+          event.vrr_feedback.at(1).property_readback_valid &&
+          !event.vrr_feedback.at(1).timestamp_available &&
+          event.vrr_feedback.at(1).interval_nanoseconds == 0 &&
+          rig.presenter->finalize_pending(pending.token, rig.error) &&
+          rig.kms.atomic_commits.size() == commits_before,
+      event.error.empty() ? rig.error : event.error);
+
+  pending = rig.presenter->present(frame_set(pixels, 3, true).view());
+  rig.drm.queue_page_flip(pending.token, 40, 1, 0, false);
+  event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.vrr_feedback.contains(1) &&
+          !event.vrr_feedback.at(1).timestamp_available &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      event.error.empty() ? rig.error : event.error);
+
+  pending = rig.presenter->present(
+      frame_set(pixels, 4, false, output::vrr::Decision::Disabled).view());
+  rig.drm.queue_page_flip(pending.token, 40, 2, 0, false);
+  event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      event.kind == output::BackendEventKind::Complete &&
+          event.vrr_feedback.contains(1) &&
+          !event.vrr_feedback.at(1).effective_enabled &&
+          event.vrr_feedback.at(1).property_readback_valid &&
+          !event.vrr_feedback.at(1).timestamp_available &&
+          rig.presenter->finalize_pending(pending.token, rig.error),
+      event.error.empty() ? rig.error : event.error);
+
+  gw::test::require(
+      rig.presenter->shutdown(rig.error) ==
+              output::BackendStateResult::Complete &&
+          contents(rig.report.path()).find(
+              "\"timestamp_unavailable_count\":3") != std::string::npos,
+      rig.error.empty() ? "timing loss remains nonfatal across enabled and "
+                          "disabled flips"
+                        : rig.error);
 }
 
 void incapable_output_accepts_unavailable_timing() {
@@ -508,7 +538,7 @@ int main() {
   historical_profile_does_not_probe_vrr();
   legacy_and_test_rejection();
   readback_mismatch_is_fatal();
-  invalid_timing_restores_saved_state();
+  unavailable_timing_is_nonfatal();
   incapable_output_accepts_unavailable_timing();
   return 0;
 }

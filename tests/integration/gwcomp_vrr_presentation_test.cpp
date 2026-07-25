@@ -47,6 +47,8 @@ class FakeVrrPresenter final : public PresentationBackend {
     result.connected = true;
     result.kms_controllable = true;
     result.simulated = true;
+    result.connector_property_present = true;
+    result.atomic_test_passed = true;
     result.session_active = true;
     result.timing_available = true;
     return result;

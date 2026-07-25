@@ -111,8 +111,8 @@ output::PresentResult Presenter::present_frame_set(
       const auto desired = output_frame.vrr.valid &&
                            output_frame.vrr.desired_enabled;
       const auto target_interval =
-          output_frame.vrr.target_interval_nanoseconds != 0
-              ? output_frame.vrr.target_interval_nanoseconds
+          output_frame.vrr.nominal_mode_interval_nanoseconds != 0
+              ? output_frame.vrr.nominal_mode_interval_nanoseconds
               : output::vrr::refresh_interval_nanoseconds(
                     capability->minimum_refresh_millihertz);
       const auto simulated = proposed_vrr->present(
