@@ -9,17 +9,11 @@ using namespace glasswyrm::wm;
 using glasswyrm::wm::test::fixture;
 using gw::test::require;
 
-void complete_snapshot_rules() {
+void complete_input_rules() {
   auto value = fixture();
   require(validate_vrr_inputs(value.raw, value.base, value.inputs) ==
               VrrEvaluationError::None,
           "canonical complete inputs validate");
-  value.inputs.complete = false;
-  require(validate_vrr_inputs(value.raw, value.base, value.inputs) ==
-              VrrEvaluationError::IncompleteSnapshot,
-          "an incomplete auxiliary snapshot is rejected");
-
-  value = fixture();
   value.inputs.outputs.erase(20);
   require(validate_vrr_inputs(value.raw, value.base, value.inputs) ==
               VrrEvaluationError::InvalidOutput,
@@ -114,7 +108,7 @@ void base_policy_alignment() {
 }  // namespace
 
 int main() {
-  complete_snapshot_rules();
+  complete_input_rules();
   exact_identifiers_and_enums();
   membership_rules();
   base_policy_alignment();

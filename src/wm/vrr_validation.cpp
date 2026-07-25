@@ -20,8 +20,6 @@ bool valid_preference(const VrrWindowPreference preference) noexcept {
 VrrEvaluationError validate_vrr_inputs(const RawState& raw,
                                        const PolicyState& base,
                                        const VrrInputs& inputs) noexcept {
-  if (!inputs.complete)
-    return VrrEvaluationError::IncompleteSnapshot;
   if (!raw.complete || !raw.has_context || base.generation == 0 ||
       base.hash == 0 || base.outputs.size() != raw.outputs.size() ||
       base.windows.size() != raw.windows.size())

@@ -272,20 +272,45 @@ void transaction_records() {
   const auto raw = state();
   const auto managed = window(1'001, 1);
   const WindowOutputHint hint{1'001, 10, 20, 0};
+  const VrrOutputInput output_vrr{10, VrrPolicyMode::Focused, true, true, 0};
+  const VrrWindowInput window_vrr{
+      1'001, VrrWindowPreference::Prefer, {10}, 0};
   Transaction transaction;
   require(transaction.begin_snapshot() && transaction.upsert(raw.context) &&
               transaction.upsert(raw.outputs.at(10)) &&
               transaction.upsert(raw.outputs.at(20)) &&
               transaction.upsert(hint) && transaction.upsert(managed) &&
+              transaction.upsert(output_vrr) &&
+              transaction.upsert(window_vrr) &&
               transaction.end_snapshot(),
-          "transactions stage output records and hints in any item order");
+          "transactions stage base and VRR records in any item order");
   const auto evaluated = transaction.commit(1);
   require(evaluated && evaluated.policy.outputs.size() == 2 &&
-              evaluated.policy.output_hints.at(1'001).preferred_output_id == 20,
-          "an accepted transaction retains its multi-output policy records");
+              evaluated.policy.output_hints.at(1'001).preferred_output_id == 20 &&
+              transaction.pending_vrr().outputs.contains(10) &&
+              transaction.pending_vrr().windows.contains(1'001),
+          "an accepted transaction retains its base and VRR input records");
+
+  require(transaction.begin_snapshot() &&
+              transaction.upsert(raw.context) &&
+              transaction.upsert(raw.outputs.at(20)) &&
+              transaction.upsert(VrrOutputInput{
+                  20, VrrPolicyMode::Off, false, false, 0}) &&
+              transaction.abort_snapshot() &&
+              transaction.pending_vrr().outputs.contains(10) &&
+              !transaction.pending_vrr().outputs.contains(20),
+          "snapshot abort restores base and VRR inputs together");
   require(transaction.remove(1'001) &&
-              !transaction.pending().output_hints.contains(1'001),
-          "removing a window also removes its stale output hint");
+              !transaction.pending().output_hints.contains(1'001) &&
+              !transaction.pending_vrr().windows.contains(1'001),
+          "removing a window also removes its auxiliary policy records");
+  VrrPolicyState committed_vrr;
+  committed_vrr.hash = 42;
+  transaction.set_committed_vrr(std::move(committed_vrr));
+  transaction.disconnect();
+  require(transaction.pending_vrr().outputs.empty() &&
+              transaction.committed_vrr().hash == 0,
+          "disconnect clears pending and committed VRR state");
 }
 
 }  // namespace

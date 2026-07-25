@@ -1,7 +1,7 @@
 #ifndef GLASSWYRM_GWM_CONTRACT_VRR_HPP
 #define GLASSWYRM_GWM_CONTRACT_VRR_HPP
 
-#include "gwm/contract_dispatch.hpp"
+#include "wm/transaction.hpp"
 
 #include <glasswyrm/ipc.h>
 
@@ -15,7 +15,7 @@ namespace glasswyrm::wm::runtime {
 [[nodiscard]] gwipc_policy_result vrr_result_from(
     VrrEvaluationError error) noexcept;
 
-[[nodiscard]] bool consume_vrr_contract(PeerState& peer,
+[[nodiscard]] bool consume_vrr_contract(Transaction& transaction,
                                         const gwipc_connection* connection,
                                         const gwipc_decoded_contract* contract,
                                         std::uint16_t type);
