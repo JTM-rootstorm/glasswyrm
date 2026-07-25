@@ -603,7 +603,8 @@ core error. It never maps or displays the window.
   `GW_SCALE`, and same-UID output-control paths.
 - `gwm`: owns window-management policy truth; it accepts lifecycle-extended
   complete policy snapshots from `glasswyrmd`, including M13 per-output work
-  areas and deterministic output assignment in one workspace.
+  areas and deterministic output assignment in one workspace. M14 adds
+  deterministic per-output VRR candidate policy.
 - `gwcomp`: owns software composition and final display authority; it retains
   the default headless path and can present the identical canonical frame
   through the opt-in M10 DRM/KMS backend. It accepts M6 metadata-only scenes
@@ -611,29 +612,32 @@ core error. It never maps or displays the window.
   software-content mode and capability-gated software cursor/session state.
   M12 adds independent software/GLES renderer selection, eventfd readiness,
   and damage-aware DRM copies without moving presentation authority. M13 adds
-  stable inventory and atomic native per-output frame sets.
+  stable inventory and atomic native per-output frame sets. M14 adds headless
+  VRR simulation and atomic-KMS capability, policy, effective-state, and raw
+  presentation-timing evidence.
 - `glasswyrm-session`: unprivileged three-process and optional-client
   orchestrator for the M11 development session with additive M12 game-profile
   and renderer argument forwarding plus M13 headless/output-model profiles.
 - `gwctl`: future runtime control utility.
-- `gwinfo`: deterministic M13 output and window diagnostics client.
+- `gwinfo`: deterministic M13 output/window and M14 VRR diagnostics client.
 - `gwtrace`: future protocol/event tracing utility.
-- `gwout`: complete-layout M13 output configuration client.
+- `gwout`: complete-layout M13 output and M14 VRR policy client.
 - `gwbench`: future rendering/compositor benchmark utility.
 
-The installed API 0.8 `libgwipc.so.0` C ABI uses nonblocking local
+The installed API 0.9.0 `libgwipc.so.0` C ABI uses nonblocking local
 `AF_UNIX`/`SOCK_SEQPACKET`, fixed little-endian wire 1.0 records, same-UID peer
 credentials, bounded queues, descriptor passing, snapshots, and compositor,
 window-policy, lifecycle, synthetic-input, session-state, interactive-policy,
-eventfd CPU-buffer synchronization, and output-management vocabularies. Wire
-1.0 and
-SOVERSION 0 remain unchanged; typed public snapshot controls replace manual
-control-byte handling. See
+eventfd CPU-buffer synchronization, output-management, and variable-refresh
+vocabularies. Historical API 0.1 through 0.8 records remain unchanged. Wire
+1.0 and SOVERSION 0 remain unchanged; typed public snapshot controls replace
+manual control-byte handling. See
 [`docs/ipc/`](docs/ipc/) for its exact API and compatibility boundary.
 
-Runtime tools still print their Milestone 0 placeholder status and exit. The
-three runtime processes communicate only in explicit integrated mode; there is
-no direct `gwm` to `gwcomp` socket. See the
+`gwinfo` and `gwout` are implemented same-UID output diagnostic and control
+clients; `gwctl`, `gwtrace`, and `gwbench` remain future placeholders. The
+three runtime processes communicate only in explicit integrated mode; there
+is no direct `gwm` to `gwcomp` socket. See the
 [M6 topology](docs/architecture/M6_RUNTIME_TOPOLOGY.md) and
 [X11 profile](docs/protocols/x11-milestone-6.md) for the implemented boundary
 and tested compatibility boundary.
