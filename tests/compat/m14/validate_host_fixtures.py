@@ -169,8 +169,12 @@ def validate(root: Path) -> None:
             or headless[0].get("hardware_capable") is not False
             or headless[0].get("controllable") is not True
             or headless[1].get("reason_names") != ["SimulatedHeadless"]
-            or headless[2].get("within_threshold") is not True
+            or headless[2].get(
+                "nominal_mode_interval_nanoseconds") != 16666667
+            or "target_interval_nanoseconds" in headless[2]
+            or "within_threshold" in headless[2]
             or headless[3].get("sample_count") != 1
+            or "pass_basis_points" in headless[3]
             or headless[4].get("readback_success") is not True):
         fail("headless VRR report fixture differs")
 
@@ -181,8 +185,12 @@ def validate(root: Path) -> None:
             or fake_drm[0].get("driver") != "fake"
             or fake_drm[0].get("controllable") is not True
             or fake_drm[1].get("effective_enabled") is not True
-            or fake_drm[2].get("within_threshold") is not True
-            or fake_drm[3].get("pass_basis_points") != 10000
+            or fake_drm[2].get(
+                "nominal_mode_interval_nanoseconds") != 16666667
+            or "target_interval_nanoseconds" in fake_drm[2]
+            or "within_threshold" in fake_drm[2]
+            or fake_drm[3].get("timestamp_unavailable_count") != 0
+            or "pass_basis_points" in fake_drm[3]
             or fake_drm[4].get("readback_success") is not True):
         fail("fake DRM VRR report fixture differs")
 
