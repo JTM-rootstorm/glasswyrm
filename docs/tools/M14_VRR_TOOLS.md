@@ -92,3 +92,28 @@ or a TTY whose interruption is unacceptable; follow the safety requirements
 in the M14 hardware validation document first. The live command must run in
 the fixed `glasswyrm-m14-harness.scope` transient scope documented there;
 direct execution is rejected before artifact creation or hardware takeover.
+
+An explicitly detached operator may add `--unattended`. This changes only the
+invoking terminal check so a reviewed remote launcher or automation process
+does not have to own the configured Linux VT:
+
+```sh
+systemd-run --scope \
+  --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-vrr-test \
+    --config PATH \
+    --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
+    --tested-commit "$tested_commit" \
+    --artifact-dir /var/tmp/glasswyrm-m14-hardware \
+    --unattended --yes
+```
+
+Detached execution does not relax hardware safety. The root doctor and live
+preflight still require the configured VT to be the kernel-active `KD_TEXT`
+console, require the alternate VT to remain `KD_TEXT`, and reject a display
+manager, competing DRM master, connector mismatch, or provenance mismatch.
+Ordinary `SIGINT` and `SIGTERM` interruptions enter the same restoration guard
+as command failures. Kernel or driver failure, power loss, and `SIGKILL`
+remain outside userspace recovery; independent console access is still
+mandatory.

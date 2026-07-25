@@ -237,6 +237,17 @@ def main() -> int:
                           "--artifact-dir", str(root / "unconfirmed"), "--dry-run",
                           "--fixture-dir", str(fixture))
         assert unconfirmed.returncode == 2 and "literal --yes" in unconfirmed.stderr
+        invalid_unattended_dry_run = run(
+            "milestone14-vrr-test", "--config", str(config),
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--artifact-dir", str(root / "invalid-unattended-dry-run"),
+            "--dry-run", "--unattended", "--yes",
+            "--fixture-dir", str(fixture),
+        )
+        assert invalid_unattended_dry_run.returncode == 2
+        assert "valid only for the live hardware run" in \
+            invalid_unattended_dry_run.stderr
         direct_artifacts = root / "direct-live"
         direct = run("milestone14-vrr-test", "--config", str(config),
                      "--required-base", REQUIRED_BASE,

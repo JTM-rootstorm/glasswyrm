@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import signal
 import sys
 import tempfile
 from typing import Callable
@@ -403,6 +404,52 @@ def test_start_unit_contract(root: Path) -> None:
     ]
 
 
+def test_detached_invocation_keeps_kernel_console_preflight(root: Path) -> None:
+    calls: list[list[str]] = []
+    console_rechecks = 0
+
+    def execute(argv: list[str], _output: Path | None) -> int:
+        calls.append(argv)
+        return 1 if argv[1:3] == [
+            "is-active", "display-manager.service",
+        ] else 0
+
+    def console_preflight() -> dict[str, object]:
+        nonlocal console_rechecks
+        console_rechecks += 1
+        return {
+            "active_tty": "/dev/tty2",
+            "kd_modes": {"/dev/tty2": 0, "/dev/tty1": 0},
+        }
+
+    attached = FixedLiveRunner(
+        dict(CONFIG), root, execute, "/dev/pts/9", False,
+        preflight_reader=console_preflight,
+    )
+    expect_harness_error(
+        attached.preflight, "live run refused the wrong active VT")
+    assert console_rechecks == 0
+
+    detached = FixedLiveRunner(
+        dict(CONFIG), root, execute, "/dev/pts/9", False,
+        preflight_reader=console_preflight, detached_invocation=True,
+    )
+    detached.preflight()
+    assert console_rechecks == 1
+    assert any(
+        argv[1:3] == ["is-active", "display-manager.service"]
+        for argv in calls
+    )
+
+
+def test_termination_signal_becomes_restorable_failure(root: Path) -> None:
+    runner = make_runner(root, lambda _argv, _output: 0)
+    expect_harness_error(
+        lambda: runner._handle_termination(signal.SIGTERM, None),
+        f"live run interrupted by signal {signal.SIGTERM}",
+    )
+
+
 def test_client_result_uses_bounded_live_deadline(root: Path) -> None:
     calls: list[tuple[list[str], Path | None]] = []
     waits: list[tuple[Path, str, int]] = []
@@ -707,6 +754,14 @@ def main() -> int:
         contract = root / "contract"
         contract.mkdir()
         test_start_unit_contract(contract)
+
+        detached = root / "detached"
+        detached.mkdir()
+        test_detached_invocation_keeps_kernel_console_preflight(detached)
+
+        termination = root / "termination"
+        termination.mkdir()
+        test_termination_signal_becomes_restorable_failure(termination)
 
         command_result = root / "command-result"
         command_result.mkdir()
