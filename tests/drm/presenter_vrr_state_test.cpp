@@ -2,6 +2,7 @@
 #include "backends/drm/fake_kms_api.hpp"
 #include "backends/drm/kms_vrr_state.hpp"
 #include "backends/drm/presenter_vrr.hpp"
+#include "tests/helpers/fake_kms.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <array>
@@ -12,24 +13,16 @@ namespace {
 using namespace glasswyrm;
 using namespace glasswyrm::drm;
 
-std::vector<ObjectProperty> properties(
-    const std::initializer_list<const char *> names, std::uint32_t id) {
-  std::vector<ObjectProperty> result;
-  for (const auto *name : names)
-    result.push_back({id++, name, 0, 64});
-  return result;
-}
-
 SavedKmsState saved_state(FakeKmsApi &api) {
   api.connector_crtcs[10] = 40;
   api.crtcs[40] = {40, 60, 0, 0, true, {}};
   api.planes[50] = {50, 60, 40};
   api.properties[{KmsObjectType::Connector, 10}] =
-      properties({"CRTC_ID"}, 10);
-  auto crtc = properties({"MODE_ID", "ACTIVE"}, 20);
+      gw::test::kms_properties({"CRTC_ID"}, 10);
+  auto crtc = gw::test::kms_properties({"MODE_ID", "ACTIVE"}, 20);
   crtc.push_back({22, "VRR_ENABLED", 1, 1, PropertyValueRange{0, 1}});
   api.properties[{KmsObjectType::Crtc, 40}] = std::move(crtc);
-  api.properties[{KmsObjectType::Plane, 50}] = properties(
+  api.properties[{KmsObjectType::Plane, 50}] = gw::test::kms_properties(
       {"FB_ID", "CRTC_ID", "SRC_X", "SRC_Y", "SRC_W", "SRC_H",
        "CRTC_X", "CRTC_Y", "CRTC_W", "CRTC_H"},
       30);

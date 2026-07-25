@@ -1,5 +1,6 @@
 #include "tests/drm/drm_ipc_test_fixture.hpp"
 
+#include "tests/helpers/fake_kms.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <fcntl.h>
@@ -85,13 +86,6 @@ glasswyrm::drm::DeviceSnapshot snapshot() {
   return value;
 }
 
-std::vector<glasswyrm::drm::ObjectProperty> properties(
-    const std::initializer_list<const char*> names, std::uint32_t first) {
-  std::vector<glasswyrm::drm::ObjectProperty> value;
-  for (const auto name : names) value.push_back({first++, name, 0, 64});
-  return value;
-}
-
 void configure_kms(glasswyrm::drm::FakeKmsApi& api) {
   using namespace glasswyrm::drm;
   api.dumb_allocation = {7, 8, 16};
@@ -103,10 +97,10 @@ void configure_kms(glasswyrm::drm::FakeKmsApi& api) {
   api.planes[50] = {50, 60, 40, 0, 0, 2, 2, 0, 0, 2U << 16U,
                     2U << 16U};
   api.properties[{KmsObjectType::Connector, 10}] =
-      properties({"CRTC_ID"}, 10);
+      kms_properties({"CRTC_ID"}, 10);
   api.properties[{KmsObjectType::Crtc, 40}] =
-      properties({"MODE_ID", "ACTIVE"}, 20);
-  api.properties[{KmsObjectType::Plane, 50}] = properties(
+      kms_properties({"MODE_ID", "ACTIVE"}, 20);
+  api.properties[{KmsObjectType::Plane, 50}] = kms_properties(
       {"FB_ID", "CRTC_ID", "SRC_X", "SRC_Y", "SRC_W", "SRC_H",
        "CRTC_X", "CRTC_Y", "CRTC_W", "CRTC_H"},
       30);

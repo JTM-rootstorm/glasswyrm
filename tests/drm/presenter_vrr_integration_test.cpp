@@ -1,6 +1,7 @@
 #include "backends/drm/fake_drm_api.hpp"
 #include "backends/drm/fake_kms_api.hpp"
 #include "backends/drm/presenter.hpp"
+#include "tests/helpers/fake_kms.hpp"
 #include "tests/helpers/test_support.hpp"
 
 #include <algorithm>
@@ -57,14 +58,6 @@ DeviceSnapshot snapshot(const bool atomic = true,
   return value;
 }
 
-std::vector<ObjectProperty> properties(
-    const std::initializer_list<const char *> names, std::uint32_t id) {
-  std::vector<ObjectProperty> result;
-  for (const auto *name : names)
-    result.push_back({id++, name, 0, 64});
-  return result;
-}
-
 void configure(FakeKmsApi &api, const bool with_vrr = true) {
   api.dumb_allocation = {7, 8, 16};
   api.connector_crtcs[10] = 40;
@@ -75,12 +68,12 @@ void configure(FakeKmsApi &api, const bool with_vrr = true) {
   api.planes[50] = {50, 60, 40, 0, 0, 2, 2, 0, 0,
                     2U << 16U, 2U << 16U};
   api.properties[{KmsObjectType::Connector, 10}] =
-      properties({"CRTC_ID"}, 10);
-  auto crtc = properties({"MODE_ID", "ACTIVE"}, 20);
+      gw::test::kms_properties({"CRTC_ID"}, 10);
+  auto crtc = gw::test::kms_properties({"MODE_ID", "ACTIVE"}, 20);
   if (with_vrr)
     crtc.push_back({22, "VRR_ENABLED", 1, 1, PropertyValueRange{0, 1}});
   api.properties[{KmsObjectType::Crtc, 40}] = std::move(crtc);
-  api.properties[{KmsObjectType::Plane, 50}] = properties(
+  api.properties[{KmsObjectType::Plane, 50}] = gw::test::kms_properties(
       {"FB_ID", "CRTC_ID", "SRC_X", "SRC_Y", "SRC_W", "SRC_H",
        "CRTC_X", "CRTC_Y", "CRTC_W", "CRTC_H"},
       30);
