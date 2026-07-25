@@ -72,8 +72,15 @@ to configured headless outputs, and the maximum cannot exceed nominal refresh.
 
 The headless report uses separate `capability`, `decision`, `timing`, `summary`,
 and `restore` records. DRM reports use the corresponding names prefixed with
-`vrr-`. Both exclude wall-clock time and do not alter frame manifests or pixel
-hashes.
+`vrr-`. Timing and summary records contain raw intervals and nominal-mode
+facts, never an application-cadence verdict. Both exclude wall-clock time and
+do not alter pixel hashes.
+
+During sealed physical reporting, the standard DRM and VRR reports carry
+matching `evidence-stream` identities and the VRR report receives an
+`evidence-seal` only after every required report and optional mirror artifact
+commits. The hardware validator archives and cross-checks the standard DRM and
+mirror reports and ignores any unsealed presentation.
 
 ## Validation harnesses
 

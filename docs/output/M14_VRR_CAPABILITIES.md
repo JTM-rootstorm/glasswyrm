@@ -15,6 +15,19 @@ both zero and one. Legacy KMS may report the connector capability but always
 reports controllability false and never probes or mutates the optional CRTC
 property.
 
+At the compositor boundary, physical capability facts are coherent only when
+`kms_controllable` is exactly the conjunction of DRM output, connector
+capability, atomic KMS, CRTC property presence, and successful atomic tests.
+An incoherent tuple is rejected as malformed instead of being guessed into a
+policy reason. The deterministic headless profile is the explicit exception:
+it is non-DRM and non-hardware but advertises its simulated property/test path.
+
+Unsupported physical facts map to their specific stable reason:
+`output-not-vrr-capable`, `atomic-kms-unavailable`,
+`vrr-property-missing`, or `vrr-atomic-test-failed`. `presenter-rejected` is
+reserved for an actual presentation-plan or property-application rejection
+after the capability snapshot was coherent.
+
 `desired_enabled` is the compositor decision before submission.
 `effective_enabled` is the successfully completed and read-back CRTC value.
 `hardware_behavior_confirmed` is acceptance evidence derived from kernel
