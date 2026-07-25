@@ -110,15 +110,6 @@ Evaluation Transaction::commit(const std::uint64_t generation,
   return evaluated;
 }
 
-void Transaction::disconnect() noexcept {
-  pending_ = {};
-  committed_raw_ = {};
-  committed_policy_ = {};
-  pre_snapshot_ = {};
-  pending_vrr_ = {};
-  committed_vrr_ = {};
-  pre_snapshot_vrr_ = {};
-  snapshot_active_ = false;
-}
+void Transaction::disconnect() noexcept { *this = {}; }
 
 }  // namespace glasswyrm::wm
