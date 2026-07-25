@@ -115,6 +115,7 @@ class DrmPresenter final : public output::PresentationBackend,
   [[nodiscard]] bool commit_evidence(headless::StagedFrameDump& mirror,
                                      StagedDrmReport& report,
                                      StagedDrmReport& vrr_report,
+                                     const DrmPresentationEvidenceId& evidence,
                                      std::string& error);
   [[nodiscard]] bool blocking_modeset(DumbBuffer& buffer, std::string& error);
   [[nodiscard]] bool set_vrr_off_on_current_frame(std::string& error);

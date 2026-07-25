@@ -72,6 +72,8 @@ REQUIRED_ARTIFACTS = (
     "milestone14-hardware-doctor.json",
     "milestone14-hardware-config.json",
     "milestone14-drm-capability.json",
+    "milestone14-drm-report.jsonl",
+    "milestone14-mirror-report.jsonl",
     "milestone14-vrr-report.jsonl",
     "milestone14-vrr-off-summary.json",
     "milestone14-vrr-on-summary.json",
@@ -99,7 +101,9 @@ ARCHIVE_STATE_ARTIFACTS = (
 )
 FIXTURE_COPY_ARTIFACTS = (
     BUILD_PROVENANCE_ARTIFACT,
-    "milestone14-vrr-report.jsonl", "milestone14-fullscreen.log",
+    "milestone14-drm-report.jsonl", "milestone14-mirror-report.jsonl",
+    "milestone14-vrr-report.jsonl",
+    "milestone14-fullscreen.log",
     "milestone14-borderless.log", "milestone14-focused.log",
     "client-app-default.json", "client-app-prefer.json",
     "client-app-preferences.json",

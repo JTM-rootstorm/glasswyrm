@@ -47,36 +47,69 @@ def populate_live_evidence(
         "record": "vrr-capability", "connector": config["connector"],
         "controllable": True, "atomic_test_off": True, "atomic_test_on": True,
     }]
+    scenarios: list[str | None] = [None]
+    drm_records: list[dict[str, object]] = []
+    token = 1
+
+    def append_presentation(record: dict[str, object],
+                            scenario: str | None = None) -> None:
+        nonlocal token
+        identity = {
+            "output_id": 1, "commit_id": token, "generation": token,
+            "presentation_token": token,
+        }
+        record.update(commit_id=token, generation=token)
+        records.extend([
+            {"record": "evidence-stream", **identity, "stream": 2},
+            record,
+            {"record": "evidence-seal", **identity, "required_streams": 3,
+             "committed_streams": 3, "mirror_frame": 0,
+             "mirror_fnv1a64": "0000000000000000", "mirror_file": ""},
+        ])
+        scenarios.extend([scenario, scenario, scenario])
+        drm_records.extend([
+            {"record": "evidence-stream", **identity, "stream": 1},
+            {"record": "flip", "commit_id": token, "generation": token},
+        ])
+        token += 1
+
     for policy in ("off", "fullscreen", "focused", "app-requested",
                    "always-eligible"):
-        records.append({"record": "vrr-decision", "policy": policy,
-                        "effective_enabled": policy != "off",
-                        "session_active": True})
-    records.append({"record": "vrr-decision", "policy": "always-eligible",
-                    "effective_enabled": False, "session_active": False})
+        append_presentation(
+            {"record": "vrr-decision", "policy": policy,
+             "effective_enabled": policy != "off", "session_active": True})
+    append_presentation(
+        {"record": "vrr-decision", "policy": "always-eligible",
+         "effective_enabled": False, "session_active": False})
     for enabled, interval, start in ((False, 6_944_444, 100),
                                      (True, 14_285_714, 1000)):
         timestamp = 1_000_000_000 if not enabled else 10_000_000_000
         for index in range(131):
-            records.append({"record": "vrr-timing", "sequence": start + index,
-                            "kernel_timestamp_nanoseconds": timestamp + interval * index,
-                            "effective_enabled": enabled})
+            append_presentation(
+                {"record": "vrr-timing", "sequence": start + index,
+                 "kernel_timestamp_nanoseconds": timestamp + interval * index,
+                 "effective_enabled": enabled},
+                "on-cadence" if enabled else "off-cadence")
     records.append({"record": "vrr-restore", "original_enabled": False,
                     "restored_enabled": False, "readback_success": True,
                     "kms_restore": True, "vt_restore": True,
                     "getty_restore": True})
+    scenarios.append(None)
     cadence_ranges: dict[str, tuple[int, int]] = {}
     offset = 0
     with (root / "vrr-part-1.jsonl").open("w", encoding="utf-8") as output:
-        for record in records:
+        for record, scenario in zip(records, scenarios, strict=True):
             line = json.dumps(record, sort_keys=True) + "\n"
-            if record.get("record") == "vrr-timing":
-                tag = "on-cadence" if record["effective_enabled"] else "off-cadence"
-                previous = cadence_ranges.get(tag, (offset, offset))
-                cadence_ranges[tag] = (previous[0], offset + len(line.encode("utf-8")))
+            if scenario is not None:
+                previous = cadence_ranges.get(scenario, (offset, offset))
+                cadence_ranges[scenario] = (
+                    previous[0], offset + len(line.encode("utf-8")))
             output.write(line)
             offset += len(line.encode("utf-8"))
-
+    with (root / "milestone14-drm-report.jsonl").open(
+            "w", encoding="utf-8") as output:
+        for record in drm_records:
+            output.write(json.dumps(record, sort_keys=True) + "\n")
     base_client = {
         "schema": "glasswyrm.m14-vrr-client.v3", "mode": "windowed",
         "window": 100, "width": 640, "height": 480,
@@ -172,4 +205,14 @@ def populate_live_evidence(
     ppm = b"P6\n1 1\n255\n\x12\x34\x56"
     (root / "milestone14-canonical.ppm").write_bytes(ppm)
     (root / "milestone14-screen.ppm").write_bytes(ppm)
+    frames = root / "frames"
+    frames.mkdir()
+    with (frames / "frames.jsonl").open("w", encoding="utf-8") as output:
+        for frame in (10_001, 10_002):
+            output.write(json.dumps({
+                "frame": frame, "commit_id": frame, "generation": frame,
+                "output_id": 1, "width": 1, "height": 1,
+                "damage_rectangles": 0, "fnv1a64": "7486b218c3c86edf",
+                "file": f"frame-{frame}.ppm",
+            }, sort_keys=True) + "\n")
     return cadence_ranges

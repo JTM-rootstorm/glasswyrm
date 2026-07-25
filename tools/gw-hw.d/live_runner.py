@@ -24,6 +24,7 @@ from common import (
     vrr_rejection_reasons,
 )
 from provenance import PROVENANCE_BINARIES
+from evidence import sealed_vrr_records
 
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
 LIVE_HARNESS_SCOPE = "glasswyrm-m14-harness.scope"
@@ -677,6 +678,7 @@ class FixedLiveRunner:
                 continue
             end = start + relative_end
             count = 0
+            parsed: list[dict[str, Any]] = []
             for number, line in enumerate(
                     contents[start:end].decode("utf-8").splitlines(), 1):
                 if not line.strip():
@@ -686,8 +688,12 @@ class FixedLiveRunner:
                 except json.JSONDecodeError as error:
                     raise HarnessError(
                         f"invalid {tag} cadence JSONL line {number}: {error}") from error
-                if (isinstance(record, dict) and
-                        record.get("record") in {"vrr-timing", "timing"} and
+                if not isinstance(record, dict):
+                    raise HarnessError(
+                        f"invalid {tag} cadence record at line {number}")
+                parsed.append(record)
+            for record in sealed_vrr_records(parsed, require_seals=True):
+                if (record.get("record") in {"vrr-timing", "timing"} and
                         record.get("effective_enabled") is enabled):
                     count += 1
             last_count = count

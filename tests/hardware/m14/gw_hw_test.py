@@ -118,6 +118,10 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
     with (fixture / "milestone14-vrr-report.jsonl").open("w", encoding="utf-8") as output:
         for record in records:
             output.write(json.dumps(record, sort_keys=True) + "\n")
+    (fixture / "milestone14-drm-report.jsonl").write_text(
+        '{"record":"fixture-drm"}\n', encoding="utf-8")
+    (fixture / "milestone14-mirror-report.jsonl").write_text(
+        '{"record":"fixture-mirror"}\n', encoding="utf-8")
     for name in TEXT_ARTIFACTS:
         (fixture / name).write_text(f"fixture {name}\n", encoding="utf-8")
     client = {

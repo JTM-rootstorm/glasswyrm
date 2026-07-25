@@ -12,6 +12,13 @@
 
 namespace glasswyrm::drm {
 
+struct DrmPresentationEvidenceId {
+  std::uint64_t output_id{};
+  std::uint64_t commit_id{};
+  std::uint64_t generation{};
+  std::uint64_t presentation_token{};
+};
+
 enum class ReportApiPath { Atomic, Legacy };
 enum class VtTransition { Release, Acquire };
 
@@ -87,6 +94,27 @@ struct DamageCopyReport {
   FullCopyReason full_copy_reason{FullCopyReason::None};
 };
 
+inline constexpr std::uint32_t kEvidenceStreamDrmReport = UINT32_C(1) << 0U;
+inline constexpr std::uint32_t kEvidenceStreamVrrReport = UINT32_C(1) << 1U;
+inline constexpr std::uint32_t kEvidenceStreamMirror = UINT32_C(1) << 2U;
+inline constexpr std::uint32_t kKnownEvidenceStreamMask =
+    kEvidenceStreamDrmReport | kEvidenceStreamVrrReport |
+    kEvidenceStreamMirror;
+
+struct EvidenceStreamReport {
+  DrmPresentationEvidenceId evidence;
+  std::uint32_t stream{};
+};
+
+struct EvidenceSealReport {
+  DrmPresentationEvidenceId evidence;
+  std::uint32_t required_streams{};
+  std::uint32_t committed_streams{};
+  std::uint64_t mirror_frame{};
+  std::uint64_t mirror_fnv1a64{};
+  std::string mirror_file;
+};
+
 struct RestoreReport {
   bool kms_restore{};
   bool vt_restore{};
@@ -106,7 +134,8 @@ struct FatalReport {
 
 using DrmReportRecord =
     std::variant<DiscoveryReport, SelectionReport, ModesetReport, FlipReport,
-                 VtReport, DamageCopyReport, RestoreReport, FatalReport,
+                 VtReport, DamageCopyReport, EvidenceStreamReport,
+                 EvidenceSealReport, RestoreReport, FatalReport,
                  DrmVrrReportRecord>;
 
 [[nodiscard]] std::string serialize_report_record(

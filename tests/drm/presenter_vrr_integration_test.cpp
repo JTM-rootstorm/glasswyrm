@@ -155,6 +155,47 @@ std::string contents(const std::filesystem::path &path) {
   return {std::istreambuf_iterator<char>(input), {}};
 }
 
+void create_report_collision(void* raw_path) {
+  const auto& path = *static_cast<std::filesystem::path*>(raw_path);
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output << "publication collision";
+}
+
+struct DeferredReportCollision {
+  DrmReport* report{};
+  std::filesystem::path path;
+  std::filesystem::path displaced;
+};
+
+void replace_report_with_collision(void* raw_context) {
+  auto& context = *static_cast<DeferredReportCollision*>(raw_context);
+  std::filesystem::rename(context.path, context.displaced);
+  create_report_collision(&context.path);
+}
+
+void arm_collision_for_next_publish(void* raw_context) {
+  auto& context = *static_cast<DeferredReportCollision*>(raw_context);
+  context.report->set_before_publish_hook_for_testing(
+      replace_report_with_collision, &context);
+}
+
+void remove_directory_before_publish(void* raw_path) {
+  const auto& path = *static_cast<std::filesystem::path*>(raw_path);
+  std::error_code ignored;
+  std::filesystem::remove_all(path, ignored);
+}
+
+bool has_staged_temporary(const std::filesystem::path& directory) {
+  for (const auto& entry :
+       std::filesystem::recursive_directory_iterator(directory)) {
+    const auto name = entry.path().filename().string();
+    if (name.find(".stage.") != std::string::npos ||
+        name.find(".tmp.") != std::string::npos)
+      return true;
+  }
+  return false;
+}
+
 std::optional<std::uint64_t> property_value(
     const AtomicCommitRecord& commit, const std::uint32_t property_id) {
   const auto found = std::ranges::find_if(
@@ -171,14 +212,17 @@ struct Rig {
   FakeDrmApi drm;
   FakeKmsApi kms;
   FakeVtApi vt;
+  DrmReport drm_report{directory / "drm-report.jsonl"};
   DrmReport report{directory / "report.jsonl"};
+  headless::FrameDumper mirror{directory / "mirror"};
   std::unique_ptr<DrmPresenter> presenter;
   std::string error;
 
   explicit Rig(const DrmPresentationApi api = DrmPresentationApi::Atomic,
                const bool atomic = true, const bool reject_vrr_on = false,
                const bool negotiate_vrr = true,
-               const bool connector_vrr_capable = true)
+               const bool connector_vrr_capable = true,
+               const bool sealed_evidence = false)
       : drm({"/dev/dri/card0", DeviceOpenStatus::Success,
              snapshot(atomic, connector_vrr_capable), {}}) {
     configure(kms);
@@ -187,8 +231,9 @@ struct Rig {
     DeviceDiscovery discovery;
     auto device = Device::open(drm, "/dev/dri/card0", {}, discovery);
     gw::test::require(device.has_value(), discovery.error);
-    presenter = std::make_unique<DrmPresenter>(std::move(*device), kms,
-                                               nullptr, nullptr, &report);
+    presenter = std::make_unique<DrmPresenter>(
+        std::move(*device), kms, sealed_evidence ? &drm_report : nullptr,
+        sealed_evidence ? &mirror : nullptr, &report);
     DrmPresenterConfig config;
     config.output = {1, 2, 2, 60'000};
     config.connector = "DP-1";
@@ -529,6 +574,92 @@ void incapable_output_accepts_unavailable_timing() {
       "incapable output reports its decision without claiming timing evidence");
 }
 
+void sealed_evidence_is_published_only_after_every_stream() {
+  Rig rig(DrmPresentationApi::Atomic, true, false, true, true, true);
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto off = frame_set(pixels, 1, false, output::vrr::Decision::Disabled);
+  gw::test::require(
+      rig.presenter->present(off.view()).disposition ==
+              output::PresentDisposition::Complete &&
+          contents(rig.drm_report.path())
+                  .find("\"record\":\"evidence-stream\"") !=
+              std::string::npos &&
+          contents(rig.report.path())
+                  .find("\"record\":\"evidence-stream\"") !=
+              std::string::npos &&
+          contents(rig.report.path())
+                  .find("\"record\":\"evidence-seal\"") !=
+              std::string::npos &&
+          contents(rig.report.path()).find("\"required_streams\":7") !=
+              std::string::npos &&
+          std::filesystem::exists(rig.directory / "mirror" / "frames.jsonl"),
+      "sealed presentation publishes matching DRM, VRR, and mirror evidence");
+}
+
+void evidence_failures_remain_unsealed_and_clean() {
+  const std::array pixels{0xff101010U, 0xff202020U, 0xff303030U,
+                          0xff404040U};
+  const auto off = frame_set(pixels, 1, false, output::vrr::Decision::Disabled);
+
+  {
+    Rig rig(DrmPresentationApi::Atomic, true, false, true, true, true);
+    DeferredReportCollision collision{
+        &rig.report, rig.report.path(), rig.directory / "failed-vrr.jsonl"};
+    rig.report.set_before_publish_hook_for_testing(
+        replace_report_with_collision, &collision);
+    const auto result = rig.presenter->present(off.view());
+    const auto drm = contents(rig.drm_report.path());
+    const auto vrr = contents(collision.displaced);
+    gw::test::require(
+        result.disposition == output::PresentDisposition::Fatal,
+        "VRR report publication failure is fatal to frame promotion: " +
+            result.error);
+    gw::test::require(
+        drm.find("\"record\":\"evidence-stream\"") != std::string::npos,
+        "standard DRM stream remains explicitly identifiable");
+    gw::test::require(
+        vrr.find("\"record\":\"evidence-seal\"") == std::string::npos,
+        "failed VRR stream has no evidence seal");
+    gw::test::require(
+        !has_staged_temporary(rig.directory),
+        "VRR report publication failure removes staged temporary files");
+  }
+
+  {
+    Rig rig(DrmPresentationApi::Atomic, true, false, true, true, true);
+    auto mirror_path = rig.directory / "mirror";
+    rig.drm_report.set_before_publish_hook_for_testing(
+        remove_directory_before_publish, &mirror_path);
+    const auto result = rig.presenter->present(off.view());
+    const auto vrr = contents(rig.report.path());
+    gw::test::require(
+        result.disposition == output::PresentDisposition::Fatal &&
+            vrr.find("\"record\":\"evidence-stream\"") != std::string::npos &&
+            vrr.find("\"record\":\"evidence-seal\"") == std::string::npos &&
+            !has_staged_temporary(rig.directory),
+        "mirror publication failure leaves both report streams unsealed");
+  }
+
+  {
+    Rig rig(DrmPresentationApi::Atomic, true, false, true, true, true);
+    DeferredReportCollision collision{
+        &rig.report, rig.report.path(), rig.directory / "unsealed-vrr.jsonl"};
+    rig.report.set_before_publish_hook_for_testing(
+        arm_collision_for_next_publish, &collision);
+    const auto result = rig.presenter->present(off.view());
+    const auto unsealed = contents(collision.displaced);
+    gw::test::require(
+        result.disposition == output::PresentDisposition::Fatal &&
+            unsealed.find("\"record\":\"evidence-stream\"") !=
+                std::string::npos &&
+            unsealed.find("\"record\":\"evidence-seal\"") ==
+                std::string::npos &&
+            !has_staged_temporary(rig.directory),
+        "seal publication failure preserves only explicitly unsealed evidence");
+  }
+}
+
 } // namespace
 
 int main() {
@@ -540,5 +671,7 @@ int main() {
   readback_mismatch_is_fatal();
   unavailable_timing_is_nonfatal();
   incapable_output_accepts_unavailable_timing();
+  sealed_evidence_is_published_only_after_every_stream();
+  evidence_failures_remain_unsealed_and_clean();
   return 0;
 }
