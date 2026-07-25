@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 
 from common import HarnessError  # noqa: E402
+from evidence import sealed_vrr_records  # noqa: E402
 from live_runner import (  # noqa: E402
     CLEANUP_QUERY_ATTEMPTS, CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES,
     FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS, QUERY_ATTEMPTS,
@@ -81,6 +82,56 @@ def expect_harness_error_contains(action: Callable[[], None], message: str) -> N
         assert message in str(error), str(error)
     else:
         raise AssertionError("expected the fixed live runner to fail closed")
+
+
+def test_evidence_seals_filter_partial_presentations() -> None:
+    identity = {
+        "output_id": 1, "commit_id": 2, "generation": 3,
+        "presentation_token": 4,
+    }
+    stream = {"record": "evidence-stream", **identity, "stream": 2}
+    timing = {
+        "record": "vrr-timing", "commit_id": 2, "generation": 3,
+        "sequence": 9, "kernel_timestamp_nanoseconds": 10,
+        "effective_enabled": True,
+    }
+    assert sealed_vrr_records([stream, timing], require_seals=True) == []
+
+    seal = {
+        "record": "evidence-seal", **identity, "required_streams": 3,
+        "committed_streams": 3, "mirror_frame": 0,
+        "mirror_fnv1a64": "0000000000000000", "mirror_file": "",
+    }
+    assert sealed_vrr_records(
+        [stream, timing, seal], require_seals=True,
+        drm_streams={(1, 2, 3, 4)}) == [timing]
+    expect_harness_error_contains(
+        lambda: sealed_vrr_records(
+            [stream, timing, seal], require_seals=True, drm_streams=set()),
+        "no matching DRM evidence stream",
+    )
+
+    mirror_seal = dict(
+        seal, required_streams=7, committed_streams=7, mirror_frame=8,
+        mirror_fnv1a64="0123456789abcdef", mirror_file="frame-8.ppm")
+    assert sealed_vrr_records(
+        [stream, timing, mirror_seal], require_seals=True,
+        drm_streams={(1, 2, 3, 4)},
+        mirror_streams={(1, 2, 3, 8):
+                        ("0123456789abcdef", "frame-8.ppm")}) == [timing]
+    expect_harness_error_contains(
+        lambda: sealed_vrr_records(
+            [stream, timing, mirror_seal], require_seals=True,
+            drm_streams={(1, 2, 3, 4)}, mirror_streams={}),
+        "no matching mirror evidence stream",
+    )
+
+    bad_seal = dict(seal, required_streams=7, committed_streams=3)
+    expect_harness_error_contains(
+        lambda: sealed_vrr_records(
+            [stream, timing, bad_seal], require_seals=True),
+        "evidence seal is invalid",
+    )
 
 
 def query_result(output: Path | None, *, status: int | None = 0,
@@ -749,6 +800,7 @@ def test_second_launch_failure_cleanup(root: Path) -> None:
 
 
 def main() -> int:
+    test_evidence_seals_filter_partial_presentations()
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         contract = root / "contract"

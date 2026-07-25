@@ -28,6 +28,7 @@ struct DrmPresenter::PendingPresentation {
   DamageCopyPlan damage_copy;
   std::optional<output::VrrPresentationRequest> vrr_request;
   PresenterVrrPlan vrr_plan;
+  DrmPresentationEvidenceId evidence;
   std::optional<PresenterVrrState> completed_vrr_state;
   output::VrrPresentationFeedbackMap vrr_feedback;
   bool promote_back{true};
@@ -114,36 +115,6 @@ bool DrmPresenter::initialize(const DrmPresenterConfig& config,
   initialized_ = true;
   return true;
 }
-bool DrmPresenter::stage_mirror(const output::SoftwareFrameView& frame,
-                                headless::StagedFrameDump& staged,
-                                std::string& error) const {
-  if (!mirror_) return true;
-  if (frame.damage.size() > std::numeric_limits<std::uint32_t>::max()) {
-    error = "DRM mirror damage count exceeds the manifest limit";
-    return false;
-  }
-  return mirror_->stage({frame.ordinal, frame.commit_id, frame.generation,
-                         frame.output.output_id, frame.output.width,
-                         frame.output.height,
-                         static_cast<std::uint32_t>(frame.damage.size())},
-                        frame.pixels, staged, error);
-}
-
-bool DrmPresenter::commit_evidence(headless::StagedFrameDump& mirror,
-                                   StagedDrmReport& report,
-                                   StagedDrmReport& vrr_report,
-                                   std::string& error) {
-  if (report.active() && !report_->commit(report, error)) return false;
-  if (vrr_report.active() &&
-      !vrr_report_->commit(vrr_report, error))
-    return false;
-  if (mirror.active()) {
-    headless::FrameDumpResult result;
-    if (!mirror_->commit(mirror, result, error)) return false;
-  }
-  return true;
-}
-
 void DrmPresenter::recover_vrr_divergence(std::string& error) noexcept {
   const auto primary = error;
   try {
@@ -196,10 +167,23 @@ output::PresentResult DrmPresenter::present_initial(
     record_fatal("initial-copy", error); fatal_ = true;
     return {output::PresentDisposition::Fatal, 0, 0, error};
   }
-  const ModesetReport record{frame.ordinal, frame.commit_id, frame.generation, 0,
-                             target.framebuffer_id(), hash, hash, selected_api_};
+  const bool seal_evidence = config_.vrr_reporting && report_ && vrr_report_ &&
+                             vrr_request && vrr_request->valid;
+  DrmPresentationEvidenceId evidence;
+  if (seal_evidence)
+    evidence = {frame.output.output_id, frame.commit_id, frame.generation,
+                next_token_++};
+  ModesetReport record{frame.ordinal, frame.commit_id, frame.generation, 0,
+                       target.framebuffer_id(), hash, hash, selected_api_};
   bool report_staged = true;
-  if (report_ && config_.damage_aware_copy) {
+  if (report_ && seal_evidence) {
+    std::vector<DrmReportRecord> records{
+        EvidenceStreamReport{evidence, kEvidenceStreamDrmReport}, record};
+    if (config_.damage_aware_copy)
+      records.emplace_back(
+          damage_copy_report(target, damage_copy, frame.generation, 0));
+    report_staged = report_->stage(records, report, error);
+  } else if (report_ && config_.damage_aware_copy) {
     const std::array<DrmReportRecord, 2> records{
         record, damage_copy_report(target, damage_copy, frame.generation, 0)};
     report_staged = report_->stage(records, report, error);
@@ -239,7 +223,12 @@ output::PresentResult DrmPresenter::present_initial(
   if (vrr_report_ && vrr_request && vrr_request->valid) {
     const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
         *vrr_request, frame.commit_id, frame.generation, false)}};
-    if (!vrr_report_->stage(decision, vrr_report, error)) {
+    const std::array<DrmReportRecord, 2> records{
+        EvidenceStreamReport{evidence, kEvidenceStreamVrrReport}, decision};
+    const bool staged =
+        seal_evidence ? vrr_report_->stage(records, vrr_report, error)
+                      : vrr_report_->stage(decision, vrr_report, error);
+    if (!staged) {
       if (mirror_) mirror_->abort(mirror);
       if (report_) report_->abort(report);
       record_fatal("initial-vrr-report", error);
@@ -248,7 +237,7 @@ output::PresentResult DrmPresenter::present_initial(
     }
   }
   display_taken_ = true;
-  if (!commit_evidence(mirror, report, vrr_report, error)) {
+  if (!commit_evidence(mirror, report, vrr_report, evidence, error)) {
     record_fatal("initial-evidence", error);
     fatal_ = true;
     return {output::PresentDisposition::Fatal, 0, 0, error};
@@ -286,6 +275,9 @@ output::PresentResult DrmPresenter::present_initial_vrr_followup(
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
   value.vrr_request = vrr_request;
   value.vrr_plan = vrr_plan;
+  if (config_.vrr_reporting && report_ && vrr_report_)
+    value.evidence = {frame.output.output_id, frame.commit_id, frame.generation,
+                      value.token};
   value.promote_back = false;
   value.report_damage_copy = false;
   std::string error;
@@ -330,6 +322,9 @@ output::PresentResult DrmPresenter::present_flip(
   if (vrr_request && vrr_request->valid)
     value.vrr_request = *vrr_request;
   value.vrr_plan = vrr_plan;
+  if (config_.vrr_reporting && report_ && vrr_report_ && value.vrr_request)
+    value.evidence = {frame.output.output_id, frame.commit_id, frame.generation,
+                      value.token};
   if (!copy_frame_to(target, frame, hash, forced_reason,
                      value.damage_copy, error) ||
       target.visible_hash() != hash) {
@@ -407,11 +402,11 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     return fatal_event("page-flip-event",
                        "DRM page-flip completion did not match the pending frame");
   }
-  const FlipReport record{pending_->ordinal, pending_->commit_id,
-                          pending_->generation,
-                          static_cast<std::uint32_t>(pending_->next_front_index),
-                          pending_->framebuffer_id, pending_->hash,
-                          pending_->hash, event.sequence, selected_api_};
+  FlipReport record{pending_->ordinal, pending_->commit_id,
+                    pending_->generation,
+                    static_cast<std::uint32_t>(pending_->next_front_index),
+                    pending_->framebuffer_id, pending_->hash,
+                    pending_->hash, event.sequence, selected_api_};
   std::string error;
   bool readback_enabled{};
   bool readback_valid{};
@@ -443,7 +438,11 @@ output::BackendEvent DrmPresenter::service(const short revents) {
   }
   if (report_) {
     report_->abort(pending_->report);
-    std::vector<DrmReportRecord> records{record};
+    std::vector<DrmReportRecord> records;
+    if (pending_->evidence.presentation_token != 0)
+      records.emplace_back(EvidenceStreamReport{
+          pending_->evidence, kEvidenceStreamDrmReport});
+    records.emplace_back(record);
     if (config_.damage_aware_copy && pending_->report_damage_copy)
       records.emplace_back(damage_copy_report(
           buffers_.back(), pending_->damage_copy, pending_->generation,
@@ -459,16 +458,28 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
         *pending_->vrr_request, pending_->commit_id,
         pending_->generation, feedback.effective_enabled)}};
+    const DrmReportRecord evidence_stream{EvidenceStreamReport{
+        pending_->evidence, kEvidenceStreamVrrReport}};
     if (!feedback.timestamp_available) {
-      if (!vrr_report_->stage(decision, pending_->vrr_report, error))
+      const std::array<DrmReportRecord, 2> records{evidence_stream, decision};
+      const bool staged = pending_->evidence.presentation_token != 0
+                              ? vrr_report_->stage(
+                                    records, pending_->vrr_report, error)
+                              : vrr_report_->stage(
+                                    decision, pending_->vrr_report, error);
+      if (!staged)
         return fatal_event("page-flip-vrr-report", std::move(error));
     } else {
-      const std::array<DrmReportRecord, 2> records{
-          decision,
+      const std::array<DrmReportRecord, 3> records{
+          evidence_stream, decision,
           DrmVrrReportRecord{vrr_timing_report(
               pending_->commit_id, pending_->generation,
               *pending_->vrr_request, feedback)}};
-      if (!vrr_report_->stage(records, pending_->vrr_report, error))
+      const std::span selected =
+          pending_->evidence.presentation_token != 0
+              ? std::span<const DrmReportRecord>{records}
+              : std::span<const DrmReportRecord>{records}.subspan(1);
+      if (!vrr_report_->stage(selected, pending_->vrr_report, error))
         return fatal_event("page-flip-vrr-report", std::move(error));
     }
   }
@@ -489,7 +500,7 @@ bool DrmPresenter::finalize_pending(const std::uint64_t token,
     return false;
   }
   if (!commit_evidence(pending_->mirror, pending_->report,
-                       pending_->vrr_report, error)) {
+                       pending_->vrr_report, pending_->evidence, error)) {
     record_fatal("page-flip-evidence", error);
     fatal_ = true;
     clear_pending();

@@ -176,6 +176,32 @@ std::string serialize(const DamageCopyReport& value) {
   return stream.str();
 }
 
+std::string serialize(const EvidenceStreamReport& value) {
+  std::ostringstream stream;
+  stream << "{\"record\":\"evidence-stream\",\"output_id\":"
+         << value.evidence.output_id << ",\"commit_id\":"
+         << value.evidence.commit_id << ",\"generation\":"
+         << value.evidence.generation << ",\"presentation_token\":"
+         << value.evidence.presentation_token << ",\"stream\":"
+         << value.stream << '}';
+  return stream.str();
+}
+
+std::string serialize(const EvidenceSealReport& value) {
+  std::ostringstream stream;
+  stream << "{\"record\":\"evidence-seal\",\"output_id\":"
+         << value.evidence.output_id << ",\"commit_id\":"
+         << value.evidence.commit_id << ",\"generation\":"
+         << value.evidence.generation << ",\"presentation_token\":"
+         << value.evidence.presentation_token << ",\"required_streams\":"
+         << value.required_streams << ",\"committed_streams\":"
+         << value.committed_streams << ",\"mirror_frame\":"
+         << value.mirror_frame << ",\"mirror_fnv1a64\":"
+         << json_quote(hex64(value.mirror_fnv1a64)) << ",\"mirror_file\":"
+         << json_quote(value.mirror_file) << '}';
+  return stream.str();
+}
+
 std::string serialize(const RestoreReport& value) {
   std::ostringstream stream;
   stream << "{\"record\":\"restore\",\"kms\":"
@@ -258,6 +284,31 @@ bool valid(const DamageCopyReport& value) {
          (value.full_copy_reason == FullCopyReason::None
               ? value.history_span != 0
               : value.copied_bytes == value.full_frame_bytes);
+}
+
+bool valid(const EvidenceStreamReport& value) {
+  return value.evidence.output_id != 0 && value.evidence.commit_id != 0 &&
+         value.evidence.generation != 0 &&
+         value.evidence.presentation_token != 0 &&
+         (value.stream == kEvidenceStreamDrmReport ||
+          value.stream == kEvidenceStreamVrrReport);
+}
+
+bool valid(const EvidenceSealReport& value) {
+  const auto& evidence = value.evidence;
+  const bool mirror_required =
+      (value.required_streams & kEvidenceStreamMirror) != 0;
+  return evidence.output_id != 0 && evidence.commit_id != 0 &&
+         evidence.generation != 0 && evidence.presentation_token != 0 &&
+         (value.required_streams & ~kKnownEvidenceStreamMask) == 0 &&
+         (value.required_streams &
+          (kEvidenceStreamDrmReport | kEvidenceStreamVrrReport)) ==
+             (kEvidenceStreamDrmReport | kEvidenceStreamVrrReport) &&
+         value.committed_streams == value.required_streams &&
+         (mirror_required
+              ? value.mirror_frame != 0 && !value.mirror_file.empty()
+              : value.mirror_frame == 0 && value.mirror_fnv1a64 == 0 &&
+                    value.mirror_file.empty());
 }
 
 bool valid(const RestoreReport&) { return true; }

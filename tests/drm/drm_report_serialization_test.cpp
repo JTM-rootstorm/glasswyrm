@@ -10,6 +10,9 @@ namespace {
 using glasswyrm::drm::DiscoveryReport;
 using glasswyrm::drm::DamageCopyReport;
 using glasswyrm::drm::DrmReportRecord;
+using glasswyrm::drm::DrmPresentationEvidenceId;
+using glasswyrm::drm::EvidenceSealReport;
+using glasswyrm::drm::EvidenceStreamReport;
 using glasswyrm::drm::FatalReport;
 using glasswyrm::drm::FlipReport;
 using glasswyrm::drm::ModesetReport;
@@ -18,6 +21,9 @@ using glasswyrm::drm::RestoreReport;
 using glasswyrm::drm::SelectionReport;
 using glasswyrm::drm::VtReport;
 using glasswyrm::drm::VtTransition;
+using glasswyrm::drm::kEvidenceStreamDrmReport;
+using glasswyrm::drm::kEvidenceStreamMirror;
+using glasswyrm::drm::kEvidenceStreamVrrReport;
 
 void require_record(const DrmReportRecord& record, const std::string& expected,
                     const std::string& label) {
@@ -119,6 +125,28 @@ int main() {
       "\"cumulative_copied_bytes\":280,"
       "\"cumulative_copy_ratio_ppm\":729166}",
       "stable damage-copy JSON");
+  const DrmPresentationEvidenceId evidence{1, 10, 12, 99};
+  require_record(
+      EvidenceStreamReport{evidence, kEvidenceStreamVrrReport},
+      "{\"record\":\"evidence-stream\",\"output_id\":1,\"commit_id\":10,"
+      "\"generation\":12,\"presentation_token\":99,\"stream\":2}",
+      "stable evidence stream JSON");
+  require_record(
+      EvidenceSealReport{
+          evidence,
+          kEvidenceStreamDrmReport | kEvidenceStreamVrrReport |
+              kEvidenceStreamMirror,
+          kEvidenceStreamDrmReport | kEvidenceStreamVrrReport |
+              kEvidenceStreamMirror,
+          3,
+          0x12ab,
+          "frame-000003-output-0000000000000001.ppm"},
+      "{\"record\":\"evidence-seal\",\"output_id\":1,\"commit_id\":10,"
+      "\"generation\":12,\"presentation_token\":99,\"required_streams\":7,"
+      "\"committed_streams\":7,\"mirror_frame\":3,"
+      "\"mirror_fnv1a64\":\"00000000000012ab\","
+      "\"mirror_file\":\"frame-000003-output-0000000000000001.ppm\"}",
+      "stable evidence seal JSON");
   require_record(RestoreReport{true, false, true, true},
                  "{\"record\":\"restore\",\"kms\":true,\"vt\":false,"
                  "\"master_drop\":true,\"framebuffer_cleanup\":true}",

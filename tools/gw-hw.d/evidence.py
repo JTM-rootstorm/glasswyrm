@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import shutil
 import tarfile
 from typing import Any
@@ -23,10 +24,169 @@ from common import (
 )
 from provenance import validate_archived_provenance
 
+_DRM_EVIDENCE_STREAM = 1
+_VRR_EVIDENCE_STREAM = 2
+_MIRROR_EVIDENCE_STREAM = 4
+_KNOWN_EVIDENCE_STREAMS = (
+    _DRM_EVIDENCE_STREAM | _VRR_EVIDENCE_STREAM | _MIRROR_EVIDENCE_STREAM)
+
+
+def _ppm_rgb_fnv1a64(path: Path) -> str:
+    contents = _read_regular(path, MAX_ARTIFACT_BYTES)
+    header = re.match(rb"P6\n([1-9][0-9]*) ([1-9][0-9]*)\n255\n", contents)
+    if header is None:
+        raise HarnessError(f"{path.name} is not a canonical binary PPM")
+    width = int(header.group(1))
+    height = int(header.group(2))
+    rgb = contents[header.end():]
+    if len(rgb) != width * height * 3:
+        raise HarnessError(f"{path.name} pixel payload size is invalid")
+    digest = 14695981039346656037
+    for byte in rgb:
+        digest = ((digest ^ byte) * 1099511628211) & ((1 << 64) - 1)
+    return f"{digest:016x}"
+
+
+def drm_evidence_streams(
+        records: list[dict[str, Any]]) -> set[tuple[int, int, int, int]]:
+    identities: set[tuple[int, int, int, int]] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise HarnessError("DRM report contains a non-object record")
+        if record.get("record") != "evidence-stream":
+            continue
+        values = tuple(record.get(name) for name in (
+            "output_id", "commit_id", "generation", "presentation_token"))
+        if (any(isinstance(value, bool) or not isinstance(value, int) or
+                value <= 0 for value in values) or
+                record.get("stream") != _DRM_EVIDENCE_STREAM or
+                values in identities):
+            raise HarnessError("DRM evidence stream identity is invalid")
+        identities.add(values)  # type: ignore[arg-type]
+    return identities
+
+
+def mirror_evidence_streams(
+        records: list[dict[str, Any]]
+        ) -> dict[tuple[int, int, int, int], tuple[str, str]]:
+    identities: dict[tuple[int, int, int, int], tuple[str, str]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            raise HarnessError("mirror report contains a non-object record")
+        values = tuple(record.get(name) for name in (
+            "output_id", "commit_id", "generation", "frame"))
+        digest = record.get("fnv1a64")
+        file_name = record.get("file")
+        if (any(isinstance(value, bool) or not isinstance(value, int) or
+                value <= 0 for value in values) or
+                not isinstance(digest, str) or
+                not re.fullmatch(r"[0-9a-f]{16}", digest) or
+                not isinstance(file_name, str) or not file_name or
+                Path(file_name).name != file_name or
+                values in identities):
+            raise HarnessError("mirror evidence stream identity is invalid")
+        identities[values] = (digest, file_name)  # type: ignore[index]
+    return identities
+
+
+def sealed_vrr_records(
+        records: list[dict[str, Any]], require_seals: bool,
+        drm_streams: set[tuple[int, int, int, int]] | None = None,
+        mirror_streams: dict[
+            tuple[int, int, int, int], tuple[str, str]] | None = None,
+        ) -> list[dict[str, Any]]:
+    """Return global records and presentation records completed by a valid seal."""
+    evidence_present = any(
+        isinstance(record, dict) and
+        record.get("record") in {"evidence-stream", "evidence-seal"}
+        for record in records)
+    if not evidence_present:
+        if require_seals:
+            raise HarnessError("VRR report contains no presentation evidence seals")
+        return records
+
+    pending: dict[tuple[int, int, int, int], list[dict[str, Any]]] = {}
+    current: tuple[int, int, int, int] | None = None
+    accepted: list[dict[str, Any]] = []
+    sealed: set[tuple[int, int, int, int]] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise HarnessError("VRR report contains a non-object record")
+        kind = record.get("record")
+        if kind == "evidence-stream":
+            values = tuple(record.get(name) for name in (
+                "output_id", "commit_id", "generation", "presentation_token"))
+            if (len(values) != 4 or
+                    any(isinstance(value, bool) or not isinstance(value, int) or
+                        value <= 0 for value in values) or
+                    record.get("stream") != _VRR_EVIDENCE_STREAM):
+                raise HarnessError("VRR evidence stream identity is invalid")
+            current = values  # type: ignore[assignment]
+            if current in pending or current in sealed:
+                raise HarnessError("VRR evidence stream identity is duplicated")
+            pending[current] = []
+            continue
+        if kind in {"vrr-decision", "vrr-timing"}:
+            if current is None:
+                raise HarnessError("VRR presentation record has no evidence stream")
+            if (record.get("commit_id"), record.get("generation")) != current[1:3]:
+                raise HarnessError("VRR presentation record identity does not match")
+            pending[current].append(record)
+            continue
+        if kind == "evidence-seal":
+            values = tuple(record.get(name) for name in (
+                "output_id", "commit_id", "generation", "presentation_token"))
+            required = record.get("required_streams")
+            committed = record.get("committed_streams")
+            if (len(values) != 4 or
+                    any(isinstance(value, bool) or not isinstance(value, int) or
+                        value <= 0 for value in values) or
+                    values != current or values not in pending or
+                    values in sealed or isinstance(required, bool) or
+                    not isinstance(required, int) or
+                    required & ~_KNOWN_EVIDENCE_STREAMS or
+                    required & (_DRM_EVIDENCE_STREAM | _VRR_EVIDENCE_STREAM) !=
+                    (_DRM_EVIDENCE_STREAM | _VRR_EVIDENCE_STREAM) or
+                    committed != required):
+                raise HarnessError("VRR presentation evidence seal is invalid")
+            if drm_streams is not None and values not in drm_streams:
+                raise HarnessError(
+                    "VRR presentation seal has no matching DRM evidence stream")
+            mirror_required = bool(required & _MIRROR_EVIDENCE_STREAM)
+            mirror_frame = record.get("mirror_frame")
+            mirror_hash = record.get("mirror_fnv1a64")
+            mirror_file = record.get("mirror_file")
+            if mirror_required:
+                if (isinstance(mirror_frame, bool) or
+                        not isinstance(mirror_frame, int) or mirror_frame <= 0 or
+                        not isinstance(mirror_hash, str) or len(mirror_hash) != 16 or
+                        not isinstance(mirror_file, str) or not mirror_file or
+                        Path(mirror_file).name != mirror_file):
+                    raise HarnessError("sealed mirror evidence identity is invalid")
+                mirror_identity = (*values[:3], mirror_frame)
+                if (mirror_streams is not None and
+                        mirror_streams.get(mirror_identity) !=
+                        (mirror_hash, mirror_file)):
+                    raise HarnessError(
+                        "VRR presentation seal has no matching mirror evidence stream")
+            elif mirror_frame != 0 or mirror_hash != "0000000000000000" or mirror_file != "":
+                raise HarnessError("non-mirror evidence seal carries mirror fields")
+            if not pending[values]:
+                raise HarnessError("VRR evidence seal contains no presentation records")
+            accepted.extend(pending.pop(values))
+            sealed.add(values)
+            current = None
+            continue
+        accepted.append(record)
+    return accepted
+
+
 def analyze_cadence(
         report_path: Path, config: dict[str, object], enabled: bool,
         source_range: tuple[int, int] | None = None,
-        scenario: str | None = None) -> dict[str, object]:
+        scenario: str | None = None,
+        require_seals: bool = False,
+        drm_report_path: Path | None = None) -> dict[str, object]:
     contents = _read_regular(report_path, MAX_JSON_BYTES)
     if source_range is None:
         start, end = 0, len(contents)
@@ -39,8 +199,7 @@ def analyze_cadence(
                 contents[end - 1:end] != b"\n"):
             raise HarnessError("cadence source byte range is invalid or unaligned")
     lines = contents[start:end].decode("utf-8").splitlines()
-    intervals: deque[int] = deque(maxlen=MAX_INTERVALS)
-    previous: dict[int, tuple[int, int]] = {}
+    parsed: list[dict[str, Any]] = []
     for number, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -48,7 +207,24 @@ def analyze_cadence(
             record = json.loads(line)
         except json.JSONDecodeError as error:
             raise HarnessError(f"invalid VRR report JSONL line {number}: {error}") from error
-        if not isinstance(record, dict) or record.get("record") not in {"vrr-timing", "timing"}:
+        if not isinstance(record, dict):
+            raise HarnessError(f"invalid VRR report record at line {number}")
+        parsed.append(record)
+    drm_streams = None
+    if drm_report_path is not None:
+        drm_records = [
+            json.loads(line) for line in
+            _read_regular(drm_report_path, MAX_JSON_BYTES)
+            .decode("utf-8").splitlines() if line.strip()]
+        if not all(isinstance(record, dict) for record in drm_records):
+            raise HarnessError("DRM report contains a non-object record")
+        drm_streams = drm_evidence_streams(drm_records)
+    parsed = sealed_vrr_records(parsed, require_seals, drm_streams)
+
+    intervals: deque[int] = deque(maxlen=MAX_INTERVALS)
+    previous: dict[int, tuple[int, int]] = {}
+    for number, record in enumerate(parsed, 1):
+        if record.get("record") not in {"vrr-timing", "timing"}:
             continue
         crtc = record.get("crtc_id", record.get("output_id", 0))
         if record.get("effective_enabled") is not enabled:
@@ -159,15 +335,28 @@ def finalize_live(config: dict[str, object], artifacts: Path,
     if not parts:
         raise HarnessError("VRR report parts are missing")
     report.write_bytes(b"".join(_read_regular(path, MAX_JSON_BYTES) for path in parts))
+    drm_report = artifacts / "milestone14-drm-report.jsonl"
+    drm_parts = [
+        path for path in (artifacts / "drm-part-0.jsonl", drm_report)
+        if path.is_file()]
+    if not drm_parts:
+        raise HarnessError("DRM report parts are missing")
+    drm_report.write_bytes(
+        b"".join(_read_regular(path, MAX_JSON_BYTES) for path in drm_parts))
+    mirror_report = artifacts / "milestone14-mirror-report.jsonl"
+    mirror_report.write_bytes(_read_regular(
+        artifacts / "frames" / "frames.jsonl", MAX_JSON_BYTES))
     off_range = runner.cadence_ranges.get("off-cadence")
     on_range = runner.cadence_ranges.get("on-cadence")
     if (off_range is None or on_range is None or
             off_range[1] > on_range[0]):
         raise HarnessError("ordered cadence scenario boundaries are incomplete")
     off = analyze_cadence(
-        report, config, False, off_range, "off-cadence")
+        report, config, False, off_range, "off-cadence", require_seals=True,
+        drm_report_path=drm_report)
     on = analyze_cadence(
-        report, config, True, on_range, "on-cadence")
+        report, config, True, on_range, "on-cadence", require_seals=True,
+        drm_report_path=drm_report)
     _write_json(artifacts / "milestone14-vrr-off-summary.json", off)
     _write_json(artifacts / "milestone14-vrr-on-summary.json", on)
     if not off["passed"] or not on["passed"]:
@@ -179,6 +368,18 @@ def finalize_live(config: dict[str, object], artifacts: Path,
             if not isinstance(value, dict):
                 raise HarnessError("VRR report contains a non-object record")
             records.append(value)
+    drm_records = [
+        json.loads(line) for line in
+        _read_regular(drm_report, MAX_JSON_BYTES).decode("utf-8").splitlines()
+        if line.strip()]
+    mirror_records = [
+        json.loads(line) for line in
+        _read_regular(mirror_report, MAX_JSON_BYTES).decode("utf-8").splitlines()
+        if line.strip()]
+    records = sealed_vrr_records(
+        records, require_seals=True, drm_streams=drm_evidence_streams(
+            drm_records), mirror_streams=mirror_evidence_streams(
+                mirror_records))
     capabilities = [record for record in records if record.get("record") == "vrr-capability"]
     if not capabilities or not any(record.get("controllable") is True and
             record.get("connector") == config["connector"] and
@@ -345,6 +546,14 @@ def finalize_live(config: dict[str, object], artifacts: Path,
         raise HarnessError("canonical screen evidence is missing")
     if (artifacts / "milestone14-canonical.ppm").read_bytes() != (artifacts / "milestone14-screen.ppm").read_bytes():
         raise HarnessError("canonical and final screen pixels differ")
+    expected_mirror_hash = _ppm_rgb_fnv1a64(
+        artifacts / "milestone14-canonical.ppm")
+    mirror_streams = mirror_evidence_streams(mirror_records)
+    if (len(mirror_streams) != 2 or
+            any(digest != expected_mirror_hash
+                for digest, _ in mirror_streams.values())):
+        raise HarnessError(
+            "sealed mirror reports do not match both canonical pixel captures")
     for name in ("milestone14-fullscreen.log", "milestone14-borderless.log",
                  "milestone14-focused.log", "milestone14-app-requested.log",
                  "milestone14-always.log", "milestone14-vt.log", "milestone14-restart.log"):
@@ -417,7 +626,30 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
             if (record.get("required_base_commit") != required_base or
                     record.get("tested_commit") != tested_commit):
                 errors.append(f"{label} source identity does not match configuration")
+        mirror_records: list[dict[str, Any]] = []
         if summary.get("dry_run") is False:
+            try:
+                vrr_records = [
+                    json.loads(line) for line in _read_regular(
+                        artifact_dir / "milestone14-vrr-report.jsonl",
+                        MAX_JSON_BYTES).decode("utf-8").splitlines()
+                    if line.strip()]
+                drm_records = [
+                    json.loads(line) for line in _read_regular(
+                        artifact_dir / "milestone14-drm-report.jsonl",
+                        MAX_JSON_BYTES).decode("utf-8").splitlines()
+                    if line.strip()]
+                mirror_records = [
+                    json.loads(line) for line in _read_regular(
+                        artifact_dir / "milestone14-mirror-report.jsonl",
+                        MAX_JSON_BYTES).decode("utf-8").splitlines()
+                    if line.strip()]
+                sealed_vrr_records(
+                    vrr_records, require_seals=True,
+                    drm_streams=drm_evidence_streams(drm_records),
+                    mirror_streams=mirror_evidence_streams(mirror_records))
+            except (HarnessError, json.JSONDecodeError) as error:
+                errors.append(f"sealed presentation evidence is invalid: {error}")
             for name, enabled, scenario in (
                     ("milestone14-vrr-off-summary.json", False, "off-cadence"),
                     ("milestone14-vrr-on-summary.json", True, "on-cadence")):
@@ -432,13 +664,27 @@ def validate_archive(artifact_dir: Path, archive: Path) -> dict[str, object]:
                         artifact_dir / "milestone14-vrr-report.jsonl", config,
                         enabled,
                         (source_range["start"], source_range["end"]),
-                        scenario)
+                        scenario, require_seals=True,
+                        drm_report_path=artifact_dir /
+                        "milestone14-drm-report.jsonl")
                     if cadence != recomputed:
                         errors.append(f"{name} differs from bounded report evidence")
                 except HarnessError as error:
                     errors.append(f"{name} has invalid bounded evidence: {error}")
         if (artifact_dir / "milestone14-canonical.ppm").read_bytes() != (artifact_dir / "milestone14-screen.ppm").read_bytes():
             errors.append("canonical and screen PPM differ")
+        if summary.get("dry_run") is False:
+            try:
+                expected_mirror_hash = _ppm_rgb_fnv1a64(
+                    artifact_dir / "milestone14-canonical.ppm")
+                archived_mirrors = mirror_evidence_streams(mirror_records)
+                if (len(archived_mirrors) != 2 or
+                        any(digest != expected_mirror_hash
+                            for digest, _ in archived_mirrors.values())):
+                    errors.append(
+                        "archived mirror seals do not match canonical pixels")
+            except HarnessError as error:
+                errors.append(f"archived mirror evidence is invalid: {error}")
         expected = set(REQUIRED_ARTIFACTS) | set(ARCHIVE_STATE_ARTIFACTS) | {"SHA256SUMS"}
         try:
             with tarfile.open(archive, "r:") as source:
