@@ -93,9 +93,10 @@ fresh transient service instead of relying on an unloaded definition.
 The live command refuses direct execution and requires the exact
 `glasswyrm-m14-harness.scope` transient scope shown above. This prevents
 stopping the configured getty from terminating the harness with its login
-shell. The detached runner ignores the getty's terminal hangup, retains its
-unconditional cleanup guard, and still requires invocation from the configured
-active physical text VT.
+shell. The detached runner ignores the getty's terminal hangup and retains its
+unconditional cleanup guard. Interactive execution requires stdin to be the
+configured active physical text VT; `--unattended` replaces only that identity
+check while retaining the kernel active-VT and `KD_TEXT` checks.
 
 Before using it, arrange console access and recovery independent of the tested
 display. Record the current KMS, VRR, KD, VT, getty, device, and session state.
@@ -147,12 +148,30 @@ to make that performance claim.
 
 The archive contains the reviewed configuration without secrets, exact-commit
 build manifest and executable hashes, EDID hash, kernel/libdrm/driver facts,
-capability and property snapshots, all decision and timing records, off/on
-summaries, policy transition logs, VT/restart evidence, canonical and screen
-images, before/after KMS and session state, restoration results, and
-`SHA256SUMS`. Validators reject missing fields, wall-clock data, an unconfirmed
-hardware path, insufficient samples, failed thresholds, or an incomplete
-restore.
+capability and property snapshots, standard DRM records, all decision and
+timing records, mirror manifests, off/on summaries, policy transition logs,
+VT/restart evidence, canonical and screen images, before/after KMS and session
+state, restoration results, and `SHA256SUMS`. Validators reject missing fields,
+wall-clock data, an unconfirmed hardware path, insufficient samples, failed
+thresholds, or an incomplete restore.
+
+Every M14 presentation carries one identity made from output, commit,
+generation, and presentation token. The standard DRM and VRR streams publish
+that identity beside their frame records. An optional mirror capture publishes
+the same output/commit/generation identity plus its frame, filename, and pixel
+hash. Only after all required streams commit does the VRR report publish the
+final evidence seal. Live and archive validation cross-match the seal against
+the standard DRM stream and, when present, the mirror manifest; unsealed
+records remain diagnostic only and never contribute cadence or policy
+acceptance.
+
+Missing, invalid, or regressed page-flip timestamps are timing-evidence
+degradation rather than display-session failure. The completed flip, pixels,
+property readback, and frame acknowledgement remain valid, while the timing
+sample is marked unavailable and excluded. The hardware gate still fails
+closed when too few sealed valid intervals remain. Event identity errors,
+property-readback divergence, scanout mismatch, report publication failure,
+and restoration failure remain fatal.
 
 Each physical pixel capture first waits for the requested policy and effective
 state to converge, then arms the one-shot mirror trigger and requests one
