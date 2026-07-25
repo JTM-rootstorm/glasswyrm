@@ -40,9 +40,7 @@ private:
     std::uint64_t minimum_interval{};
     std::uint64_t maximum_interval{};
     std::uint64_t interval_sum{};
-    std::uint64_t pass_count{};
     std::vector<std::uint64_t> intervals;
-    std::vector<std::uint64_t> absolute_errors;
   };
 
   explicit VrrReport(int fd) noexcept : fd_(fd) {}

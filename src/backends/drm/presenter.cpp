@@ -233,7 +233,9 @@ output::PresentResult DrmPresenter::present_initial(
     readback_valid = true;
   }
   if (vrr_contract_enabled_ && vrr_state_initialized_)
-    vrr_state_.complete_initial(false, readback_valid);
+    vrr_state_.complete_initial(
+        false, readback_valid,
+        vrr_request && vrr_request->valid ? vrr_request->transition_serial : 0);
   if (vrr_report_ && vrr_request && vrr_request->valid) {
     const DrmReportRecord decision{DrmVrrReportRecord{vrr_decision_report(
         *vrr_request, frame.commit_id, frame.generation, false)}};
@@ -427,23 +429,10 @@ output::BackendEvent DrmPresenter::service(const short revents) {
     readback_valid = true;
   }
   if (vrr_contract_enabled_ && vrr_state_initialized_) {
-    if (vrr_state_.kms_state().controllable && pending_->vrr_request &&
-        device_.snapshot().timestamp_monotonic &&
-        (!event.timestamp_available ||
-         event.kernel_timestamp_nanoseconds == 0)) {
-      error =
-          "DRM page-flip timing is unavailable or invalid (sequence=" +
-          std::to_string(event.sequence) + ", timestamp_available=" +
-          (event.timestamp_available ? "true" : "false") +
-          ", kernel_timestamp_nanoseconds=" +
-          std::to_string(event.kernel_timestamp_nanoseconds) +
-          ", timestamp_monotonic=true)";
-      recover_vrr_divergence(error);
-      return fatal_event("page-flip-vrr-timing", std::move(error));
-    }
     auto completed = vrr_state_;
     completed.complete_flip(
         pending_->vrr_plan.desired_enabled, readback_enabled, readback_valid,
+        pending_->vrr_request ? pending_->vrr_request->transition_serial : 0,
         event.sequence, event.kernel_timestamp_nanoseconds,
         event.timestamp_available);
     if (pending_->vrr_request) {

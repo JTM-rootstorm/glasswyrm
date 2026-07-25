@@ -146,19 +146,13 @@ DrmVrrTimingReport DrmPresenter::vrr_timing_report(
     const std::uint64_t commit_id, const std::uint64_t generation,
     const output::VrrPresentationRequest& request,
     const output::VrrPresentationFeedback& feedback) const {
-  const auto target = request.target_interval_nanoseconds;
-  const auto interval = feedback.interval_nanoseconds;
-  const auto distance = interval >= target ? interval - target
-                                            : target - interval;
   return {commit_id,
           generation,
           feedback.flip_sequence,
           feedback.kernel_timestamp_nanoseconds,
-          interval,
-          target,
-          feedback.effective_enabled,
-          feedback.timestamp_available && target != 0 &&
-              distance <= output::vrr::timing_tolerance(target)};
+          feedback.interval_nanoseconds,
+          request.nominal_mode_interval_nanoseconds,
+          feedback.effective_enabled};
 }
 
 }  // namespace glasswyrm::drm

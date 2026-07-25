@@ -14,6 +14,8 @@ public:
     result.connected = true;
     result.kms_controllable = true;
     result.simulated = true;
+    result.connector_property_present = true;
+    result.atomic_test_passed = true;
     result.session_active = true;
     result.timing_available = true;
     return result;
@@ -41,6 +43,7 @@ gw::compositor::Scene scene() {
   gwipc_output_upsert output{};
   output.output_id = 1;
   output.enabled = 1;
+  output.refresh_millihertz = 144'000;
   value.outputs.emplace(1, output);
   gwipc_surface_upsert surface{};
   surface.surface_id = 10;
@@ -87,8 +90,11 @@ int main() {
       scene(), presenter, committed, error);
   require(prepared && prepared->outputs.at(1).request.desired_enabled &&
               prepared->outputs.at(1).request.decision ==
-                  glasswyrm::output::vrr::Decision::Enabled,
-          "pure decision is attached before presentation");
+                  glasswyrm::output::vrr::Decision::Enabled &&
+              prepared->outputs.at(1)
+                      .request.nominal_mode_interval_nanoseconds ==
+                  6'944'444,
+          "pure decision carries the nominal 144 Hz mode interval");
 
   auto disabled = scene();
   auto second_output = disabled.outputs.at(1);
@@ -138,6 +144,22 @@ int main() {
               completed->outputs.at(1).timing.commit_id == 11 &&
               completed->outputs.at(1).timing.presented_generation == 12,
           "state and timing correlate to the presented frame");
+
+  auto unavailable_feedback = feedback;
+  unavailable_feedback.kernel_timestamp_nanoseconds = 0;
+  unavailable_feedback.interval_nanoseconds = 0;
+  unavailable_feedback.timestamp_available = false;
+  const auto degraded = gw::compositor::VrrRuntime::complete(
+      *prepared, {{1, unavailable_feedback}}, 13, 14, error);
+  require(
+      degraded &&
+          glasswyrm::output::vrr::has_reason(
+              degraded->outputs.at(1).state.reason_flags,
+              glasswyrm::output::vrr::Reason::TimingUnavailable) &&
+          degraded->outputs.at(1).timing.timestamp_available == 0 &&
+          degraded->outputs.at(1).timing.kernel_timestamp_nanoseconds == 0 &&
+          degraded->outputs.at(1).timing.interval_nanoseconds == 0,
+      "missing timestamps degrade VRR evidence without rejecting the frame");
 
   auto two_outputs = *prepared;
   two_outputs.outputs.emplace(2, two_outputs.outputs.at(1));

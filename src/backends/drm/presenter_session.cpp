@@ -187,15 +187,13 @@ output::BackendStateResult DrmPresenter::shutdown(std::string& error) noexcept {
       const auto timing = vrr_state_.timing_summary();
       const DrmVrrSummaryReport summary{
           timing.count,
-          timing.within_threshold_count,
-          timing.pass_basis_points,
           timing.minimum_nanoseconds,
           timing.maximum_nanoseconds,
           timing.mean_nanoseconds,
           timing.median_nanoseconds,
-          timing.p95_absolute_error_nanoseconds,
           vrr_state_.enabled_period_count(),
-          vrr_state_.disabled_period_count()};
+          vrr_state_.disabled_period_count(),
+          vrr_state_.timestamp_unavailable_count()};
       vrr_report_ok =
           append_vrr_report(DrmVrrReportRecord{summary}, report_error);
       if (vrr_report_ok) {

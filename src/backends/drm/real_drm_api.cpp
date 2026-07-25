@@ -615,9 +615,16 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
         cookie->timestamp_available && !cookie->timestamp_invalid &&
         timestamp_monotonic_[handle];
     if (cookie->timestamp_available) {
+      if (cookie->kernel_timestamp_nanoseconds == 0) {
+        cookie->timestamp_available = false;
+        cookie->timestamp_invalid = true;
+      }
       const auto previous = last_page_flip_timestamps_.find(handle);
-      if (previous != last_page_flip_timestamps_.end() &&
-          cookie->kernel_timestamp_nanoseconds < previous->second) {
+      if (cookie->timestamp_available &&
+          previous != last_page_flip_timestamps_.end() &&
+          cookie->kernel_timestamp_nanoseconds <= previous->second) {
+        last_page_flip_timestamps_[handle] =
+            cookie->kernel_timestamp_nanoseconds;
         cookie->timestamp_available = false;
         cookie->timestamp_invalid = true;
         cookie->kernel_timestamp_nanoseconds = 0;

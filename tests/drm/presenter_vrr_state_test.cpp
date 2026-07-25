@@ -6,6 +6,7 @@
 #include "tests/helpers/test_support.hpp"
 
 #include <array>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -90,13 +91,13 @@ void controller_feedback() {
   enabled.requested_mode = output::vrr::PolicyMode::Fullscreen;
   enabled.decision = output::vrr::Decision::Enabled;
   enabled.desired_enabled = true;
-  enabled.target_interval_nanoseconds = 16'666'667;
+  enabled.nominal_mode_interval_nanoseconds = 16'666'667;
   const auto transition = state.plan(enabled);
   gw::test::require(transition.accepted && transition.include_property,
                     "eligible transition requests one property-bearing flip");
   state.complete_initial(false, true);
-  state.complete_flip(true, true, true, 10, 1'000'000'000, true);
-  state.complete_flip(true, true, true, 11, 1'016'666'666, true);
+  state.complete_flip(true, true, true, 1, 10, 1'000'000'000, true);
+  state.complete_flip(true, true, true, 1, 11, 1'016'666'666, true);
   const auto feedback = state.feedback();
   gw::test::require(
       feedback.output_id == 7 && feedback.effective_enabled &&
@@ -110,7 +111,7 @@ void controller_feedback() {
   gw::test::require(reaffirmed.include_property,
                     "explicit test injection reaffirms unchanged VRR state");
   auto mistimed = enabled;
-  mistimed.target_interval_nanoseconds = 16'666'666;
+  mistimed.nominal_mode_interval_nanoseconds = 16'666'666;
   gw::test::require(!state.plan(mistimed).accepted,
                     "presenter rejects timing for a different output mode");
   state.mark_suspended_off();
@@ -121,6 +122,102 @@ void controller_feedback() {
                                   output::vrr::Reason::SessionInactive) &&
           !state.effective_enabled(),
       "suspend exposes inactive state with VRR forced off");
+}
+
+void timing_period_lifecycle() {
+  KmsVrrState kms;
+  kms.status = KmsVrrStatus::Controllable;
+  kms.connector_property_present = true;
+  kms.hardware_capable = true;
+  kms.atomic_available = true;
+  kms.crtc_property_present = true;
+  kms.test_off_passed = kms.test_on_passed = kms.controllable = true;
+
+  PresenterVrrState state;
+  state.initialize(7, kms, true, 60'000);
+  state.complete_initial(false, true);
+  state.complete_flip(false, false, true, 10,
+                      std::numeric_limits<std::uint32_t>::max(),
+                      1'000'000'000, true);
+  state.complete_flip(false, false, true, 10, 0, 1'000'000'100, true);
+  gw::test::require(
+      state.feedback().interval_nanoseconds == 100 &&
+          state.timing_summary().count == 1,
+      "sequence wrap remains inside one coherent timing period");
+
+  state.complete_flip(false, false, true, 11, 1, 1'000'000'200, true);
+  gw::test::require(
+      state.feedback().timestamp_available &&
+          state.feedback().interval_nanoseconds == 0 &&
+          state.timing_summary().count == 0,
+      "transition serial change resets an unchanged effective-state period");
+  state.complete_flip(false, false, true, 11, 2, 1'000'000'300, true);
+  gw::test::require(state.feedback().interval_nanoseconds == 100 &&
+                        state.timing_summary().count == 1,
+                    "second same-period sample produces interval evidence");
+
+  state.complete_flip(true, true, true, 12, 3, 1'000'000'400, true);
+  gw::test::require(
+      state.feedback().effective_enabled &&
+          state.feedback().interval_nanoseconds == 0 &&
+          state.timing_summary().count == 0,
+      "effective-state change starts a fresh enabled timing period");
+
+  state.complete_flip(true, true, true, 12, 4, 0, false);
+  gw::test::require(
+      !state.feedback().timestamp_available &&
+          state.feedback().kernel_timestamp_nanoseconds == 0 &&
+          state.feedback().interval_nanoseconds == 0 &&
+          state.timestamp_unavailable_count() == 1 &&
+          state.timing_summary().count == 0,
+      "missing timestamp clears the period without fabricating an interval");
+  state.complete_flip(true, true, true, 12, 5, 1'000'001'000, true);
+  gw::test::require(
+      state.feedback().timestamp_available &&
+          state.feedback().interval_nanoseconds == 0,
+      "first timestamp after evidence loss is baseline only");
+  state.complete_flip(true, true, true, 12, 6, 1'000'001'100, true);
+  gw::test::require(state.feedback().interval_nanoseconds == 100 &&
+                        state.timing_summary().count == 1,
+                    "second recovered timestamp begins interval evidence");
+
+  state.complete_flip(true, true, true, 12, 7, 1'000'001'050, true);
+  gw::test::require(
+      !state.feedback().timestamp_available &&
+          state.feedback().interval_nanoseconds == 0 &&
+          state.timestamp_unavailable_count() == 2 &&
+          state.timing_summary().count == 0,
+      "timestamp regression degrades evidence and resets current statistics");
+  state.complete_flip(true, true, true, 12, 8, 1'000'001'150, true);
+  gw::test::require(
+      state.feedback().timestamp_available &&
+          state.feedback().interval_nanoseconds == 100 &&
+          state.timing_summary().count == 1,
+      "a regression timestamp becomes only the next period baseline");
+
+  state.mark_suspended_off();
+  state.mark_acquired_off();
+  state.mark_session_active();
+  state.complete_flip(true, true, true, 13, 9, 2'000'000'000, true);
+  gw::test::require(
+      state.feedback().timestamp_available &&
+          state.feedback().interval_nanoseconds == 0 &&
+          state.timing_summary().count == 0,
+      "first post-acquire timestamp cannot span VT downtime");
+  state.complete_flip(true, true, true, 13, 10, 2'000'000'100, true);
+  gw::test::require(
+      state.feedback().interval_nanoseconds == 100 &&
+          state.timing_summary().count == 1 &&
+          state.enabled_period_count() == 2 &&
+          state.disabled_period_count() == 4,
+      "current statistics and lifetime state-period counters remain separate");
+
+  PresenterVrrState restarted;
+  restarted.initialize(7, kms, true, 60'000);
+  gw::test::require(!restarted.feedback().timestamp_available &&
+                        restarted.feedback().interval_nanoseconds == 0 &&
+                        restarted.timing_summary().count == 0,
+                    "presenter restart begins without an inherited baseline");
 }
 
 void deterministic_reports() {
@@ -141,6 +238,38 @@ void deterministic_reports() {
               std::string::npos &&
           encoded.find("timestamp") == std::string::npos,
       "VRR report is stable JSON without wall-clock timestamps");
+
+  const DrmVrrTimingReport timing{
+      2, 2, 11, 1'014'285'714, 14'285'714, 6'944'444, true};
+  const auto encoded_timing =
+      serialize_drm_vrr_report_record(DrmVrrReportRecord{timing});
+  gw::test::require(
+      valid_drm_vrr_report_record(DrmVrrReportRecord{timing}) &&
+          encoded_timing.find(
+              "\"nominal_mode_interval_nanoseconds\":6944444") !=
+              std::string::npos &&
+          encoded_timing.find("\"interval_nanoseconds\":14285714") !=
+              std::string::npos &&
+          encoded_timing.find("target_interval_nanoseconds") ==
+              std::string::npos &&
+          encoded_timing.find("within_threshold") == std::string::npos,
+      "DRM timing reports distinguish a 144 Hz mode from raw 70 Hz cadence");
+
+  const DrmVrrSummaryReport summary{
+      3, 14'000'000, 15'000'000, 14'333'333, 14'285'714, 1, 1, 2};
+  const auto encoded_summary =
+      serialize_drm_vrr_report_record(DrmVrrReportRecord{summary});
+  gw::test::require(
+      valid_drm_vrr_report_record(DrmVrrReportRecord{summary}) &&
+          encoded_summary.find("\"sample_count\":3") != std::string::npos &&
+          encoded_summary.find("\"median_nanoseconds\":14285714") !=
+              std::string::npos &&
+          encoded_summary.find("\"timestamp_unavailable_count\":2") !=
+              std::string::npos &&
+          encoded_summary.find("pass_count") == std::string::npos &&
+          encoded_summary.find("pass_basis_points") == std::string::npos &&
+          encoded_summary.find("absolute_error") == std::string::npos,
+      "DRM timing summaries contain raw interval statistics without a verdict");
 }
 
 } // namespace
@@ -148,6 +277,7 @@ void deterministic_reports() {
 int main() {
   probe_and_requests();
   controller_feedback();
+  timing_period_lifecycle();
   deterministic_reports();
   return 0;
 }

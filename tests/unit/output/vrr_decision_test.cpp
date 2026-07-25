@@ -140,8 +140,10 @@ void test_output_session_and_presenter_reasons() {
                   "output reconfiguration disables VRR");
   input = eligible();
   input.output.kms_controllable = false;
-  require_blocked(input, Reason::PresenterRejected, Decision::Rejected,
-                  "uncontrollable presenter rejects VRR");
+  auto result = evaluate(input);
+  require(result.desired_enabled &&
+              !has_reason(result.reasons, Reason::PresenterRejected),
+          "capability evaluation does not invent presenter rejection");
   input = eligible();
   input.presenter.accepted = false;
   require_blocked(input, Reason::PresenterRejected, Decision::Rejected,
@@ -153,7 +155,7 @@ void test_output_session_and_presenter_reasons() {
 
   input = eligible();
   input.presenter.timing_available = false;
-  auto result = evaluate(input);
+  result = evaluate(input);
   require(result.desired_enabled &&
               has_reason(result.reasons, Reason::TimingUnavailable),
           "missing timing is informational and does not prevent observation");
@@ -163,6 +165,47 @@ void test_output_session_and_presenter_reasons() {
   require(result.desired_enabled &&
               has_reason(result.reasons, Reason::HardwareBehaviorUnconfirmed),
           "unconfirmed hardware behavior remains informational");
+}
+
+void test_capability_coherence() {
+  const auto coherent = eligible().output;
+  require(capability_facts_coherent(coherent),
+          "complete physical capability facts are coherent");
+
+  auto facts = coherent;
+  facts.hardware_capable = false;
+  require(!capability_facts_coherent(facts),
+          "controllability requires hardware capability");
+  facts = coherent;
+  facts.atomic_kms_available = false;
+  require(!capability_facts_coherent(facts),
+          "controllability requires atomic KMS");
+  facts = coherent;
+  facts.vrr_property_present = false;
+  require(!capability_facts_coherent(facts),
+          "controllability requires the CRTC VRR property");
+  facts = coherent;
+  facts.atomic_test_passed = false;
+  require(!capability_facts_coherent(facts),
+          "controllability requires successful atomic tests");
+  facts = coherent;
+  facts.kms_controllable = false;
+  require(!capability_facts_coherent(facts),
+          "complete physical prerequisites imply controllability");
+
+  facts = coherent;
+  facts.kms_controllable = false;
+  facts.hardware_capable = false;
+  facts.atomic_test_passed = false;
+  require(capability_facts_coherent(facts),
+          "specific unsupported physical facts remain coherent");
+
+  facts = {true, true, false, false, false, true, true, true, true};
+  require(capability_facts_coherent(facts),
+          "documented simulated-headless capability profile is coherent");
+  facts.hardware_capable = true;
+  require(!capability_facts_coherent(facts),
+          "simulated output cannot claim physical hardware capability");
 }
 
 void test_candidate_window_and_surface_reasons() {
@@ -284,6 +327,7 @@ int main() {
   test_modes_and_candidate_semantics();
   test_output_session_and_presenter_reasons();
   test_candidate_window_and_surface_reasons();
+  test_capability_coherence();
   test_simulation_reason_stability_and_precedence();
   return 0;
 }

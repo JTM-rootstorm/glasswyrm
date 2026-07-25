@@ -71,6 +71,8 @@ struct DecisionResult {
   std::optional<Reason> primary;
 };
 
+[[nodiscard]] bool
+capability_facts_coherent(const OutputFacts &facts) noexcept;
 [[nodiscard]] DecisionResult evaluate(const DecisionInput &input) noexcept;
 
 } // namespace glasswyrm::output::vrr

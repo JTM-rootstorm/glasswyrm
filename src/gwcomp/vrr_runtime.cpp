@@ -128,20 +128,26 @@ std::optional<PreparedVrrFrame> VrrRuntime::prepare(
         {capability->kms_controllable, true, capability->timing_available,
          false},
         candidate_for(scene, output_id)};
+    if (!glasswyrm::output::vrr::capability_facts_coherent(input.output)) {
+      error = "presentation backend reported incoherent VRR capability facts";
+      return std::nullopt;
+    }
     const auto result = glasswyrm::output::vrr::evaluate(input);
-    VrrPresentationRequest request{
-        true,
-        input.mode,
-        result.decision,
-        result.desired_enabled,
-        result.candidate_window_id,
-        result.candidate_surface_id,
-        result.reasons | capability->reason_flags,
+    VrrPresentationRequest request;
+    request.valid = true;
+    request.requested_mode = input.mode;
+    request.decision = result.decision;
+    request.desired_enabled = result.desired_enabled;
+    request.candidate_window_id = result.candidate_window_id;
+    request.candidate_surface_id = result.candidate_surface_id;
+    request.reason_flags = result.reasons | capability->reason_flags;
+    request.state_generation =
         scene.vrr.policy_generation != 0 ? scene.vrr.policy_generation
-                                         : scene.configuration_generation,
-        1,
+                                         : scene.configuration_generation;
+    request.transition_serial = 1;
+    request.nominal_mode_interval_nanoseconds =
         glasswyrm::output::vrr::refresh_interval_nanoseconds(
-            output.refresh_millihertz)};
+            output.refresh_millihertz);
     const auto old = committed.outputs().find(output_id);
     if (old != committed.outputs().end()) {
       request.transition_serial = old->second.state.transition_serial;
@@ -189,6 +195,8 @@ std::optional<CompletedVrrFrame> VrrRuntime::complete(
     auto effective_decision = request.decision;
     auto reasons = request.reason_flags;
     const bool simulated = output.capability.simulated;
+    if (!actual->second.timestamp_available)
+      reasons |= glasswyrm::output::vrr::reason_bit(Reason::TimingUnavailable);
     if (request.desired_enabled && !actual->second.effective_enabled) {
       effective_decision = Decision::Rejected;
       reasons |= glasswyrm::output::vrr::reason_bit(Reason::PresenterRejected);

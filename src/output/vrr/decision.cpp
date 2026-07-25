@@ -37,8 +37,6 @@ void evaluate_output(const DecisionInput &input, ReasonMask &blocking,
     if (!input.output.atomic_test_passed)
       block(Reason::VrrAtomicTestFailed);
   }
-  if (!input.output.kms_controllable)
-    block(Reason::PresenterRejected);
   if (!input.display.session_active)
     block(Reason::SessionInactive);
   if (input.display.vt_suspended)
@@ -122,6 +120,28 @@ Decision blocked_decision(const Reason primary) noexcept {
 }
 
 } // namespace
+
+bool capability_facts_coherent(const OutputFacts &facts) noexcept {
+  if (facts.simulated) {
+    return !facts.drm && !facts.hardware_capable &&
+           !facts.atomic_kms_available && facts.vrr_property_present &&
+           facts.atomic_test_passed && facts.kms_controllable;
+  }
+  if (facts.hardware_capable && !facts.drm)
+    return false;
+  if (facts.atomic_kms_available && !facts.drm)
+    return false;
+  if (facts.vrr_property_present && !facts.drm)
+    return false;
+  if (facts.atomic_test_passed &&
+      (!facts.hardware_capable || !facts.atomic_kms_available ||
+       !facts.vrr_property_present))
+    return false;
+  const bool prerequisites =
+      facts.drm && facts.hardware_capable && facts.atomic_kms_available &&
+      facts.vrr_property_present && facts.atomic_test_passed;
+  return facts.kms_controllable == prerequisites;
+}
 
 DecisionResult evaluate(const DecisionInput &input) noexcept {
   DecisionResult result;

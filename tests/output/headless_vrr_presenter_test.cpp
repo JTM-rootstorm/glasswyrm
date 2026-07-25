@@ -86,7 +86,7 @@ int main() {
                         output::vrr::Reason::SimulatedHeadless),
                     9,
                     1,
-                    20'000'000};
+                    16'666'667};
   requests[right] = {true,
                      output::vrr::PolicyMode::Off,
                      output::vrr::Decision::Disabled,
@@ -96,7 +96,7 @@ int main() {
                      output::vrr::reason_bit(output::vrr::Reason::PolicyOff),
                      9,
                      1,
-                     0};
+                     13'333'333};
   gw::test::require(frames.set_vrr_requests(requests, error), error);
 
   const auto presented = presenter.present(frames.view());
@@ -107,9 +107,9 @@ int main() {
   const auto &left_feedback = presented.vrr_feedback.at(left);
   const auto &right_feedback = presented.vrr_feedback.at(right);
   gw::test::require(
-      left_feedback.effective_enabled && left_feedback.property_readback_valid &&
-          left_feedback.session_active && left_feedback.flip_sequence == 1 &&
-          left_feedback.interval_nanoseconds == 20'000'000 &&
+          left_feedback.effective_enabled && left_feedback.property_readback_valid &&
+              left_feedback.session_active && left_feedback.flip_sequence == 1 &&
+          left_feedback.interval_nanoseconds == 16'666'667 &&
           left_feedback.timestamp_available &&
           (left_feedback.flags & output::kVrrPresentationFeedbackSimulated) != 0,
       "enabled output returns requested deterministic simulated timing");
@@ -133,8 +133,15 @@ int main() {
               std::string::npos &&
           report_text.find("\"record\":\"restore\"") !=
               std::string::npos &&
+          report_text.find("\"nominal_mode_interval_nanoseconds\":") !=
+              std::string::npos &&
+          report_text.find("target_interval_nanoseconds") ==
+              std::string::npos &&
+          report_text.find("within_threshold") == std::string::npos &&
+          report_text.find("pass_basis_points") == std::string::npos &&
+          report_text.find("absolute_error") == std::string::npos &&
           report_text.find("wall_clock") == std::string::npos,
-      "headless report contains deterministic lifecycle records only");
+      "headless report contains raw deterministic timing without a verdict");
 
   std::filesystem::remove_all(directory);
 }
