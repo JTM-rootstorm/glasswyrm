@@ -141,6 +141,13 @@ if get_option('glasswyrmd')
         m14_vrr_integrated_test = find_program(
           tests_source_dir / 'apps/m14_vrr_integrated_test.sh',
         )
+        m14_integrated_sanitized = get_option('asan') or get_option('ubsan')
+        m14_integrated_client_timeout = '60'
+        m14_integrated_test_timeout = 90
+        if m14_integrated_sanitized
+          m14_integrated_client_timeout = '120'
+          m14_integrated_test_timeout = 150
+        endif
         test(
           'm14-vrr-180-frame-integrated',
           m14_vrr_integrated_test,
@@ -152,11 +159,12 @@ if get_option('glasswyrmd')
             m14_client_state_validator.full_path(),
             m14_vrr_integrated_validator.full_path(),
             m14_bounded_damage_test.full_path(),
+            m14_integrated_client_timeout,
           ],
           depends: [gwm_program, gwcomp_program, glasswyrmd_program,
                     m14_vrr_client, m14_bounded_damage_test],
           suite: 'm14-runtime',
-          timeout: 90,
+          timeout: m14_integrated_test_timeout,
         )
       endif
     endif
