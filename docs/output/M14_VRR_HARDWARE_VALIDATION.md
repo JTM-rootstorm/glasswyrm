@@ -47,6 +47,14 @@ systemd-run --scope --unit=glasswyrm-m14-harness \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
+For a reviewed detached launch, add `--unattended` to the final command. This
+permits an automation process whose stdin is not the configured Linux VT, but
+does not permit a different active console: the root doctor and just-in-time
+preflight still read the kernel active-VT and `KD_TEXT` state directly. The
+runner converts ordinary termination signals into a restoration failure and
+executes its cleanup guard before exiting. A kernel/driver failure, power
+loss, or `SIGKILL` still requires the independent recovery route.
+
 The provenance option is deliberately opt-in. Its build-by-default target
 requires the source tree to remain at the configured `HEAD` with no tracked
 changes, then hashes every repository executable used by the physical runner.

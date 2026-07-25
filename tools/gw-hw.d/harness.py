@@ -142,12 +142,16 @@ def _live_failure_summary(
 
 
 def milestone14(config_path: Path, required_base: str, tested_commit: str,
-                confirmed: bool, dry: bool,
+                confirmed: bool, unattended: bool, dry: bool,
                 fixture_dir: Path | None, artifact_dir: Path) -> int:
     if not confirmed:
         print("gw-hw: milestone14-vrr-test requires the literal --yes", file=sys.stderr)
         return 2
     if dry:
+        if unattended:
+            print("gw-hw: --unattended is valid only for the live hardware run",
+                  file=sys.stderr)
+            return 2
         if fixture_dir is None:
             print("gw-hw: --dry-run requires --fixture-dir", file=sys.stderr)
             return 2
@@ -162,7 +166,8 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
         validate_cli_identity(config, required_base, tested_commit)
         if doctor_config(config, None, artifact_dir) != 0:
             raise HarnessError("live doctor failed")
-        runner = FixedLiveRunner(config, artifact_dir)
+        runner = FixedLiveRunner(
+            config, artifact_dir, detached_invocation=unattended)
         runner.run()
         finalize_live(config, artifact_dir, runner)
         return 0
@@ -680,6 +685,9 @@ def parser() -> argparse.ArgumentParser:
     milestone_parser.add_argument("--required-base", required=True)
     milestone_parser.add_argument("--tested-commit", required=True)
     milestone_parser.add_argument("--yes", action="store_true")
+    milestone_parser.add_argument(
+        "--unattended", action="store_true",
+        help="allow a detached launcher after exact live console checks")
     milestone_parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     milestone_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     milestone_parser.add_argument("--artifact-dir", required=True, type=Path)
@@ -695,7 +703,8 @@ def main(arguments: list[str] | None = None) -> int:
                       options.artifact_dir)
     if options.command == "milestone14-vrr-test":
         return milestone14(options.config, options.required_base,
-                           options.tested_commit, options.yes, options.dry_run,
+                           options.tested_commit, options.yes,
+                           options.unattended, options.dry_run,
                            options.fixture_dir, options.artifact_dir)
     return self_test()
 

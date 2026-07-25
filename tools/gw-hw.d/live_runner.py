@@ -112,7 +112,8 @@ class FixedLiveRunner:
                  execute: Any = None, active_tty: str | None = None,
                  verify_paths: bool = True, ready: Any = None,
                  state_reader: Any = None, validate_runtime: bool = True,
-                 preflight_reader: Any = None) -> None:
+                 preflight_reader: Any = None,
+                 detached_invocation: bool = False) -> None:
         self.config = config
         self.artifacts = artifacts
         self.execute = execute or self._execute
@@ -123,6 +124,7 @@ class FixedLiveRunner:
         self.preflight_reader = preflight_reader or self._live_console_preflight
         self.recheck_console = verify_paths or preflight_reader is not None
         self.validate_runtime = validate_runtime
+        self.detached_invocation = detached_invocation
         self.steps: list[str] = []
         self.cleanup_attempted = False
         self.cleanup_errors: list[str] = []
@@ -820,14 +822,17 @@ class FixedLiveRunner:
             for path in FIXED_BINARIES.values():
                 if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
                     raise HarnessError(f"fixed executable is unavailable or unsafe: {path}")
-        current = self.active_tty
-        if current is None:
-            try:
-                current = os.ttyname(sys.stdin.fileno())
-            except OSError as error:
-                raise HarnessError("live run requires invocation from the configured text VT") from error
-        if current != self.config["tty"]:
-            raise HarnessError("live run refused the wrong active VT")
+        if not self.detached_invocation:
+            current = self.active_tty
+            if current is None:
+                try:
+                    current = os.ttyname(sys.stdin.fileno())
+                except OSError as error:
+                    raise HarnessError(
+                        "live run requires invocation from the configured "
+                        "text VT or explicit --unattended") from error
+            if current != self.config["tty"]:
+                raise HarnessError("live run refused the wrong active VT")
         if self.command_result([
                 str(FIXED_BINARIES["systemctl"]), "is-active",
                 "display-manager.service"]).succeeded:
@@ -923,8 +928,13 @@ class FixedLiveRunner:
                 self.cleanup_errors.append(f"runtime directory cleanup failed: {error}")
         self.record_restoration_evidence()
 
+    @staticmethod
+    def _handle_termination(signum: int, _frame: object) -> None:
+        raise HarnessError(f"live run interrupted by signal {signum}")
+
     def run(self) -> None:
         self.preflight()
+        previous_handlers: dict[int, Any] = {}
         try:
             self._step(1)
             self.before_state = self.state_reader()
@@ -936,7 +946,12 @@ class FixedLiveRunner:
                               str(self.artifacts / "kms-before.json")])
             self.verify_live_console()
             if self.verify_paths:
-                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                for signum, handler in (
+                        (signal.SIGHUP, signal.SIG_IGN),
+                        (signal.SIGINT, self._handle_termination),
+                        (signal.SIGTERM, self._handle_termination)):
+                    previous_handlers[signum] = signal.getsignal(signum)
+                    signal.signal(signum, handler)
             self.command([str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit])
             self.getty_stopped = True
             self._step(2); self.start_unit(LIVE_UNITS["gwm"], "gwm", ["--ipc-socket", str(RUNTIME_ROOT / "gwm.sock")]); self.wait_path(RUNTIME_ROOT / "gwm.sock")
@@ -976,6 +991,8 @@ class FixedLiveRunner:
         finally:
             if not self.cleanup_attempted:
                 self.cleanup()
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
 
     def start_stack_after_gwm(self) -> None:
         drm = str(self.config["drm_device"]); tty = str(self.config["tty"])
