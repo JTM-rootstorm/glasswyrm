@@ -70,7 +70,7 @@ GUEST_SCRIPT
 }
 
 milestone10_doctor() {
-  local failed=0 xml video graphics vgamem state probe
+  local failed=0 xml video_xml video graphics vgamem state probe
   command_exists virsh || return 1
   if command_exists magick; then
     printf '[ok] ImageMagick screenshot conversion\n'
@@ -78,9 +78,10 @@ milestone10_doctor() {
     printf '[missing] ImageMagick magick command for screenshot conversion\n'; failed=1
   fi
   if xml=$(virsh --connect "$LIBVIRT_URI" dumpxml "$VM_DOMAIN" 2>/dev/null); then
-    video=$(sed -n "s/.*<model[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
+    video_xml=$(sed -n '/<video>/,/<\/video>/p' <<<"$xml")
+    video=$(sed -n "s/.*<model[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$video_xml" | head -n1)
     graphics=$(sed -n "s/.*<graphics[^>]*type=['\"]\([^'\"]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
-    vgamem=$(sed -n "s/.*<model[^>]*vgamem=['\"]\([0-9]*\)['\"].*/\1/p" <<<"$xml" | head -n1)
+    vgamem=$(sed -n "s/.*<model[^>]*vgamem=['\"]\([0-9]*\)['\"].*/\1/p" <<<"$video_xml" | head -n1)
     if [[ -n $video ]]; then printf '[ok] libvirt video model: %s\n' "$video"; else printf '[missing] libvirt video model\n'; failed=1; fi
     if [[ -n $graphics ]]; then printf '[ok] libvirt graphics type: %s\n' "$graphics"; else printf '[missing] libvirt graphics console\n'; failed=1; fi
     if [[ $video == qxl ]]; then

@@ -151,7 +151,12 @@ case " $* " in
   *' domstate '*) printf 'running\n' ;;
   *' dumpxml '*)
     if [[ ${GW_VM_TEST_QXL_LOW:-0} == 1 ]]; then
-      printf '<domain><devices><video><model type="qxl" vgamem="16384"/></video><graphics type="spice"/></devices></domain>\n'
+      printf '%s\n' \
+        '<domain><devices>' \
+        '<interface><model type="virtio"/></interface>' \
+        '<video><model type="qxl" vgamem="16384"/></video>' \
+        '<graphics type="spice"/>' \
+        '</devices></domain>'
     else
       printf '<domain><devices><video><model type="virtio"/></video><graphics type="spice"/></devices></domain>\n'
     fi
