@@ -45,6 +45,13 @@ output, and every enabled output's ID, physical extent, scale, transform, and
 visible hash in stable ID order. The aggregate is evidence metadata; it never
 replaces historical one-output fixtures.
 
+The committed frame set also carries a bounded two-entry visible-hash history
+per output. A staged transaction may reuse an exact historical FNV value only
+after a full byte-for-byte comparison with its immutable cached pixels.
+History is inherited through private shared snapshots, so rejection or timeout
+discards speculative cache updates with the rest of the staged frame. Cache
+allocation is best-effort and never changes canonical hash semantics.
+
 Headless presentation publishes every staged output artifact atomically. The
 DRM presenter accepts exactly one native-sized output frame and rejects a
 multi-output set before any KMS mutation.
