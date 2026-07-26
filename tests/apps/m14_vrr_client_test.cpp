@@ -148,11 +148,28 @@ void test_cadence_and_pixels() {
               even[4] != odd[4] && even.front() == odd[4],
           "cadence alternates only the fixed bounded rectangle");
   EventfdDamageProducer producer;
-  require(producer.produce(0) == even && producer.produce(1) == odd,
-          "eventfd producer synchronizes exact cadence damage publication");
+  bool rejected_unprepared = false;
+  try {
+    (void)producer.produce(0);
+  } catch (const std::runtime_error&) {
+    rejected_unprepared = true;
+  }
+  producer.prepare(0);
+  bool rejected_overlap = false;
+  try {
+    producer.prepare(1);
+  } catch (const std::runtime_error&) {
+    rejected_overlap = true;
+  }
+  const auto produced_even = producer.produce(0);
+  producer.prepare(1);
+  require(rejected_unprepared && rejected_overlap && produced_even == even &&
+              producer.produce(1) == odd,
+          "eventfd producer precomputes one exact cadence frame at a time");
 }
 
 void test_presentation_pacer() {
+  static_assert(kPresentationPollNanoseconds < kFinalSpinNanoseconds);
   PresentationPacer pacer(3, 10, 50);
   std::string error;
   require(pacer.begin({7, 9}, 100, error), "pacer accepts an initial marker");

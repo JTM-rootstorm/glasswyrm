@@ -302,19 +302,28 @@ void set_preference(xcb_connection_t *connection, const xcb_window_t window,
   std::free(state);
 }
 
+xcb_void_cookie_t enqueue_pixels(
+    xcb_connection_t *connection, const xcb_drawable_t drawable,
+    const xcb_gcontext_t gc, const std::uint16_t width,
+    const std::uint16_t height, const std::int16_t x, const std::int16_t y,
+    const std::vector<std::uint32_t> &pixels, const std::uint8_t depth) {
+  require(pixels.size() == static_cast<std::size_t>(width) * height,
+          "pixel rectangle size mismatch");
+  return xcb_put_image_checked(
+      connection, XCB_IMAGE_FORMAT_Z_PIXMAP, drawable, gc, width, height, x, y,
+      0, depth,
+      static_cast<std::uint32_t>(pixels.size() * sizeof(pixels[0])),
+      reinterpret_cast<const std::uint8_t *>(pixels.data()));
+}
+
 void put_pixels(xcb_connection_t *connection, const xcb_drawable_t drawable,
                 const xcb_gcontext_t gc, const std::uint16_t width,
                 const std::uint16_t height, const std::int16_t x,
                 const std::int16_t y, const std::vector<std::uint32_t> &pixels,
                 const std::uint8_t depth) {
-  require(pixels.size() == static_cast<std::size_t>(width) * height,
-          "pixel rectangle size mismatch");
   checked(connection,
-          xcb_put_image_checked(
-              connection, XCB_IMAGE_FORMAT_Z_PIXMAP, drawable, gc, width,
-              height, x, y, 0, depth,
-              static_cast<std::uint32_t>(pixels.size() * sizeof(pixels[0])),
-              reinterpret_cast<const std::uint8_t *>(pixels.data())),
+          enqueue_pixels(connection, drawable, gc, width, height, x, y, pixels,
+                         depth),
           "core PutImage failed");
 }
 
@@ -471,6 +480,9 @@ int run_client(const ClientOptions &options) {
       std::string pacing_error;
       require(pacer.begin(initial.marker, monotonic_nanoseconds(), pacing_error),
               "could not initialize presentation cadence pacing");
+      producer.prepare(0);
+      std::vector<xcb_void_cookie_t> cadence_checks;
+      cadence_checks.reserve(options.frame_count);
       for (;;) {
         const auto event = pacer.next(monotonic_nanoseconds());
         if (event.action == PresentationPacerAction::Complete)
@@ -488,7 +500,8 @@ int run_client(const ClientOptions &options) {
                 observed.action == PresentationPacerAction::Timeout)
               throw std::runtime_error(observed.detail);
             if (observed.action == PresentationPacerAction::Wait)
-              std::this_thread::sleep_for(std::chrono::milliseconds(1));
+              std::this_thread::sleep_for(std::chrono::nanoseconds(
+                  gw::test::m14::kPresentationPollNanoseconds));
           } else {
             require(gw::test::m14::wait_until_monotonic(
                         event.scheduled_deadline_nanoseconds),
@@ -499,14 +512,18 @@ int run_client(const ClientOptions &options) {
         require(event.action == PresentationPacerAction::SubmitNow,
                 "presentation pacer emitted an invalid action");
         const auto pixels = producer.produce(event.frame_ordinal - 1U);
-        put_pixels(connection, window, gc, gw::test::m14::kDamageWidth,
-                   gw::test::m14::kDamageHeight, 0, 0, pixels,
-                   screen.root_depth);
+        cadence_checks.push_back(enqueue_pixels(
+            connection, window, gc, gw::test::m14::kDamageWidth,
+            gw::test::m14::kDamageHeight, 0, 0, pixels, screen.root_depth));
         require(xcb_flush(connection) > 0, "could not flush cadence frame");
         const auto submitted_at = monotonic_nanoseconds();
         if (!pacer.submitted(event.frame_ordinal, submitted_at, pacing_error))
           throw std::runtime_error(pacing_error);
+        if (event.frame_ordinal < options.frame_count)
+          producer.prepare(event.frame_ordinal);
       }
+      for (const auto cookie : cadence_checks)
+        checked(connection, cookie, "cadence PutImage failed");
       presentation = pacer.stats();
     }
 

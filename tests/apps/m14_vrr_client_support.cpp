@@ -246,11 +246,20 @@ void EventfdDamageProducer::run() {
 
 std::vector<std::uint32_t>
 EventfdDamageProducer::produce(const std::uint32_t frame) {
-  frame_.store(frame);
-  signal(request_);
+  if (!prepared_frame_ || *prepared_frame_ != frame)
+    throw std::runtime_error("cadence frame was not prepared in sequence");
   wait(ready_);
   std::lock_guard lock(mutex_);
+  prepared_frame_.reset();
   return pixels_;
+}
+
+void EventfdDamageProducer::prepare(const std::uint32_t frame) {
+  if (prepared_frame_)
+    throw std::runtime_error("cadence frame preparation is already pending");
+  frame_.store(frame);
+  prepared_frame_ = frame;
+  signal(request_);
 }
 
 std::uint64_t
