@@ -99,6 +99,13 @@ unconsumed runtime trigger during cleanup. This bounds a high-resolution run
 to two full-size PPM proof frames while preserving the default
 `gwcomp --mirror-dump-dir` behavior for other workflows.
 
+The held client has an exact three-repaint budget. After the runner returns
+from the inactive VT to the configured active VT, it requests and waits for one
+private bounded repaint before querying the active VRR snapshot. That snapshot
+therefore follows a normal compositor transaction instead of reusing the last
+pre-release cache state. The remaining two repaint requests are reserved for
+the off/enabled one-shot pixel captures described above.
+
 The cadence client prepares each deterministic damage frame ahead of its
 absolute deadline, polls the presentation marker below the evidence tolerance,
 and defers checked PutImage completion until the bounded sequence ends. X11

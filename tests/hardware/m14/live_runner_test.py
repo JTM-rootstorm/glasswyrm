@@ -15,6 +15,7 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 
+import live_runner as live_runner_module  # noqa: E402
 from common import HarnessError  # noqa: E402
 from evidence import sealed_vrr_records  # noqa: E402
 from live_runner import (  # noqa: E402
@@ -575,6 +576,157 @@ def test_client_result_uses_bounded_live_deadline(root: Path) -> None:
     assert launches[0][launches[0].index("--output") + 1] == "DP-1"
 
 
+def test_repaint_client_reserves_vt_and_capture_budget(root: Path) -> None:
+    calls: list[tuple[list[str], Path | None]] = []
+
+    def execute(argv: list[str], output: Path | None) -> int:
+        calls.append((argv, output))
+        return 0
+
+    runner = make_runner(root, execute)
+    runner.wait_path = lambda _path, _kind, _attempts: None
+    runner.start_client("always", "windowed", "default", repaint=True)
+
+    launch = next(
+        argv for argv, _ in calls
+        if launched_unit(argv) == "m14-hardware-client-always.service"
+    )
+    assert launch.count("--repaint-trigger") == 1
+    assert launch[launch.index("--repaint-trigger") + 1] == \
+        "/run/glasswyrm-m14-hardware/repaint.request"
+    assert launch.count("--repaint-count") == 1
+    assert launch[launch.index("--repaint-count") + 1] == "3"
+
+
+def test_bounded_repaint_trigger_is_private_and_consumed(root: Path) -> None:
+    runtime = root / "runtime"
+    runtime.mkdir(mode=0o700)
+    (root / "vrr-part-1.jsonl").write_text("", encoding="utf-8")
+    original_runtime = live_runner_module.RUNTIME_ROOT
+    live_runner_module.RUNTIME_ROOT = runtime
+    try:
+        runner = make_runner(
+            root, lambda _argv, _output: 0, validate_runtime=True,
+        )
+        observed: list[Path] = []
+        sealed_starts: list[int] = []
+
+        def consume(path: Path) -> None:
+            observed.append(path)
+            status = path.lstat()
+            assert status.st_mode & 0o077 == 0
+            assert path.is_file() and not path.is_symlink()
+            path.unlink()
+
+        runner.wait_absent = consume
+        runner.wait_for_sealed_presentation = sealed_starts.append
+        runner.request_bounded_repaint()
+        trigger = runtime / "repaint.request"
+        assert observed == [trigger]
+        assert sealed_starts == [0]
+        assert not trigger.exists()
+
+        trigger.write_text("collision", encoding="ascii")
+        expect_harness_error(
+            runner.request_bounded_repaint,
+            "bounded repaint trigger already exists",
+        )
+        assert trigger.read_text(encoding="ascii") == "collision"
+    finally:
+        live_runner_module.RUNTIME_ROOT = original_runtime
+
+
+def test_bounded_repaint_timeout_fails_closed(root: Path) -> None:
+    runtime = root / "runtime"
+    runtime.mkdir(mode=0o700)
+    (root / "vrr-part-1.jsonl").write_text("", encoding="utf-8")
+    original_runtime = live_runner_module.RUNTIME_ROOT
+    live_runner_module.RUNTIME_ROOT = runtime
+    try:
+        runner = make_runner(
+            root, lambda _argv, _output: 0, validate_runtime=True,
+        )
+        trigger = runtime / "repaint.request"
+
+        def timeout(path: Path) -> None:
+            assert path == trigger and path.is_file()
+            raise HarnessError(f"timed out waiting for removal: {path}")
+
+        runner.wait_absent = timeout
+        expect_harness_error(
+            runner.request_bounded_repaint,
+            f"timed out waiting for removal: {trigger}",
+        )
+        assert trigger.is_file()
+        assert trigger.stat().st_mode & 0o077 == 0
+    finally:
+        live_runner_module.RUNTIME_ROOT = original_runtime
+
+
+def test_bounded_repaint_requires_new_sealed_transaction(root: Path) -> None:
+    report = root / "vrr-part-1.jsonl"
+    drm_report = root / "milestone14-drm-report.jsonl"
+    prefix = '{"record":"vrr-capability"}\n'
+    report.write_text(prefix, encoding="utf-8")
+    identity = {
+        "output_id": 1, "commit_id": 2, "generation": 3,
+        "presentation_token": 4,
+    }
+    stream = {"record": "evidence-stream", **identity, "stream": 2}
+    decision = {
+        "record": "vrr-decision", "commit_id": 2, "generation": 3,
+    }
+    seal = {
+        "record": "evidence-seal", **identity, "required_streams": 3,
+        "committed_streams": 3, "mirror_frame": 0,
+        "mirror_fnv1a64": "0000000000000000", "mirror_file": "",
+    }
+    drm_report.write_text(
+        json.dumps({"record": "evidence-stream", **identity, "stream": 1}) +
+        "\n",
+        encoding="utf-8",
+    )
+    report.write_text(
+        prefix + "".join(json.dumps(record) + "\n"
+                         for record in (stream, decision, seal)),
+        encoding="utf-8",
+    )
+    runner = make_runner(
+        root, lambda _argv, _output: 0, validate_runtime=True,
+    )
+    runner.wait_for_sealed_presentation(len(prefix.encode("utf-8")))
+
+    report.write_text(prefix + json.dumps(stream) + "\n", encoding="utf-8")
+    original_sleep = live_runner_module.time.sleep
+    live_runner_module.time.sleep = lambda _seconds: None
+    try:
+        expect_harness_error(
+            lambda: runner.wait_for_sealed_presentation(
+                len(prefix.encode("utf-8")),
+            ),
+            "bounded repaint did not produce sealed presentation evidence",
+        )
+    finally:
+        live_runner_module.time.sleep = original_sleep
+
+
+def test_active_vt_snapshot_follows_one_repaint(root: Path) -> None:
+    runner = make_runner(root, lambda _argv, _output: 0)
+    events: list[tuple[object, ...]] = []
+    runner.request_bounded_repaint = lambda: events.append(("repaint",))
+    runner.snapshot = lambda name, policy, effective: events.append(
+        ("snapshot", name, policy, effective),
+    ) or {}
+
+    runner.verify_active_vt_reevaluation()
+
+    assert events == [
+        ("repaint",),
+        ("snapshot", "milestone14-vt-active.json",
+         "always-eligible", True),
+    ]
+
+
 def test_cadence_client_requires_v3_presentation_state(root: Path) -> None:
     state = {
         "schema": "glasswyrm.m14-vrr-client.v3",
@@ -905,6 +1057,26 @@ def main() -> int:
         client_wait = root / "client-wait"
         client_wait.mkdir()
         test_client_result_uses_bounded_live_deadline(client_wait)
+
+        repaint_client = root / "repaint-client"
+        repaint_client.mkdir()
+        test_repaint_client_reserves_vt_and_capture_budget(repaint_client)
+
+        repaint_trigger = root / "repaint-trigger"
+        repaint_trigger.mkdir()
+        test_bounded_repaint_trigger_is_private_and_consumed(repaint_trigger)
+
+        repaint_timeout = root / "repaint-timeout"
+        repaint_timeout.mkdir()
+        test_bounded_repaint_timeout_fails_closed(repaint_timeout)
+
+        repaint_seal = root / "repaint-seal"
+        repaint_seal.mkdir()
+        test_bounded_repaint_requires_new_sealed_transaction(repaint_seal)
+
+        active_vt_repaint = root / "active-vt-repaint"
+        active_vt_repaint.mkdir()
+        test_active_vt_snapshot_follows_one_repaint(active_vt_repaint)
 
         client_timeout = root / "client-timeout"
         client_timeout.mkdir()

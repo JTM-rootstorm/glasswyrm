@@ -433,7 +433,9 @@ id fb pos size
         if (repaint_client is None or
                 repaint_client.count("--repaint-trigger") != 1 or
                 repaint_client.count("--repaint-count") != 1 or
-                "2" not in repaint_client):
+                repaint_client[
+                    repaint_client.index("--repaint-count") + 1
+                ] != "3"):
             raise AssertionError("bounded physical repaint trigger is absent")
         snapshot_attempts = 0
         def converging(argv: list[str], output: Path | None) -> int:
