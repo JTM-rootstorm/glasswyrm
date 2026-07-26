@@ -58,6 +58,8 @@ int main() {
   upper->storage->fill({0, 0, 3, 3}, 0x0000ff00U);
   clipped_grandchild->storage->fill({0, 0, 4, 3}, 0x000000ffU);
 
+  gw::test::require(direct_top_level_storage(resources, base + 1) == nullptr,
+                    "mapped InputOutput child requires subtree composition");
   const auto composed = compose_top_level_subtree(resources, base + 1);
   gw::test::require(composed.has_value(), "compose subtree");
   gw::test::require(composed->at(0, 0) == 0xff101010U,
@@ -108,5 +110,10 @@ int main() {
           lower->width == 6 && lower->height == 5 &&
           lower->storage == storage_before_failure,
       "failed child backing resize leaves geometry and storage atomic");
+
+  lower->map_state = MapState::Unmapped;
+  gw::test::require(direct_top_level_storage(resources, base + 1) ==
+                        top->storage.get(),
+                    "childless visible subtree publishes canonical storage");
   return 0;
 }

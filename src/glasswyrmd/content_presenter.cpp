@@ -295,6 +295,9 @@ bool ContentPresenter::prepare_content(
       buffer_dirty = normalize(found->second.pending_buffer,
                                {0, 0, presentation->width(),
                                 presentation->height()});
+    } else if (const auto* direct =
+                   direct_top_level_storage(resources, xid)) {
+      presentation = direct;
     } else {
       composed = compose_top_level_subtree(resources, xid);
       if (!composed) return false;

@@ -1,5 +1,6 @@
 #include "glasswyrmd/published_buffer.hpp"
 
+#include <array>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -19,9 +20,14 @@ int main() {
                          published->fd(), 0);
   if (mapping == MAP_FAILED) return 4;
   const auto* words = static_cast<const std::uint32_t*>(mapping);
-  const bool copied = words[6] == 0xff123456U;
+  if (words[6] != 0xff123456U) return 5;
+  pixels->at(1, 2) = 0xff654321U;
+  const std::array<glasswyrm::geometry::Rectangle, 1> dirty{
+      glasswyrm::geometry::Rectangle{1, 2, 1, 1}};
+  if (!published->copy_from(*pixels, dirty) ||
+      !published->signal_ready() || words[9] != 0xff654321U)
+    return 9;
   (void)::munmap(mapping, published->size());
-  if (!copied) return 5;
 
   auto synchronized = PublishedWindowBuffer::create(
       2, 0x200002, *pixels, GWIPC_SYNCHRONIZATION_EVENTFD);

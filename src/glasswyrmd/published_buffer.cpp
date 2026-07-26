@@ -118,7 +118,7 @@ bool PublishedWindowBuffer::copy_from(
                   static_cast<std::size_t>(clipped->width) * 4U);
     }
   }
-  return ::msync(mapping_, size_, MS_SYNC) == 0;
+  return true;
 }
 
 bool PublishedWindowBuffer::copy_all_from(
@@ -128,8 +128,8 @@ bool PublishedWindowBuffer::copy_all_from(
 }
 
 bool PublishedWindowBuffer::signal_ready() noexcept {
-  if (synchronization_ == GWIPC_SYNCHRONIZATION_NONE) return true;
   std::atomic_thread_fence(std::memory_order_release);
+  if (synchronization_ == GWIPC_SYNCHRONIZATION_NONE) return true;
   const std::uint64_t value = 1;
   ssize_t count = -1;
   do {
