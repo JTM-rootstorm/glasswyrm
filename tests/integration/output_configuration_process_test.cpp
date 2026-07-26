@@ -10,7 +10,9 @@
 #include <array>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <poll.h>
 #include <system_error>
@@ -280,7 +282,7 @@ struct Reply {
       GWIPC_OUTPUT_CONFIGURATION_INTERNAL_ERROR};
   std::vector<gwipc_output_upsert> outputs;
   std::vector<std::uint64_t> vrr_capabilities;
-  std::vector<std::uint64_t> vrr_policies;
+  std::map<std::uint64_t, gwipc_vrr_policy_mode> vrr_policies;
   std::vector<std::uint64_t> vrr_states;
 };
 
@@ -336,7 +338,7 @@ Reply receive_reply(gwipc_connection* connection,
         const auto* value =
             gwipc_decoded_output_vrr_policy_upsert(decoded.get());
         require(value != nullptr, "queried VRR policy is typed");
-        reply.vrr_policies.push_back(value->output_id);
+        reply.vrr_policies.emplace(value->output_id, value->mode);
       }
       if (gwipc_message_type(message.get()) ==
           GWIPC_MESSAGE_OUTPUT_VRR_STATE_UPSERT) {
@@ -406,18 +408,28 @@ void send_configuration(gwipc_connection* connection, const std::uint64_t id,
   begin.snapshot_id = id;
   begin.domain = GWIPC_SNAPSHOT_OUTPUTS;
   begin.generation = initial.generation;
-  begin.expected_item_count = outputs.size();
+  begin.expected_item_count =
+      outputs.size() + initial.vrr_policies.size();
   send_control(connection, GWIPC_MESSAGE_SNAPSHOT_BEGIN, begin,
                gwipc_control_encode_snapshot_begin);
   for (const auto& output : outputs)
     send_contract(connection, GWIPC_MESSAGE_OUTPUT_UPSERT,
                   GWIPC_FLAG_SNAPSHOT_ITEM, output,
                   gwipc_contract_encode_output_upsert);
+  for (const auto& [output_id, mode] : initial.vrr_policies) {
+    gwipc_output_vrr_policy_upsert policy{};
+    policy.struct_size = sizeof(policy);
+    policy.output_id = output_id;
+    policy.mode = mode;
+    send_contract(connection, GWIPC_MESSAGE_OUTPUT_VRR_POLICY_UPSERT,
+                  GWIPC_FLAG_SNAPSHOT_ITEM, policy,
+                  gwipc_contract_encode_output_vrr_policy_upsert);
+  }
   gwipc_snapshot_end end{};
   end.struct_size = sizeof(end);
   end.snapshot_id = id;
   end.generation = initial.generation;
-  end.actual_item_count = outputs.size();
+  end.actual_item_count = outputs.size() + initial.vrr_policies.size();
   send_control(connection, GWIPC_MESSAGE_SNAPSHOT_END, end,
                gwipc_control_encode_snapshot_end);
   gwipc_output_configuration_commit commit{};
@@ -614,13 +626,32 @@ int main(int argc, char** argv) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   require(::kill(restarted_vrr_compositor.pid, SIGCONT) == 0,
           "resume replacement M14 compositor");
-  const auto vrr_after_restart = receive_reply(vrr_tool.get());
+  const auto vrr_during_restart = receive_reply(vrr_tool.get());
+  if (vrr_during_restart.result !=
+          GWIPC_OUTPUT_CONFIGURATION_COMPOSITOR_REJECTED ||
+      vrr_during_restart.generation != 1 ||
+      vrr_during_restart.root_width != 1280 ||
+      vrr_during_restart.root_height != 480)
+    std::fprintf(
+        stderr,
+        "restart reply result=%u generation=%llu root=%ux%u vrr_states=%zu\n",
+        static_cast<unsigned>(vrr_during_restart.result),
+        static_cast<unsigned long long>(vrr_during_restart.generation),
+        vrr_during_restart.root_width, vrr_during_restart.root_height,
+        vrr_during_restart.vrr_states.size());
+  require(vrr_during_restart.result ==
+                  GWIPC_OUTPUT_CONFIGURATION_COMPOSITOR_REJECTED &&
+              vrr_during_restart.generation == 1 &&
+              vrr_during_restart.root_width == 1280 &&
+              vrr_during_restart.root_height == 480,
+          "output work queued before peer failure is rejected coherently");
+  const auto vrr_after_restart =
+      configure(vrr_tool.get(), 602, vrr_after_repetition);
   require(vrr_after_restart.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
               vrr_after_restart.generation == 2 &&
               vrr_after_restart.root_width == 640 &&
-              vrr_after_restart.root_height == 960 &&
-              vrr_after_restart.vrr_states.size() == 2,
-          "queued M14 output work waits for compositor replay readiness");
+              vrr_after_restart.root_height == 960,
+          "later M14 output work succeeds after compositor replay");
 
   vrr_tool.reset();
   vrr_server.stop();
