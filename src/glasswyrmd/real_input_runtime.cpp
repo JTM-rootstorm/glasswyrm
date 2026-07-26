@@ -102,8 +102,7 @@ bool ServerRuntime::service_session_changes() {
       abort_interactive();
       (void)server_.state_.grabs().suspend();
     }
-    if ((applied.result == GWIPC_SESSION_STATE_ACCEPTED ||
-         applied.result == GWIPC_SESSION_STATE_ALREADY_APPLIED) &&
+    if (applied.result == GWIPC_SESSION_STATE_ACCEPTED &&
         server_.options_.vrr_protocol) {
       auto* cache = bridge_->vrr_cache();
       const auto status =
