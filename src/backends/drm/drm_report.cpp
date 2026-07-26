@@ -5,11 +5,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iomanip>
-#include <linux/fs.h>
 #include <sstream>
 #include <string_view>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 
@@ -340,6 +338,17 @@ bool identity(const std::filesystem::path& path, struct stat& status,
   return true;
 }
 
+void unlink_if_identity(const std::filesystem::path& path,
+                        const struct stat& expected) noexcept {
+  struct stat current {};
+  if (::lstat(path.c_str(), &current) == 0 &&
+      static_cast<std::uint64_t>(current.st_dev) ==
+          static_cast<std::uint64_t>(expected.st_dev) &&
+      static_cast<std::uint64_t>(current.st_ino) ==
+          static_cast<std::uint64_t>(expected.st_ino))
+    (void)::unlink(path.c_str());
+}
+
 } // namespace
 
 std::string serialize_report_record(const DrmReportRecord& record) {
@@ -369,8 +378,9 @@ StagedDrmReport& StagedDrmReport::operator=(StagedDrmReport&& other) noexcept {
 
 void StagedDrmReport::discard() noexcept {
   if (!active_) return;
-  std::error_code ignored;
-  std::filesystem::remove(temporary_path_, ignored);
+  temporary_path_.clear();
+  final_path_.clear();
+  contents_.clear();
   active_ = false;
 }
 
@@ -429,7 +439,8 @@ bool DrmReport::validate_target(std::string& error) const {
   if (!identity(path_, status, error)) return false;
   if (!S_ISREG(status.st_mode) || status.st_nlink != 1 ||
       static_cast<std::uint64_t>(status.st_dev) != target_identity_.device ||
-      static_cast<std::uint64_t>(status.st_ino) != target_identity_.inode) {
+      static_cast<std::uint64_t>(status.st_ino) != target_identity_.inode ||
+      static_cast<std::uint64_t>(status.st_size) != committed_size_) {
     error = "DRM report target was replaced";
     return false;
   }
@@ -460,13 +471,17 @@ bool DrmReport::stage(const std::span<const DrmReportRecord> records,
     error = "DRM report is not initialized";
     return false;
   }
+  if (poisoned_) {
+    error = "DRM report is unavailable after an ambiguous write failure";
+    return false;
+  }
   if (records.empty()) {
     error = "cannot stage an empty DRM report update";
     return false;
   }
   if (!validate_target(error)) return false;
 
-  std::string contents = committed_contents_;
+  std::string contents;
   for (const auto& record : records) {
     if (!valid(record)) {
       error = "invalid or internally inconsistent DRM report record";
@@ -474,35 +489,8 @@ bool DrmReport::stage(const std::span<const DrmReportRecord> records,
     }
     contents += serialize_report_record(record);
   }
-  const auto temporary =
-      parent_ / ("." + path_.filename().string() + ".stage." +
-                 std::to_string(static_cast<long long>(::getpid())) + "." +
-                 std::to_string(generation_ + 1));
-  const int fd = ::open(temporary.c_str(),
-                        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW,
-                        0600);
-  if (fd < 0) {
-    error = std::string("cannot create staged DRM report: ") +
-            std::strerror(errno);
-    return false;
-  }
-  bool success = write_all(fd, contents, error);
-  if (success && ::fsync(fd) != 0) {
-    error = std::string("DRM report fsync failed: ") + std::strerror(errno);
-    success = false;
-  }
-  if (::close(fd) != 0 && success) {
-    error = std::string("DRM report close failed: ") + std::strerror(errno);
-    success = false;
-  }
-  if (!success) {
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
-    return false;
-  }
 
   StagedDrmReport replacement;
-  replacement.temporary_path_ = temporary;
   replacement.final_path_ = path_;
   replacement.contents_ = std::move(contents);
   replacement.base_generation_ = generation_;
@@ -527,69 +515,100 @@ bool DrmReport::commit(StagedDrmReport& staged, std::string& error) {
   const auto hook_context = std::exchange(before_publish_context_, nullptr);
   if (hook) hook(hook_context);
 
-  const auto exchange_paths = [&]() {
-    return static_cast<int>(::syscall(
-        SYS_renameat2, AT_FDCWD, staged.temporary_path_.c_str(), AT_FDCWD,
-        path_.c_str(), RENAME_EXCHANGE));
-  };
-
-  if (generation_ == 0) {
-    const int result = static_cast<int>(::syscall(
-        SYS_renameat2, AT_FDCWD, staged.temporary_path_.c_str(), AT_FDCWD,
-        path_.c_str(), RENAME_NOREPLACE));
-    if (result != 0) {
-      error = std::string("DRM report atomic publication failed: ") +
-              std::strerror(errno);
-      staged.discard();
-      return false;
-    }
-  } else {
-    if (exchange_paths() != 0) {
-      error = std::string("DRM report atomic exchange failed: ") +
-              std::strerror(errno);
-      staged.discard();
-      return false;
-    }
-
-    struct stat displaced {};
-    const bool expected_target =
-        ::lstat(staged.temporary_path_.c_str(), &displaced) == 0 &&
-        S_ISREG(displaced.st_mode) && displaced.st_nlink == 1 &&
-        static_cast<std::uint64_t>(displaced.st_dev) ==
-            target_identity_.device &&
-        static_cast<std::uint64_t>(displaced.st_ino) == target_identity_.inode;
-    if (!expected_target) {
-      error = "DRM report target raced with atomic publication";
-      if (exchange_paths() != 0) {
-        error += std::string("; rollback failed: ") + std::strerror(errno);
-        // The displaced path may belong to another process. Preserve it rather
-        // than allowing the staged transaction destructor to unlink it.
-        staged.active_ = false;
-      } else {
-        staged.discard();
-      }
-      return false;
-    }
-    if (::unlink(staged.temporary_path_.c_str()) != 0) {
-      error = std::string("cannot remove superseded DRM report: ") +
-              std::strerror(errno);
-      if (exchange_paths() != 0) {
-        error += std::string("; rollback failed: ") + std::strerror(errno);
-        staged.active_ = false;
-      } else {
-        staged.discard();
-      }
-      return false;
-    }
-  }
-  if (!capture_target_identity(error)) {
-    staged.active_ = false;
+  const bool first = generation_ == 0;
+  const int flags = O_WRONLY | O_CLOEXEC | O_NOFOLLOW |
+                    (first ? O_CREAT | O_EXCL : O_APPEND);
+  const int fd = ::open(path_.c_str(), flags, 0600);
+  if (fd < 0) {
+    error = std::string(first ? "DRM report publication failed: "
+                              : "DRM report append open failed: ") +
+            std::strerror(errno);
+    staged.discard();
     return false;
   }
-  committed_contents_ = std::move(staged.contents_);
+
+  struct stat status {};
+  const bool inspected = ::fstat(fd, &status) == 0;
+  const bool expected_target =
+      inspected && S_ISREG(status.st_mode) && status.st_nlink == 1 &&
+      (first ||
+       (static_cast<std::uint64_t>(status.st_dev) ==
+            target_identity_.device &&
+        static_cast<std::uint64_t>(status.st_ino) ==
+            target_identity_.inode &&
+        static_cast<std::uint64_t>(status.st_size) == committed_size_));
+  if (!expected_target) {
+    error = "DRM report target raced with publication";
+    (void)::close(fd);
+    if (first && inspected) unlink_if_identity(path_, status);
+    staged.discard();
+    return false;
+  }
+
+  const bool wrote = write_all(fd, staged.contents_, error);
+  const bool closed = ::close(fd) == 0;
+  if (!wrote || !closed) {
+    if (error.empty())
+      error = std::string("DRM report close failed: ") + std::strerror(errno);
+    if (first) {
+      unlink_if_identity(path_, status);
+    } else {
+      poisoned_ = true;
+    }
+    staged.discard();
+    return false;
+  }
+  if (first && !capture_target_identity(error)) {
+    poisoned_ = true;
+    staged.discard();
+    return false;
+  }
+  committed_size_ += staged.contents_.size();
   ++generation_;
+  dirty_ = true;
   staged.active_ = false;
   return true;
+}
+
+bool DrmReport::flush(std::string& error) {
+  error.clear();
+  if (!initialized_) {
+    error = "DRM report is not initialized";
+    return false;
+  }
+  if (poisoned_) {
+    error = "DRM report is unavailable after an ambiguous write failure";
+    return false;
+  }
+  if (!dirty_) return true;
+  if (!validate_target(error)) return false;
+  const int fd = ::open(path_.c_str(), O_WRONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    error = std::string("DRM report flush open failed: ") +
+            std::strerror(errno);
+    return false;
+  }
+  struct stat status {};
+  const bool expected_target =
+      ::fstat(fd, &status) == 0 && S_ISREG(status.st_mode) &&
+      status.st_nlink == 1 &&
+      static_cast<std::uint64_t>(status.st_dev) == target_identity_.device &&
+      static_cast<std::uint64_t>(status.st_ino) == target_identity_.inode &&
+      static_cast<std::uint64_t>(status.st_size) == committed_size_;
+  if (!expected_target) {
+    error = "DRM report target raced with flush";
+    (void)::close(fd);
+    return false;
+  }
+  bool success = ::fsync(fd) == 0;
+  if (!success)
+    error = std::string("DRM report fsync failed: ") + std::strerror(errno);
+  if (::close(fd) != 0 && success) {
+    error = std::string("DRM report close failed: ") + std::strerror(errno);
+    success = false;
+  }
+  if (success) dirty_ = false;
+  return success;
 }
 
 void DrmReport::abort(StagedDrmReport& staged) const noexcept {

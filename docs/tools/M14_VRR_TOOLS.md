@@ -82,6 +82,12 @@ matching `evidence-stream` identities and the VRR report receives an
 commits. The hardware validator archives and cross-checks the standard DRM and
 mirror reports and ignores any unsealed presentation.
 
+DRM report transactions are validated in memory and append only after a
+presentation completes. Appends preserve the private report inode and are
+flushed as one durability boundary after shutdown summary and restoration
+records are written. A crash or partial run therefore remains fail-closed:
+missing final summary/restoration records cannot satisfy physical acceptance.
+
 ## Validation harnesses
 
 `gw-vm milestone14-runtime-test --yes` is the fixed QXL negative-capability
