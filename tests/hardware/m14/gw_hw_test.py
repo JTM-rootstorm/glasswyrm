@@ -147,7 +147,8 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
     write_json(fixture / "client-app-preferences.json",
                dict(client, window=103, mode="preference", preference="Disable",
                     preference_reply_count=4, notify_event_count=3,
-                    notify_change_mask=1, reason_mask=1 << 19,
+                    notify_change_mask=1,
+                    reason_mask=(1 << 19) | (1 << 20),
                     preference_sequence=["Default", "Allow", "Prefer", "Disable"]))
     app_output = {
         "name": "DP-1", "policy": "app-requested",
@@ -169,7 +170,8 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "vrr": [dict(app_output, effective_enabled=False, candidate_window=0,
                      reasons=["no-candidate"])],
         "windows": [{"window": 103, "preference": "Disable",
-                     "reasons": ["window-preference-disabled"]}],
+                     "reasons": ["window-preference-disabled",
+                                 "window-did-not-request"]}],
     })
     capture_output = dict(app_output, candidate_window=0)
     write_json(fixture / "milestone14-capture-off-state.json", {

@@ -147,7 +147,7 @@ def populate_live_evidence(
     preference = dict(base_client, mode="preference", window=101,
                       preference="Disable", preference_reply_count=4,
                       notify_event_count=3, notify_change_mask=1,
-                      reason_mask=1 << 19,
+                      reason_mask=(1 << 19) | (1 << 20),
                       preference_sequence=["Default", "Allow", "Prefer", "Disable"])
     _write(root / "client-app-preferences.json", preference)
     app_default = dict(base_client, window=102, preference_reply_count=1,
@@ -185,7 +185,8 @@ def populate_live_evidence(
         "vrr": [dict(app_output, effective_enabled=False, candidate_window=0,
                      reasons=["no-candidate"])],
         "windows": [{"window": 101, "preference": "Disable",
-                     "reasons": ["window-preference-disabled"]}],
+                     "reasons": ["window-preference-disabled",
+                                 "window-did-not-request"]}],
     })
     for name in ("milestone14-fullscreen.log", "milestone14-borderless.log",
                  "milestone14-always.log",

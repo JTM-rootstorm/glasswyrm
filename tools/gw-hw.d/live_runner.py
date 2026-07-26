@@ -818,7 +818,8 @@ class FixedLiveRunner:
         self.start_client("app-preferences", "preference")
         self.snapshot("milestone14-app-requested-disable.json",
                       "app-requested", False, "disable", ("no-candidate",),
-                      ("window-preference-disabled",))
+                      ("window-preference-disabled",
+                       "window-did-not-request"))
         self.stop_client("app-preferences")
         self.wait_policy_cleanup()
 

@@ -490,7 +490,7 @@ def finalize_live(config: dict[str, object], artifacts: Path,
             preference["notify_event_count"] < 3 or
             preference.get("notify_change_mask", 0) & 1 == 0 or
             not isinstance(preference.get("reason_mask"), int) or
-            preference["reason_mask"] != (1 << 19)):
+            preference["reason_mask"] != ((1 << 19) | (1 << 20))):
         raise HarnessError("preference client omitted replies/events/reasons")
     default_client = _read_json(artifacts / "client-app-default.json")
     prefer_client = _read_json(artifacts / "client-app-prefer.json")
@@ -512,7 +512,7 @@ def finalize_live(config: dict[str, object], artifacts: Path,
     _validate_app_requested_snapshot(
         artifacts / "milestone14-app-requested-disable.json", config,
         preference, "disable", False, ["no-candidate"],
-        ["window-preference-disabled"])
+        ["window-preference-disabled", "window-did-not-request"])
     focus_a = _read_json(artifacts / "client-focus-a.json")
     focus_b = _read_json(artifacts / "client-focus-b.json")
     first_focus = _read_json(artifacts / "milestone14-focused.log")
