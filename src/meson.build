@@ -162,6 +162,7 @@ if get_option('drm_backend')
       'backends/drm/damage_copy.cpp',
       'backends/drm/dumb_buffer.cpp',
       'backends/drm/drm_report.cpp',
+      'backends/drm/drm_report_publication.cpp',
       'backends/drm/drm_vrr_report.cpp',
       'backends/drm/edid_digest.cpp',
       'backends/drm/inventory.cpp',
