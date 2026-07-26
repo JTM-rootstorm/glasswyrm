@@ -1,6 +1,9 @@
 #include "glasswyrmd/vrr_events.hpp"
 
+#include "glasswyrmd/client_connection.hpp"
+
 #include <algorithm>
+#include <optional>
 
 namespace glasswyrm::server {
 namespace {
@@ -15,6 +18,32 @@ WindowVrrPreference preference(
 }
 
 }  // namespace
+
+VrrSessionStateStatus synchronize_vrr_session_state(
+    VrrStateCache& cache, VrrWindowStateStore& published,
+    const std::map<std::uint64_t, std::uint32_t>& output_xids,
+    const gwipc_session_state state, VrrEventBatch& events) {
+  auto staged_cache = cache;
+  const auto status = staged_cache.apply_session_state(state);
+  if (status != VrrSessionStateStatus::Applied) return status;
+
+  VrrEventBatch staged_events;
+  std::optional<VrrWindowStateStore> staged_published;
+  if (state == GWIPC_SESSION_INACTIVE) {
+    staged_events =
+        prepare_vrr_event_batch(staged_cache, published, output_xids);
+    if (staged_events.outputs.size() != staged_cache.outputs().size() ||
+        staged_events.windows.size() != staged_cache.windows().size())
+      return VrrSessionStateStatus::OutputStateIncoherent;
+    staged_published = published;
+    apply_vrr_event_batch(*staged_published, staged_events);
+  }
+
+  cache = std::move(staged_cache);
+  if (staged_published) published = std::move(*staged_published);
+  events = std::move(staged_events);
+  return VrrSessionStateStatus::Applied;
+}
 
 VrrEventBatch prepare_vrr_event_batch(
     const VrrStateCache& cache, const VrrWindowStateStore& published,
@@ -120,6 +149,27 @@ void apply_vrr_event_batch(VrrWindowStateStore& published,
     if (const auto* current = published.find_window(transition.window_id))
       after.event_selections = current->event_selections;
     published.ensure_window(transition.window_id) = std::move(after);
+  }
+}
+
+void enqueue_vrr_event_batch_notifications(
+    const VrrWindowStateStore& published, const VrrEventBatch& batch,
+    const std::span<ClientConnection* const> recipients) {
+  for (const auto& transition : batch.windows) {
+    const auto* after = published.find_window(transition.window_id);
+    if (!after) continue;
+    const auto changed = vrr_change_mask(transition.before, *after);
+    for (auto* recipient : recipients) {
+      const auto selection =
+          after->event_selections.find(recipient->identifier());
+      if (selection == after->event_selections.end()) continue;
+      const auto selected = changed & selection->second & kKnownVrrEventMask;
+      if (selected != 0)
+        (void)recipient->enqueue_server_packet(extensions::encode_gw_vrr_notify(
+            recipient->byte_order(), recipient->last_request_sequence(),
+            selected, transition.window_id, *after,
+            transition.output_policy));
+    }
   }
 }
 
