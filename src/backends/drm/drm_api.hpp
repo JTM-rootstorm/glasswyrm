@@ -122,6 +122,7 @@ public:
   virtual void
   abandon_page_flip(int handle,
                     const std::shared_ptr<PageFlipCookie> &cookie) noexcept = 0;
+  virtual void reset_crtc_sequence_samples(int handle) noexcept = 0;
   [[nodiscard]] virtual DrmEvent service_events(int handle, short revents) = 0;
 };
 

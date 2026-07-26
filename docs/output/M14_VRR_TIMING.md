@@ -21,6 +21,10 @@ supported, both values are nonzero, the queried timestamp falls within the
 page-flip event's one-microsecond timestamp quantization window, and the
 queried sequence and timestamp advance. Query failure, a later vblank, or a
 regression does not invalidate the completed flip.
+VT release and every blocking modeset clear the per-CRTC correlation baseline,
+so the first tightly correlated sample after acquire or a sequence rebase
+starts a new timing period instead of being compared with the prior scanout
+period.
 
 The standard DRM `flip` record serializes the queried source, correlation,
 full 64-bit sequence, timestamp, and cadence-eligibility verdict separately.

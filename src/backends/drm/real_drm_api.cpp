@@ -485,6 +485,7 @@ public:
   void abandon_page_flip(
       int handle,
       const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
+  void reset_crtc_sequence_samples(int handle) noexcept override;
   DrmEvent service_events(int handle, short revents) override;
 
 private:
@@ -596,6 +597,10 @@ void RealDrmApi::abandon_page_flip(
   const auto event = event_cookies_.find(handle);
   if (event != event_cookies_.end() && event->second.cookie == cookie)
     event->second.armed = false;
+}
+
+void RealDrmApi::reset_crtc_sequence_samples(const int handle) noexcept {
+  last_crtc_sequence_samples_.erase(handle);
 }
 
 DrmEvent RealDrmApi::service_events(const int handle, const short revents) {

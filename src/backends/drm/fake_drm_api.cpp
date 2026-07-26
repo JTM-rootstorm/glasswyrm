@@ -149,6 +149,11 @@ void FakeDrmApi::abandon_page_flip(
     event_cookie_armed_ = false;
 }
 
+void FakeDrmApi::reset_crtc_sequence_samples(const int handle) noexcept {
+  if (handle == active_handle_ && open_)
+    ++crtc_sequence_reset_count_;
+}
+
 DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
   if (handle != active_handle_ || !open_)
     return {DrmEventKind::Error, 0, 0, 0, "fake DRM device is not open"};

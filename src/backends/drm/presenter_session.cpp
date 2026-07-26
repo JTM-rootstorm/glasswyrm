@@ -21,6 +21,7 @@ output::BackendStateResult DrmPresenter::suspend(std::string& error) {
     fatal_ = true;
     return output::BackendStateResult::Fatal;
   }
+  device_.reset_crtc_sequence_samples();
   suspended_ = true;
   if (vrr_state_initialized_) vrr_state_.mark_suspended_off();
   if (config_.damage_aware_copy && damage_history_) {

@@ -103,6 +103,11 @@ void Device::abandon_page_flip(
     api_->abandon_page_flip(handle_, cookie);
 }
 
+void Device::reset_crtc_sequence_samples() noexcept {
+  if (valid())
+    api_->reset_crtc_sequence_samples(handle_);
+}
+
 DrmEvent Device::service_events(const short revents) {
   if (!valid())
     return {DrmEventKind::Error, 0, 0, 0, "DRM device is not open"};

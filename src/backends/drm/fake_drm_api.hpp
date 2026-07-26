@@ -37,6 +37,7 @@ public:
   void abandon_page_flip(
       int handle,
       const std::shared_ptr<PageFlipCookie> &cookie) noexcept override;
+  void reset_crtc_sequence_samples(int handle) noexcept override;
   [[nodiscard]] DrmEvent service_events(int handle, short revents) override;
 
   void queue_page_flip(std::uint64_t token, std::uint32_t crtc_id,
@@ -48,6 +49,9 @@ public:
   [[nodiscard]] bool open() const noexcept { return open_; }
   [[nodiscard]] std::size_t close_count() const noexcept {
     return close_count_;
+  }
+  [[nodiscard]] std::size_t crtc_sequence_reset_count() const noexcept {
+    return crtc_sequence_reset_count_;
   }
   [[nodiscard]] const DeviceOpenOptions &last_options() const noexcept {
     return last_options_;
@@ -71,6 +75,7 @@ private:
   int last_adopted_handle_{-1};
   int last_closed_handle_{-1};
   std::size_t close_count_{};
+  std::size_t crtc_sequence_reset_count_{};
   DeviceOpenOptions last_options_;
   std::shared_ptr<PageFlipCookie> event_cookie_;
   bool event_cookie_armed_{};

@@ -39,6 +39,9 @@ int main() {
   DeviceDiscovery discovery;
   auto device = Device::open(api, "/dev/dri/card0", {}, discovery);
   gw::test::require(device.has_value(), "fake DRM device opens");
+  device->reset_crtc_sequence_samples();
+  gw::test::require(api.crtc_sequence_reset_count() == 1,
+                    "device forwards CRTC sequence baseline resets");
 
   pollfd descriptor{device->poll_fd(), POLLIN, 0};
   gw::test::require(::poll(&descriptor, 1, 0) == 0,
