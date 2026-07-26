@@ -18,6 +18,11 @@ be the active VT in `KD_TEXT`; `alternate_tty` must be a distinct, inactive
 also refuses profiles with more than one connected or active physical
 connector.
 
+For proprietary NVIDIA DRM the doctor also requires the root-readable
+load-time `nvidia_drm.vblank` parameter to report enabled. This prevents a
+disruptive run from relying on zero-sequence fake flip events when DRM vblank
+notifications were left at the driver default.
+
 The live runner repeats the active-VT and `KD_TEXT` checks for both configured
 VTs at takeover time and again immediately before stopping the getty. Cleanup
 records the exact before/after active VT, KD mode, and getty state; a failed

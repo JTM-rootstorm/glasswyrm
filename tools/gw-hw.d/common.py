@@ -63,7 +63,8 @@ DOCTOR_FACT_KEYS = {
     "edid_sha256", "vrr_capable", "atomic_kms", "vrr_enabled_property",
     "mode", "range_source", "minimum_refresh_hz", "maximum_refresh_hz",
     "no_competing_drm_master", "session_permissions", "kernel", "libdrm",
-    "driver", "firmware", "keyboard_device", "pointer_device",
+    "driver", "vblank_notifications", "firmware", "keyboard_device",
+    "pointer_device",
     "keyboard_character_device", "pointer_character_device",
     "selected_mode_available",
 }

@@ -26,6 +26,7 @@ from provenance import validate_build_provenance
 
 
 MODETEST_MODULE_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
+NVIDIA_VBLANK_PARAMETER = Path("/sys/module/nvidia_drm/parameters/vblank")
 
 
 def _modetest_commands(
@@ -54,6 +55,22 @@ def _query_modetest(executable: str, drm: Path, driver: str) -> str:
         if result.returncode == 0:
             return result.stdout[:1024 * 1024]
     return ""
+
+
+def _vblank_notification_state(
+        driver: str, parameter: Path = NVIDIA_VBLANK_PARAMETER) -> str:
+    """Return the NVIDIA DRM vblank-notification prerequisite state."""
+    if driver != "nvidia":
+        return "not-applicable"
+    try:
+        value = parameter.read_text(encoding="ascii").strip().lower()
+    except (OSError, UnicodeError):
+        return "unavailable"
+    if value in {"1", "y", "yes", "true", "on"}:
+        return "enabled"
+    if value in {"0", "n", "no", "false", "off"}:
+        return "disabled"
+    return "unavailable"
 
 
 def parse_config(path: Path) -> dict[str, object]:
@@ -393,6 +410,11 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
                    facts.get("active_connector_count") == 1,
                    facts.get("active_connector_count")))
     checks.append(("vrr capable", facts.get("vrr_capable") == 1, facts.get("vrr_capable")))
+    checks.append((
+        "DRM vblank notifications",
+        facts.get("vblank_notifications") in {"enabled", "not-applicable"},
+        facts.get("vblank_notifications"),
+    ))
     checks.append(("reviewed range source", facts.get("range_source") in {"debugfs", "config-reviewed"}, facts.get("range_source")))
     checks.append(("target cadence distinguishes fixed refresh", target_distinguishes_fixed_refresh(config), config["target_refresh_hz"]))
     for field in ("kernel", "libdrm", "driver", "firmware"):
@@ -438,6 +460,7 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
         driver = driver_link.resolve(strict=True).name
     except OSError:
         driver = "unavailable"
+    vblank_notifications = _vblank_notification_state(driver)
     try:
         edid = (root / "edid").read_bytes()
         digest = hashlib.sha256(edid).hexdigest() if edid else ""
@@ -530,6 +553,7 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
         "no_competing_drm_master": clients_available and not competing,
         "session_permissions": os.access(drm, os.R_OK | os.W_OK),
         "kernel": os.uname().release, "libdrm": libdrm, "driver": driver,
+        "vblank_notifications": vblank_notifications,
         "firmware": text(Path("/sys/class/drm") / card / "device" / "firmware_node"),
         "keyboard_device": config["keyboard_device"],
         "pointer_device": config["pointer_device"],
@@ -561,7 +585,7 @@ def doctor_config(config: dict[str, object],
             capability = {key: facts[key] for key in (
                 "schema", "drm_device", "driver", "connector", "mode",
                 "selected_mode_available", "vrr_capable", "atomic_kms",
-                "vrr_enabled_property", "range_source",
+                "vrr_enabled_property", "vblank_notifications", "range_source",
                 "minimum_refresh_hz", "maximum_refresh_hz")}
             _write_json(artifact_dir / "milestone14-drm-capability.json", capability)
         for check in checks:

@@ -130,3 +130,8 @@ Ordinary `SIGINT` and `SIGTERM` interruptions enter the same restoration guard
 as command failures. Kernel or driver failure, power loss, and `SIGKILL`
 remain outside userspace recovery; independent console access is still
 mandatory.
+
+For proprietary NVIDIA DRM, physical cadence testing additionally requires the
+load-time `nvidia_drm.vblank=1` module parameter. The root doctor records the
+live parameter and refuses takeover when it is disabled or unreadable because
+zero-sequence fake flip events cannot establish fixed-versus-variable cadence.
