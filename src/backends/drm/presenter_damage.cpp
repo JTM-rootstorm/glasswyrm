@@ -1,6 +1,9 @@
 #include "backends/drm/presenter.hpp"
+#include "backends/drm/presenter_pending.hpp"
 
+#include <cstring>
 #include <limits>
+#include <new>
 
 namespace glasswyrm::drm {
 namespace {
@@ -116,6 +119,89 @@ void DrmPresenter::complete_damage_copy(DumbBuffer& target,
       cumulative_full_frame_bytes_, plan.full_frame_bytes);
   cumulative_copied_bytes_ = saturating_add(
       cumulative_copied_bytes_, plan.copied_bytes);
+}
+
+bool DrmPresenter::stage_committed_pixel_update(
+    PendingPresentation& pending,
+    const std::span<const std::uint32_t> pixels,
+    std::string& error) const {
+  const auto expected =
+      std::uint64_t{config_.output.width} * config_.output.height;
+  if (expected != pixels.size() || expected != committed_pixels_.size()) {
+    error = "pending DRM frame cannot update committed pixel history";
+    return false;
+  }
+  try {
+    pending.committed_pixel_rectangles =
+        config_.damage_aware_copy
+            ? pending.damage_copy.rectangles
+            : std::vector<gw::compositor::Rectangle>{
+                  {0, 0, config_.output.width, config_.output.height}};
+  } catch (const std::bad_alloc&) {
+    error = "could not retain pending DRM pixel rectangles";
+    return false;
+  }
+  if (pending.committed_pixel_rectangles.empty()) {
+    error = "pending DRM frame has no committed pixel update";
+    return false;
+  }
+
+  std::size_t update_pixels = 0;
+  for (const auto& rectangle : pending.committed_pixel_rectangles) {
+    const auto right = std::int64_t{rectangle.x} + rectangle.width;
+    const auto bottom = std::int64_t{rectangle.y} + rectangle.height;
+    const auto count = std::uint64_t{rectangle.width} * rectangle.height;
+    if (rectangle.empty() || rectangle.x < 0 || rectangle.y < 0 ||
+        right > config_.output.width || bottom > config_.output.height ||
+        count > std::numeric_limits<std::size_t>::max() - update_pixels) {
+      error = "pending DRM pixel update exceeds the selected output";
+      return false;
+    }
+    update_pixels += static_cast<std::size_t>(count);
+  }
+
+  try {
+    pending.committed_pixel_update.resize(update_pixels);
+  } catch (const std::bad_alloc&) {
+    error = "could not retain pending DRM pixel damage";
+    return false;
+  }
+  auto* destination = pending.committed_pixel_update.data();
+  for (const auto& rectangle : pending.committed_pixel_rectangles) {
+    const auto x = static_cast<std::uint32_t>(rectangle.x);
+    const auto y = static_cast<std::uint32_t>(rectangle.y);
+    for (std::uint32_t row = 0; row < rectangle.height; ++row) {
+      const auto* source =
+          pixels.data() +
+          static_cast<std::size_t>(y + row) * config_.output.width + x;
+      std::memcpy(destination, source,
+                  static_cast<std::size_t>(rectangle.width) *
+                      sizeof(std::uint32_t));
+      destination += rectangle.width;
+    }
+  }
+  error.clear();
+  return true;
+}
+
+void DrmPresenter::apply_committed_pixel_update(
+    const PendingPresentation& pending) noexcept {
+  if (pending.committed_pixel_update.empty())
+    return;
+  const auto* source = pending.committed_pixel_update.data();
+  for (const auto& rectangle : pending.committed_pixel_rectangles) {
+    const auto x = static_cast<std::uint32_t>(rectangle.x);
+    const auto y = static_cast<std::uint32_t>(rectangle.y);
+    for (std::uint32_t row = 0; row < rectangle.height; ++row) {
+      auto* destination =
+          committed_pixels_.data() +
+          static_cast<std::size_t>(y + row) * config_.output.width + x;
+      std::memcpy(destination, source,
+                  static_cast<std::size_t>(rectangle.width) *
+                      sizeof(std::uint32_t));
+      source += rectangle.width;
+    }
+  }
 }
 
 }  // namespace glasswyrm::drm

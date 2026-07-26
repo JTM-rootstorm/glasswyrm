@@ -13,6 +13,13 @@ for at most eight completed generations. A submitted frame does not advance a
 buffer or the history ring until KMS completion and evidence publication both
 succeed.
 
+The presenter's private VT-resume image follows the same transaction boundary.
+While a page flip is pending, it retains only the normalized pixel rectangles
+needed to update that committed image. Successful finalization applies those
+rectangles; rejection or abort discards them. A conservative full-copy recovery
+retains a complete replacement, so exact resume pixels and the canonical
+visible hash remain paired without a steady full-frame copy.
+
 When generation `N` is copied into a buffer containing generation `K`, the
 presenter unions completed damage from `K + 1` through `N`. Rectangles are
 clipped and normalized through the compositor damage-region implementation.
@@ -65,6 +72,7 @@ readback before KMS submission.
 
 Unit tests cover first use of both alternating buffers, accumulated small
 damage, history eviction, damage-unavailable fallback, incomplete advertised
-damage, failed page flips, resume invalidation, zeroed pitch padding, report
-serialization, and canonical versus scanout hash parity. Real DRM validation
-remains part of the fixed Milestone 12 VM scenario.
+damage, failed and aborted page flips, transactional resume-image promotion,
+resume invalidation, zeroed pitch padding, report serialization, and canonical
+versus scanout hash parity. Real DRM validation remains part of the fixed
+Milestone 12 VM scenario.
