@@ -494,6 +494,8 @@ private:
   };
   std::unordered_map<int, EventCookie> event_cookies_;
   std::unordered_map<int, std::uint64_t> last_page_flip_timestamps_;
+  std::unordered_map<int, std::unordered_map<std::uint32_t, CrtcSequencePoint>>
+      last_crtc_sequence_samples_;
   std::unordered_map<int, bool> timestamp_monotonic_;
 };
 
@@ -543,6 +545,7 @@ void RealDrmApi::close_device(const int handle) noexcept {
     (void)::close(handle);
   event_cookies_.erase(handle);
   last_page_flip_timestamps_.erase(handle);
+  last_crtc_sequence_samples_.erase(handle);
   timestamp_monotonic_.erase(handle);
 }
 
@@ -575,6 +578,7 @@ bool RealDrmApi::arm_page_flip(const int handle,
   cookie->kernel_timestamp_nanoseconds = 0;
   cookie->timestamp_available = false;
   cookie->timestamp_invalid = false;
+  cookie->crtc_sequence_sample = {};
   event_cookies_.emplace(handle, EventCookie{cookie, true});
   error.clear();
   return true;
@@ -633,13 +637,34 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
         last_page_flip_timestamps_[handle] =
             cookie->kernel_timestamp_nanoseconds;
     }
+    if (cookie->completed_sequence == 0 &&
+        cookie->completed_crtc_id != 0) {
+      std::uint64_t query_sequence{};
+      std::uint64_t query_timestamp{};
+      const bool query_succeeded =
+          drmCrtcGetSequence(handle, cookie->completed_crtc_id, &query_sequence,
+                             &query_timestamp) == 0;
+      auto &samples = last_crtc_sequence_samples_[handle];
+      const auto prior = samples.find(cookie->completed_crtc_id);
+      const std::optional<CrtcSequencePoint> previous =
+          prior == samples.end() ? std::nullopt : std::optional{prior->second};
+      cookie->crtc_sequence_sample = assess_crtc_sequence_sample(
+          cookie->kernel_timestamp_nanoseconds, cookie->timestamp_available,
+          query_succeeded, timestamp_monotonic_[handle], query_sequence,
+          query_timestamp, previous);
+      const auto correlation = cookie->crtc_sequence_sample.correlation;
+      if (correlation == CrtcSequenceCorrelation::Correlated) {
+        samples[cookie->completed_crtc_id] = {query_sequence, query_timestamp};
+      }
+    }
     const DrmEvent event{DrmEventKind::PageFlip,
                          cookie->token,
                          cookie->completed_crtc_id,
                          cookie->completed_sequence,
                          {},
                          cookie->kernel_timestamp_nanoseconds,
-                         cookie->timestamp_available};
+                         cookie->timestamp_available,
+                         cookie->crtc_sequence_sample};
     event_cookies_.erase(registered);
     return armed ? event : DrmEvent{};
   }

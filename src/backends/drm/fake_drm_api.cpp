@@ -128,6 +128,7 @@ bool FakeDrmApi::arm_page_flip(const int handle,
   cookie->kernel_timestamp_nanoseconds = 0;
   cookie->timestamp_available = false;
   cookie->timestamp_invalid = false;
+  cookie->crtc_sequence_sample = {};
   event_cookie_ = cookie;
   event_cookie_armed_ = true;
   error.clear();
