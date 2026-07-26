@@ -45,6 +45,24 @@ void paint_window(PixelStorage& result, const WindowResource& window,
 }
 }  // namespace
 
+const PixelStorage* direct_top_level_storage(
+    const ResourceTable& resources,
+    const std::uint32_t top_level_xid) noexcept {
+  const auto* top = resources.find_window(top_level_xid);
+  if (!top || top->parent != resources.screen().root_window ||
+      top->window_class != WindowClass::InputOutput || !top->storage ||
+      top->storage->width() != top->width ||
+      top->storage->height() != top->height)
+    return nullptr;
+  for (const auto child_xid : top->children) {
+    const auto* child = resources.find_window(child_xid);
+    if (child && child->map_state == MapState::Viewable &&
+        child->window_class == WindowClass::InputOutput)
+      return nullptr;
+  }
+  return top->storage.get();
+}
+
 std::optional<PixelStorage> compose_top_level_subtree(
     const ResourceTable& resources, const std::uint32_t top_level_xid) {
   const auto* top = resources.find_window(top_level_xid);
