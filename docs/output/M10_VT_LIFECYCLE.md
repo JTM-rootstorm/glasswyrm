@@ -32,6 +32,10 @@ requests Active. Producer processing resumes only after real input acknowledges
 a successful resume. Timeout, rejection, or malformed correlation is fatal and
 enters restoration.
 
+Consuming the correlated Inactive reply explicitly schedules the suspension
+phase even if that reply leaves no descriptor readable. The VT release cannot
+stall waiting for unrelated producer, presentation, or signal activity.
+
 When SessionState is not negotiated, the exact M10 sequence below remains in
 effect.
 

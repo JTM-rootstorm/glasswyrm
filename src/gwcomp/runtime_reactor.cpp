@@ -385,6 +385,12 @@ void RuntimeReactor::service_session_messages() {
                      error.c_str());
         stopping_ = true;
         exit_status_ = 1;
+      } else if (session_acknowledgement_needs_reactor_turn(
+                     acknowledged.state)) {
+        // The acknowledgement consumed the only readable producer message.
+        // Schedule the phase that suspends presentation and acknowledges the
+        // kernel VT release without waiting for unrelated descriptor activity.
+        buffered_work_pending_ = true;
       } else if (vt_acquire_requested_ &&
                  session_state_.state() == CoordinatedSessionState::Active) {
         if (!compositor_.activate_presentation_session(error)) {
