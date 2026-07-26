@@ -136,9 +136,11 @@ The cadence client requests the matching window projection with each VRR timing
 snapshot so an enabled candidate remains self-contained and coherence-checked.
 
 AppRequested evidence requires exact compositor-authoritative rejection reason
-sets: Default and Disable each leave the output at `no-candidate`, with the
-matching window rejected by `window-did-not-request` and
-`window-preference-disabled`, respectively; Prefer has no rejection reasons.
+sets: Default and Disable each leave the output at `no-candidate`. Default
+carries `window-did-not-request`; Disable carries both
+`window-preference-disabled` and `window-did-not-request`, preserving every
+applicable reason while `window-preference-disabled` remains primary. Prefer
+has no rejection reasons.
 Nonblocking timing or hardware-confirmation diagnostics remain independently
 visible and do not weaken this exact rejection check.
 The corresponding protocol-client evidence also preserves exact nonzero

@@ -396,6 +396,13 @@ id fb pos size
                 ("milestone14-app-requested.log", True, "prefer"),
                 ("milestone14-app-requested-disable.json", False, "disable")}:
             raise AssertionError("AppRequested authoritative transition proof changed")
+        disable_state = next(
+            item for item in runner.snapshot_expectations
+            if item["name"] == "milestone14-app-requested-disable.json")
+        if disable_state["window_reasons"] != (
+                "window-preference-disabled", "window-did-not-request"):
+            raise AssertionError(
+                "AppRequested Disable exhaustive reason proof changed")
         flattened = [item for argv in commands for item in argv]
         if str(BUILD_ROOT / "src/glasswyrm-session") in flattened:
             raise AssertionError("live runner unexpectedly used the session wrapper")
