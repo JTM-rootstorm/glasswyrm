@@ -636,6 +636,68 @@ def test_bounded_repaint_trigger_is_private_and_consumed(root: Path) -> None:
         live_runner_module.RUNTIME_ROOT = original_runtime
 
 
+def test_repaint_boundary_waits_through_concurrent_appends(root: Path) -> None:
+    runner = make_runner(
+        root, lambda _argv, _output: 0, validate_runtime=True,
+    )
+    report = root / "vrr-part-1.jsonl"
+    original_read = live_runner_module._read_regular
+    original_sleep = live_runner_module.time.sleep
+    live_runner_module.time.sleep = lambda _seconds: None
+    try:
+        def acquire(sequence: list[bytes]) -> tuple[int, int]:
+            calls = 0
+
+            def racing_read(path: Path, maximum: int) -> bytes:
+                nonlocal calls
+                assert path == report and maximum == live_runner_module.MAX_JSON_BYTES
+                value = sequence[min(calls, len(sequence) - 1)]
+                calls += 1
+                return value
+
+            live_runner_module._read_regular = racing_read
+            return runner.acquire_stable_report_boundary(report), calls
+
+        partial = b'{"record":"evidence-stream"'
+        complete = partial + b"}\n"
+        boundary, calls = acquire([partial, complete, complete])
+        assert boundary == len(complete)
+        assert calls == 3
+
+        first = b'{"record":"evidence-stream"}\n'
+        second_partial = first + b'{"record":"vrr-decision"'
+        both = second_partial + b"}\n"
+        boundary, calls = acquire([first, second_partial, both, both])
+        assert boundary == len(both)
+        assert calls == 4
+
+        live_runner_module._read_regular = lambda _path, _maximum: first
+        assert runner.acquire_stable_report_boundary(report) == len(first)
+    finally:
+        live_runner_module._read_regular = original_read
+        live_runner_module.time.sleep = original_sleep
+
+
+def test_repaint_boundary_rejects_non_append_mutation(root: Path) -> None:
+    runner = make_runner(
+        root, lambda _argv, _output: 0, validate_runtime=True,
+    )
+    report = root / "vrr-part-1.jsonl"
+    values = iter((b'{"record":"first"}\n', b'{"record":"other"}\n'))
+    original_read = live_runner_module._read_regular
+    original_sleep = live_runner_module.time.sleep
+    live_runner_module._read_regular = lambda _path, _maximum: next(values)
+    live_runner_module.time.sleep = lambda _seconds: None
+    try:
+        expect_harness_error(
+            lambda: runner.acquire_stable_report_boundary(report),
+            "bounded repaint VRR report changed before its append boundary",
+        )
+    finally:
+        live_runner_module._read_regular = original_read
+        live_runner_module.time.sleep = original_sleep
+
+
 def test_bounded_repaint_timeout_fails_closed(root: Path) -> None:
     runtime = root / "runtime"
     runtime.mkdir(mode=0o700)
@@ -1065,6 +1127,18 @@ def main() -> int:
         repaint_trigger = root / "repaint-trigger"
         repaint_trigger.mkdir()
         test_bounded_repaint_trigger_is_private_and_consumed(repaint_trigger)
+
+        repaint_boundary = root / "repaint-boundary"
+        repaint_boundary.mkdir()
+        test_repaint_boundary_waits_through_concurrent_appends(
+            repaint_boundary,
+        )
+
+        repaint_boundary_mutation = root / "repaint-boundary-mutation"
+        repaint_boundary_mutation.mkdir()
+        test_repaint_boundary_rejects_non_append_mutation(
+            repaint_boundary_mutation,
+        )
 
         repaint_timeout = root / "repaint-timeout"
         repaint_timeout.mkdir()
