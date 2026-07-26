@@ -772,6 +772,68 @@ def test_bounded_repaint_requires_new_sealed_transaction(root: Path) -> None:
         live_runner_module.time.sleep = original_sleep
 
 
+def test_compositor_restart_requires_fresh_sealed_replay(root: Path) -> None:
+    report = root / "vrr-part-1.jsonl"
+    drm_report = root / "milestone14-drm-report.jsonl"
+    identity = {
+        "output_id": 1, "commit_id": 22, "generation": 23,
+        "presentation_token": 24,
+    }
+    stream = {"record": "evidence-stream", **identity, "stream": 2}
+    decision = {
+        "record": "vrr-decision", "commit_id": 22, "generation": 23,
+    }
+    seal = {
+        "record": "evidence-seal", **identity, "required_streams": 3,
+        "committed_streams": 3, "mirror_frame": 0,
+        "mirror_fnv1a64": "0000000000000000", "mirror_file": "",
+    }
+    drm_report.write_text(
+        json.dumps({"record": "evidence-stream", **identity, "stream": 1}) +
+        "\n",
+        encoding="utf-8",
+    )
+    report.write_text(
+        "".join(json.dumps(record) + "\n"
+                for record in (stream, decision, seal)),
+        encoding="utf-8",
+    )
+    runner = make_runner(
+        root, lambda _argv, _output: 0, validate_runtime=True,
+    )
+    runner.wait_for_fresh_compositor_presentation()
+
+    report.write_text(json.dumps(stream) + "\n", encoding="utf-8")
+    original_sleep = live_runner_module.time.sleep
+    live_runner_module.time.sleep = lambda _seconds: None
+    try:
+        expect_harness_error(
+            runner.wait_for_fresh_compositor_presentation,
+            "replacement compositor did not produce sealed replay evidence",
+        )
+    finally:
+        live_runner_module.time.sleep = original_sleep
+
+
+def test_compositor_restart_snapshot_follows_fresh_replay(root: Path) -> None:
+    runner = make_runner(root, lambda _argv, _output: 0)
+    events: list[tuple[object, ...]] = []
+    runner.wait_for_fresh_compositor_presentation = lambda: events.append(
+        ("sealed-replay",),
+    )
+    runner.snapshot = lambda name, policy, effective: events.append(
+        ("snapshot", name, policy, effective),
+    ) or {}
+
+    runner.verify_compositor_restart()
+
+    assert events == [
+        ("sealed-replay",),
+        ("snapshot", "milestone14-restart.log",
+         "always-eligible", True),
+    ]
+
+
 def test_active_vt_snapshot_follows_one_repaint(root: Path) -> None:
     runner = make_runner(root, lambda _argv, _output: 0)
     events: list[tuple[object, ...]] = []
@@ -1147,6 +1209,16 @@ def main() -> int:
         repaint_seal = root / "repaint-seal"
         repaint_seal.mkdir()
         test_bounded_repaint_requires_new_sealed_transaction(repaint_seal)
+
+        restart_seal = root / "restart-seal"
+        restart_seal.mkdir()
+        test_compositor_restart_requires_fresh_sealed_replay(restart_seal)
+
+        restart_snapshot = root / "restart-snapshot"
+        restart_snapshot.mkdir()
+        test_compositor_restart_snapshot_follows_fresh_replay(
+            restart_snapshot,
+        )
 
         active_vt_repaint = root / "active-vt-repaint"
         active_vt_repaint.mkdir()

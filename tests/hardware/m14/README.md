@@ -111,6 +111,11 @@ therefore follows a normal compositor transaction instead of reusing the last
 pre-release cache state. The remaining two repaint requests are reserved for
 the off/enabled one-shot pixel captures described above.
 
+The compositor-restart check does not consume that repaint budget. The
+replacement compositor must first publish a new sealed replay presentation
+cross-matched to its fresh DRM report; only then may the runner accept the
+restart snapshot or continue to the capture policy transitions.
+
 The cadence client prepares each deterministic damage frame ahead of its
 absolute deadline, polls the presentation marker below the evidence tolerance,
 and defers checked PutImage completion until the bounded sequence ends. X11

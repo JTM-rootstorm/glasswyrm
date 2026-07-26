@@ -875,9 +875,44 @@ class FixedLiveRunner:
         raise HarnessError(
             "bounded repaint did not produce sealed presentation evidence")
 
+    def wait_for_fresh_compositor_presentation(self) -> None:
+        if not self.validate_runtime:
+            return
+        report = self.artifacts / "vrr-part-1.jsonl"
+        drm_report = self.artifacts / "milestone14-drm-report.jsonl"
+        for _ in range(200):
+            try:
+                records = [
+                    json.loads(line) for line in
+                    _read_regular(report, MAX_JSON_BYTES)
+                    .decode("utf-8").splitlines() if line.strip()
+                ]
+                drm_records = [
+                    json.loads(line) for line in
+                    _read_regular(drm_report, MAX_JSON_BYTES)
+                    .decode("utf-8").splitlines() if line.strip()
+                ]
+                accepted = sealed_vrr_records(
+                    records, require_seals=True,
+                    drm_streams=drm_evidence_streams(drm_records),
+                )
+                if any(record.get("record") == "vrr-decision"
+                       for record in accepted):
+                    return
+            except (HarnessError, json.JSONDecodeError, UnicodeError):
+                pass
+            time.sleep(.05)
+        raise HarnessError(
+            "replacement compositor did not produce sealed replay evidence")
+
     def verify_active_vt_reevaluation(self) -> None:
         self.request_bounded_repaint()
         self.snapshot("milestone14-vt-active.json",
+                      "always-eligible", True)
+
+    def verify_compositor_restart(self) -> None:
+        self.wait_for_fresh_compositor_presentation()
+        self.snapshot("milestone14-restart.log",
                       "always-eligible", True)
 
     def snapshot(self, name: str, policy: str, effective: bool,
@@ -1132,7 +1167,7 @@ class FixedLiveRunner:
                 os.replace(self.artifacts / "vrr-part-1.jsonl", self.artifacts / "vrr-part-0.jsonl")
                 os.replace(self.artifacts / "milestone14-drm-report.jsonl", self.artifacts / "drm-part-0.jsonl")
             self.start_stack_after_gwm()
-            self._step(24); self.snapshot("milestone14-restart.log", "always-eligible", True)
+            self._step(24); self.verify_compositor_restart()
             self._step(25); self.capture_pixels()
             self._step(26); self.stop_client("always")
             self._step(27); self.cleanup()
