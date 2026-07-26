@@ -4,6 +4,47 @@
 
 namespace glasswyrm::drm {
 
+std::optional<std::uint32_t>
+find_crtc_index(const std::span<const CrtcIndexBinding> bindings,
+                const std::uint32_t crtc_id) noexcept {
+  for (const auto& binding : bindings)
+    if (binding.crtc_id == crtc_id)
+      return binding.crtc_index;
+  return std::nullopt;
+}
+
+std::optional<std::uint32_t>
+legacy_vblank_crtc_selector(const std::uint32_t crtc_index) noexcept {
+  constexpr auto maximum_index =
+      kLegacyVBlankHighCrtcMask >> kLegacyVBlankHighCrtcShift;
+  if (crtc_index > maximum_index)
+    return std::nullopt;
+  return crtc_index << kLegacyVBlankHighCrtcShift;
+}
+
+LegacyVBlankCounterResult extend_legacy_vblank_counter(
+    const std::uint32_t raw_sequence,
+    const std::optional<LegacyVBlankCounterState> previous) noexcept {
+  if (!previous)
+    return {LegacyVBlankCounterStatus::Success,
+            {raw_sequence, raw_sequence}};
+
+  const std::uint32_t delta = raw_sequence - previous->raw_sequence;
+  if (delta == 0)
+    return {LegacyVBlankCounterStatus::Duplicate, *previous};
+  if (delta > static_cast<std::uint32_t>(
+                  std::numeric_limits<std::int32_t>::max()))
+    return {LegacyVBlankCounterStatus::Regression, *previous};
+  if (delta >
+      std::numeric_limits<std::uint64_t>::max() -
+          previous->extended_sequence)
+    return {LegacyVBlankCounterStatus::ArithmeticOverflow, *previous};
+  return {
+      LegacyVBlankCounterStatus::Success,
+      {raw_sequence, previous->extended_sequence + delta},
+  };
+}
+
 VrrTimestampResult convert_page_flip_timestamp(
     const std::uint64_t seconds, const std::uint64_t microseconds,
     const std::optional<std::uint64_t> previous_nanoseconds) noexcept {
@@ -30,8 +71,10 @@ CrtcSequenceSample assess_crtc_sequence_sample(
     const bool event_timestamp_available, const bool query_succeeded,
     const bool timestamp_monotonic, const std::uint64_t query_sequence,
     const std::uint64_t query_timestamp_nanoseconds,
-    const std::optional<CrtcSequencePoint> previous) noexcept {
+    const std::optional<CrtcSequencePoint> previous,
+    const VrrTimingSource source) noexcept {
   CrtcSequenceSample result;
+  result.source = source;
   result.sequence = query_sequence;
   result.timestamp_nanoseconds = query_timestamp_nanoseconds;
   if (!query_succeeded) {

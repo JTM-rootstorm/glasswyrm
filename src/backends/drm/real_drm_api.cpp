@@ -25,6 +25,9 @@
 namespace glasswyrm::drm {
 namespace {
 
+static_assert(kLegacyVBlankHighCrtcShift == DRM_VBLANK_HIGH_CRTC_SHIFT);
+static_assert(kLegacyVBlankHighCrtcMask == DRM_VBLANK_HIGH_CRTC_MASK);
+
 class UniqueFd {
 public:
   explicit UniqueFd(const int value) noexcept : value_(value) {}
@@ -237,6 +240,48 @@ Mode discovered_mode(const drmModeModeInfo &mode) {
 
 DeviceOpenResult failure(const DeviceOpenStatus status, std::string error) {
   return {status, -1, {}, std::move(error)};
+}
+
+std::vector<CrtcIndexBinding>
+crtc_index_bindings(const DeviceSnapshot &snapshot) {
+  std::vector<CrtcIndexBinding> result;
+  result.reserve(snapshot.crtcs.size());
+  for (const auto &crtc : snapshot.crtcs)
+    result.push_back({crtc.id, crtc.index});
+  return result;
+}
+
+struct LegacyVBlankQuery {
+  bool succeeded{};
+  std::uint32_t raw_sequence{};
+  std::uint64_t timestamp_nanoseconds{};
+};
+
+LegacyVBlankQuery query_legacy_vblank(const int handle,
+                                      const std::uint32_t crtc_index) {
+  const auto selector = legacy_vblank_crtc_selector(crtc_index);
+  if (!selector)
+    return {};
+
+  drmVBlank query{};
+  query.request.type = static_cast<drmVBlankSeqType>(
+      static_cast<std::uint32_t>(DRM_VBLANK_RELATIVE) | *selector);
+  query.request.sequence = 0;
+  query.request.signal = 0;
+  if (drmWaitVBlank(handle, &query) != 0)
+    return {};
+
+  LegacyVBlankQuery result;
+  result.succeeded = true;
+  result.raw_sequence = query.reply.sequence;
+  if (query.reply.tval_sec < 0 || query.reply.tval_usec < 0)
+    return result;
+  const auto timestamp = convert_page_flip_timestamp(
+      static_cast<std::uint64_t>(query.reply.tval_sec),
+      static_cast<std::uint64_t>(query.reply.tval_usec));
+  if (timestamp.status == VrrTimestampStatus::Success)
+    result.timestamp_nanoseconds = timestamp.nanoseconds;
+  return result;
 }
 
 bool enumerate_connectors(const int fd, const drmModeRes &resources,
@@ -497,6 +542,12 @@ private:
   std::unordered_map<int, std::uint64_t> last_page_flip_timestamps_;
   std::unordered_map<int, std::unordered_map<std::uint32_t, CrtcSequencePoint>>
       last_crtc_sequence_samples_;
+  std::unordered_map<
+      int,
+      std::unordered_map<std::uint32_t, LegacyVBlankCounterState>>
+      last_legacy_vblank_counters_;
+  std::unordered_map<int, std::vector<CrtcIndexBinding>>
+      crtc_index_bindings_;
   std::unordered_map<int, bool> timestamp_monotonic_;
 };
 
@@ -519,6 +570,7 @@ DeviceOpenResult RealDrmApi::open_device(const std::string_view path,
   auto result = inspect_device(raw_fd, canonical.string(), options);
   if (result.status == DeviceOpenStatus::Success) {
     timestamp_monotonic_[raw_fd] = result.snapshot.timestamp_monotonic;
+    crtc_index_bindings_[raw_fd] = crtc_index_bindings(result.snapshot);
     result.handle = fd.release();
   }
   return result;
@@ -536,6 +588,7 @@ DeviceOpenResult RealDrmApi::adopt_device(const int inherited_fd,
       inspect_device(duplicate, inherited_device_path(inherited_fd), options);
   if (result.status == DeviceOpenStatus::Success) {
     timestamp_monotonic_[duplicate] = result.snapshot.timestamp_monotonic;
+    crtc_index_bindings_[duplicate] = crtc_index_bindings(result.snapshot);
     result.handle = fd.release();
   }
   return result;
@@ -547,6 +600,8 @@ void RealDrmApi::close_device(const int handle) noexcept {
   event_cookies_.erase(handle);
   last_page_flip_timestamps_.erase(handle);
   last_crtc_sequence_samples_.erase(handle);
+  last_legacy_vblank_counters_.erase(handle);
+  crtc_index_bindings_.erase(handle);
   timestamp_monotonic_.erase(handle);
 }
 
@@ -601,6 +656,7 @@ void RealDrmApi::abandon_page_flip(
 
 void RealDrmApi::reset_crtc_sequence_samples(const int handle) noexcept {
   last_crtc_sequence_samples_.erase(handle);
+  last_legacy_vblank_counters_.erase(handle);
 }
 
 DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
@@ -646,9 +702,38 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
         cookie->completed_crtc_id != 0) {
       std::uint64_t query_sequence{};
       std::uint64_t query_timestamp{};
-      const bool query_succeeded =
+      bool query_succeeded =
           drmCrtcGetSequence(handle, cookie->completed_crtc_id, &query_sequence,
                              &query_timestamp) == 0;
+      auto source = VrrTimingSource::CrtcSequenceQuery;
+      std::optional<LegacyVBlankCounterState> legacy_counter;
+      if (!query_succeeded) {
+        source = VrrTimingSource::LegacyVBlankQuery;
+        const auto bindings = crtc_index_bindings_.find(handle);
+        const auto crtc_index =
+            bindings == crtc_index_bindings_.end()
+                ? std::nullopt
+                : find_crtc_index(bindings->second,
+                                  cookie->completed_crtc_id);
+        if (crtc_index) {
+          const auto legacy = query_legacy_vblank(handle, *crtc_index);
+          query_succeeded = legacy.succeeded;
+          query_timestamp = legacy.timestamp_nanoseconds;
+          if (query_succeeded) {
+            auto &counters = last_legacy_vblank_counters_[handle];
+            const auto prior_counter =
+                counters.find(cookie->completed_crtc_id);
+            const auto extension = extend_legacy_vblank_counter(
+                legacy.raw_sequence,
+                prior_counter == counters.end()
+                    ? std::nullopt
+                    : std::optional{prior_counter->second});
+            query_sequence = extension.state.extended_sequence;
+            if (extension.status == LegacyVBlankCounterStatus::Success)
+              legacy_counter = extension.state;
+          }
+        }
+      }
       auto &samples = last_crtc_sequence_samples_[handle];
       const auto prior = samples.find(cookie->completed_crtc_id);
       const std::optional<CrtcSequencePoint> previous =
@@ -656,10 +741,13 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
       cookie->crtc_sequence_sample = assess_crtc_sequence_sample(
           cookie->kernel_timestamp_nanoseconds, cookie->timestamp_available,
           query_succeeded, timestamp_monotonic_[handle], query_sequence,
-          query_timestamp, previous);
+          query_timestamp, previous, source);
       const auto correlation = cookie->crtc_sequence_sample.correlation;
       if (correlation == CrtcSequenceCorrelation::Correlated) {
         samples[cookie->completed_crtc_id] = {query_sequence, query_timestamp};
+        if (legacy_counter)
+          last_legacy_vblank_counters_[handle][cookie->completed_crtc_id] =
+              *legacy_counter;
       }
     }
     const DrmEvent event{DrmEventKind::PageFlip,

@@ -2,6 +2,7 @@
 #include "backends/drm/vrr_timing.hpp"
 #include "tests/helpers/test_support.hpp"
 
+#include <array>
 #include <limits>
 #include <memory>
 #include <poll.h>
@@ -9,6 +10,77 @@
 
 int main() {
   using namespace glasswyrm::drm;
+  const std::array crtc_bindings{
+      CrtcIndexBinding{40, 0},
+      CrtcIndexBinding{900, 1},
+      CrtcIndexBinding{12, 31},
+  };
+  gw::test::require(
+      find_crtc_index(crtc_bindings, 40) == 0 &&
+          find_crtc_index(crtc_bindings, 900) == 1 &&
+          find_crtc_index(crtc_bindings, 12) == 31 &&
+          !find_crtc_index(crtc_bindings, 1),
+      "legacy vblank lookup maps object IDs to resource indices");
+  gw::test::require(
+      legacy_vblank_crtc_selector(0) == 0 &&
+          legacy_vblank_crtc_selector(1) == 2 &&
+          legacy_vblank_crtc_selector(31) == 62 &&
+          !legacy_vblank_crtc_selector(32),
+      "legacy vblank selector encodes only supported CRTC indices");
+
+  auto extended =
+      extend_legacy_vblank_counter(UINT32_C(0xfffffffe));
+  gw::test::require(
+      extended.status == LegacyVBlankCounterStatus::Success &&
+          extended.state.raw_sequence == UINT32_C(0xfffffffe) &&
+          extended.state.extended_sequence == UINT64_C(0xfffffffe),
+      "legacy vblank counter initializes without inventing an epoch");
+  extended =
+      extend_legacy_vblank_counter(UINT32_C(0xffffffff), extended.state);
+  gw::test::require(
+      extended.status == LegacyVBlankCounterStatus::Success &&
+          extended.state.extended_sequence == UINT64_C(0xffffffff),
+      "legacy vblank counter advances before wrap");
+  extended = extend_legacy_vblank_counter(0, extended.state);
+  gw::test::require(
+      extended.status == LegacyVBlankCounterStatus::Success &&
+          extended.state.extended_sequence == UINT64_C(0x100000000),
+      "legacy vblank counter extends a 32-bit wrap");
+  extended = extend_legacy_vblank_counter(1, extended.state);
+  gw::test::require(
+      extended.status == LegacyVBlankCounterStatus::Success &&
+          extended.state.extended_sequence == UINT64_C(0x100000001),
+      "legacy vblank counter advances after wrap");
+  const auto duplicate =
+      extend_legacy_vblank_counter(1, extended.state);
+  gw::test::require(
+      duplicate.status == LegacyVBlankCounterStatus::Duplicate &&
+          duplicate.state.extended_sequence ==
+              extended.state.extended_sequence,
+      "duplicate legacy vblank counter fails closed");
+  const auto regression = extend_legacy_vblank_counter(
+      0, LegacyVBlankCounterState{1, UINT64_C(0x100000001)});
+  gw::test::require(
+      regression.status == LegacyVBlankCounterStatus::Regression,
+      "backward legacy vblank counter fails closed");
+  const auto ambiguous = extend_legacy_vblank_counter(
+      UINT32_C(0x80000000), LegacyVBlankCounterState{0, 10});
+  gw::test::require(
+      ambiguous.status == LegacyVBlankCounterStatus::Regression,
+      "half-range legacy vblank counter change is rejected");
+  const auto counter_overflow = extend_legacy_vblank_counter(
+      1, LegacyVBlankCounterState{
+             0, std::numeric_limits<std::uint64_t>::max()});
+  gw::test::require(
+      counter_overflow.status ==
+          LegacyVBlankCounterStatus::ArithmeticOverflow,
+      "legacy vblank counter arithmetic overflow fails closed");
+  const auto reset_counter = extend_legacy_vblank_counter(7);
+  gw::test::require(
+      reset_counter.status == LegacyVBlankCounterStatus::Success &&
+          reset_counter.state.extended_sequence == 7,
+      "clearing the legacy baseline starts a new scanout period");
+
   const auto exact = convert_page_flip_timestamp(12, 345'678);
   gw::test::require(exact.status == VrrTimestampStatus::Success &&
                         exact.nanoseconds == 12'345'678'000ULL,
@@ -32,6 +104,15 @@ int main() {
           query_failed.correlation == CrtcSequenceCorrelation::QueryFailed &&
           !query_failed.cadence_eligible,
       "failed CRTC query remains separately tagged and ineligible");
+  const auto legacy_query_failed = assess_crtc_sequence_sample(
+      2'000'000'000ULL, true, false, true, 0, 0, std::nullopt,
+      VrrTimingSource::LegacyVBlankQuery);
+  gw::test::require(
+      legacy_query_failed.source == VrrTimingSource::LegacyVBlankQuery &&
+          legacy_query_failed.correlation ==
+              CrtcSequenceCorrelation::QueryFailed &&
+          !legacy_query_failed.cadence_eligible,
+      "failed legacy vblank query remains separately tagged and ineligible");
   const auto invalid_query = assess_crtc_sequence_sample(
       2'000'000'000ULL, true, true, true, 0, 2'000'000'000ULL);
   gw::test::require(invalid_query.correlation ==
@@ -72,6 +153,16 @@ int main() {
       next_query.correlation == CrtcSequenceCorrelation::Correlated &&
           next_query.cadence_eligible,
       "increasing correlated CRTC sequence remains cadence eligible");
+  const auto legacy_query = assess_crtc_sequence_sample(
+      2'300'000'000ULL, true, true, true, 0x1'0000'0003ULL, 2'300'000'000ULL,
+      CrtcSequencePoint{0x1'0000'0002ULL, 2'200'000'000ULL},
+      VrrTimingSource::LegacyVBlankQuery);
+  gw::test::require(
+      legacy_query.source == VrrTimingSource::LegacyVBlankQuery &&
+          legacy_query.correlation ==
+              CrtcSequenceCorrelation::Correlated &&
+          legacy_query.cadence_eligible,
+      "legacy vblank query remains separately source-tagged");
 
   DeviceSnapshot snapshot;
   snapshot.primary_node = true;

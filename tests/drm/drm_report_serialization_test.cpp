@@ -131,6 +131,40 @@ int main() {
       "\"crtc_sequence\":0,\"crtc_timestamp_nanoseconds\":0,"
       "\"crtc_cadence_eligible\":false}",
       "failed CRTC sequence diagnostic remains reportable");
+  sampled_flip.crtc_sequence_sample.source =
+      VrrTimingSource::LegacyVBlankQuery;
+  require_record(
+      sampled_flip,
+      "{\"record\":\"flip\",\"ordinal\":3,\"commit_id\":10,"
+      "\"generation\":12,\"front_buffer\":1,\"framebuffer_id\":56,"
+      "\"canonical_hash\":\"00000000000012ab\","
+      "\"scanout_hash\":\"00000000000012ab\","
+      "\"page_flip_sequence\":0,\"api\":\"atomic\","
+      "\"crtc_sequence_source\":\"wait-vblank\","
+      "\"crtc_sequence_correlation\":\"query-failed\","
+      "\"crtc_sequence\":0,\"crtc_timestamp_nanoseconds\":0,"
+      "\"crtc_cadence_eligible\":false}",
+      "failed legacy vblank diagnostic remains distinctly source-tagged");
+  sampled_flip.crtc_sequence_sample = {
+      VrrTimingSource::LegacyVBlankQuery,
+      CrtcSequenceCorrelation::Correlated,
+      UINT64_C(4294967298),
+      UINT64_C(2'100'000'999),
+      true,
+  };
+  require_record(
+      sampled_flip,
+      "{\"record\":\"flip\",\"ordinal\":3,\"commit_id\":10,"
+      "\"generation\":12,\"front_buffer\":1,\"framebuffer_id\":56,"
+      "\"canonical_hash\":\"00000000000012ab\","
+      "\"scanout_hash\":\"00000000000012ab\","
+      "\"page_flip_sequence\":0,\"api\":\"atomic\","
+      "\"crtc_sequence_source\":\"wait-vblank\","
+      "\"crtc_sequence_correlation\":\"correlated\","
+      "\"crtc_sequence\":4294967298,"
+      "\"crtc_timestamp_nanoseconds\":2100000999,"
+      "\"crtc_cadence_eligible\":true}",
+      "legacy vblank diagnostic remains distinctly source-tagged");
   require_record(VtReport{VtTransition::Release, false, false, 0x12ab},
                  "{\"record\":\"vt\",\"transition\":\"release\","
                  "\"master_owned\":false,\"full_modeset\":false,"
