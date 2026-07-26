@@ -134,9 +134,14 @@ in-range target with VRR off and on. The cadence thresholds are defined in
 Some DRM drivers deliver a valid page-flip event and strictly increasing
 monotonic kernel timestamps while leaving the event sequence at zero.
 Glasswyrm records that zero unchanged and accepts consecutive zero-sequence
-events only when their kernel timestamps increase. It does not synthesize a
-sequence number. Missing or regressed timestamps remain nonfatal runtime timing
-loss and cannot satisfy physical cadence acceptance.
+events only when their kernel timestamps increase. The real DRM adapter may
+separately sample the current 64-bit CRTC sequence for a zero-sequence event,
+but it does not synthesize or replace the raw event fields. Only a successful,
+monotonic query whose timestamp tightly correlates with that event is marked
+cadence-eligible. The standard DRM `flip` record archives that separately
+tagged diagnostic, but M14 cadence acceptance does not yet consume it. Missing
+or regressed event timestamps remain nonfatal runtime timing loss and cannot
+satisfy physical cadence acceptance.
 The cadence client requests the matching window projection with each VRR timing
 snapshot so an enabled candidate remains self-contained and coherence-checked.
 

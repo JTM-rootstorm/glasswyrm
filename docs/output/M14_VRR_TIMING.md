@@ -11,6 +11,23 @@ interval. Sequence wrap is accepted; timestamp regression, overflow, a
 different CRTC, or unavailable monotonic timestamps invalidates the interval
 without fabricating a sample.
 
+When a driver reports event sequence zero, the real DRM adapter also attempts
+`drmCrtcGetSequence` after consuming the matching event. The raw page-flip
+sequence and timestamp remain unchanged and authoritative. The queried 64-bit
+sequence and nanosecond timestamp are retained separately with
+`CrtcSequenceQuery` source and an explicit correlation result. A query sample
+is cadence-eligible only when the query succeeded, monotonic timestamps are
+supported, both values are nonzero, the queried timestamp falls within the
+page-flip event's one-microsecond timestamp quantization window, and the
+queried sequence and timestamp advance. Query failure, a later vblank, or a
+regression does not invalidate the completed flip.
+
+The standard DRM `flip` record serializes the queried source, correlation,
+full 64-bit sequence, timestamp, and cadence-eligibility verdict separately.
+M14 `vrr-timing` records continue to serialize the raw page-flip event fields,
+and the physical acceptance calculation does not yet consume the queried
+sample.
+
 The compositor and DRM presenter report raw presentation facts only:
 
 - kernel page-flip timestamp and sequence;

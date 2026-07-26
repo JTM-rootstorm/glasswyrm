@@ -25,4 +25,41 @@ VrrTimestampResult convert_page_flip_timestamp(
   return {VrrTimestampStatus::Success, value};
 }
 
+CrtcSequenceSample assess_crtc_sequence_sample(
+    const std::uint64_t event_timestamp_nanoseconds,
+    const bool event_timestamp_available, const bool query_succeeded,
+    const bool timestamp_monotonic, const std::uint64_t query_sequence,
+    const std::uint64_t query_timestamp_nanoseconds,
+    const std::optional<CrtcSequencePoint> previous) noexcept {
+  CrtcSequenceSample result;
+  result.sequence = query_sequence;
+  result.timestamp_nanoseconds = query_timestamp_nanoseconds;
+  if (!query_succeeded) {
+    result.correlation = CrtcSequenceCorrelation::QueryFailed;
+    return result;
+  }
+  if (!timestamp_monotonic || query_sequence == 0 ||
+      query_timestamp_nanoseconds == 0) {
+    result.correlation = CrtcSequenceCorrelation::Invalid;
+    return result;
+  }
+  constexpr std::uint64_t event_quantization_nanoseconds = 1'000;
+  if (!event_timestamp_available || event_timestamp_nanoseconds == 0 ||
+      query_timestamp_nanoseconds < event_timestamp_nanoseconds ||
+      query_timestamp_nanoseconds - event_timestamp_nanoseconds >=
+          event_quantization_nanoseconds) {
+    result.correlation = CrtcSequenceCorrelation::Uncorrelated;
+    return result;
+  }
+  if (previous &&
+      (query_sequence <= previous->sequence ||
+       query_timestamp_nanoseconds <= previous->timestamp_nanoseconds)) {
+    result.correlation = CrtcSequenceCorrelation::NonMonotonic;
+    return result;
+  }
+  result.correlation = CrtcSequenceCorrelation::Correlated;
+  result.cadence_eligible = true;
+  return result;
+}
+
 } // namespace glasswyrm::drm

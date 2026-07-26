@@ -2,6 +2,7 @@
 
 #include "backends/drm/damage_copy.hpp"
 #include "backends/drm/drm_vrr_report.hpp"
+#include "backends/drm/vrr_timing.hpp"
 
 #include <cstdint>
 #include <filesystem>
@@ -68,6 +69,7 @@ struct FlipReport {
   std::uint64_t scanout_hash{};
   std::uint64_t page_flip_sequence{};
   ReportApiPath api{ReportApiPath::Atomic};
+  CrtcSequenceSample crtc_sequence_sample;
 };
 
 struct VtReport {

@@ -322,7 +322,8 @@ output::PresentResult DrmPresenter::present_flip(
       value.hash,
       value.hash,
       std::numeric_limits<std::uint64_t>::max(),
-      selected_api_};
+      selected_api_,
+      {}};
   bool report_staged = true;
   if (report_ && config_.damage_aware_copy) {
     const std::array<DrmReportRecord, 2> records{
@@ -386,7 +387,8 @@ output::BackendEvent DrmPresenter::service(const short revents) {
                     pending_->generation,
                     static_cast<std::uint32_t>(pending_->next_front_index),
                     pending_->framebuffer_id, pending_->hash,
-                    pending_->hash, event.sequence, selected_api_};
+                    pending_->hash, event.sequence, selected_api_, {}};
+  record.crtc_sequence_sample = event.crtc_sequence_sample;
   std::string error;
   bool readback_enabled{};
   bool readback_valid{};

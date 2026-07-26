@@ -1,11 +1,13 @@
 #pragma once
 
 #include "backends/drm/resources.hpp"
+#include "backends/drm/vrr_timing.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace glasswyrm::drm {
 
@@ -62,6 +64,19 @@ struct DeviceOpenResult {
 enum class DrmEventKind { None, PageFlip, Error };
 
 struct DrmEvent {
+  DrmEvent() = default;
+  DrmEvent(DrmEventKind event_kind, std::uint64_t event_token,
+           std::uint32_t event_crtc_id, std::uint32_t event_sequence,
+           std::string event_error = {},
+           std::uint64_t event_timestamp_nanoseconds = 0,
+           bool event_timestamp_available = false,
+           CrtcSequenceSample event_crtc_sequence_sample = {})
+      : kind(event_kind), token(event_token), crtc_id(event_crtc_id),
+        sequence(event_sequence), error(std::move(event_error)),
+        kernel_timestamp_nanoseconds(event_timestamp_nanoseconds),
+        timestamp_available(event_timestamp_available),
+        crtc_sequence_sample(event_crtc_sequence_sample) {}
+
   DrmEventKind kind{DrmEventKind::None};
   std::uint64_t token{};
   std::uint32_t crtc_id{};
@@ -69,6 +84,7 @@ struct DrmEvent {
   std::string error;
   std::uint64_t kernel_timestamp_nanoseconds{};
   bool timestamp_available{};
+  CrtcSequenceSample crtc_sequence_sample;
 };
 
 struct PageFlipCookie {
@@ -83,6 +99,7 @@ struct PageFlipCookie {
   std::uint64_t kernel_timestamp_nanoseconds{};
   bool timestamp_available{};
   bool timestamp_invalid{};
+  CrtcSequenceSample crtc_sequence_sample;
 };
 
 class DrmApi {

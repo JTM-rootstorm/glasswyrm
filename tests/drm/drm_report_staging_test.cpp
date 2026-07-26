@@ -77,7 +77,7 @@ SelectionReport selection() {
 
 FlipReport flip() {
   return {1, 9, 11, 1, 56, 0x1234, 0x1234, 77,
-          ReportApiPath::Atomic};
+          ReportApiPath::Atomic, {}};
 }
 
 struct ReplacementRace {

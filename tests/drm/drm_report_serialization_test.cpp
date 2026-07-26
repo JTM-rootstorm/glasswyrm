@@ -7,8 +7,9 @@
 
 namespace {
 
-using glasswyrm::drm::DiscoveryReport;
+using glasswyrm::drm::CrtcSequenceCorrelation;
 using glasswyrm::drm::DamageCopyReport;
+using glasswyrm::drm::DiscoveryReport;
 using glasswyrm::drm::DrmReportRecord;
 using glasswyrm::drm::DrmPresentationEvidenceId;
 using glasswyrm::drm::EvidenceSealReport;
@@ -21,6 +22,7 @@ using glasswyrm::drm::RestoreReport;
 using glasswyrm::drm::SelectionReport;
 using glasswyrm::drm::VtReport;
 using glasswyrm::drm::VtTransition;
+using glasswyrm::drm::VrrTimingSource;
 using glasswyrm::drm::kEvidenceStreamDrmReport;
 using glasswyrm::drm::kEvidenceStreamMirror;
 using glasswyrm::drm::kEvidenceStreamVrrReport;
@@ -81,13 +83,54 @@ int main() {
       "stable modeset JSON");
   require_record(
       FlipReport{3, 10, 12, 1, 56, 0x12ab, 0x12ab, 99,
-                 ReportApiPath::Legacy},
+                 ReportApiPath::Legacy, {}},
       "{\"record\":\"flip\",\"ordinal\":3,\"commit_id\":10,"
       "\"generation\":12,\"front_buffer\":1,\"framebuffer_id\":56,"
       "\"canonical_hash\":\"00000000000012ab\","
       "\"scanout_hash\":\"00000000000012ab\","
       "\"page_flip_sequence\":99,\"api\":\"legacy\"}",
       "stable flip JSON");
+  FlipReport sampled_flip{3, 10, 12, 1, 56, 0x12ab, 0x12ab, 0,
+                          ReportApiPath::Atomic, {}};
+  sampled_flip.crtc_sequence_sample = {
+      VrrTimingSource::CrtcSequenceQuery,
+      CrtcSequenceCorrelation::Correlated,
+      UINT64_C(4294967297),
+      UINT64_C(2'000'000'999),
+      true,
+  };
+  require_record(
+      sampled_flip,
+      "{\"record\":\"flip\",\"ordinal\":3,\"commit_id\":10,"
+      "\"generation\":12,\"front_buffer\":1,\"framebuffer_id\":56,"
+      "\"canonical_hash\":\"00000000000012ab\","
+      "\"scanout_hash\":\"00000000000012ab\","
+      "\"page_flip_sequence\":0,\"api\":\"atomic\","
+      "\"crtc_sequence_source\":\"query\","
+      "\"crtc_sequence_correlation\":\"correlated\","
+      "\"crtc_sequence\":4294967297,"
+      "\"crtc_timestamp_nanoseconds\":2000000999,"
+      "\"crtc_cadence_eligible\":true}",
+      "source-tagged CRTC sequence diagnostic JSON");
+  sampled_flip.crtc_sequence_sample = {
+      VrrTimingSource::CrtcSequenceQuery,
+      CrtcSequenceCorrelation::QueryFailed,
+      0,
+      0,
+      false,
+  };
+  require_record(
+      sampled_flip,
+      "{\"record\":\"flip\",\"ordinal\":3,\"commit_id\":10,"
+      "\"generation\":12,\"front_buffer\":1,\"framebuffer_id\":56,"
+      "\"canonical_hash\":\"00000000000012ab\","
+      "\"scanout_hash\":\"00000000000012ab\","
+      "\"page_flip_sequence\":0,\"api\":\"atomic\","
+      "\"crtc_sequence_source\":\"query\","
+      "\"crtc_sequence_correlation\":\"query-failed\","
+      "\"crtc_sequence\":0,\"crtc_timestamp_nanoseconds\":0,"
+      "\"crtc_cadence_eligible\":false}",
+      "failed CRTC sequence diagnostic remains reportable");
   require_record(VtReport{VtTransition::Release, false, false, 0x12ab},
                  "{\"record\":\"vt\",\"transition\":\"release\","
                  "\"master_owned\":false,\"full_modeset\":false,"

@@ -116,7 +116,10 @@ uncommitted. The producer socket may be polled but no new compositor contract
 is dequeued. A two-second timeout, event error, HUP, wrong token, wrong CRTC,
 or missing completion is fatal. The kernel page-flip sequence is diagnostic:
 drivers without usable vblank accounting may deliver zero with a valid matching
-completion. Connector loss is fatal in M10; hotplug recovery is not implemented.
+completion. A separately tagged CRTC sequence query may corroborate such an
+event, but query failure or loose correlation leaves the raw successful
+completion unchanged. Connector loss is fatal in M10; hotplug recovery is not
+implemented.
 
 When a buffered ProtocolServer configures `--scene-manifest`, its serialized
 scene record is staged with the presentation. Synchronous modesets publish it

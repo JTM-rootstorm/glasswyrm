@@ -122,7 +122,31 @@ std::string serialize(const FlipReport& value) {
          << json_quote(hex64(value.canonical_hash)) << ",\"scanout_hash\":"
          << json_quote(hex64(value.scanout_hash)) << ",\"page_flip_sequence\":"
          << value.page_flip_sequence << ",\"api\":"
-         << json_quote(api_name(value.api)) << '}';
+         << json_quote(api_name(value.api));
+  if (value.crtc_sequence_sample.correlation !=
+      CrtcSequenceCorrelation::NotSampled) {
+    const auto correlation = [](const CrtcSequenceCorrelation result) {
+      switch (result) {
+        case CrtcSequenceCorrelation::NotSampled: return "not-sampled";
+        case CrtcSequenceCorrelation::QueryFailed: return "query-failed";
+        case CrtcSequenceCorrelation::Invalid: return "invalid";
+        case CrtcSequenceCorrelation::Uncorrelated: return "uncorrelated";
+        case CrtcSequenceCorrelation::NonMonotonic: return "nonmonotonic";
+        case CrtcSequenceCorrelation::Correlated: return "correlated";
+      }
+      return "unknown";
+    };
+    stream << ",\"crtc_sequence_source\":\"query\""
+           << ",\"crtc_sequence_correlation\":"
+           << json_quote(correlation(
+                  value.crtc_sequence_sample.correlation))
+           << ",\"crtc_sequence\":" << value.crtc_sequence_sample.sequence
+           << ",\"crtc_timestamp_nanoseconds\":"
+           << value.crtc_sequence_sample.timestamp_nanoseconds
+           << ",\"crtc_cadence_eligible\":"
+           << boolean(value.crtc_sequence_sample.cadence_eligible);
+  }
+  stream << '}';
   return stream.str();
 }
 
@@ -245,9 +269,17 @@ bool valid(const ModesetReport& value) {
 }
 
 bool valid(const FlipReport& value) {
-  return value.ordinal != 0 && value.commit_id != 0 && value.generation != 0 &&
-         value.framebuffer_id != 0 &&
-         value.canonical_hash == value.scanout_hash;
+  const auto& sample = value.crtc_sequence_sample;
+  const bool valid_sample =
+      sample.correlation == CrtcSequenceCorrelation::NotSampled ||
+      (sample.source == VrrTimingSource::CrtcSequenceQuery &&
+       (sample.cadence_eligible ==
+        (sample.correlation == CrtcSequenceCorrelation::Correlated)) &&
+       (!sample.cadence_eligible ||
+        (sample.sequence != 0 && sample.timestamp_nanoseconds != 0)));
+  return value.ordinal != 0 && value.commit_id != 0 &&
+         value.generation != 0 && value.framebuffer_id != 0 &&
+         value.canonical_hash == value.scanout_hash && valid_sample;
 }
 
 bool valid(const VtReport& value) {

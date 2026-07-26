@@ -25,6 +25,54 @@ int main() {
           VrrTimestampStatus::Regression,
       "timestamp regression is rejected");
 
+  const auto query_failed =
+      assess_crtc_sequence_sample(2'000'000'000ULL, true, false, true, 0, 0);
+  gw::test::require(
+      query_failed.source == VrrTimingSource::CrtcSequenceQuery &&
+          query_failed.correlation == CrtcSequenceCorrelation::QueryFailed &&
+          !query_failed.cadence_eligible,
+      "failed CRTC query remains separately tagged and ineligible");
+  const auto invalid_query = assess_crtc_sequence_sample(
+      2'000'000'000ULL, true, true, true, 0, 2'000'000'000ULL);
+  gw::test::require(invalid_query.correlation ==
+                            CrtcSequenceCorrelation::Invalid &&
+                        !invalid_query.cadence_eligible,
+                    "zero CRTC sequence cannot become cadence evidence");
+  const auto nonmonotonic_clock = assess_crtc_sequence_sample(
+      2'000'000'000ULL, true, true, false, 9, 2'000'000'000ULL);
+  gw::test::require(nonmonotonic_clock.correlation ==
+                            CrtcSequenceCorrelation::Invalid &&
+                        !nonmonotonic_clock.cadence_eligible,
+                    "a non-monotonic timestamp clock fails closed");
+  const auto late_query = assess_crtc_sequence_sample(
+      2'000'000'000ULL, true, true, true, 9, 2'000'001'000ULL);
+  gw::test::require(late_query.correlation ==
+                            CrtcSequenceCorrelation::Uncorrelated &&
+                        !late_query.cadence_eligible,
+                    "a query from a later vblank cannot replace event timing");
+  const auto correlated_query = assess_crtc_sequence_sample(
+      2'000'000'000ULL, true, true, true, 0x1'0000'0001ULL, 2'000'000'999ULL);
+  gw::test::require(
+      correlated_query.correlation == CrtcSequenceCorrelation::Correlated &&
+          correlated_query.sequence == 0x1'0000'0001ULL &&
+          correlated_query.timestamp_nanoseconds == 2'000'000'999ULL &&
+          correlated_query.cadence_eligible,
+      "a tightly correlated query retains its full 64-bit CRTC sequence");
+  const auto nonmonotonic_query = assess_crtc_sequence_sample(
+      2'100'000'000ULL, true, true, true, 0x1'0000'0001ULL, 2'100'000'000ULL,
+      CrtcSequencePoint{0x1'0000'0001ULL, 2'000'000'999ULL});
+  gw::test::require(nonmonotonic_query.correlation ==
+                            CrtcSequenceCorrelation::NonMonotonic &&
+                        !nonmonotonic_query.cadence_eligible,
+                    "non-increasing CRTC sequence fails closed");
+  const auto next_query = assess_crtc_sequence_sample(
+      2'200'000'000ULL, true, true, true, 0x1'0000'0002ULL, 2'200'000'000ULL,
+      CrtcSequencePoint{0x1'0000'0001ULL, 2'100'000'000ULL});
+  gw::test::require(
+      next_query.correlation == CrtcSequenceCorrelation::Correlated &&
+          next_query.cadence_eligible,
+      "increasing correlated CRTC sequence remains cadence eligible");
+
   DeviceSnapshot snapshot;
   snapshot.primary_node = true;
   snapshot.dumb_buffer = true;
