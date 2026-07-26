@@ -119,6 +119,11 @@ void test_options() {
 }
 
 void test_cadence_and_pixels() {
+  require(
+      kPresentationQueryFlags ==
+          (GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
+           GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR),
+      "presentation queries include window state needed to validate a candidate");
   require(target_interval_nanoseconds(0) == 0 &&
               target_interval_nanoseconds(72) == 13'888'888,
           "target cadence uses deterministic integer nanoseconds");

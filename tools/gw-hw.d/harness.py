@@ -220,6 +220,22 @@ def self_test() -> int:
                 bounded.get("scenario") != "on-cadence" or
                 contaminated.get("passed") is not False):
             raise AssertionError("cadence analysis crossed its scenario boundary")
+        zero_sequence_report = Path(directory) / "zero-sequence-cadence.jsonl"
+        zero_sequence_report.write_text("".join(
+            json.dumps({
+                "record": "vrr-timing", "sequence": 0,
+                "kernel_timestamp_nanoseconds": 1_000_000_000 +
+                    14_285_714 * index,
+                "effective_enabled": True,
+            }, sort_keys=True) + "\n"
+            for index in range(131)
+        ), encoding="utf-8")
+        zero_sequence = analyze_cadence(
+            zero_sequence_report, config, True, scenario="zero-sequence")
+        if (zero_sequence.get("passed") is not True or
+                zero_sequence.get("sample_count") != 130):
+            raise AssertionError(
+                "timestamped zero-sequence cadence was not retained")
         for required_base, tested_commit in (
                 ("0" * 40, "b" * 40),
                 ("6864ea631d61636289a21c7d2d6655a17be0c004", "c" * 40)):

@@ -60,10 +60,8 @@ public:
 
   PresentationObservation observe() override {
     Snapshot snapshot;
-    auto result = client_.query_once(GWIPC_OUTPUT_QUERY_DESCRIPTORS |
-                                         GWIPC_OUTPUT_QUERY_LAYOUT |
-                                         GWIPC_OUTPUT_QUERY_VRR,
-                                     snapshot);
+    auto result = client_.query_once(
+        gw::test::m14::kPresentationQueryFlags, snapshot);
     const auto timestamp = monotonic_nanoseconds();
     if (result.outcome == QueryOutcome::RetryableNotReady)
       return {PresentationObservationKind::RetryableNotReady, {}, timestamp,
