@@ -120,7 +120,8 @@ public:
 output::SoftwareFrameSet frame_set(
     const std::span<const std::uint32_t> pixels, const std::uint64_t ordinal,
     const bool desired_enabled,
-    const output::vrr::Decision decision = output::vrr::Decision::Enabled) {
+    const output::vrr::Decision decision = output::vrr::Decision::Enabled,
+    const std::uint64_t transition_serial = 0) {
   output::SoftwareFrameSet result;
   output::OutputFrameResult item;
   std::string error;
@@ -140,7 +141,8 @@ output::SoftwareFrameSet frame_set(
   item.vrr.candidate_window_id = desired_enabled ? 100U : 0U;
   item.vrr.candidate_surface_id = desired_enabled ? 200U : 0U;
   item.vrr.state_generation = ordinal;
-  item.vrr.transition_serial = ordinal;
+  item.vrr.transition_serial =
+      transition_serial == 0 ? ordinal : transition_serial;
   item.vrr.nominal_mode_interval_nanoseconds = 16'666'667;
   const auto request = item.vrr;
   gw::test::require(result.append(std::move(item), error), error);
@@ -395,13 +397,29 @@ void zero_sequence_with_kernel_timestamp_is_valid() {
               1'000'000'000 &&
           rig.presenter->finalize_pending(pending.token, rig.error),
       event.error.empty() ? rig.error : event.error);
+  const auto next = rig.presenter->present(
+      frame_set(pixels, 3, true, output::vrr::Decision::Enabled, 2).view());
+  gw::test::require(next.disposition == output::PresentDisposition::Pending,
+                    "second zero-sequence frame remains asynchronous");
+  rig.drm.queue_page_flip(next.token, 40, 0, 1'016'666'667, true);
+  const auto next_event = rig.presenter->service(POLLIN);
+  gw::test::require(
+      next_event.kind == output::BackendEventKind::Complete &&
+          next_event.vrr_feedback.contains(1) &&
+          next_event.vrr_feedback.at(1).flip_sequence == 0 &&
+          next_event.vrr_feedback.at(1).timestamp_available &&
+          next_event.vrr_feedback.at(1).interval_nanoseconds == 16'666'667 &&
+          rig.presenter->finalize_pending(next.token, rig.error),
+      next_event.error.empty() ? rig.error : next_event.error);
   const auto report = contents(rig.report.path());
   gw::test::require(
       report.find("\"record\":\"vrr-timing\"") != std::string::npos &&
           report.find("\"sequence\":0") != std::string::npos &&
           report.find("\"kernel_timestamp_nanoseconds\":1000000000") !=
+              std::string::npos &&
+          report.find("\"interval_nanoseconds\":16666667") !=
               std::string::npos,
-      "zero-sequence completion retains valid kernel timing evidence");
+      "consecutive zero-sequence completions retain kernel timing intervals");
 }
 
 void historical_profile_does_not_probe_vrr() {

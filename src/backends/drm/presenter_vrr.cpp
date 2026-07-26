@@ -14,6 +14,8 @@ void add_reason(output::vrr::ReasonMask &mask,
 
 bool sequence_follows(const std::uint32_t previous,
                       const std::uint32_t current) noexcept {
+  if (previous == 0 && current == 0)
+    return true;
   const auto distance = static_cast<std::uint32_t>(current - previous);
   return distance != 0 && distance < (UINT32_C(1) << 31U);
 }

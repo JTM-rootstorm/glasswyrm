@@ -50,6 +50,16 @@ void test_observation_validation_and_wrap() {
                   TimingObservation::IntervalAccepted &&
               statistics.summary().count == 1,
           "page-flip sequence wrap is forward progress");
+
+  statistics.reset();
+  require(statistics.observe(0, 100) ==
+                  TimingObservation::BaselineAccepted &&
+              statistics.observe(0, 200) ==
+                  TimingObservation::IntervalAccepted &&
+              statistics.observe(0, 300) ==
+                  TimingObservation::IntervalAccepted &&
+              statistics.summary().count == 2,
+          "zero-sequence drivers retain strictly monotonic kernel intervals");
 }
 
 void test_exact_summary() {
