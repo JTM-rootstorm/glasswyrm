@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 from config_doctor import (  # noqa: E402
     ConfigError, _connector_profile, _modetest_commands,
-    _parse_debugfs_refresh_range, _reviewed_range_source, doctor_config,
-    parse_config,
+    _parse_debugfs_refresh_range, _reviewed_range_source,
+    _vblank_notification_state, doctor_config, parse_config,
 )
 
 TOOL = ROOT / "tools" / "gw-hw"
@@ -75,7 +75,8 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "minimum_refresh_hz": 48, "maximum_refresh_hz": 144,
         "no_competing_drm_master": True, "session_permissions": True,
         "kernel": "fixture-kernel", "libdrm": "fixture-libdrm",
-        "driver": "fixture-driver", "firmware": "fixture-firmware",
+        "driver": "fixture-driver", "vblank_notifications": "not-applicable",
+        "firmware": "fixture-firmware",
         "keyboard_device": "/dev/input/event0",
         "pointer_device": "/dev/input/event1",
         "keyboard_character_device": True, "pointer_character_device": True,
@@ -227,6 +228,15 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         config, fixture = make_fixture(root)
+        parameter = root / "nvidia-vblank"
+        parameter.write_text("Y\n", encoding="ascii")
+        assert _vblank_notification_state("nvidia", parameter) == "enabled"
+        parameter.write_text("N\n", encoding="ascii")
+        assert _vblank_notification_state("nvidia", parameter) == "disabled"
+        assert _vblank_notification_state("amdgpu", parameter) == \
+            "not-applicable"
+        assert _vblank_notification_state(
+            "nvidia", root / "missing-vblank") == "unavailable"
         duplicate_vt = CONFIG_TEXT.replace(
             'alternate_tty = "/dev/tty1"', 'alternate_tty = "/dev/tty2"')
         config.write_text(duplicate_vt, encoding="utf-8")
@@ -327,6 +337,20 @@ def main() -> int:
                        "--fixture-dir", str(fixture))
         assert multiple.returncode == 1
         assert "exactly one connected connector" in multiple.stdout
+        write_json(fixture / "doctor.json", unavailable)
+
+        missing_vblank = dict(
+            unavailable, driver="nvidia", vblank_notifications="disabled",
+        )
+        write_json(fixture / "doctor.json", missing_vblank)
+        rejected_vblank = run(
+            "doctor", "--config", str(config),
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--fixture-dir", str(fixture),
+        )
+        assert rejected_vblank.returncode == 1
+        assert "DRM vblank notifications" in rejected_vblank.stdout
         write_json(fixture / "doctor.json", unavailable)
 
         artifacts = root / "artifacts"

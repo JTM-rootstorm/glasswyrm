@@ -25,6 +25,13 @@ a `debugfs` range source only after parsing one labelled minimum/maximum pair
 that exactly matches the reviewed values; otherwise the explicitly reviewed
 configuration remains the recorded source.
 
+On the proprietary NVIDIA DRM driver, the doctor also reads the load-time
+`/sys/module/nvidia_drm/parameters/vblank` parameter as root and fails closed
+unless vblank notifications are enabled. `nvidia_drm.modeset=1` and
+`nvidia_drm.fbdev=1` do not enable that separate timing prerequisite. Prepare
+the boot with `nvidia_drm.vblank=1` before physical cadence acceptance; a
+disabled or unreadable parameter prevents display takeover.
+
 The live command requires an explicit confirmation token:
 
 ```sh
