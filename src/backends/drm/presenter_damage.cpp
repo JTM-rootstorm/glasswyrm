@@ -35,9 +35,15 @@ bool DrmPresenter::copy_frame_to(
   const auto first_copy = target.last_copy_metrics();
   plan.drm_copied_bytes = first_copy.bytes;
   plan.copy_nanoseconds = first_copy.nanoseconds;
-  if (target.verify_visible_pixels(frame.pixels, expected_hash)) {
+  const bool parity =
+      plan.full_copy()
+          ? target.verify_visible_pixels(frame.pixels, expected_hash)
+          : target.verify_damage_lineage(
+                frame.pixels, plan.rectangles, expected_hash);
+  if (parity) {
     const auto parity = target.last_parity_metrics();
-    plan.parity_verified_bytes = parity.bytes;
+    plan.parity_verified_bytes = plan.full_frame_bytes;
+    plan.scanout_readback_bytes = parity.bytes;
     plan.parity_nanoseconds = parity.nanoseconds;
     return true;
   }
@@ -68,6 +74,8 @@ bool DrmPresenter::copy_frame_to(
       saturating_add(first_copy.nanoseconds, recovery_copy.nanoseconds);
   plan.parity_verified_bytes =
       saturating_add(first_parity.bytes, recovery_parity.bytes);
+  plan.scanout_readback_bytes =
+      saturating_add(first_parity.bytes, recovery_parity.bytes);
   plan.parity_nanoseconds =
       saturating_add(first_parity.nanoseconds, recovery_parity.nanoseconds);
   return true;
@@ -87,6 +95,7 @@ DamageCopyReport DrmPresenter::damage_copy_report(
   report.drm_copied_bytes = plan.drm_copied_bytes;
   report.copy_nanoseconds = plan.copy_nanoseconds;
   report.parity_verified_bytes = plan.parity_verified_bytes;
+  report.scanout_readback_bytes = plan.scanout_readback_bytes;
   report.parity_nanoseconds = plan.parity_nanoseconds;
   report.cumulative_full_frame_bytes = saturating_add(
       cumulative_full_frame_bytes_, plan.full_frame_bytes);

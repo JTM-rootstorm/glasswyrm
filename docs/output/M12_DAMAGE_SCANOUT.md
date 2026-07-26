@@ -42,16 +42,29 @@ a `damage-copy` JSON record beside its modeset or flip record. It contains:
 - `history_span`;
 - `full_copy_reason` (`none`, `first-use`, `history-miss`,
   `damage-unavailable`, `canonical-mismatch`, or `vt-resume`);
+- `parity_verified_bytes`, covering the complete canonical parity proof;
+- `scanout_readback_bytes`, distinguishing direct mapped-buffer reads from
+  parity retained through the validated damage lineage;
+- copy and parity timing costs;
 - saturating cumulative byte totals and `cumulative_copy_ratio_ppm`.
 
 The ratio uses overflow-safe intermediate arithmetic. Evidence is committed
 only after the corresponding KMS operation completes, so failed presentations
 cannot claim copy savings or advance cumulative counters.
 
+First use, complete-copy recovery, VT resume, and output reconfiguration read
+back every visible scanout byte and seed a private CPU parity shadow. Steady
+partial updates apply the same normalized rectangles to the scanout mapping and
+shadow, then compare the full shadow with the canonical frame. Because the dumb
+buffer has no external writer while its lineage is valid, unchanged pixels
+retain the previous direct-readback proof. Any incomplete canonical damage is
+detected by the shadow comparison and falls back to a complete copy and direct
+readback before KMS submission.
+
 ## Validation boundary
 
 Unit tests cover first use of both alternating buffers, accumulated small
-damage, history eviction, damage-unavailable fallback, failed page flips,
-resume invalidation, zeroed pitch padding, report serialization, and canonical
-versus scanout hash parity. Real DRM validation remains part of the fixed
-Milestone 12 VM scenario.
+damage, history eviction, damage-unavailable fallback, incomplete advertised
+damage, failed page flips, resume invalidation, zeroed pitch padding, report
+serialization, and canonical versus scanout hash parity. Real DRM validation
+remains part of the fixed Milestone 12 VM scenario.

@@ -108,6 +108,7 @@ int main() {
   copy.drm_copied_bytes = 24;
   copy.copy_nanoseconds = 17;
   copy.parity_verified_bytes = 128;
+  copy.scanout_readback_bytes = 24;
   copy.parity_nanoseconds = 19;
   copy.cumulative_full_frame_bytes = 384;
   copy.cumulative_copied_bytes = 280;
@@ -119,7 +120,8 @@ int main() {
       "\"copied_bytes\":24,\"copy_rectangles\":[{\"x\":1,\"y\":2,"
       "\"width\":3,\"height\":2}],\"history_span\":2,"
       "\"drm_copied_bytes\":24,\"copy_nanoseconds\":17,"
-      "\"parity_verified_bytes\":128,\"parity_nanoseconds\":19,"
+      "\"parity_verified_bytes\":128,\"scanout_readback_bytes\":24,"
+      "\"parity_nanoseconds\":19,"
       "\"full_copy_reason\":\"none\","
       "\"cumulative_full_frame_bytes\":384,"
       "\"cumulative_copied_bytes\":280,"
