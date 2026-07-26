@@ -84,6 +84,10 @@ void require_fifo_prefix_before_acknowledgement() {
                     GWIPC_SESSION_STATE_ACCEPTED),
                 error),
             "correlated acknowledgement survives the queued frame prefix");
+    require(compositor::session_acknowledgement_needs_reactor_turn(
+                GWIPC_SESSION_INACTIVE),
+            "inactive acknowledgement schedules suspension without another "
+            "descriptor event");
   }
   require(drained_contracts == 1 &&
               coordinator.state() ==
@@ -153,7 +157,9 @@ int main() {
                       GWIPC_SESSION_STATE_ALREADY_APPLIED),
               error) &&
               coordinator.state() ==
-                  compositor::CoordinatedSessionState::Active,
+                  compositor::CoordinatedSessionState::Active &&
+              !compositor::session_acknowledgement_needs_reactor_turn(
+                  GWIPC_SESSION_ACTIVE),
           "already-applied active reply safely resumes producer flow");
 
   coordinator.configure(true);

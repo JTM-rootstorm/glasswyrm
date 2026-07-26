@@ -33,4 +33,9 @@ enum class SessionWaitMessageRoute {
   return requested && producer_bootstrapped;
 }
 
+[[nodiscard]] constexpr bool session_acknowledgement_needs_reactor_turn(
+    const gwipc_session_state state) noexcept {
+  return state == GWIPC_SESSION_INACTIVE;
+}
+
 }  // namespace glasswyrm::compositor
