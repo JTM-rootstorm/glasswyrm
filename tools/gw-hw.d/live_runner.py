@@ -24,7 +24,7 @@ from common import (
     vrr_rejection_reasons,
 )
 from provenance import PROVENANCE_BINARIES
-from evidence import sealed_vrr_records
+from evidence import drm_evidence_streams, sealed_vrr_records
 
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
 LIVE_HARNESS_SCOPE = "glasswyrm-m14-harness.scope"
@@ -674,7 +674,7 @@ class FixedLiveRunner:
         if repaint:
             arguments += ["--repaint-trigger",
                           str(RUNTIME_ROOT / "repaint.request"),
-                          "--repaint-count", "2"]
+                          "--repaint-count", "3"]
         self.start_unit(unit, "client", arguments,
                         ["KillMode=mixed", "SuccessExitStatus=143"])
         try:
@@ -788,6 +788,80 @@ class FixedLiveRunner:
             self.artifacts / ".policy-cleanup.query.tmp",
             CLEANUP_QUERY_ATTEMPTS, validate,
         )
+
+    def request_bounded_repaint(self) -> None:
+        if not self.validate_runtime:
+            return
+        trigger = RUNTIME_ROOT / "repaint.request"
+        report = self.artifacts / "vrr-part-1.jsonl"
+        report_start = len(_read_regular(report, MAX_JSON_BYTES))
+        try:
+            descriptor = os.open(
+                trigger,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC |
+                os.O_NOFOLLOW,
+                0o600,
+            )
+        except FileExistsError as error:
+            raise HarnessError(
+                "bounded repaint trigger already exists") from error
+        except OSError as error:
+            raise HarnessError(
+                f"could not create bounded repaint trigger: {error}") from error
+        else:
+            os.close(descriptor)
+        try:
+            status = trigger.lstat()
+        except OSError as error:
+            raise HarnessError(
+                f"could not inspect bounded repaint trigger: {error}") from error
+        if (not stat.S_ISREG(status.st_mode) or
+                status.st_mode & 0o077):
+            raise HarnessError("bounded repaint trigger is not private")
+        self.wait_absent(trigger)
+        self.wait_for_sealed_presentation(report_start)
+
+    def wait_for_sealed_presentation(self, report_start: int) -> None:
+        if not self.validate_runtime:
+            return
+        report = self.artifacts / "vrr-part-1.jsonl"
+        drm_report = self.artifacts / "milestone14-drm-report.jsonl"
+        for _ in range(200):
+            contents = _read_regular(report, MAX_JSON_BYTES)
+            if (report_start > len(contents) or
+                    (report_start > 0 and
+                     contents[report_start - 1:report_start] != b"\n")):
+                raise HarnessError(
+                    "bounded repaint VRR report boundary is invalid")
+            tail = contents[report_start:]
+            if tail and tail[-1:] == b"\n":
+                try:
+                    records = [
+                        json.loads(line) for line in
+                        tail.decode("utf-8").splitlines() if line.strip()
+                    ]
+                    drm_records = [
+                        json.loads(line) for line in
+                        _read_regular(drm_report, MAX_JSON_BYTES)
+                        .decode("utf-8").splitlines() if line.strip()
+                    ]
+                    accepted = sealed_vrr_records(
+                        records, require_seals=True,
+                        drm_streams=drm_evidence_streams(drm_records),
+                    )
+                    if any(record.get("record") == "vrr-decision"
+                           for record in accepted):
+                        return
+                except (HarnessError, json.JSONDecodeError, UnicodeError):
+                    pass
+            time.sleep(.05)
+        raise HarnessError(
+            "bounded repaint did not produce sealed presentation evidence")
+
+    def verify_active_vt_reevaluation(self) -> None:
+        self.request_bounded_repaint()
+        self.snapshot("milestone14-vt-active.json",
+                      "always-eligible", True)
 
     def snapshot(self, name: str, policy: str, effective: bool,
                  preference: str | None = None,
@@ -1034,7 +1108,7 @@ class FixedLiveRunner:
             self._step(18); self.set_policy("off"); self.snapshot("milestone14-policy-off.json", "off", False); self.set_policy("always-eligible")
             self._step(19); self.command([str(FIXED_BINARIES["chvt"]), self.alternate_tty]); self.snapshot("milestone14-vt-inactive.json", "always-eligible", False); self.command([str(FIXED_BINARIES["chvt"]), TTY_PATTERN.fullmatch(str(self.config["tty"])).group(1)])  # type: ignore[union-attr]
             self._step(20); shutil.copyfile(self.artifacts / "milestone14-vt-inactive.json", self.artifacts / "milestone14-vt.log") if self.validate_runtime else None
-            self._step(21); self.snapshot("milestone14-vt-active.json", "always-eligible", True)
+            self._step(21); self.verify_active_vt_reevaluation()
             self._step(22); gwm_socket = RUNTIME_ROOT / "gwm.sock"; old_inode = gwm_socket.stat().st_ino if self.validate_runtime else 0; self.command([str(FIXED_BINARIES["systemctl"]), "restart", LIVE_UNITS["gwm"]]); self.wait_replaced(gwm_socket, old_inode); self.snapshot("milestone14-restart-gwm.json", "always-eligible", True)
             self._step(23); compositor_socket = RUNTIME_ROOT / "gwcomp.sock"; self.stop_unit(LIVE_UNITS["gwcomp"]); self.wait_absent(compositor_socket)
             if self.validate_runtime:
@@ -1081,12 +1155,11 @@ class FixedLiveRunner:
                           else "milestone14-capture-enabled-state.json")
             self.snapshot(state_name, policy,
                           policy == "always-eligible")
-            repaint_trigger = RUNTIME_ROOT / "repaint.request"
             trigger.touch(mode=0o600, exist_ok=False)
-            repaint_trigger.touch(mode=0o600, exist_ok=False)
+            self.request_bounded_repaint()
             for _ in range(200):
                 frames = sorted((self.artifacts / "frames").glob("*.ppm"))
-                if not repaint_trigger.exists() and len(frames) > count:
+                if len(frames) > count:
                     shutil.copyfile(frames[-1], self.artifacts / destination)
                     return
                 time.sleep(.05)

@@ -196,6 +196,13 @@ state to converge, then arms the one-shot mirror trigger and requests one
 bounded deterministic repaint from the held client. This prevents a stale
 pre-transition frame from satisfying either side of the VRR-only comparison.
 
+The held client accepts exactly three bounded repaint requests. The runner
+uses the first immediately after returning to the configured active VT and
+waits for its private trigger to be consumed before taking the active VRR
+snapshot. This forces active-state reevaluation through a new normal
+compositor transaction. The other two requests remain dedicated to the
+VRR-off and VRR-enabled pixel captures.
+
 The implementation and deterministic dry-run coverage do not constitute a
 positive result. Until a reviewed live archive passes these checks, Milestone
 14 must be described as hardware-acceptance pending.
