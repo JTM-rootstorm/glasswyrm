@@ -58,6 +58,7 @@ COMMAND_TAIL_BYTES = 2048
 QUERY_ATTEMPTS = 3
 CLEANUP_QUERY_ATTEMPTS = 5
 QUERY_SLOW_NS = 1_000_000_000
+COMMAND_DIAGNOSTIC_SCHEMA = "glasswyrm.m14-command-diagnostic.v1"
 QUERY_DIAGNOSTIC_SCHEMA = "glasswyrm.m14-query-diagnostic.v1"
 RETRYABLE_QUERY_TAILS = (
     "output snapshot is temporarily unavailable",
@@ -143,6 +144,7 @@ class FixedLiveRunner:
         self.cleanup_wait_count = 0
         self.cadence_ranges: dict[str, tuple[int, int]] = {}
         self._cadence_starts: dict[str, int] = {}
+        self._command_failure_count = 0
 
     @staticmethod
     def _execute(argv: list[str], output: Path | None = None) -> CommandResult:
@@ -237,6 +239,7 @@ class FixedLiveRunner:
             argv, self.artifacts / output if output else None,
         )
         if not result.succeeded:
+            self._write_command_diagnostic(argv, result)
             raise HarnessError(f"fixed command failed: {Path(argv[0]).name}")
 
     @staticmethod
@@ -247,11 +250,58 @@ class FixedLiveRunner:
         return value
 
     @staticmethod
-    def _query_safe_name(name: str) -> str:
+    def _diagnostic_safe_name(name: str) -> str:
         return "".join(
             character if character.isalnum() or character in ".-_" else "_"
             for character in name
         )
+
+    def _command_diagnostic_path(self, executable: str) -> Path:
+        directory = self.artifacts / ".command-diagnostics"
+        if directory.exists():
+            status = directory.lstat()
+            if (not stat.S_ISDIR(status.st_mode) or status.st_mode & 0o077):
+                raise HarnessError(
+                    "command diagnostics path must be a private directory")
+        else:
+            directory.mkdir(mode=0o700)
+        self._command_failure_count += 1
+        safe_name = self._diagnostic_safe_name(Path(executable).name)
+        return directory / (
+            f"{self._command_failure_count:03d}-{safe_name}.diagnostic.json"
+        )
+
+    def _write_command_diagnostic(
+            self, argv: list[str], result: CommandResult) -> Path:
+        destination = self._command_diagnostic_path(argv[0])
+        temporary = destination.with_name(f".{destination.name}.tmp")
+        payload = {
+            "schema": COMMAND_DIAGNOSTIC_SCHEMA,
+            "executable": Path(argv[0]).name,
+            "argv": argv,
+            "command": self._command_evidence(result),
+        }
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8",
+        )
+        if len(encoded) > 32 * 1024:
+            raise HarnessError("command diagnostic exceeded its bounded schema")
+        temporary.unlink(missing_ok=True)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC |
+            os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            offset = 0
+            while offset < len(encoded):
+                offset += os.write(descriptor, encoded[offset:])
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, destination)
+        return destination
 
     def _query_diagnostic_path(self, name: str) -> Path:
         directory = self.artifacts / ".query-diagnostics"
@@ -262,7 +312,9 @@ class FixedLiveRunner:
                     "query diagnostics path must be a private directory")
         else:
             directory.mkdir(mode=0o700)
-        return directory / f"{self._query_safe_name(name)}.diagnostic.json"
+        return directory / (
+            f"{self._diagnostic_safe_name(name)}.diagnostic.json"
+        )
 
     def _write_query_diagnostic(
             self, name: str, outcome: str, attempts: list[dict[str, object]],
@@ -378,7 +430,7 @@ class FixedLiveRunner:
                 record["error"] = last_error
                 attempts.append(record)
                 last_coherent = self._query_diagnostic_path(name).with_name(
-                    f"{self._query_safe_name(name)}.last-coherent.json",
+                    f"{self._diagnostic_safe_name(name)}.last-coherent.json",
                 )
                 os.replace(temporary, last_coherent)
                 self._write_query_diagnostic(
