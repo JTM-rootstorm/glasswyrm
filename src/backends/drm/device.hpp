@@ -49,6 +49,7 @@ public:
   void cancel_page_flip(const std::shared_ptr<PageFlipCookie> &cookie) noexcept;
   void
   abandon_page_flip(const std::shared_ptr<PageFlipCookie> &cookie) noexcept;
+  void reset_crtc_sequence_samples() noexcept;
   [[nodiscard]] DrmEvent service_events(short revents);
   void reset() noexcept;
 

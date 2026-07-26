@@ -288,7 +288,8 @@ void atomic_transition_suspend_restore() {
           initial.vrr_feedback.at(1).property_readback_valid &&
           !initial.vrr_feedback.at(1).effective_enabled &&
           rig.kms.atomic_commits.back().properties.back().property_id == 22 &&
-          rig.kms.atomic_commits.back().properties.back().value == 0,
+          rig.kms.atomic_commits.back().properties.back().value == 0 &&
+          rig.drm.crtc_sequence_reset_count() == 1,
       "first modeset explicitly commits and reads back VRR off");
 
   const auto enabled = frame_set(pixels, 2, true);
@@ -316,7 +317,8 @@ void atomic_transition_suspend_restore() {
           !rig.kms.master &&
           rig.kms.atomic_commits.back().flags == 0 &&
           rig.kms.atomic_commits.back().properties.size() == 2 &&
-          rig.kms.atomic_commits.back().properties.back().value == 0,
+          rig.kms.atomic_commits.back().properties.back().value == 0 &&
+          rig.drm.crtc_sequence_reset_count() == 2,
       "VT suspend disables VRR on the current framebuffer before master drop");
 
   const output::SoftwareFrameView committed{
@@ -325,7 +327,8 @@ void atomic_transition_suspend_restore() {
       rig.presenter->resume(committed).disposition ==
               output::PresentDisposition::Complete &&
           rig.kms.master && !rig.presenter->vrr_capability(1)->session_active &&
-          rig.kms.atomic_commits.back().properties.back().value == 0,
+          rig.kms.atomic_commits.back().properties.back().value == 0 &&
+          rig.drm.crtc_sequence_reset_count() == 3,
       "VT acquire re-modesets off but remains inactive before peer ack");
   gw::test::require(rig.presenter->activate_session(rig.error) &&
                         rig.presenter->vrr_capability(1)->session_active,

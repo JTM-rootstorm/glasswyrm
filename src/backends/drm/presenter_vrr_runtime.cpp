@@ -62,6 +62,7 @@ bool DrmPresenter::activate_session(std::string& error) {
 }
 
 bool DrmPresenter::blocking_modeset(DumbBuffer& buffer, std::string& error) {
+  device_.reset_crtc_sequence_samples();
   if (selected_api_ == ReportApiPath::Atomic) {
     const auto request = atomic_initial_request(
         pipeline_, saved_.properties, mode_blob_.id(), buffer.framebuffer_id(),
