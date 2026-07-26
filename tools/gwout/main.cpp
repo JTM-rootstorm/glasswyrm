@@ -124,7 +124,7 @@ int main(const int argc, char **argv) {
   auto query_flags = GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_MODES |
                      GWIPC_OUTPUT_QUERY_LAYOUT;
   if (edit.vrr_policy)
-    query_flags |= GWIPC_OUTPUT_QUERY_VRR;
+    query_flags |= GWIPC_OUTPUT_QUERY_VRR | GWIPC_OUTPUT_QUERY_WINDOWS;
   if (!client.query(query_flags, snapshot, error, command == "set")) {
     std::cerr << "gwout: " << error << '\n';
     return 1;

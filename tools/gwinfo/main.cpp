@@ -76,7 +76,7 @@ int main(const int argc, char **argv) {
             GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
   else if (include_vrr)
     flags |= GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
-             GWIPC_OUTPUT_QUERY_VRR;
+             GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
   Client client(socket);
   Snapshot snapshot;
   std::string error;

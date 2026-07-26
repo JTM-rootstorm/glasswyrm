@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( $# != 6 )); then
-  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT VALIDATOR GWINFO\n' "$0" >&2
+if (( $# != 7 )); then
+  printf 'Usage: %s GWM GWCOMP GLASSWYRMD CLIENT VALIDATOR GWINFO GWOUT\n' "$0" >&2
   exit 2
 fi
 
@@ -12,6 +12,7 @@ glasswyrmd=$3
 client=$4
 validator=$5
 gwinfo=$6
+gwout=$7
 root=$(mktemp -d "${TMPDIR:-/tmp}/glasswyrm-m14-client-runtime-XXXXXX")
 display=
 x_socket=
@@ -80,6 +81,16 @@ wait_path() {
   return 1
 }
 
+wait_file() {
+  local path=$1
+  for ((attempt = 0; attempt < 400; ++attempt)); do
+    [[ -f $path ]] && return 0
+    sleep .01
+  done
+  printf 'Timed out waiting for file: %s\n' "$path" >&2
+  return 1
+}
+
 "$gwm" --ipc-socket "$root/gwm.sock" >"$root/gwm.log" 2>&1 &
 gwm_pid=$!
 wait_path "$root/gwm.sock"
@@ -128,6 +139,35 @@ client_pid=
   >"$root/cleanup.json"
 grep -Fq '"windows":[]' "$root/cleanup.json"
 grep -Fq '"candidate_window":0' "$root/cleanup.json"
+
+"$gwout" --socket "$root/control.sock" set DP-1 \
+  --vrr always-eligible --json >"$root/always.json"
+"$client" --display ":$display" --mode fullscreen \
+  --result "$root/active-client.json" --hold-ms 10000 --preference prefer \
+  >"$root/active-client.log" 2>&1 &
+client_pid=$!
+wait_file "$root/active-client.json"
+"$gwinfo" --socket "$root/control.sock" vrr DP-1 --json \
+  >"$root/active.json"
+grep -Fq '"effective_enabled":true' "$root/active.json"
+if grep -Fq '"candidate_window":0' "$root/active.json"; then
+  printf 'AlwaysEligible did not publish its active candidate\n' >&2
+  exit 1
+fi
+"$gwout" --socket "$root/control.sock" set DP-1 --vrr off --json \
+  >"$root/off.json"
+grep -Fq '"result":1' "$root/off.json"
+grep -Fq '"policy":"off"' "$root/off.json"
+
+kill -TERM "$client_pid"
+client_status=0
+wait "$client_pid" || client_status=$?
+client_pid=
+if (( client_status != 0 && client_status != 143 )); then
+  printf 'Held VRR client exited unexpectedly: %d\n' "$client_status" >&2
+  exit 1
+fi
+
 for pid in "$gwm_pid" "$gwcomp_pid" "$server_pid"; do
   kill -0 "$pid"
 done
