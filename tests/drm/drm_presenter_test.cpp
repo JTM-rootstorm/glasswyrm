@@ -410,6 +410,38 @@ void incomplete_damage_recovers_with_full_copy() {
               "\"full_copy_reason\":\"canonical-mismatch\"") !=
               std::string::npos,
       "canonical mismatch retries a complete copy before KMS submission");
+  gw::test::require(
+      rig.presenter->suspend(rig.error) ==
+              output::BackendStateResult::Complete &&
+          rig.presenter->resume(frame(changed, 3, 60'000, wrong_damage))
+                  .disposition == output::PresentDisposition::Complete,
+      "full-copy recovery promotes complete committed resume pixels");
+}
+
+void aborted_damage_does_not_promote_committed_pixels() {
+  Rig rig(DrmPresentationApi::Atomic, true, true, false, true, true);
+  const std::array full_damage{gw::compositor::Rectangle{0, 0, 2, 2}};
+  const std::array initial{0xff101010U, 0xff202020U, 0xff303030U,
+                           0xff404040U};
+  gw::test::require(
+      rig.presenter->present(frame(initial, 1, 60'000, full_damage))
+              .disposition == output::PresentDisposition::Complete,
+      "aborted-damage fixture commits its initial pixels");
+
+  const std::array top_left{gw::compositor::Rectangle{0, 0, 1, 1}};
+  const std::array candidate{0xffabcdefU, 0xff202020U, 0xff303030U,
+                             0xff404040U};
+  const auto pending =
+      rig.presenter->present(frame(candidate, 2, 60'000, top_left));
+  gw::test::require(pending.disposition == output::PresentDisposition::Pending,
+                    "aborted damage stages a bounded update");
+  rig.presenter->abort_pending(pending.token);
+  gw::test::require(
+      rig.presenter->suspend(rig.error) ==
+              output::BackendStateResult::Complete &&
+          rig.presenter->resume(frame(initial, 1, 60'000, full_damage))
+                  .disposition == output::PresentDisposition::Complete,
+      "aborted damage leaves committed resume pixels unchanged");
 }
 
 void zero_sequence_page_flip_completion() {
@@ -587,6 +619,7 @@ int main() {
   historical_frame_identity_adapter();
   accumulated_damage_copy_and_vt_fallback();
   incomplete_damage_recovers_with_full_copy();
+  aborted_damage_does_not_promote_committed_pixels();
   zero_sequence_page_flip_completion();
   policy_and_legacy_requests();
   mismatch_resume_and_shutdown_order();

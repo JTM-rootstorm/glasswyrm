@@ -168,6 +168,12 @@ class DrmPresenter final : public output::PresentationBackend,
       std::uint64_t generation, std::uint32_t buffer_index) const;
   void complete_damage_copy(DumbBuffer& target, const DamageCopyPlan& plan,
                             std::uint64_t generation);
+  [[nodiscard]] bool stage_committed_pixel_update(
+      PendingPresentation& pending,
+      std::span<const std::uint32_t> pixels,
+      std::string& error) const;
+  void apply_committed_pixel_update(
+      const PendingPresentation& pending) noexcept;
   void clear_pending() noexcept;
 
   Device device_;

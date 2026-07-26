@@ -4,6 +4,7 @@
 #include "backends/drm/connector_selector.hpp"
 #include "backends/drm/mode_selector.hpp"
 #include "backends/drm/pipeline_selector.hpp"
+#include "backends/drm/presenter_pending.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,29 +13,6 @@
 #include <utility>
 
 namespace glasswyrm::drm {
-struct DrmPresenter::PendingPresentation {
-  std::uint64_t token{};
-  std::uint64_t hash{};
-  std::uint64_t ordinal{};
-  std::uint64_t commit_id{};
-  std::uint64_t generation{};
-  std::uint32_t framebuffer_id{};
-  std::size_t next_front_index{};
-  std::shared_ptr<PageFlipCookie> cookie;
-  headless::StagedFrameDump mirror;
-  StagedDrmReport report;
-  StagedDrmReport vrr_report;
-  std::vector<std::uint32_t> pixels;
-  DamageCopyPlan damage_copy;
-  std::optional<output::VrrPresentationRequest> vrr_request;
-  PresenterVrrPlan vrr_plan;
-  DrmPresentationEvidenceId evidence;
-  std::optional<PresenterVrrState> completed_vrr_state;
-  output::VrrPresentationFeedbackMap vrr_feedback;
-  bool promote_back{true};
-  bool report_damage_copy{true};
-  bool completion_verified{};
-};
 DrmPresenter::DrmPresenter(Device device, KmsApi& kms, DrmReport* report,
                            headless::FrameDumper* mirror,
                            DrmReport* vrr_report) noexcept
@@ -271,7 +249,6 @@ output::PresentResult DrmPresenter::present_initial_vrr_followup(
   value.generation = frame.generation;
   value.framebuffer_id = buffers_.front().framebuffer_id();
   value.next_front_index = front_index_;
-  value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
   value.vrr_request = vrr_request;
   value.vrr_plan = vrr_plan;
@@ -317,7 +294,6 @@ output::PresentResult DrmPresenter::present_flip(
   value.generation = frame.generation;
   value.framebuffer_id = target.framebuffer_id();
   value.next_front_index = 1U - front_index_;
-  value.pixels.assign(frame.pixels.begin(), frame.pixels.end());
   value.cookie = std::make_shared<PageFlipCookie>(value.token);
   if (vrr_request && vrr_request->valid)
     value.vrr_request = *vrr_request;
@@ -332,6 +308,10 @@ output::PresentResult DrmPresenter::present_flip(
     record_fatal("flip-copy", error);
     fatal_ = true;
     return {output::PresentDisposition::Fatal, 0, 0, error};
+  }
+  if (!stage_committed_pixel_update(value, frame.pixels, error)) {
+    target.invalidate_content();
+    return {output::PresentDisposition::Rejected, 0, 0, error};
   }
   const FlipReport staged_record{
       value.ordinal,
@@ -512,7 +492,7 @@ bool DrmPresenter::finalize_pending(const std::uint64_t token,
     buffers_.promote_back();
     front_index_ = pending_->next_front_index;
   }
-  committed_pixels_ = std::move(pending_->pixels);
+  apply_committed_pixel_update(*pending_);
   committed_hash_ = pending_->hash;
   committed_generation_ = pending_->generation;
   if (pending_layout_generation_)
