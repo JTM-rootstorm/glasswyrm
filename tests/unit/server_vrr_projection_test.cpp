@@ -124,7 +124,11 @@ void test_event_commit_boundary() {
   effective.output_id = 5;
   effective.requested_mode = GWIPC_VRR_POLICY_FULLSCREEN;
   effective.decision = GWIPC_VRR_DECISION_ENABLED;
+  effective.desired_enabled = 1;
   effective.effective_enabled = 1;
+  effective.session_active = 1;
+  effective.candidate_window_id = 10;
+  effective.candidate_surface_id = (UINT64_C(1) << 32U) | UINT64_C(10);
   effective.state_generation = 4;
   require(state.seed_compositor_state({effective}, {}),
           "stage effective output state");
@@ -137,6 +141,72 @@ void test_event_commit_boundary() {
               published.find_window(10)->effective_output_enabled &&
               published.find_window(10)->event_selections.contains(77),
           "commit publishes output and window state while preserving selects");
+
+  auto rejected_cache = state;
+  auto rejected_published = published;
+  VrrEventBatch rejected_events;
+  require(synchronize_vrr_session_state(
+              rejected_cache, rejected_published, {{6, 600}},
+              GWIPC_SESSION_INACTIVE, rejected_events) ==
+                  VrrSessionStateStatus::OutputStateIncoherent &&
+              rejected_cache.outputs().at(5).compositor_state
+                  ->effective_enabled == 1 &&
+              rejected_published.find_output(500)->effective_enabled,
+          "invalid session projection cannot partially mutate either truth");
+
+  VrrEventBatch inactive_events;
+  require(synchronize_vrr_session_state(
+              state, published, {{5, 500}}, GWIPC_SESSION_INACTIVE,
+              inactive_events) == VrrSessionStateStatus::Applied,
+          "inactive session synchronizes cache and published VRR truth");
+  const auto* inactive_output = published.find_output(500);
+  const auto* inactive_window = published.find_window(10);
+  constexpr std::uint64_t inactive_reasons =
+      GWIPC_VRR_REASON_SESSION_INACTIVE | GWIPC_VRR_REASON_VT_SUSPENDED |
+      GWIPC_VRR_REASON_TIMING_UNAVAILABLE;
+  require(inactive_output && inactive_window &&
+              !inactive_output->effective_enabled &&
+              (inactive_output->reason_flags & inactive_reasons) ==
+                  inactive_reasons &&
+              !inactive_window->effective_output_enabled &&
+              inactive_events.windows.size() == 2 &&
+              (vrr_change_mask(inactive_events.windows.front().before,
+                               inactive_events.windows.front().after) &
+               kVrrEffectiveStateChanged) != 0,
+          "inactive publication carries exact output truth and client delta");
+  const auto notifications = publish_vrr_event_batch(
+      rejected_published, inactive_events,
+      gw::protocol::x11::ByteOrder::LittleEndian, 9);
+  require(notifications.size() == 1 && notifications.front().client == 77 &&
+              notifications.front().bytes.size() == 32 &&
+              notifications.front().bytes[1] == kVrrEffectiveStateChanged,
+          "inactive publication emits the subscribed effective-state event");
+
+  const auto transition_serial =
+      state.outputs().at(5).compositor_state->transition_serial;
+  VrrEventBatch duplicate_events;
+  require(synchronize_vrr_session_state(
+              state, published, {{5, 500}}, GWIPC_SESSION_INACTIVE,
+              duplicate_events) == VrrSessionStateStatus::Applied &&
+              state.outputs().at(5).compositor_state->transition_serial ==
+                  transition_serial &&
+              vrr_change_mask(duplicate_events.windows.front().before,
+                              duplicate_events.windows.front().after) == 0,
+          "duplicate inactive state preserves serial and emits no delta");
+  require(publish_vrr_event_batch(
+              published, duplicate_events,
+              gw::protocol::x11::ByteOrder::LittleEndian, 10).empty(),
+          "duplicate inactive state emits no client notification");
+
+  VrrEventBatch active_events;
+  require(synchronize_vrr_session_state(
+              state, published, {{5, 500}}, GWIPC_SESSION_ACTIVE,
+              active_events) == VrrSessionStateStatus::Applied &&
+              !state.outputs().at(5).compositor_state &&
+              published.find_output(500) &&
+              !published.find_output(500)->effective_enabled &&
+              active_events.outputs.empty() && active_events.windows.empty(),
+          "active invalidates cache without republishing stale active truth");
 }
 
 }  // namespace

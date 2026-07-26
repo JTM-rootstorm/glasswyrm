@@ -5,9 +5,12 @@
 
 #include <cstdint>
 #include <map>
+#include <span>
 #include <vector>
 
 namespace glasswyrm::server {
+
+class ClientConnection;
 
 struct VrrWindowTransition {
   std::uint32_t window_id{};
@@ -21,12 +24,21 @@ struct VrrEventBatch {
   std::map<std::uint32_t, PublishedOutputVrrState> outputs;
 };
 
+[[nodiscard]] VrrSessionStateStatus synchronize_vrr_session_state(
+    VrrStateCache& cache, VrrWindowStateStore& published,
+    const std::map<std::uint64_t, std::uint32_t>& output_xids,
+    gwipc_session_state state, VrrEventBatch& events);
+
 [[nodiscard]] VrrEventBatch prepare_vrr_event_batch(
     const VrrStateCache& cache, const VrrWindowStateStore& published,
     const std::map<std::uint64_t, std::uint32_t>& output_xids);
 
 void apply_vrr_event_batch(VrrWindowStateStore& published,
                            const VrrEventBatch& batch);
+
+void enqueue_vrr_event_batch_notifications(
+    const VrrWindowStateStore& published, const VrrEventBatch& batch,
+    std::span<ClientConnection* const> recipients);
 
 [[nodiscard]] std::vector<VrrNotification> publish_vrr_event_batch(
     VrrWindowStateStore& published, const VrrEventBatch& batch,
