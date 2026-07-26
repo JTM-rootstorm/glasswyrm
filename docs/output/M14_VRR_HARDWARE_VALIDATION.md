@@ -82,6 +82,11 @@ time, output path, and a bounded output tail in private
 `.query-diagnostics/*.diagnostic.json` files after a failed or slow query.
 Malformed or zero-byte successful output fails immediately, while a coherent
 but not-yet-converged JSON snapshot is retained privately for diagnosis.
+Any other failed fixed command also records its exact argument vector and the
+same bounded execution evidence in a sequential private
+`.command-diagnostics/*.diagnostic.json` sidecar. This includes `gwout` policy
+transitions, so an unattended failure retains the rejection or connection
+detail even when the live runner must proceed directly to restoration.
 
 Before takeover, the live runner checks its bounded core and client unit-name
 set. Active collisions are rejected; inactive or failed stale transient units
