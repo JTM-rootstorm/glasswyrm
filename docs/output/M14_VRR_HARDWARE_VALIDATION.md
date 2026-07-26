@@ -101,6 +101,10 @@ are reset by exact name and must unload before the run proceeds. New units use
 `Type=exec` startup confirmation and collection-on-failure, while cleanup stops
 only units whose transient launch succeeded. A compositor restart creates a
 fresh transient service instead of relying on an unloaded definition.
+After that replacement starts, the runner requires a new sealed VRR
+presentation cross-matched to the replacement DRM report before it accepts the
+restart snapshot or submits another output-policy transaction. A socket-ready
+replacement and a coherent pre-restart server cache are not restart evidence.
 
 The live command refuses direct execution and requires the exact
 `glasswyrm-m14-harness.scope` transient scope shown above. This prevents
