@@ -19,8 +19,8 @@ from common import HarnessError  # noqa: E402
 from evidence import sealed_vrr_records  # noqa: E402
 from live_runner import (  # noqa: E402
     CLEANUP_QUERY_ATTEMPTS, CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES,
-    FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS, QUERY_ATTEMPTS,
-    QUERY_DIAGNOSTIC_SCHEMA, CommandResult, FixedLiveRunner,
+    COMMAND_DIAGNOSTIC_SCHEMA, FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS,
+    QUERY_ATTEMPTS, QUERY_DIAGNOSTIC_SCHEMA, CommandResult, FixedLiveRunner,
 )
 
 
@@ -170,6 +170,11 @@ def read_query_diagnostic(root: Path, name: str) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_command_diagnostic(root: Path, name: str) -> dict[str, object]:
+    path = root / ".command-diagnostics" / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def test_command_result_contract(root: Path) -> None:
     output = root / "query.json"
     output.write_text("{}\n", encoding="utf-8")
@@ -215,6 +220,48 @@ def test_command_result_contract(root: Path) -> None:
         lambda: runner.command([str(FIXED_BINARIES["gwinfo"])]),
         "fixed command failed: gwinfo",
     )
+    diagnostic = read_command_diagnostic(
+        root, "001-gwinfo.diagnostic.json",
+    )
+    assert diagnostic["schema"] == COMMAND_DIAGNOSTIC_SCHEMA
+    assert diagnostic["executable"] == "gwinfo"
+    assert diagnostic["argv"] == [str(FIXED_BINARIES["gwinfo"])]
+    assert diagnostic["command"]["signal"] == 15
+    directory = root / ".command-diagnostics"
+    assert directory.stat().st_mode & 0o077 == 0
+    assert (directory / "001-gwinfo.diagnostic.json").stat().st_mode & 0o077 == 0
+
+
+def test_policy_failure_retains_bounded_command_diagnostic(root: Path) -> None:
+    tail = "x" * (COMMAND_TAIL_BYTES * 4)
+
+    def execute(_argv: list[str], output: Path | None) -> CommandResult:
+        assert output is None
+        return query_result(
+            output, status=2, stderr_bytes=len(tail), tail=tail,
+        )
+
+    runner = make_runner(root, execute, validate_runtime=True)
+    expect_harness_error(
+        lambda: runner.set_policy("off"),
+        "fixed command failed: gwout",
+    )
+
+    diagnostic_path = (
+        root / ".command-diagnostics" / "001-gwout.diagnostic.json"
+    )
+    diagnostic = read_command_diagnostic(
+        root, "001-gwout.diagnostic.json",
+    )
+    assert diagnostic["schema"] == COMMAND_DIAGNOSTIC_SCHEMA
+    assert diagnostic["executable"] == "gwout"
+    assert diagnostic["argv"][-4:] == ["DP-1", "--vrr", "off", "--json"]
+    assert diagnostic["command"]["exit_status"] == 2
+    assert len(diagnostic["command"]["bounded_tail"].encode(
+        "utf-8",
+    )) <= COMMAND_TAIL_BYTES
+    assert diagnostic_path.stat().st_size <= 32 * 1024
+    assert diagnostic_path.stat().st_mode & 0o077 == 0
 
 
 def test_snapshot_busy_then_success_is_bounded_and_atomic(root: Path) -> None:
@@ -818,6 +865,12 @@ def main() -> int:
         command_result = root / "command-result"
         command_result.mkdir()
         test_command_result_contract(command_result)
+
+        command_diagnostic = root / "command-diagnostic"
+        command_diagnostic.mkdir()
+        test_policy_failure_retains_bounded_command_diagnostic(
+            command_diagnostic,
+        )
 
         snapshot_busy = root / "snapshot-busy"
         snapshot_busy.mkdir()
