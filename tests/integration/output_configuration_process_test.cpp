@@ -579,9 +579,52 @@ int main(int argc, char** argv) {
   require(vrr_after_repetition.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
               vrr_after_repetition.vrr_states.size() == 2,
           "M14 control remains usable after negotiated disconnect repetition");
+
+  require(::kill(vrr_server.pid, SIGSTOP) == 0,
+          "pause M14 server before compositor replacement");
+  int vrr_server_stop_status = 0;
+  require(::waitpid(vrr_server.pid, &vrr_server_stop_status, WUNTRACED) ==
+                  vrr_server.pid &&
+              WIFSTOPPED(vrr_server_stop_status),
+          "M14 server reaches the stopped state");
+  vrr_compositor_process.stop();
+  require(!std::filesystem::exists(vrr_compositor),
+          "stopped M14 compositor removes its socket");
+  auto restarted_vrr_compositor = launch(
+      argv[3], {"--backend", "headless", "--ipc-socket", vrr_compositor,
+                "--dump-dir", vrr_dumps, "--headless-output",
+                "LEFT:640x480@60000", "--headless-output",
+                "RIGHT:640x480@60000", "--headless-vrr",
+                "LEFT=40000-60000", "--headless-vrr",
+                "RIGHT=40000-60000"});
+  wait_for_socket(vrr_compositor);
+  require(::kill(restarted_vrr_compositor.pid, SIGSTOP) == 0,
+          "pause replacement M14 compositor before replay");
+  int vrr_compositor_stop_status = 0;
+  require(::waitpid(restarted_vrr_compositor.pid, &vrr_compositor_stop_status,
+                    WUNTRACED) == restarted_vrr_compositor.pid &&
+              WIFSTOPPED(vrr_compositor_stop_status),
+          "replacement M14 compositor reaches the stopped state");
+  send_configuration(vrr_tool.get(), 601, vrr_after_repetition);
+  for (unsigned attempt = 0; attempt < 4; ++attempt)
+    require(pump(vrr_tool.get()),
+            "flush M14 output configuration queued during restart");
+  require(::kill(vrr_server.pid, SIGCONT) == 0,
+          "resume M14 server while replacement compositor is paused");
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  require(::kill(restarted_vrr_compositor.pid, SIGCONT) == 0,
+          "resume replacement M14 compositor");
+  const auto vrr_after_restart = receive_reply(vrr_tool.get());
+  require(vrr_after_restart.result == GWIPC_OUTPUT_CONFIGURATION_ACCEPTED &&
+              vrr_after_restart.generation == 2 &&
+              vrr_after_restart.root_width == 640 &&
+              vrr_after_restart.root_height == 960 &&
+              vrr_after_restart.vrr_states.size() == 2,
+          "queued M14 output work waits for compositor replay readiness");
+
   vrr_tool.reset();
   vrr_server.stop();
-  vrr_compositor_process.stop();
+  restarted_vrr_compositor.stop();
   vrr_wm_process.stop();
   std::filesystem::remove_all(vrr_directory);
 #endif

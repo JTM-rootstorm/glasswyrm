@@ -296,7 +296,8 @@ bool ServerRuntime::service_output_control_work() {
         return false;
       return finish_output_configuration();
     }
-    if (lifecycle_->phase() != CoordinatorPhase::Idle ||
+    if (!bridge_->ready() ||
+        lifecycle_->phase() != CoordinatorPhase::Idle ||
         !bridge_->transaction_idle() ||
         (content_presenter_ && content_presenter_->frame_in_flight()) ||
         (cursor_presenter_ && cursor_presenter_->in_flight()))
