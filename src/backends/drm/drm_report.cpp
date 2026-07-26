@@ -125,6 +125,14 @@ std::string serialize(const FlipReport& value) {
          << json_quote(api_name(value.api));
   if (value.crtc_sequence_sample.correlation !=
       CrtcSequenceCorrelation::NotSampled) {
+    const auto source = [](const VrrTimingSource value) {
+      switch (value) {
+        case VrrTimingSource::PageFlipEvent: return "page-flip-event";
+        case VrrTimingSource::CrtcSequenceQuery: return "query";
+        case VrrTimingSource::LegacyVBlankQuery: return "wait-vblank";
+      }
+      return "unknown";
+    };
     const auto correlation = [](const CrtcSequenceCorrelation result) {
       switch (result) {
         case CrtcSequenceCorrelation::NotSampled: return "not-sampled";
@@ -136,7 +144,8 @@ std::string serialize(const FlipReport& value) {
       }
       return "unknown";
     };
-    stream << ",\"crtc_sequence_source\":\"query\""
+    stream << ",\"crtc_sequence_source\":"
+           << json_quote(source(value.crtc_sequence_sample.source))
            << ",\"crtc_sequence_correlation\":"
            << json_quote(correlation(
                   value.crtc_sequence_sample.correlation))
@@ -270,9 +279,12 @@ bool valid(const ModesetReport& value) {
 
 bool valid(const FlipReport& value) {
   const auto& sample = value.crtc_sequence_sample;
+  const bool query_source =
+      sample.source == VrrTimingSource::CrtcSequenceQuery ||
+      sample.source == VrrTimingSource::LegacyVBlankQuery;
   const bool valid_sample =
       sample.correlation == CrtcSequenceCorrelation::NotSampled ||
-      (sample.source == VrrTimingSource::CrtcSequenceQuery &&
+      (query_source &&
        (sample.cadence_eligible ==
         (sample.correlation == CrtcSequenceCorrelation::Correlated)) &&
        (!sample.cadence_eligible ||

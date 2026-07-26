@@ -52,8 +52,10 @@ CRTC and token. The kernel event sequence and timestamp are recorded as
 delivered. Drivers without usable page-flip sequence accounting, including QXL
 in its immediate-event path, may report sequence zero for an otherwise valid
 flip-complete event. For a zero event sequence, the real adapter may retain a
-separate `drmCrtcGetSequence` sample. It is never substituted for the raw event
-and is cadence-eligible only after tight event-timestamp correlation and
+separate `drmCrtcGetSequence` sample or, when that query is unavailable, a
+standard relative-zero `drmWaitVBlank` current-vblank sample for the matching
+CRTC resource index. Neither diagnostic is substituted for the raw event.
+Each is cadence-eligible only after tight event-timestamp correlation and
 monotonic validation.
 
 ## Auto selection and fallback
