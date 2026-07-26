@@ -19,6 +19,7 @@ inline constexpr std::uint16_t kPatternHeight = 192;
 inline constexpr std::uint16_t kDamageWidth = 64;
 inline constexpr std::uint16_t kDamageHeight = 64;
 inline constexpr std::uint64_t kFinalSpinNanoseconds = 200'000;
+inline constexpr std::uint64_t kPresentationPollNanoseconds = 100'000;
 inline constexpr std::uint32_t kPresentationQueryFlags =
     GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
     GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
@@ -150,6 +151,7 @@ public:
   ~EventfdDamageProducer() noexcept;
   EventfdDamageProducer(const EventfdDamageProducer &) = delete;
   EventfdDamageProducer &operator=(const EventfdDamageProducer &) = delete;
+  void prepare(std::uint32_t frame);
   [[nodiscard]] std::vector<std::uint32_t> produce(std::uint32_t frame);
 
 private:
@@ -163,6 +165,7 @@ private:
   std::mutex mutex_;
   std::vector<std::uint32_t> pixels_;
   std::thread worker_;
+  std::optional<std::uint32_t> prepared_frame_;
 };
 
 [[nodiscard]] std::uint64_t

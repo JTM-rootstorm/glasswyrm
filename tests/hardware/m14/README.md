@@ -98,3 +98,9 @@ with VRR enabled. It compares the resulting canonical pixels and removes any
 unconsumed runtime trigger during cleanup. This bounds a high-resolution run
 to two full-size PPM proof frames while preserving the default
 `gwcomp --mirror-dump-dir` behavior for other workflows.
+
+The cadence client prepares each deterministic damage frame ahead of its
+absolute deadline, polls the presentation marker below the evidence tolerance,
+and defers checked PutImage completion until the bounded sequence ends. X11
+protocol errors still fail the client, while request round trips cannot shift
+the measured submission schedule.
