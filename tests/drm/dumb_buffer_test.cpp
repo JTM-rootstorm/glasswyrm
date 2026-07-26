@@ -192,15 +192,28 @@ int main() {
       0xff112233U, 0xff010203U, 0xff778899U, 0xffaabbccU};
   const std::array partial{gw::compositor::Rectangle{1, 0, 1, 1}};
   gw::test::require(buffer.copy_rectangles_from(changed, partial, error) &&
-                        buffer.verify_visible_pixels(
-                            changed,
+                        buffer.verify_damage_lineage(
+                            changed, partial,
                             glasswyrm::output::hash_visible_xrgb8888(changed)) &&
                         buffer.visible_hash() ==
                             glasswyrm::output::hash_visible_xrgb8888(changed),
                     "bounded partial copy updates only selected pixels");
   gw::test::require(buffer.last_copy_metrics().bytes == 4 &&
-                        buffer.last_parity_metrics().bytes == 16,
-                    "partial copy and full parity costs remain distinct");
+                        buffer.last_parity_metrics().bytes == 0,
+                    "partial parity avoids unbounded scanout readback");
+  const std::vector<std::uint32_t> incomplete_damage{
+      0xff998877U, 0xff0a0b0cU, 0xff778899U, 0xffaabbccU};
+  gw::test::require(
+      buffer.copy_rectangles_from(incomplete_damage, partial, error) &&
+          !buffer.verify_damage_lineage(
+              incomplete_damage, partial,
+              glasswyrm::output::hash_visible_xrgb8888(incomplete_damage)),
+      "parity shadow rejects canonical changes outside advertised damage");
+  gw::test::require(buffer.copy_from(changed, error) &&
+                        buffer.verify_visible_pixels(
+                            changed,
+                            glasswyrm::output::hash_visible_xrgb8888(changed)),
+                    "full copy restores parity after incomplete damage");
   api.mapping[0] ^= std::byte{1};
   gw::test::require(
       !buffer.verify_visible_pixels(

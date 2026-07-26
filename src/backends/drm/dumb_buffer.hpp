@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace glasswyrm::drm {
 
@@ -40,6 +41,10 @@ public:
   [[nodiscard]] std::uint64_t visible_hash() const noexcept;
   [[nodiscard]] bool verify_visible_pixels(
       std::span<const std::uint32_t> pixels,
+      std::uint64_t verified_hash) const noexcept;
+  [[nodiscard]] bool verify_damage_lineage(
+      std::span<const std::uint32_t> pixels,
+      std::span<const gw::compositor::Rectangle> rectangles,
       std::uint64_t verified_hash) const noexcept;
   [[nodiscard]] BufferOperationMetrics last_copy_metrics() const noexcept {
     return last_copy_metrics_;
@@ -88,6 +93,7 @@ private:
   std::uint64_t completed_generation_{};
   bool content_valid_{};
   mutable std::optional<std::uint64_t> visible_hash_;
+  mutable std::vector<std::uint32_t> verified_pixels_;
   BufferOperationMetrics last_copy_metrics_;
   mutable BufferOperationMetrics last_parity_metrics_;
 };

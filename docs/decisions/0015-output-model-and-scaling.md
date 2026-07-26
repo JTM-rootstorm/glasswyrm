@@ -60,8 +60,9 @@ rational scale, transform, bounded fallback reason, and the maximum
 software-reference channel error observed by fractional GLES sampling. Schema
 14 also reports rendered pixels plus render and visible-frame-hash byte/time
 costs. DRM damage-copy reports independently record planned and actual copied
-bytes, copy time, and full parity-verification byte/time costs, including any
-recovery copy after a parity mismatch.
+bytes, copy time, full logical parity coverage, direct scanout-readback bytes,
+and parity-verification time, including any recovery copy after a parity
+mismatch.
 
 Milestone 14 preserves trusted content damage as normalized local rectangles
 through scene commit and maps those rectangles independently into every current
@@ -70,12 +71,25 @@ outward for rational output scale and transform, and includes the renderer's
 bilinear filter footprint. Moves, resizes, visibility, stacking, membership,
 output-configuration changes, and new or replacement buffers remain
 conservative old/new or full-surface invalidations with typed fallback reasons.
-DRM damage history may optimize copies from this result, but canonical-to-scanout
-hash parity remains authoritative and forces a full-copy recovery on mismatch.
-The optimized integrated 2560x1440 cadence gate completes well below the
-60-second optimization trigger while retaining full visible-frame hashing and
-full scanout parity verification. Those correctness checks therefore remain
-intentionally unweakened; their scalar costs are exposed for later profiling.
+DRM damage history may optimize copies from this result, but
+canonical-to-scanout hash parity remains authoritative and forces a full-copy
+recovery on mismatch. A complete copy directly reads back the visible scanout
+and seeds a private per-buffer parity shadow. A partial copy applies the exact
+same normalized rectangles to the privately owned scanout mapping and shadow,
+then compares the complete shadow with the canonical frame. Unchanged scanout
+pixels retain their prior direct-readback proof because no external writer can
+access a valid Glasswyrm dumb buffer. VT release, output reconfiguration,
+history loss, or any shadow mismatch invalidates that lineage and requires a
+complete copy plus direct readback.
+
+This distinction is required for physical cadence. The reviewed NVIDIA target
+made a complete 14.7 MiB mapped-buffer read take approximately 0.48 seconds,
+even though the corresponding bounded damage copy was sub-millisecond. Reading
+the entire write-combined mapping after every partial update therefore changes
+the cadence being measured. `parity_verified_bytes` records the logical
+full-frame proof, while `scanout_readback_bytes` records how many mapped bytes
+were directly read for that presentation. This keeps the evidence explicit
+without weakening full readback at lineage boundaries.
 
 `GW_SCALE` 0.1 is an explicit experimental client contract for preferred
 scale, membership notifications, and retained scaled-pixmap presentation. It

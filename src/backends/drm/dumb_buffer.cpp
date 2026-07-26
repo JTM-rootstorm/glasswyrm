@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <utility>
 
 namespace glasswyrm::drm {
@@ -71,6 +72,7 @@ DumbBuffer &DumbBuffer::operator=(DumbBuffer &&other) noexcept {
   completed_generation_ = std::exchange(other.completed_generation_, 0);
   content_valid_ = std::exchange(other.content_valid_, false);
   visible_hash_ = std::exchange(other.visible_hash_, std::nullopt);
+  verified_pixels_ = std::move(other.verified_pixels_);
   last_copy_metrics_ = std::exchange(other.last_copy_metrics_, {});
   last_parity_metrics_ = std::exchange(other.last_parity_metrics_, {});
   return *this;
@@ -109,6 +111,13 @@ bool DumbBuffer::create(DumbBufferApi &api, const std::uint32_t width,
   replacement.mapping_ = api.map_memory(map_offset, replacement.size_, error);
   if (replacement.mapping_ == nullptr)
     return false;
+  try {
+    replacement.verified_pixels_.resize(
+        static_cast<std::size_t>(width) * height);
+  } catch (const std::bad_alloc&) {
+    error = "could not allocate DRM parity shadow";
+    return false;
+  }
   std::memset(replacement.mapping_, 0, replacement.size_);
   output = std::move(replacement);
   error.clear();
@@ -222,7 +231,8 @@ bool DumbBuffer::verify_visible_pixels(
   visible_hash_.reset();
   last_parity_metrics_ = {};
   const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
-  if (!valid() || pixel_count != pixels.size())
+  if (!valid() || pixel_count != pixels.size() ||
+      verified_pixels_.size() != pixels.size())
     return false;
   const auto started = std::chrono::steady_clock::now();
   const auto row_bytes = static_cast<std::size_t>(width_) * kBytesPerPixel;
@@ -239,6 +249,55 @@ bool DumbBuffer::verify_visible_pixels(
                               : static_cast<std::uint64_t>(elapsed.count());
       return false;
     }
+  }
+  std::memcpy(verified_pixels_.data(), pixels.data(),
+              static_cast<std::size_t>(pixel_count) * kBytesPerPixel);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started);
+  last_parity_metrics_.nanoseconds =
+      elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count());
+  visible_hash_ = verified_hash;
+  return true;
+}
+
+bool DumbBuffer::verify_damage_lineage(
+    const std::span<const std::uint32_t> pixels,
+    const std::span<const gw::compositor::Rectangle> rectangles,
+    const std::uint64_t verified_hash) const noexcept {
+  visible_hash_.reset();
+  last_parity_metrics_ = {};
+  const auto pixel_count = static_cast<std::uint64_t>(width_) * height_;
+  if (!valid() || !content_valid_ || pixel_count != pixels.size() ||
+      verified_pixels_.size() != pixels.size() || rectangles.empty())
+    return false;
+  for (const auto& rectangle : rectangles) {
+    const auto right = std::int64_t{rectangle.x} + rectangle.width;
+    const auto bottom = std::int64_t{rectangle.y} + rectangle.height;
+    if (rectangle.empty() || rectangle.x < 0 || rectangle.y < 0 ||
+        right > width_ || bottom > height_)
+      return false;
+  }
+
+  const auto started = std::chrono::steady_clock::now();
+  for (const auto& rectangle : rectangles) {
+    const auto row_bytes =
+        static_cast<std::size_t>(rectangle.width) * kBytesPerPixel;
+    for (std::uint32_t row = 0; row < rectangle.height; ++row) {
+      const auto y = static_cast<std::uint32_t>(rectangle.y) + row;
+      const auto x = static_cast<std::uint32_t>(rectangle.x);
+      const auto offset = static_cast<std::size_t>(y) * width_ + x;
+      const auto* source = pixels.data() + offset;
+      std::memcpy(verified_pixels_.data() + offset, source, row_bytes);
+    }
+  }
+  const auto visible_bytes =
+      static_cast<std::size_t>(pixel_count) * kBytesPerPixel;
+  if (std::memcmp(verified_pixels_.data(), pixels.data(), visible_bytes) != 0) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - started);
+    last_parity_metrics_.nanoseconds =
+        elapsed.count() < 0 ? 0U : static_cast<std::uint64_t>(elapsed.count());
+    return false;
   }
   const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now() - started);
@@ -294,6 +353,7 @@ bool DumbBuffer::release(std::string &error) noexcept {
   completed_generation_ = 0;
   content_valid_ = false;
   visible_hash_.reset();
+  std::vector<std::uint32_t>().swap(verified_pixels_);
   last_copy_metrics_ = {};
   last_parity_metrics_ = {};
   return success;
@@ -311,6 +371,7 @@ void DumbBuffer::abandon() noexcept {
   completed_generation_ = 0;
   content_valid_ = false;
   visible_hash_.reset();
+  std::vector<std::uint32_t>().swap(verified_pixels_);
   last_copy_metrics_ = {};
   last_parity_metrics_ = {};
 }

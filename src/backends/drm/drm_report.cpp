@@ -165,6 +165,8 @@ std::string serialize(const DamageCopyReport& value) {
          << ",\"copy_nanoseconds\":" << value.copy_nanoseconds
          << ",\"parity_verified_bytes\":"
          << value.parity_verified_bytes
+         << ",\"scanout_readback_bytes\":"
+         << value.scanout_readback_bytes
          << ",\"parity_nanoseconds\":" << value.parity_nanoseconds
          << ",\"full_copy_reason\":"
          << json_quote(full_copy_reason_name(value.full_copy_reason))
@@ -281,6 +283,9 @@ bool valid(const DamageCopyReport& value) {
          !value.rectangles.empty() &&
          value.drm_copied_bytes >= value.copied_bytes &&
          value.parity_verified_bytes >= value.full_frame_bytes &&
+         value.scanout_readback_bytes <= value.parity_verified_bytes &&
+         (value.full_copy_reason == FullCopyReason::None ||
+          value.scanout_readback_bytes >= value.full_frame_bytes) &&
          (value.full_copy_reason == FullCopyReason::None
               ? value.history_span != 0
               : value.copied_bytes == value.full_frame_bytes);
