@@ -113,9 +113,11 @@ Before any physical run, `m14-bounded-damage-fake-drm` exercises a
 2560x1440@120000 in-process fake DRM/KMS target. After the two scanout buffers
 are seeded, 180 steady 64x64 updates must avoid full-copy fallbacks, remain at
 or below 256 KiB per copy, and total less than ten percent of the equivalent
-full-frame copies. The fixture also proves skipped-generation history union,
-exact canonical/scanout parity, and full-copy recovery after an injected pixel
-change outside advertised damage.
+full-frame copies. Steady updates must also report zero direct scanout-readback
+bytes while retaining full logical parity through the seeded per-buffer damage
+lineage. The fixture proves skipped-generation history union, incomplete
+advertised-damage detection, exact canonical/scanout parity, and complete-copy
+direct readback during recovery.
 
 The fixed run exercises policy Off, Fullscreen enter/exit,
 borderless-fullscreen, Focused, AppRequested Default/Prefer/Disable,
@@ -123,6 +125,13 @@ AlwaysEligible, VT release/acquire, GWM restart, compositor restart, and clean
 shutdown. It captures property readback and kernel intervals for the same
 in-range target with VRR off and on. The cadence thresholds are defined in
 [M14 VRR timing](M14_VRR_TIMING.md).
+
+Some DRM drivers deliver a valid page-flip event and strictly increasing
+monotonic kernel timestamps while leaving the event sequence at zero.
+Glasswyrm records that zero unchanged and accepts consecutive zero-sequence
+events only when their kernel timestamps increase. It does not synthesize a
+sequence number. Missing or regressed timestamps remain nonfatal runtime timing
+loss and cannot satisfy physical cadence acceptance.
 
 AppRequested evidence requires exact compositor-authoritative rejection reason
 sets: Default and Disable each leave the output at `no-candidate`, with the

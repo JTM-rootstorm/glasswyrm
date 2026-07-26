@@ -665,7 +665,9 @@ and exact readback. Connector `vrr_capable`, CRTC `VRR_ENABLED`, and successful
 TEST_ONLY off/on commits establish controllability, not positive behavior.
 Positive acceptance additionally requires enough monotonic kernel page-flip
 samples to distinguish the same in-range cadence with VRR off and on, followed
-by exact KMS/KD/VT/getty restoration.
+by exact KMS/KD/VT/getty restoration. A driver may report sequence zero for
+consecutive valid flip events; raw zero is retained, and only strictly
+increasing kernel timestamps may establish chronology in that profile.
 
 M14 host, fake-DRM, raw-protocol, and simulated-output coverage is implemented.
 The clean QXL negative-capability gate and the separate reviewed physical
