@@ -261,6 +261,29 @@ void test_window_readiness_matrix() {
          VrrQueryReadiness::Ready, VrrQueryReason::None,
          "a coherent output and window projection is ready");
 
+  auto inactive = ready;
+  require(inactive.apply_session_state(GWIPC_SESSION_INACTIVE) ==
+              VrrSessionStateStatus::Applied,
+          "project an inactive session before querying");
+  expect(project_vrr_query(&inactive, output_layout, kPolicies, kWindows),
+         VrrQueryReadiness::Ready, VrrQueryReason::None,
+         "an inactive compositor may disable a policy-selected candidate");
+  require(inactive.outputs().at(kOutputId).policy_result->desired_enabled == 1 &&
+              inactive.outputs()
+                      .at(kOutputId)
+                      .compositor_state->desired_enabled == 0,
+          "inactive query preserves policy intent and compositor authority");
+
+  auto unauthorized_enable = output_ready_cache();
+  auto &unauthorized_outputs =
+      const_cast<std::map<std::uint64_t, ServerVrrOutputState> &>(
+          unauthorized_enable.outputs());
+  unauthorized_outputs.at(kOutputId).compositor_state->desired_enabled = 1;
+  expect(project_vrr_query(&unauthorized_enable, output_layout, kPolicies),
+         VrrQueryReadiness::FatalInvariant,
+         VrrQueryReason::OutputStateIncoherent,
+         "a compositor cannot enable VRR without policy permission");
+
   auto missing_policy = ready;
   auto &policy_windows =
       const_cast<std::map<std::uint32_t, ServerVrrWindowState> &>(

@@ -114,7 +114,8 @@ VrrQueryResult project_vrr_query(
     if (value.policy_result &&
         (value.policy_result->output_id != output_id.value ||
          value.policy_result->mode != committed->second ||
-         value.policy_result->desired_enabled != state.desired_enabled ||
+         (state.desired_enabled != 0 &&
+          value.policy_result->desired_enabled == 0) ||
          value.policy_result->selected_window_id != state.candidate_window_id))
       return query_result(VrrQueryReadiness::FatalInvariant,
                           VrrQueryReason::OutputStateIncoherent);
