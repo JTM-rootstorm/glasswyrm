@@ -117,7 +117,9 @@ cross-matched to its fresh DRM report; only then may the runner accept the
 restart snapshot or continue to the capture policy transitions.
 
 The cadence client prepares each deterministic damage frame ahead of its
-absolute deadline, polls the presentation marker below the evidence tolerance,
-and defers checked PutImage completion until the bounded sequence ends. X11
-protocol errors still fail the client, while request round trips cannot shift
-the measured submission schedule.
+absolute deadline, polls the presentation marker at a bounded half-millisecond
+interval, and defers checked PutImage completion until the bounded sequence
+ends. The polling interval leaves more than a millisecond of headroom in the
+reviewed 70 Hz profile while reducing output-control work in the server's
+presentation loop. X11 protocol errors still fail the client, while request
+round trips cannot shift the measured submission schedule.

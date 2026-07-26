@@ -135,6 +135,12 @@ lineage. The fixture proves skipped-generation history union, incomplete
 advertised-damage detection, exact canonical/scanout parity, and complete-copy
 direct readback during recovery.
 
+The cadence client retains one outstanding update and absolute monotonic
+submission deadlines. While that update is outstanding, it polls the complete
+presentation snapshot at a bounded 500 microsecond interval. This reduces
+output-control serialization pressure on the protocol server without changing
+the configured cadence, kernel-timestamp evidence, or acceptance thresholds.
+
 The fixed run exercises policy Off, Fullscreen enter/exit,
 borderless-fullscreen, Focused, AppRequested Default/Prefer/Disable,
 AlwaysEligible, VT release/acquire, GWM restart, compositor restart, and clean

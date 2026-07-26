@@ -169,7 +169,7 @@ void test_cadence_and_pixels() {
 }
 
 void test_presentation_pacer() {
-  static_assert(kPresentationPollNanoseconds < kFinalSpinNanoseconds);
+  static_assert(kPresentationPollNanoseconds == 500'000);
   PresentationPacer pacer(3, 10, 50);
   std::string error;
   require(pacer.begin({7, 9}, 100, error), "pacer accepts an initial marker");
