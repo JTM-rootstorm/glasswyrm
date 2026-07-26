@@ -190,6 +190,76 @@ void test_frame_set_bounds_and_historical_visible_hash() {
             "frame-set output bound rejects the ninth frame");
   }
 }
+glasswyrm::output::SoftwareFrameSet make_cached_frame_set(
+    const glasswyrm::output::SoftwareFrameSet* previous, std::uint64_t output_id,
+    const std::vector<std::uint32_t>& pixels,
+    const std::uint64_t serial) {
+  std::string error;
+  glasswyrm::output::OutputFrameResult frame;
+  require(frame.frame.configure(output_id,
+                                static_cast<std::uint32_t>(pixels.size()), 1,
+                                error),
+          error);
+  std::ranges::copy(pixels, frame.frame.pixels().begin());
+  frame.output = frame.frame.spec(60'000);
+  frame.logical = {0, 0, static_cast<std::uint32_t>(pixels.size()), 1};
+  frame.damage = {{0, 0, static_cast<std::uint32_t>(pixels.size()), 1}};
+  glasswyrm::output::SoftwareFrameSet result(previous);
+  require(result.append(std::move(frame), error), error);
+  require(result.finalize(serial, output_id, serial, serial, serial, error),
+          error);
+  return result;
+}
+
+void test_transactional_two_frame_hash_cache() {
+  const std::vector<std::uint32_t> first{0x00112233U, 0x80445566U,
+                                         0xff778899U, 0x00aabbccU};
+  auto second = first;
+  auto third = first;
+  second[0] = 0x00112234U;
+  third[0] = 0x00112235U;
+  auto first_set = make_cached_frame_set(nullptr, 1, first, 1);
+  require(!first_set.outputs().at(1).frame_hash_reused,
+          "the first canonical frame computes its hash");
+  auto second_set = make_cached_frame_set(&first_set, 1, second, 2);
+  require(!second_set.outputs().at(1).frame_hash_reused,
+          "a distinct second canonical frame computes its hash");
+  auto repeated_first = make_cached_frame_set(&second_set, 1, first, 3);
+  const auto& repeated = repeated_first.outputs().at(1);
+  require(repeated.frame_hash_reused &&
+              repeated.visible_hash ==
+                  glasswyrm::output::hash_visible_xrgb8888(first) &&
+              repeated.frame_hash_bytes == first.size() * 3U,
+          "the second cache entry reuses the exact historical FNV value");
+  {
+    auto rejected = make_cached_frame_set(&repeated_first, 1, third, 4);
+    require(!rejected.outputs().at(1).frame_hash_reused,
+            "a speculative third frame computes a private staged hash");
+  }
+  auto after_rollback = make_cached_frame_set(&repeated_first, 1, second, 5);
+  require(after_rollback.outputs().at(1).frame_hash_reused,
+          "discarding a staged frame leaves committed cache history intact");
+  auto third_set = make_cached_frame_set(&repeated_first, 1, third, 6);
+  auto evicted_second = make_cached_frame_set(&third_set, 1, second, 7);
+  require(!evicted_second.outputs().at(1).frame_hash_reused,
+          "a third distinct frame evicts the least-recent cache entry");
+  auto different_output = make_cached_frame_set(&repeated_first, 2, first, 8);
+  require(!different_output.outputs().at(2).frame_hash_reused,
+          "canonical cache entries do not cross output identities");
+  auto different_extent = make_cached_frame_set(
+      &repeated_first, 1, {first[0], first[1], first[2], first[3],
+                           0xff010203U}, 9);
+  require(!different_extent.outputs().at(1).frame_hash_reused,
+          "canonical cache entries require an exact pixel extent");
+  auto ignored_x_changed = first;
+  ignored_x_changed[0] ^= 0xff000000U;
+  auto strict_bytes =
+      make_cached_frame_set(&repeated_first, 1, ignored_x_changed, 10);
+  require(!strict_bytes.outputs().at(1).frame_hash_reused &&
+              strict_bytes.outputs().at(1).visible_hash ==
+                  repeated.visible_hash,
+          "cache reuse requires full bytes even when visible FNV is unchanged");
+}
 
 void test_multi_output_render_and_previous_preservation() {
   SceneModel model(SceneProfile::OutputModel);
@@ -251,9 +321,11 @@ void test_multi_output_render_and_previous_preservation() {
       model, mappings, attachments, unchanged, &rendered.frames, 14, 15, 16});
   require(preserved.complete() &&
               preserved.frames.aggregate_hash() == aggregate &&
+              preserved.frames.outputs().at(1).frame_hash_reused &&
+              preserved.frames.outputs().at(2).frame_hash_reused &&
               std::ranges::equal(
                   preserved.frames.outputs().at(2).frame.pixels(), right),
-          "compatible prior output frames survive an empty damage transaction");
+          "compatible prior frames survive and reuse exact canonical hashes");
 
   const SurfaceAttachmentMap missing;
   auto rejected = renderer.render(SoftwareFrameSetRenderRequest{
@@ -515,6 +587,7 @@ void test_all_gles_output_transforms() {
 
 int main() {
   test_frame_set_bounds_and_historical_visible_hash();
+  test_transactional_two_frame_hash_cache();
   test_multi_output_render_and_previous_preservation();
   test_fractional_bilinear_reference();
   test_scaled_client_downsample_reference();

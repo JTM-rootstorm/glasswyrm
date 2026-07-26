@@ -5,6 +5,10 @@
 
 #include <glasswyrm/ipc/contracts.h>
 
+#include <chrono>
+#include <cstring>
+#include <memory>
+#include <new>
 #include <string_view>
 
 namespace glasswyrm::output {
@@ -40,6 +44,16 @@ bool valid_damage(const gw::compositor::Rectangle rectangle,
 }
 
 } // namespace
+
+SoftwareFrameSet::SoftwareFrameSet(const SoftwareFrameSet* const previous) {
+  if (previous != nullptr && previous->finalized()) {
+    try {
+      hash_history_ = previous->hash_history_;
+    } catch (const std::bad_alloc&) {
+      // A cache miss remains correct and lets rendering proceed normally.
+    }
+  }
+}
 
 std::uint64_t calculate_frame_set_aggregate_hash(
     const std::map<std::uint64_t, OutputFrameResult> &outputs,
@@ -100,15 +114,53 @@ bool SoftwareFrameSet::append(OutputFrameResult output, std::string &error) {
     error = "software frame set exceeds the total pixel limit";
     return false;
   }
-  const auto hash = hash_visible_xrgb8888_measured(output.frame.pixels());
-  output.visible_hash = hash.hash;
-  output.frame_hash_bytes = hash.bytes;
-  output.frame_hash_nanoseconds = hash.nanoseconds;
   const auto id = output.output.output_id;
-  if (!outputs_.emplace(id, std::move(output)).second) {
+  if (outputs_.contains(id)) {
     error = "software frame set contains a duplicate output ID";
     return false;
   }
+
+  FrameHashMeasurement hash;
+  const auto started = std::chrono::steady_clock::now();
+  auto history = hash_history_.find(id);
+  if (history != hash_history_.end()) {
+    for (std::size_t index = 0; index < history->second.size(); ++index) {
+      const auto& candidate = history->second[index];
+      if (!candidate || !candidate->pixels ||
+          candidate->pixels->size() != output.frame.pixels().size() ||
+          std::memcmp(candidate->pixels->data(), output.frame.pixels().data(),
+                      output.frame.pixels().size_bytes()) != 0)
+        continue;
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+              std::chrono::steady_clock::now() - started);
+      hash = {candidate->hash, pixels * 3U,
+              elapsed.count() < 0
+                  ? 0U
+                  : static_cast<std::uint64_t>(elapsed.count())};
+      output.frame_hash_reused = true;
+      if (index != 0)
+        std::swap(history->second[0], history->second[index]);
+      break;
+    }
+  }
+  if (!output.frame_hash_reused) {
+    hash = hash_visible_xrgb8888_measured(output.frame.pixels());
+    try {
+      auto snapshot = std::make_shared<const std::vector<std::uint32_t>>(
+          output.frame.pixels().begin(), output.frame.pixels().end());
+      auto& entries = hash_history_[id];
+      entries[1] = std::move(entries[0]);
+      entries[0] = CanonicalHashEntry{std::move(snapshot), hash.hash};
+    } catch (const std::bad_alloc&) {
+      // Hash caching is best-effort. Preserve inherited entries so allocation
+      // pressure cannot turn a correct canonical frame into a render failure.
+    }
+  }
+  output.visible_hash = hash.hash;
+  output.frame_hash_bytes = hash.bytes;
+  output.frame_hash_nanoseconds = hash.nanoseconds;
+  outputs_.emplace(id, std::move(output));
   total_pixels_ += pixels;
   error.clear();
   return true;
@@ -137,6 +189,14 @@ bool SoftwareFrameSet::finalize(const std::uint64_t layout_generation,
   ordinal_ = ordinal;
   aggregate_hash_ = calculate_frame_set_aggregate_hash(
       outputs_, layout_generation_, primary_output_id_);
+  for (auto iterator = hash_history_.begin();
+       iterator != hash_history_.end();) {
+    if (outputs_.contains(iterator->first)) {
+      ++iterator;
+    } else {
+      iterator = hash_history_.erase(iterator);
+    }
+  }
   finalized_ = true;
   error.clear();
   return true;

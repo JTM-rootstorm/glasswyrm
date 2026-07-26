@@ -340,7 +340,7 @@ SoftwareFrameSetRenderResult MultiOutputSoftwareSceneRenderer::render(
     return result;
   }
   const auto &scene = request.scene_model.committed();
-  glasswyrm::output::SoftwareFrameSet staged_frames;
+  glasswyrm::output::SoftwareFrameSet staged_frames(request.previous);
   std::map<std::uint64_t, SourceImage> source_cache;
   for (const auto &[output_id, unused] : request.damage) {
     (void)unused;

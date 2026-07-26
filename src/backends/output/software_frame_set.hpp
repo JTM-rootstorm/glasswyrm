@@ -5,8 +5,11 @@
 #include "output/vrr/reasons.hpp"
 #include "output/vrr/types.hpp"
 
+#include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -38,6 +41,7 @@ struct OutputFrameResult {
   std::uint64_t visible_hash{};
   std::uint64_t frame_hash_bytes{};
   std::uint64_t frame_hash_nanoseconds{};
+  bool frame_hash_reused{};
   VrrPresentationRequest vrr;
 };
 
@@ -72,6 +76,9 @@ public:
   static constexpr std::uint64_t kMaximumTotalPixels =
       kMaximumTotalOutputPixels;
 
+  SoftwareFrameSet() = default;
+  explicit SoftwareFrameSet(const SoftwareFrameSet* previous);
+
   [[nodiscard]] bool append(OutputFrameResult output, std::string &error);
   [[nodiscard]] bool finalize(std::uint64_t layout_generation,
                               std::uint64_t primary_output_id,
@@ -104,7 +111,15 @@ public:
   [[nodiscard]] SoftwareFrameSetView view() const noexcept;
 
 private:
+  struct CanonicalHashEntry {
+    std::shared_ptr<const std::vector<std::uint32_t>> pixels;
+    std::uint64_t hash{};
+  };
+  using CanonicalHashHistory =
+      std::array<std::optional<CanonicalHashEntry>, 2>;
+
   std::map<std::uint64_t, OutputFrameResult> outputs_;
+  std::map<std::uint64_t, CanonicalHashHistory> hash_history_;
   std::uint64_t total_pixels_{};
   std::uint64_t aggregate_hash_{};
   std::uint64_t layout_generation_{};
