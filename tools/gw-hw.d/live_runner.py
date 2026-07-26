@@ -794,7 +794,7 @@ class FixedLiveRunner:
             return
         trigger = RUNTIME_ROOT / "repaint.request"
         report = self.artifacts / "vrr-part-1.jsonl"
-        report_start = len(_read_regular(report, MAX_JSON_BYTES))
+        report_start = self.acquire_stable_report_boundary(report)
         try:
             descriptor = os.open(
                 trigger,
@@ -820,6 +820,23 @@ class FixedLiveRunner:
             raise HarnessError("bounded repaint trigger is not private")
         self.wait_absent(trigger)
         self.wait_for_sealed_presentation(report_start)
+
+    def acquire_stable_report_boundary(self, report: Path) -> int:
+        previous: bytes | None = None
+        for _ in range(200):
+            contents = _read_regular(report, MAX_JSON_BYTES)
+            if previous is not None and not contents.startswith(previous):
+                raise HarnessError(
+                    "bounded repaint VRR report changed before its "
+                    "append boundary")
+            if (previous is not None and contents == previous and
+                    (not contents or contents[-1:] == b"\n")):
+                return len(contents)
+            previous = contents
+            time.sleep(.05)
+        raise HarnessError(
+            "bounded repaint VRR report did not reach a stable newline "
+            "boundary")
 
     def wait_for_sealed_presentation(self, report_start: int) -> None:
         if not self.validate_runtime:
