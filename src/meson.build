@@ -490,6 +490,7 @@ if get_option('glasswyrmd')
       'glasswyrmd/vrr_events.cpp',
       'glasswyrmd/vrr_policy_projection.cpp',
       'glasswyrmd/vrr_state_cache.cpp',
+      'glasswyrmd/vrr_session_state_cache.cpp',
       'glasswyrmd/runtime_bridge.cpp',
       'glasswyrmd/published_buffer.cpp',
       'glasswyrmd/content_presenter.cpp',

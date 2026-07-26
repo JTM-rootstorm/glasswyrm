@@ -102,6 +102,20 @@ bool ServerRuntime::service_session_changes() {
       abort_interactive();
       (void)server_.state_.grabs().suspend();
     }
+    if ((applied.result == GWIPC_SESSION_STATE_ACCEPTED ||
+         applied.result == GWIPC_SESSION_STATE_ALREADY_APPLIED) &&
+        server_.options_.vrr_protocol) {
+      auto* cache = bridge_->vrr_cache();
+      const auto status =
+          cache ? cache->apply_session_state(request.change.state)
+                : VrrSessionStateStatus::OutputStateMissing;
+      if (status != VrrSessionStateStatus::Applied) {
+        std::fprintf(stderr,
+                     "glasswyrmd: VRR session cache transition failed: %u\n",
+                     static_cast<unsigned>(status));
+        return false;
+      }
+    }
     std::string error;
     if (!bridge_->acknowledge_session_state(request, applied.result, error)) {
       std::fprintf(stderr,

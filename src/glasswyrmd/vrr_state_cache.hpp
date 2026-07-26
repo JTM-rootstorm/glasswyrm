@@ -97,6 +97,14 @@ enum class VrrResponseStatus {
   ReleaseMismatch,
 };
 
+enum class VrrSessionStateStatus {
+  Applied,
+  InvalidState,
+  OutputStateMissing,
+  OutputStateIncoherent,
+  TransitionSerialExhausted,
+};
+
 class VrrStateCache final {
  public:
   [[nodiscard]] std::uint64_t generation() const noexcept {
@@ -134,6 +142,8 @@ class VrrStateCache final {
   [[nodiscard]] bool seed_compositor_state(
       const std::vector<gwipc_output_vrr_state_upsert>& states,
       const std::vector<gwipc_presentation_timing>& timings);
+  [[nodiscard]] VrrSessionStateStatus apply_session_state(
+      gwipc_session_state state);
 
   [[nodiscard]] bool expect_response(VrrResponseExpectation expectation);
   void cancel_expectation() noexcept { expectation_.reset(); }
