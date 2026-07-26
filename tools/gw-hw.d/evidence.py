@@ -244,11 +244,14 @@ def analyze_cadence(
         previous[crtc] = (sequence, timestamp)
         if prior is None:
             continue
-        sequence_delta = (sequence - prior[0]) & 0xffffffff
-        if sequence_delta == 0 or sequence_delta >= (1 << 31):
-            continue
         if timestamp <= prior[1]:
             raise HarnessError(f"kernel timestamp regression at line {number}")
+        sequence_delta = (sequence - prior[0]) & 0xffffffff
+        if sequence_delta == 0 and sequence == 0:
+            intervals.append(timestamp - prior[1])
+            continue
+        if sequence_delta == 0 or sequence_delta >= (1 << 31):
+            continue
         intervals.append(timestamp - prior[1])
     target_ns = 1_000_000_000.0 / int(config["target_refresh_hz"])
     tolerance_ns = interval_tolerance(target_ns)

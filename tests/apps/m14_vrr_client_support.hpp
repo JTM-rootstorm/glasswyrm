@@ -2,6 +2,8 @@
 
 #include "m14_vrr_client_options.hpp"
 
+#include "glasswyrm/ipc/output.h"
+
 #include <cstdint>
 #include <atomic>
 #include <optional>
@@ -17,6 +19,9 @@ inline constexpr std::uint16_t kPatternHeight = 192;
 inline constexpr std::uint16_t kDamageWidth = 64;
 inline constexpr std::uint16_t kDamageHeight = 64;
 inline constexpr std::uint64_t kFinalSpinNanoseconds = 200'000;
+inline constexpr std::uint32_t kPresentationQueryFlags =
+    GWIPC_OUTPUT_QUERY_DESCRIPTORS | GWIPC_OUTPUT_QUERY_LAYOUT |
+    GWIPC_OUTPUT_QUERY_WINDOWS | GWIPC_OUTPUT_QUERY_VRR;
 
 struct PresentationMarker {
   std::uint64_t commit_id{};

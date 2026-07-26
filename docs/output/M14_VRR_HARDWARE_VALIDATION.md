@@ -132,6 +132,8 @@ Glasswyrm records that zero unchanged and accepts consecutive zero-sequence
 events only when their kernel timestamps increase. It does not synthesize a
 sequence number. Missing or regressed timestamps remain nonfatal runtime timing
 loss and cannot satisfy physical cadence acceptance.
+The cadence client requests the matching window projection with each VRR timing
+snapshot so an enabled candidate remains self-contained and coherence-checked.
 
 AppRequested evidence requires exact compositor-authoritative rejection reason
 sets: Default and Disable each leave the output at `no-candidate`, with the

@@ -55,7 +55,7 @@ m14_vrr_client_test = executable(
     tests_source_dir / 'apps/m14_vrr_client_options.cpp',
     tests_source_dir / 'apps/m14_vrr_client_support.cpp',
   ),
-  include_directories: test_source_root_include,
+  include_directories: [test_source_root_include, gw_include_dir],
 )
 test('m14-vrr-client-unit', m14_vrr_client_test, timeout: 10)
 
