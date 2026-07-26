@@ -72,8 +72,10 @@ PeerProcessOutcome CompositorPeer::finish_vrr_response(std::string& error) {
     error = "M14 compositor response batch is incomplete";
     return PeerProcessOutcome::Fatal;
   }
-  if (vrr_cache_.promote(vrr_response_) != VrrResponseStatus::Accepted) {
-    error = "M14 compositor response failed server promotion preflight";
+  const auto promotion = vrr_cache_.promote(vrr_response_);
+  if (promotion != VrrResponseStatus::Accepted) {
+    error = "M14 compositor response failed server promotion preflight: ";
+    error += vrr_response_status_name(promotion);
     return PeerProcessOutcome::Fatal;
   }
   accepted_vrr_cache_ = vrr_cache_;

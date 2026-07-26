@@ -413,6 +413,20 @@ bool VrrStateCache::expect_response(VrrResponseExpectation expectation) {
   return true;
 }
 
+void VrrStateCache::invalidate_compositor_state() noexcept {
+  for (auto& [output_id, output] : outputs_) {
+    static_cast<void>(output_id);
+    output.compositor_state.reset();
+    output.timing.reset();
+  }
+  invalidate_after_response_ = false;
+}
+
+void VrrStateCache::cancel_expectation() noexcept {
+  expectation_.reset();
+  if (invalidate_after_response_) invalidate_compositor_state();
+}
+
 VrrResponseStatus VrrStateCache::preflight(
     const VrrResponseBatch& batch) const noexcept {
   if (!expectation_) return VrrResponseStatus::NoExpectation;
@@ -446,8 +460,8 @@ VrrResponseStatus VrrStateCache::preflight(
         state.flags != 0 ||
         (state.reason_flags & ~GWIPC_VRR_KNOWN_REASON_MASK) != 0 ||
         (found->second.policy_result &&
-         (state.desired_enabled !=
-              found->second.policy_result->desired_enabled ||
+         ((state.desired_enabled != 0 &&
+           found->second.policy_result->desired_enabled == 0) ||
           state.candidate_window_id !=
               found->second.policy_result->selected_window_id ||
           state.candidate_surface_id !=
@@ -501,6 +515,7 @@ VrrResponseStatus VrrStateCache::promote(const VrrResponseBatch& batch) {
   for (const auto& timing : batch.timings)
     outputs_.at(timing.output_id).timing = timing;
   expectation_.reset();
+  if (invalidate_after_response_) invalidate_compositor_state();
   return VrrResponseStatus::Accepted;
 }
 
