@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -43,6 +44,12 @@ void write(const std::filesystem::path& path, const std::string& contents) {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   output << contents;
   gw::test::require(static_cast<bool>(output), "write test file");
+}
+
+void append(const std::filesystem::path& path, const std::string& contents) {
+  std::ofstream output(path, std::ios::binary | std::ios::app);
+  output << contents;
+  gw::test::require(static_cast<bool>(output), "append test file");
 }
 
 DiscoveryReport discovery() {
@@ -95,14 +102,18 @@ void stage_commit_abort() {
   StagedDrmReport staged;
   gw::test::require(report.stage(initialization, staged, error),
                     "stage initialization records");
-  gw::test::require(staged.active() &&
-                        std::filesystem::exists(staged.temporary_path()) &&
+  gw::test::require(staged.active() && staged.temporary_path().empty() &&
                         !std::filesystem::exists(path),
-                    "staging exposes only private temporary report");
-  const auto initial_contents = read(staged.temporary_path());
+                    "staging remains in memory before report publication");
+  const auto initial_contents =
+      glasswyrm::drm::serialize_report_record(initialization[0]) +
+      glasswyrm::drm::serialize_report_record(initialization[1]);
   gw::test::require(report.commit(staged, error) && report.generation() == 1 &&
                         read(path) == initial_contents,
-                    "atomically publish initialization report");
+                    "publish initialization report without replacement");
+  struct stat initial_status {};
+  gw::test::require(::stat(path.c_str(), &initial_status) == 0,
+                    "inspect initial report identity");
 
   const auto frame = DrmReportRecord{flip()};
   gw::test::require(report.stage(frame, staged, error), "stage completed flip");
@@ -110,29 +121,30 @@ void stage_commit_abort() {
                         read(path).find("\"record\":\"flip\"") ==
                             std::string::npos,
                     "final frame record invisible before completion commit");
-  const auto temporary = staged.temporary_path();
   report.abort(staged);
-  gw::test::require(!std::filesystem::exists(temporary) &&
-                        read(path) == initial_contents,
-                    "aborted flip removes staging and preserves report");
+  gw::test::require(!staged.active() && read(path) == initial_contents,
+                    "aborted flip discards memory and preserves report");
 
   gw::test::require(report.stage(frame, staged, error) &&
                         report.commit(staged, error) &&
                         read(path).find("\"record\":\"flip\"") !=
                             std::string::npos,
-                    "publish flip only on explicit completion commit");
+                    "append flip only on explicit completion commit");
+  struct stat appended_status {};
+  gw::test::require(::stat(path.c_str(), &appended_status) == 0 &&
+                        appended_status.st_ino == initial_status.st_ino &&
+                        report.flush(error),
+                    "append preserves identity and flushes at durability boundary");
 
-  std::filesystem::path abandoned;
   {
     StagedDrmReport automatic_abort;
     const DrmReportRecord fatal =
         FatalReport{"page_flip", "timeout", "Virtual-1", 42, 56, 9, 11};
     gw::test::require(report.stage(fatal, automatic_abort, error),
                       "stage fatal evidence");
-    abandoned = automatic_abort.temporary_path();
+    gw::test::require(automatic_abort.temporary_path().empty(),
+                      "staged fatal evidence remains memory-only");
   }
-  gw::test::require(!std::filesystem::exists(abandoned),
-                    "staged report destructor removes temporary file");
 }
 
 void unsafe_paths_are_rejected() {
@@ -177,11 +189,11 @@ void replacement_targets_are_not_overwritten() {
                     "publish report before replacement test");
   gw::test::require(report.stage(DrmReportRecord{flip()}, staged, error),
                     "stage report update before replacement");
-  const auto temporary = staged.temporary_path();
   std::filesystem::rename(path, original);
   write(path, "replacement");
   gw::test::require(!report.commit(staged, error) && read(path) == "replacement" &&
-                        !std::filesystem::exists(temporary),
+                        read(original).find("\"record\":\"flip\"") ==
+                            std::string::npos,
                     "reject and preserve replacement target");
 
   const auto raced_path = directory.path / "raced.jsonl";
@@ -212,6 +224,19 @@ void replacement_targets_are_not_overwritten() {
                         read(exchange_path) == "raced replacement" &&
                         std::filesystem::exists(displaced_path),
                     "exchange rollback preserves raced replacement target");
+
+  const auto modified_path = directory.path / "modified.jsonl";
+  DrmReport modified_report(modified_path);
+  gw::test::require(
+      modified_report.initialize(error) &&
+          modified_report.stage(DrmReportRecord{discovery()}, staged, error) &&
+          modified_report.commit(staged, error) &&
+          modified_report.stage(DrmReportRecord{flip()}, staged, error),
+      "stage append before in-place modification");
+  append(modified_path, "intruder");
+  gw::test::require(!modified_report.commit(staged, error) &&
+                        read(modified_path).ends_with("intruder"),
+                    "reject and preserve in-place report modification");
 }
 
 void invalid_records_are_rejected() {

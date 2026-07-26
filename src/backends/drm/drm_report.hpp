@@ -184,6 +184,7 @@ public:
   [[nodiscard]] bool stage(std::span<const DrmReportRecord> records,
                            StagedDrmReport& staged, std::string& error);
   [[nodiscard]] bool commit(StagedDrmReport& staged, std::string& error);
+  [[nodiscard]] bool flush(std::string& error);
   void abort(StagedDrmReport& staged) const noexcept;
   void set_before_publish_hook_for_testing(BeforePublishHook hook,
                                            void* context) noexcept {
@@ -212,9 +213,11 @@ private:
   std::filesystem::path parent_;
   Identity parent_identity_{};
   Identity target_identity_{};
-  std::string committed_contents_;
+  std::uint64_t committed_size_{};
   std::uint64_t generation_{};
   bool initialized_{};
+  bool dirty_{};
+  bool poisoned_{};
   BeforePublishHook before_publish_hook_{};
   void* before_publish_context_{};
 };

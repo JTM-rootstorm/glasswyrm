@@ -213,18 +213,22 @@ output::BackendStateResult DrmPresenter::shutdown(std::string& error) noexcept {
     }
     std::string standard_report_error;
     const bool report_ok = append_report(restore, standard_report_error);
+    if (vrr_report_ok && vrr_report_)
+      vrr_report_ok = vrr_report_->flush(report_error);
+    const bool report_flushed =
+        report_ok && (!report_ || report_->flush(standard_report_error));
     if (!operation_error.empty()) shutdown_error_ = operation_error;
     if (!vrr_report_ok) {
       if (!shutdown_error_.empty()) shutdown_error_ += "; ";
       shutdown_error_ += report_error;
     }
-    if (!report_ok) {
+    if (!report_flushed) {
       if (!shutdown_error_.empty()) shutdown_error_ += "; ";
       shutdown_error_ += standard_report_error;
     }
     if (!kms_restore || !vt_restore ||
         (device_.session() == DeviceSession::Standalone && !master_drop) ||
-        !framebuffer_cleanup || !vrr_report_ok || !report_ok)
+        !framebuffer_cleanup || !vrr_report_ok || !report_flushed)
       shutdown_result_ = output::BackendStateResult::Fatal;
   } catch (...) {
     shutdown_error_ = "unexpected exception during DRM shutdown";
