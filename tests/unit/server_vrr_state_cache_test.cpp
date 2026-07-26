@@ -219,6 +219,38 @@ VrrStateCache active_session_cache() {
   return cache;
 }
 
+void test_compositor_may_block_policy_desire() {
+  auto cache = active_session_cache();
+  require(cache.expect_response({41, 13, {7}, {99}}),
+          "stage response expectation for compositor rejection");
+  auto batch = response();
+  auto& state = batch.output_states.front();
+  state.decision = GWIPC_VRR_DECISION_DISABLED;
+  state.desired_enabled = 0;
+  state.effective_enabled = 0;
+  state.session_active = 0;
+  state.candidate_window_id = 20;
+  state.candidate_surface_id =
+      (UINT64_C(1) << 32U) | UINT64_C(20);
+  state.reason_flags =
+      GWIPC_VRR_REASON_SESSION_INACTIVE | GWIPC_VRR_REASON_VT_SUSPENDED;
+  batch.timings.front().effective_vrr_enabled = 0;
+  require(cache.promote(batch) == VrrResponseStatus::Accepted &&
+              cache.outputs().at(7).policy_result->desired_enabled == 1 &&
+              cache.outputs().at(7).compositor_state->desired_enabled == 0,
+          "compositor blockers override policy desire without changing policy");
+
+  VrrStateCache forbidden;
+  require(forbidden.replace_inventory({capability()}, {policy()}) &&
+              forbidden.stage_policy_result(
+                  9, {policy_result(7)}, {}) &&
+              forbidden.expect_response({41, 13, {7}, {99}}),
+          "install disabled policy before forbidden compositor enable");
+  require(forbidden.preflight(response()) ==
+              VrrResponseStatus::InvalidOutputState,
+          "compositor cannot enable VRR without policy permission");
+}
+
 void test_inactive_session_projection() {
   auto cache = active_session_cache();
   require(cache.expect_response({51, 19, {7}, {101}}),
@@ -232,7 +264,7 @@ void test_inactive_session_projection() {
       GWIPC_VRR_REASON_SESSION_INACTIVE | GWIPC_VRR_REASON_VT_SUSPENDED |
       GWIPC_VRR_REASON_TIMING_UNAVAILABLE;
   require(state.decision == GWIPC_VRR_DECISION_DISABLED &&
-              state.desired_enabled == 1 && state.effective_enabled == 0 &&
+              state.desired_enabled == 0 && state.effective_enabled == 0 &&
               state.session_active == 0 && state.candidate_window_id == 20 &&
               state.candidate_surface_id ==
                   ((UINT64_C(1) << 32U) | UINT64_C(20)) &&
@@ -255,16 +287,42 @@ void test_inactive_session_projection() {
 
 void test_active_session_invalidation() {
   auto cache = active_session_cache();
-  require(cache.expect_response({51, 19, {7}, {101}}),
-          "install active-transition response expectation");
   require(cache.apply_session_state(GWIPC_SESSION_ACTIVE) ==
                   VrrSessionStateStatus::Applied &&
               !cache.outputs().at(7).compositor_state &&
               !cache.outputs().at(7).timing &&
               cache.outputs().at(7).policy_result &&
-              cache.windows().at(20).policy_result &&
-              cache.expectation() && cache.expectation()->commit_id == 51,
+              cache.windows().at(20).policy_result,
           "accepted active state waits for ordinary compositor presentation");
+
+  auto pending = active_session_cache();
+  require(pending.expect_response({41, 13, {7}, {99}}),
+          "install in-flight inactive presentation");
+  require(pending.apply_session_state(GWIPC_SESSION_ACTIVE) ==
+                  VrrSessionStateStatus::Applied &&
+              pending.outputs().at(7).compositor_state &&
+              pending.expectation(),
+          "active transition retains truth required by an in-flight response");
+  auto batch = response();
+  batch.output_states.front().candidate_window_id = 20;
+  batch.output_states.front().candidate_surface_id =
+      (UINT64_C(1) << 32U) | UINT64_C(20);
+  require(pending.promote(batch) == VrrResponseStatus::Accepted &&
+              !pending.outputs().at(7).compositor_state &&
+              !pending.outputs().at(7).timing && !pending.expectation(),
+          "in-flight response completes before active invalidation");
+
+  auto cancelled = active_session_cache();
+  require(cancelled.expect_response({41, 13, {7}, {99}}),
+          "install cancellable inactive presentation");
+  require(cancelled.apply_session_state(GWIPC_SESSION_ACTIVE) ==
+              VrrSessionStateStatus::Applied,
+          "defer active invalidation for cancellable response");
+  cancelled.cancel_expectation();
+  require(!cancelled.outputs().at(7).compositor_state &&
+              !cancelled.outputs().at(7).timing &&
+              !cancelled.expectation(),
+          "cancelling the response completes deferred active invalidation");
 }
 
 void test_session_transition_failures_are_atomic() {
@@ -313,6 +371,7 @@ void test_session_transition_failures_are_atomic() {
 
 int main() {
   test_exact_atomic_response();
+  test_compositor_may_block_policy_desire();
   test_policy_and_window_staging();
   test_inactive_session_projection();
   test_active_session_invalidation();

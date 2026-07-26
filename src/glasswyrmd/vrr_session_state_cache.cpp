@@ -14,7 +14,7 @@ bool inactive_state_differs(
     const gwipc_policy_output_vrr_state& policy,
     const std::uint64_t generation) noexcept {
   return state.decision != GWIPC_VRR_DECISION_DISABLED ||
-         state.desired_enabled != policy.desired_enabled ||
+         state.desired_enabled != 0 ||
          state.effective_enabled != 0 || state.session_active != 0 ||
          state.candidate_window_id != policy.selected_window_id ||
          (state.reason_flags & kSessionInactiveReasons) !=
@@ -54,11 +54,10 @@ VrrSessionStateStatus VrrStateCache::apply_session_state(
     return VrrSessionStateStatus::InvalidState;
   }
   if (session_state == GWIPC_SESSION_ACTIVE) {
-    for (auto& [output_id, output] : outputs_) {
-      static_cast<void>(output_id);
-      output.compositor_state.reset();
-      output.timing.reset();
-    }
+    if (expectation_)
+      invalidate_after_response_ = true;
+    else
+      invalidate_compositor_state();
     return VrrSessionStateStatus::Applied;
   }
 
@@ -84,7 +83,7 @@ VrrSessionStateStatus VrrStateCache::apply_session_state(
     const bool changed =
         inactive_state_differs(state, policy, generation_);
     state.decision = GWIPC_VRR_DECISION_DISABLED;
-    state.desired_enabled = policy.desired_enabled;
+    state.desired_enabled = 0;
     state.effective_enabled = 0;
     state.session_active = 0;
     state.candidate_window_id = policy.selected_window_id;

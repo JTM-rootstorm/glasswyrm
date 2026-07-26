@@ -37,7 +37,10 @@ timing. The protocol server owns requested per-output policy and per-window
 application preference. GWM receives complete policy inputs and returns its
 window and output decisions. The compositor remains final display authority
 and may reject a GWM-selected candidate for surface, session, or presenter
-reasons.
+reasons. Accordingly, `OutputVrrStateUpsert.desired_enabled` may fall from a
+true `PolicyOutputVrrState.desired_enabled` to false, but it may not rise from
+false to true; requested mode and selected candidate identity must still match
+the committed policy result.
 
 Complete M14 snapshots require one output policy per output. Scene snapshots
 carry one `SurfaceVrrState` for each nonmetadata window surface. Window-policy

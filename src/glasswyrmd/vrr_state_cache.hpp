@@ -146,16 +146,19 @@ class VrrStateCache final {
       gwipc_session_state state);
 
   [[nodiscard]] bool expect_response(VrrResponseExpectation expectation);
-  void cancel_expectation() noexcept { expectation_.reset(); }
+  void cancel_expectation() noexcept;
   [[nodiscard]] VrrResponseStatus preflight(
       const VrrResponseBatch& batch) const noexcept;
   [[nodiscard]] VrrResponseStatus promote(const VrrResponseBatch& batch);
 
  private:
+  void invalidate_compositor_state() noexcept;
+
   std::uint64_t generation_{1};
   std::map<std::uint64_t, ServerVrrOutputState> outputs_;
   std::map<std::uint32_t, ServerVrrWindowState> windows_;
   std::optional<VrrResponseExpectation> expectation_;
+  bool invalidate_after_response_{};
 };
 
 [[nodiscard]] const char* vrr_response_status_name(
