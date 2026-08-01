@@ -90,6 +90,32 @@ missing final summary/restoration records cannot satisfy physical acceptance.
 
 ## Validation harnesses
 
+The narrow first physical command is:
+
+```sh
+systemd-run --scope --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-nvidia-vrr-probe \
+    --config PATH --artifact-dir NEW_PRIVATE_DIRECTORY --yes
+```
+
+It validates the separate fixed
+`/var/tmp/glasswyrm-build-m14-nvidia-probe` executable and manifest, performs
+only the bounded DRM off/on/restore experiment, and immediately writes an
+offline classification. It does not require input devices or start any
+Glasswyrm process other than `gw_drm_vrr_probe`. Direct execution outside the
+exact detached scope and reuse of an artifact directory are rejected before
+DRM takeover. See
+[M14 NVIDIA VRR bring-up](../output/M14_NVIDIA_VRR_BRINGUP.md) for the build,
+host, and recovery procedure.
+
+An existing raw report can be classified repeatedly without hardware access:
+
+```sh
+./tools/gw-hw analyze-milestone14-nvidia-vrr-probe \
+  --report RAW.jsonl --config PATH --output NEW_SUMMARY.json
+```
+
 `gw-vm milestone14-runtime-test --yes` is the fixed QXL negative-capability
 gate. Both `gw-hw doctor` and `gw-hw milestone14-vrr-test` require the reviewed
 configuration, pinned `--required-base`, exact `--tested-commit`, and a private

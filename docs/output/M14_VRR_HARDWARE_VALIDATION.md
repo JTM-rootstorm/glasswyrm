@@ -54,6 +54,13 @@ systemd-run --scope --unit=glasswyrm-m14-harness \
   --artifact-dir /var/tmp/glasswyrm-m14-hardware --yes
 ```
 
+Do not begin convergence with that complete runner. First use the separate L4
+NVIDIA probe build and `milestone14-nvidia-vrr-probe` procedure in
+[M14 NVIDIA VRR bring-up](M14_NVIDIA_VRR_BRINGUP.md). That path has no input,
+X11, WM, compositor, restart, VT-cycle, or pixel-capture dependency. The final
+build and complete runner are reserved for L8 after the minimal probe and
+three-process diagnostic stages pass.
+
 For a reviewed detached launch, add `--unattended` to the final command. This
 permits an automation process whose stdin is not the configured Linux VT, but
 does not permit a different active console: the root doctor and just-in-time

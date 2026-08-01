@@ -41,6 +41,49 @@ three-process cadence stage only when that probe reports
 `accepted-probe-distinction`. Property readback without distinguishable raw
 page-flip cadence is not positive M14 evidence.
 
+## Minimal L4 build and run
+
+Freeze and commit the candidate before configuring the separate probe build.
+The opt-in build target records that exact clean `HEAD`, hashes only
+`gw_drm_vrr_probe`, and refuses a tracked-dirty source tree. It does not create
+or modify the final L8 `/var/tmp/glasswyrm-build-m14` build.
+
+```sh
+meson setup /var/tmp/glasswyrm-build-m14-nvidia-probe \
+  --buildtype=debugoptimized \
+  -Ddrm_backend=true \
+  -Dm14_nvidia_probe_provenance=true
+meson compile -C /var/tmp/glasswyrm-build-m14-nvidia-probe \
+  gw_drm_vrr_probe m14-nvidia-probe-build-provenance
+```
+
+If that build directory was configured at an earlier commit, run `meson setup
+--reconfigure` with the same options after checking out the reviewed candidate,
+then compile the two named targets again. The generated manifest and executable
+must remain regular files; the wrapper rejects symlink substitution, a changed
+commit, or a hash mismatch.
+
+From the reviewed active text VT, with the display manager and any competing
+DRM master stopped, run:
+
+```sh
+systemd-run --scope --unit=glasswyrm-m14-harness \
+  --collect --quiet -- \
+  ./tools/gw-hw milestone14-nvidia-vrr-probe \
+    --config /path/to/reviewed.toml \
+    --artifact-dir /var/tmp/glasswyrm-m14-nvidia-probe-artifacts \
+    --yes
+```
+
+The artifact directory must be new or empty, private, and nonsymlinked. The
+wrapper checks the exact connector, EDID, mode, active text VT, NVIDIA facts,
+DRM master availability, probe build provenance, and literal confirmation
+before invoking the fixed binary. Input devices are intentionally not required
+because L4 does not start `glasswyrmd`, `gwm`, `gwcomp`, or a client. The C++
+probe restores the saved KMS state before releasing its buffers; success also
+requires the offline analyzer to accept the restoration record and the frozen
+off/on cadence distinction.
+
 ## Offline replay
 
 The repository analyzer consumes a completed probe JSONL without opening a DRM

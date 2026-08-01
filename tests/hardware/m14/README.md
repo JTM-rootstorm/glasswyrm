@@ -48,13 +48,21 @@ meson setup /var/tmp/glasswyrm-build-m14 \
 meson compile -C /var/tmp/glasswyrm-build-m14
 ```
 
+Before creating or refreshing that final build, use the narrow L4 NVIDIA probe
+build described in
+[`docs/output/M14_NVIDIA_VRR_BRINGUP.md`](../../../docs/output/M14_NVIDIA_VRR_BRINGUP.md).
+It uses `/var/tmp/glasswyrm-build-m14-nvidia-probe`, hashes only the probe
+executable, and runs through `milestone14-nvidia-vrr-probe`. That diagnostic
+stage intentionally does not validate or open the configured input devices.
+
 The optimized build type is required because the positive gate measures
 physical presentation cadence; the separate debug and sanitizer builds remain
 the correctness gates. The opt-in Meson target records the configured
 Git commit and refuses to emit
 `glasswyrm-m14-build-manifest.json` if `HEAD` changed or any tracked source is
 dirty. It hashes `gwm`, `gwcomp`, `glasswyrmd`, `gwout`, `gwinfo`, the M14 XCB
-client, and `gw_drm_probe`. Untracked local plans do not invalidate the build.
+client, `gw_drm_probe`, and `gw_drm_vrr_probe`. Untracked local plans do not
+invalidate the build.
 `gw-hw` independently checks the exact fixed paths, regular-executable type,
 size, and SHA-256 digest against `--tested-commit` before live hardware
 discovery. It copies the validated manifest into the evidence archive.
