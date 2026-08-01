@@ -119,6 +119,25 @@ def main() -> int:
         assert "tracked source changes" in dirty.stderr
         assert not dirty_output.exists()
 
+        tracked.write_text("accepted source\n", encoding="utf-8")
+        probe_output = build / provenance.PROBE_MANIFEST_NAME
+        probe_binary = binary_paths[-1]
+        probe = command(
+            generator,
+            "--source-root", source,
+            "--git", git_program,
+            "--expected-commit", commit,
+            "--output", probe_output,
+            "--profile", "nvidia-probe",
+            "--roles", "drm-vrr-probe",
+            "--binaries", probe_binary,
+        )
+        assert probe.returncode == 0, probe.stderr
+        provenance.PROBE_BUILD_ROOT = build.resolve()
+        provenance.PROBE_BINARY = probe_binary
+        provenance.validate_probe_build_provenance(commit, artifacts)
+        assert (artifacts / provenance.PROBE_ARTIFACT).is_file()
+
     print("M14 build provenance test: ok")
     return 0
 

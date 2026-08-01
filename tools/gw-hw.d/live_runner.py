@@ -23,13 +23,14 @@ from common import (
     TTY_PATTERN, _read_json, _read_regular, _write_json,
     vrr_rejection_reasons,
 )
-from provenance import PROVENANCE_BINARIES
+from provenance import PROBE_BINARY, PROVENANCE_BINARIES
 from evidence import drm_evidence_streams, sealed_vrr_records
 
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
 LIVE_HARNESS_SCOPE = "glasswyrm-m14-harness.scope"
 FIXED_BINARIES = {
     **PROVENANCE_BINARIES,
+    "nvidia-drm-vrr-probe": PROBE_BINARY,
     "systemctl": Path("/usr/bin/systemctl"),
     "systemd-run": Path("/usr/bin/systemd-run"),
     "chvt": Path("/usr/bin/chvt"),

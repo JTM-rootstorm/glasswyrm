@@ -16,6 +16,10 @@ from common import (
 
 
 MANIFEST_NAME = "glasswyrm-m14-build-manifest.json"
+PROBE_MANIFEST_NAME = "glasswyrm-m14-nvidia-probe-build-manifest.json"
+PROBE_BUILD_ROOT = Path("/var/tmp/glasswyrm-build-m14-nvidia-probe")
+PROBE_BINARY = PROBE_BUILD_ROOT / "tools/gw_drm_vrr_probe"
+PROBE_ARTIFACT = "milestone14-nvidia-vrr-probe-build-provenance.json"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 PROVENANCE_BINARIES = {
     "gwm": BUILD_ROOT / "src/gwm",
@@ -29,7 +33,10 @@ PROVENANCE_BINARIES = {
 }
 
 
-def _validate_document(manifest: dict[str, Any], tested_commit: str) -> None:
+def _validate_document(
+        manifest: dict[str, Any], tested_commit: str,
+        binaries: dict[str, Path] = PROVENANCE_BINARIES,
+        build_root: Path = BUILD_ROOT) -> None:
     if set(manifest) != {
             "schema", "source_commit", "tracked_source_clean", "binaries"}:
         raise HarnessError("build provenance manifest has a non-exact schema")
@@ -39,11 +46,11 @@ def _validate_document(manifest: dict[str, Any], tested_commit: str) -> None:
         raise HarnessError(
             "build provenance does not identify the exact clean tested commit")
     records = manifest.get("binaries")
-    if not isinstance(records, list) or len(records) != len(PROVENANCE_BINARIES):
+    if not isinstance(records, list) or len(records) != len(binaries):
         raise HarnessError("build provenance has the wrong executable set")
     expected_paths = {
-        role: path.relative_to(BUILD_ROOT).as_posix()
-        for role, path in PROVENANCE_BINARIES.items()
+        role: path.relative_to(build_root).as_posix()
+        for role, path in binaries.items()
     }
     observed: set[str] = set()
     for record in records:
@@ -60,15 +67,44 @@ def _validate_document(manifest: dict[str, Any], tested_commit: str) -> None:
                 not SHA256_PATTERN.fullmatch(digest)):
             raise HarnessError("build provenance executable identity is invalid")
         observed.add(role)
-    if observed != set(PROVENANCE_BINARIES):
+    if observed != set(binaries):
         raise HarnessError("build provenance executable roles are incomplete")
 
 
-def validate_archived_provenance(path: Path, tested_commit: str) -> dict[str, Any]:
+def validate_archived_provenance(
+        path: Path, tested_commit: str,
+        binaries: dict[str, Path] = PROVENANCE_BINARIES,
+        build_root: Path = BUILD_ROOT) -> dict[str, Any]:
     if not COMMIT_PATTERN.fullmatch(tested_commit):
         raise HarnessError("tested commit is invalid for build provenance")
     manifest = _read_json(path)
-    _validate_document(manifest, tested_commit)
+    _validate_document(manifest, tested_commit, binaries, build_root)
+    return manifest
+
+
+def validate_probe_build_provenance(
+        tested_commit: str, artifact_dir: Path | None = None) -> dict[str, Any]:
+    binaries = {"drm-vrr-probe": PROBE_BINARY}
+    try:
+        status = PROBE_BUILD_ROOT.lstat()
+    except OSError as error:
+        raise HarnessError(
+            "fixed NVIDIA probe build directory is unavailable") from error
+    if (not stat.S_ISDIR(status.st_mode) or
+            PROBE_BUILD_ROOT.resolve(strict=True) != PROBE_BUILD_ROOT):
+        raise HarnessError(
+            "fixed NVIDIA probe build directory must be a non-symlink directory")
+    manifest = validate_archived_provenance(
+        PROBE_BUILD_ROOT / PROBE_MANIFEST_NAME, tested_commit,
+        binaries, PROBE_BUILD_ROOT)
+    record = manifest["binaries"][0]
+    size, digest = _hash_executable(PROBE_BINARY)
+    if record["size"] != size or record["sha256"] != digest:
+        raise HarnessError(
+            "fixed NVIDIA VRR probe does not match provenance")
+    if artifact_dir is not None:
+        artifact_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _write_json(artifact_dir / PROBE_ARTIFACT, manifest)
     return manifest
 
 

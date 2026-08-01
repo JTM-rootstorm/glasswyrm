@@ -254,6 +254,47 @@ if get_option('tools')
 endif
 subdir('tests')
 
+if get_option('m14_nvidia_probe_provenance')
+  if not (get_option('tools') and get_option('drm_backend'))
+    error('m14_nvidia_probe_provenance requires tools and drm_backend')
+  endif
+  if get_option('optimization') not in ['1', '2', '3', 's']
+    error('m14_nvidia_probe_provenance requires an optimized build; use --buildtype=debugoptimized or release')
+  endif
+
+  probe_git_program = find_program('git', required: true)
+  probe_source_commit_result = run_command(
+    probe_git_program,
+    '-C', meson.project_source_root(),
+    'rev-parse', '--verify', 'HEAD',
+    check: false,
+  )
+  probe_source_commit = probe_source_commit_result.stdout().strip()
+  if probe_source_commit_result.returncode() != 0 or probe_source_commit == ''
+    error('m14_nvidia_probe_provenance requires a Git checkout with an exact HEAD commit')
+  endif
+
+  probe_provenance_generator = find_program(
+    'tools/generate_m14_build_provenance.py',
+  )
+  custom_target(
+    'm14-nvidia-probe-build-provenance',
+    input: [gw_drm_vrr_probe_program],
+    output: 'glasswyrm-m14-nvidia-probe-build-manifest.json',
+    command: [
+      probe_provenance_generator,
+      '--source-root', meson.project_source_root(),
+      '--git', probe_git_program.full_path(),
+      '--expected-commit', probe_source_commit,
+      '--output', '@OUTPUT@',
+      '--profile', 'nvidia-probe',
+      '--roles', 'drm-vrr-probe',
+      '--binaries', '@INPUT@',
+    ],
+    build_by_default: true,
+  )
+endif
+
 if get_option('physical_validation_provenance')
   if not (get_option('glasswyrmd') and get_option('gwm') and
           get_option('gwcomp') and get_option('tools') and

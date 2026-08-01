@@ -16,7 +16,7 @@ import sys
 
 SCHEMA = "glasswyrm.m14-build-provenance.v1"
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
-EXPECTED_PATHS = {
+FULL_EXPECTED_PATHS = {
     "gwm": "src/gwm",
     "gwcomp": "src/gwcomp",
     "server": "src/glasswyrmd",
@@ -25,6 +25,13 @@ EXPECTED_PATHS = {
     "client": "tests/manifest/m14/m14_vrr_client",
     "drm-probe": "tools/gw_drm_probe",
     "drm-vrr-probe": "tools/gw_drm_vrr_probe",
+}
+PROBE_EXPECTED_PATHS = {
+    "drm-vrr-probe": "tools/gw_drm_vrr_probe",
+}
+PROFILES = {
+    "full": FULL_EXPECTED_PATHS,
+    "nvidia-probe": PROBE_EXPECTED_PATHS,
 }
 
 
@@ -67,7 +74,7 @@ def hash_regular_executable(path: Path) -> tuple[int, str]:
 
 
 def generate(source_root: Path, git_program: Path, expected_commit: str, output: Path,
-             roles: list[str], binaries: list[Path]) -> None:
+             roles: list[str], binaries: list[Path], profile: str = "full") -> None:
     if not COMMIT_PATTERN.fullmatch(expected_commit):
         fail("expected commit must be exactly 40 lowercase hexadecimal digits")
     source_root = source_root.resolve(strict=True)
@@ -80,7 +87,10 @@ def generate(source_root: Path, git_program: Path, expected_commit: str, output:
         fail("Git HEAD changed after the physical-validation build was configured")
     if git(git_program, source_root, "status", "--porcelain=v1", "--untracked-files=no"):
         fail("tracked source changes prevent exact physical-build provenance")
-    if roles != list(EXPECTED_PATHS) or len(binaries) != len(roles):
+    expected_paths = PROFILES.get(profile)
+    if expected_paths is None:
+        fail("physical build profile is unsupported")
+    if roles != list(expected_paths) or len(binaries) != len(roles):
         fail("physical build roles do not match the fixed M14 executable set")
 
     build_root = output.parent.resolve(strict=True)
@@ -91,7 +101,7 @@ def generate(source_root: Path, git_program: Path, expected_commit: str, output:
             relative = absolute.relative_to(build_root).as_posix()
         except ValueError:
             fail(f"{role} is outside the Meson build root")
-        if relative != EXPECTED_PATHS[role]:
+        if relative != expected_paths[role]:
             fail(f"{role} has unexpected build path {relative}")
         size, digest = hash_regular_executable(path)
         records.append({
@@ -125,6 +135,7 @@ def main() -> int:
     parser.add_argument("--git", type=Path, required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="full")
     parser.add_argument("--roles", required=True)
     parser.add_argument("--binaries", type=Path, nargs="+", required=True)
     options = parser.parse_args()
@@ -136,6 +147,7 @@ def main() -> int:
             options.output,
             options.roles.split(","),
             options.binaries,
+            options.profile,
         )
         return 0
     except (OSError, subprocess.SubprocessError, ValueError) as error:

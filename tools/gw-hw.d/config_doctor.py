@@ -628,10 +628,11 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
 def doctor_config(config: dict[str, object],
                   fixture_dir: Path | None = None,
                   artifact_dir: Path | None = None,
-                  require_input: bool = True) -> int:
+                  require_input: bool = True,
+                  validate_provenance: bool = True) -> int:
     """Run the doctor against one already parsed and identity-checked config."""
     try:
-        if fixture_dir is None:
+        if fixture_dir is None and validate_provenance:
             validate_build_provenance(
                 str(config["tested_commit"]), artifact_dir)
             print("[ok] exact physical build provenance")

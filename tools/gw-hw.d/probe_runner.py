@@ -14,6 +14,7 @@ from common import (
 from config_doctor import doctor_config, parse_config
 from live_runner import FIXED_BINARIES, FixedLiveRunner, require_live_harness_scope
 from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
+from provenance import validate_probe_build_provenance
 
 
 RAW_ARTIFACT = "milestone14-nvidia-vrr-probe.jsonl"
@@ -69,8 +70,12 @@ def run_nvidia_vrr_probe(
         config = parse_config(config_path)
         stage = "doctor"
         if doctor_config(
-                config, fixture_dir, artifact_dir, require_input=False) != 0:
+                config, fixture_dir, artifact_dir, require_input=False,
+                validate_provenance=False) != 0:
             raise HarnessError("NVIDIA VRR probe doctor failed")
+        if fixture_dir is None:
+            validate_probe_build_provenance(
+                str(config["tested_commit"]), artifact_dir)
 
         report = artifact_dir / RAW_ARTIFACT
         stage = "probe"
@@ -85,7 +90,7 @@ def run_nvidia_vrr_probe(
             runner = FixedLiveRunner(
                 config, artifact_dir, detached_invocation=True)
             argv = [
-                str(FIXED_BINARIES["drm-vrr-probe"]),
+                str(FIXED_BINARIES["nvidia-drm-vrr-probe"]),
                 "--device", str(config["drm_device"]),
                 "--connector", str(config["connector"]),
                 "--mode", str(config["mode"]),
