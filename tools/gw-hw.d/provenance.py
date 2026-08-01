@@ -25,6 +25,7 @@ PROVENANCE_BINARIES = {
     "gwinfo": BUILD_ROOT / "tools/gwinfo",
     "client": BUILD_ROOT / "tests/manifest/m14/m14_vrr_client",
     "drm-probe": BUILD_ROOT / "tools/gw_drm_probe",
+    "drm-vrr-probe": BUILD_ROOT / "tools/gw_drm_vrr_probe",
 }
 
 

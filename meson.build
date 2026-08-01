@@ -292,6 +292,7 @@ if get_option('physical_validation_provenance')
       gwinfo_program,
       m14_vrr_client,
       gw_drm_probe_program,
+      gw_drm_vrr_probe_program,
     ],
     output: 'glasswyrm-m14-build-manifest.json',
     command: [
@@ -300,7 +301,7 @@ if get_option('physical_validation_provenance')
       '--git', git_program.full_path(),
       '--expected-commit', source_commit,
       '--output', '@OUTPUT@',
-      '--roles', 'gwm,gwcomp,server,gwout,gwinfo,client,drm-probe',
+      '--roles', 'gwm,gwcomp,server,gwout,gwinfo,client,drm-probe,drm-vrr-probe',
       '--binaries', '@INPUT@',
     ],
     build_by_default: true,

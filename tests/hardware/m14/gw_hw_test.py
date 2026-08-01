@@ -103,6 +103,7 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
                 ("gwinfo", "tools/gwinfo"),
                 ("client", "tests/manifest/m14/m14_vrr_client"),
                 ("drm-probe", "tools/gw_drm_probe"),
+                ("drm-vrr-probe", "tools/gw_drm_vrr_probe"),
             ))
         ],
     })

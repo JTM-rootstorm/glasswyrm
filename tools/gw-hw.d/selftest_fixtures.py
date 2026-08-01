@@ -28,6 +28,7 @@ def populate_live_evidence(
                 ("gwinfo", "tools/gwinfo"),
                 ("client", "tests/manifest/m14/m14_vrr_client"),
                 ("drm-probe", "tools/gw_drm_probe"),
+                ("drm-vrr-probe", "tools/gw_drm_vrr_probe"),
             ))
         ],
     })
