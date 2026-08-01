@@ -225,6 +225,16 @@ test(
   timeout: 15,
 )
 
+m14_dev_cli_contract_test = find_program(
+  tests_source_dir / 'tools/m14_dev_cli_contract_test.sh',
+)
+test(
+  'm14-dev-cli-contract',
+  m14_dev_cli_contract_test,
+  args: [meson.project_source_root()],
+  timeout: 10,
+)
+
 if get_option('tools') and get_option('libgwipc')
   m14_output_tool_fixture_test = find_program(
     tests_source_dir / 'tools/m14_output_tool_fixture_test.sh',

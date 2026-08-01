@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+readonly repo_root=$(cd -- "${script_dir}/.." && pwd)
+
+usage() {
+  cat <<'EOF'
+Usage: gw-m14-dev COMMAND BUILD [BASE_REF]
+
+Commands:
+  configure-probe BUILD       Configure a narrow DRM developer build
+  configure-stack BUILD       Configure the complete local stack build
+  timing BUILD                Raw DRM timestamp gates
+  probe BUILD                 Minimal VRR probe and analyzer gates
+  presenter BUILD             DRM presenter VRR gates
+  damage BUILD                Bounded-damage gate
+  headless BUILD              Headless output and VRR gates
+  restart BUILD               Process restart and epoch gates
+  harness BUILD               Hardware orchestration replay gates
+  integration BUILD           Explicit broad M14 software gate
+  changed BUILD BASE_REF      Print path mapping and run selected gates
+EOF
+}
+
+fail() {
+  printf 'gw-m14-dev: %s\n' "$*" >&2
+  exit 2
+}
+
+reject_physical_build() {
+  local build=$1
+  case "${build}" in
+    /var/tmp/glasswyrm-build-m14|/var/tmp/glasswyrm-build-m14/*)
+      fail 'refusing to touch the frozen M14 physical acceptance build'
+      ;;
+  esac
+  [[ ! -L ${build} ]] || fail 'build directory must not be a symlink'
+}
+
+require_build() {
+  local build=$1
+  reject_physical_build "${build}"
+  [[ -f ${build}/meson-private/coredata.dat ]] ||
+    fail "Meson build is not configured: ${build}"
+}
+
+configure_build() {
+  local profile=$1
+  local build=$2
+  reject_physical_build "${build}"
+  local options=(--buildtype=debugoptimized -Dwerror=true -Ddrm_backend=true)
+  if [[ ${profile} == stack ]]; then
+    options+=(-Dlibinput_backend=true -Drender_gl=true)
+  fi
+  if [[ -e ${build} && ! -d ${build} ]]; then
+    fail "build path is not a directory: ${build}"
+  fi
+  if [[ -f ${build}/meson-private/coredata.dat ]]; then
+    if python3 "${script_dir}/gw-m14-dev.d/options.py" "${profile}" "${build}"; then
+      printf 'gw-m14-dev: %s options already match in %s\n' \
+        "${profile}" "${build}"
+    else
+      printf 'gw-m14-dev: reconciling %s options in %s\n' "${profile}" "${build}"
+      meson configure "${build}" "${options[@]}"
+    fi
+  else
+    printf 'gw-m14-dev: configuring %s build in %s\n' "${profile}" "${build}"
+    meson setup "${build}" "${repo_root}" "${options[@]}"
+  fi
+}
+
+gate_contract() {
+  local gate=$1
+  case "${gate}" in
+    timing)
+      targets=(drm_vrr_timing drm_fake_events)
+      tests=(drm-vrr-timing drm-fake-events)
+      ;;
+    probe)
+      targets=(gw_drm_vrr_probe drm_vrr_probe_test)
+      tests=(drm-vrr-probe m14-nvidia-probe-analyzer m14-nvidia-probe-runner)
+      ;;
+    presenter)
+      targets=(drm_presenter_vrr_state drm_presenter_vrr_integration)
+      tests=(drm-presenter-vrr-state drm-presenter-vrr-integration)
+      ;;
+    damage)
+      targets=(m14_bounded_damage_test)
+      tests=(m14-bounded-damage-fake-drm)
+      ;;
+    headless)
+      targets=(headless_inventory_test headless_vrr_simulation_test
+               headless_vrr_presenter_test headless_output_test
+               headless_presenter_test)
+      tests=(headless-inventory headless-vrr-simulation
+             headless-vrr-presenter headless-output headless-presenter)
+      ;;
+    restart)
+      targets=(output_configuration_process_test runtime_bridge_transaction_test
+               compositor_peer_vrr_buffer_release_test
+               server_vrr_lifecycle_test glasswyrmd gwm gwcomp)
+      tests=(output-configuration-process runtime-bridge-transaction
+             compositor-peer-vrr-buffer-release server-vrr-lifecycle)
+      ;;
+    harness)
+      targets=()
+      tests=(m14-live-runner-lifecycle m14-nvidia-probe-runner
+             m14-nvidia-probe-analyzer gw-hw-parser-doctor-dry-run)
+      ;;
+    integration)
+      targets=(gw_drm_vrr_probe drm_vrr_probe_test m14_bounded_damage_test
+               output_configuration_process_test runtime_bridge_transaction_test
+               compositor_peer_vrr_buffer_release_test
+               server_vrr_lifecycle_test glasswyrmd gwm gwcomp
+               m14_vrr_client m14_vrr_client_test)
+      tests=(drm-vrr-timing drm-fake-events drm-vrr-probe
+             drm-presenter-vrr-state drm-presenter-vrr-integration
+             m14-bounded-damage-fake-drm m14-vrr-180-frame-integrated
+             output-configuration-process runtime-bridge-transaction
+             compositor-peer-vrr-buffer-release server-vrr-lifecycle
+             m14-live-runner-lifecycle m14-nvidia-probe-runner
+             m14-nvidia-probe-analyzer source-layout)
+      ;;
+    *) fail "unknown gate: ${gate}" ;;
+  esac
+}
+
+run_gate() {
+  local gate=$1
+  local build=$2
+  require_build "${build}"
+  local -a targets tests
+  gate_contract "${gate}"
+  mkdir -p -- "${build}/meson-logs"
+  local log=${build}/meson-logs/m14-dev-${gate}.log
+  : > "${log}"
+  printf 'gw-m14-dev: gate=%s\n' "${gate}" | tee -a "${log}"
+  printf 'gw-m14-dev: compile targets:%s\n' "${targets[*]:+ ${targets[*]}}" |
+    tee -a "${log}"
+  printf 'gw-m14-dev: test names: %s\n' "${tests[*]}" | tee -a "${log}"
+  if ((${#targets[@]})); then
+    meson compile -C "${build}" "${targets[@]}" 2>&1 | tee -a "${log}"
+  fi
+  meson test -C "${build}" --no-rebuild --print-errorlogs \
+    "${tests[@]}" 2>&1 | tee -a "${log}"
+}
+
+map_changed() {
+  local build=$1
+  local base=$2
+  git -C "${repo_root}" rev-parse --verify "${base}^{commit}" >/dev/null
+  local -a selected=()
+  local path
+  while IFS= read -r path; do
+    local -a mapped=()
+    case "${path}" in
+      src/backends/drm/real_drm_api.*|src/backends/drm/vrr_timing.*)
+        mapped=(timing probe presenter) ;;
+      src/backends/drm/presenter.*)
+        mapped=(presenter damage) ;;
+      src/tools/drm_vrr_probe.*|tests/drm/drm_vrr_probe_test.cpp|tools/gw-hw.d/nvidia_probe_analysis.py)
+        mapped=(probe) ;;
+      src/output/*|src/glasswyrmd/output*|src/gwcomp/backends/headless/*)
+        mapped=(headless) ;;
+      *output_configuration*|*runtime_bridge*|*compositor_peer*|*server_vrr_lifecycle*)
+        mapped=(restart) ;;
+      tools/gw-hw.d/*|tests/hardware/m14/*)
+        mapped=(harness) ;;
+      meson.build|meson_options.txt|*/meson.build|include/*|src/*/*.hpp)
+        mapped=(integration) ;;
+      *) mapped=(integration) ;;
+    esac
+    printf 'gw-m14-dev: changed %s -> %s\n' "${path}" "${mapped[*]}"
+    local gate
+    for gate in "${mapped[@]}"; do
+      if [[ " ${selected[*]} " != *" ${gate} "* ]]; then
+        selected+=("${gate}")
+      fi
+    done
+  done < <(git -C "${repo_root}" diff --name-only "${base}...HEAD")
+  if ((${#selected[@]} == 0)); then
+    printf 'gw-m14-dev: no changed tracked paths after %s\n' "${base}"
+    return 0
+  fi
+  printf 'gw-m14-dev: selected gates: %s\n' "${selected[*]}"
+  local gate
+  for gate in "${selected[@]}"; do
+    run_gate "${gate}" "${build}"
+  done
+}
+
+if (($# < 2)); then
+  usage >&2
+  exit 2
+fi
+
+readonly command=$1
+readonly build_argument=$2
+case "${command}" in
+  configure-probe) (($# == 2)) || fail 'configure-probe accepts BUILD only'; configure_build probe "${build_argument}" ;;
+  configure-stack) (($# == 2)) || fail 'configure-stack accepts BUILD only'; configure_build stack "${build_argument}" ;;
+  timing|probe|presenter|damage|headless|restart|harness|integration)
+    (($# == 2)) || fail "${command} accepts BUILD only"
+    run_gate "${command}" "${build_argument}"
+    ;;
+  changed)
+    (($# == 3)) || fail 'changed requires BUILD and BASE_REF'
+    map_changed "${build_argument}" "$3"
+    ;;
+  -h|--help|help) usage ;;
+  *) fail "unknown command: ${command}" ;;
+esac
