@@ -105,7 +105,8 @@ gate_contract() {
       ;;
     harness)
       targets=()
-      tests=(m14-live-runner-lifecycle m14-nvidia-probe-runner
+      tests=(m14-live-runner-lifecycle m14-live-runner-stages
+             m14-nvidia-probe-runner
              m14-nvidia-probe-analyzer gw-hw-parser-doctor-dry-run)
       ;;
     integration)
@@ -119,7 +120,8 @@ gate_contract() {
              m14-bounded-damage-fake-drm m14-vrr-180-frame-integrated
              output-configuration-process runtime-bridge-transaction
              compositor-peer-vrr-buffer-release server-vrr-lifecycle
-             m14-live-runner-lifecycle m14-nvidia-probe-runner
+             m14-live-runner-lifecycle m14-live-runner-stages
+             m14-nvidia-probe-runner
              m14-nvidia-probe-analyzer source-layout)
       ;;
     *) fail "unknown gate: ${gate}" ;;

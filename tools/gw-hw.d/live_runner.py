@@ -62,6 +62,14 @@ FULL_ACCEPTANCE_STAGES = (
     "pixel-parity",
     "shutdown-and-restore",
 )
+DIAGNOSTIC_STACK_STAGES = (
+    "stack-cadence",
+    "policy-matrix",
+    "vt-cycle",
+    "restart-gwm",
+    "restart-gwcomp",
+    "pixel-parity",
+)
 
 PATH_WAIT_ATTEMPTS = 200
 CLIENT_RESULT_WAIT_ATTEMPTS = 1200
@@ -157,6 +165,7 @@ class FixedLiveRunner:
         self.cadence_ranges: dict[str, tuple[int, int]] = {}
         self._cadence_starts: dict[str, int] = {}
         self._command_failure_count = 0
+        self.record_full_steps = True
 
     @staticmethod
     def _execute(argv: list[str], output: Path | None = None) -> CommandResult:
@@ -986,6 +995,8 @@ class FixedLiveRunner:
         )
 
     def _step(self, number: int) -> None:
+        if not self.record_full_steps:
+            return
         if number != len(self.steps) + 1:
             raise AssertionError("hardware run step order is not contiguous")
         self.steps.append(RUN_STEPS[number - 1])
@@ -1263,6 +1274,48 @@ class FixedLiveRunner:
         self.cleanup()
         self._step(28)
         self._step(29)
+
+    def prepare_always_eligible_stage(self) -> None:
+        self.set_policy("always-eligible")
+        self.start_client(
+            "always", "windowed", "default", repaint=True)
+        self.snapshot("milestone14-always.log", "always-eligible", True)
+
+    def run_stage(self, stage: str) -> None:
+        if stage == "full-acceptance":
+            self.run()
+            return
+        if stage not in DIAGNOSTIC_STACK_STAGES:
+            raise HarnessError(f"unsupported live diagnostic stage: {stage}")
+        self.record_full_steps = False
+        self.preflight()
+        previous_handlers: dict[int, Any] = {}
+        try:
+            if self.verify_paths:
+                for signum, handler in (
+                        (signal.SIGHUP, signal.SIG_IGN),
+                        (signal.SIGINT, self._handle_termination),
+                        (signal.SIGTERM, self._handle_termination)):
+                    previous_handlers[signum] = signal.getsignal(signum)
+                    signal.signal(signum, handler)
+            self.stage_start_stack()
+            if stage == "stack-cadence":
+                self.stage_stack_cadence()
+            elif stage == "policy-matrix":
+                self.set_policy("fullscreen")
+                self.stage_policy_matrix()
+            else:
+                self.prepare_always_eligible_stage()
+                getattr(self, "stage_" + stage.replace("-", "_"))()
+        finally:
+            if not self.cleanup_attempted:
+                self.cleanup()
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+        if (self.restoration_evidence is None or
+                self.restoration_evidence.get("passed") is not True):
+            raise HarnessError(
+                f"{stage} completed without exact restoration evidence")
 
     def run(self) -> None:
         self.preflight()

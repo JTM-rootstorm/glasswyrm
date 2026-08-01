@@ -61,6 +61,26 @@ X11, WM, compositor, restart, VT-cycle, or pixel-capture dependency. The final
 build and complete runner are reserved for L8 after the minimal probe and
 three-process diagnostic stages pass.
 
+After L4 passes, the complete stack runner can execute one restored diagnostic
+stage at a time with `--stage`:
+
+```sh
+./tools/gw-hw milestone14-vrr-test ... --stage stack-cadence --yes
+./tools/gw-hw milestone14-vrr-test ... --stage policy-matrix --yes
+./tools/gw-hw milestone14-vrr-test ... --stage vt-cycle --yes
+./tools/gw-hw milestone14-vrr-test ... --stage restart-gwm --yes
+./tools/gw-hw milestone14-vrr-test ... --stage restart-gwcomp --yes
+./tools/gw-hw milestone14-vrr-test ... --stage pixel-parity --yes
+```
+
+Every diagnostic invocation creates its own private artifact directory, starts
+only the prerequisites for that stage, and performs the same cleanup and exact
+console/KMS restoration readback before returning. Its
+`milestone14-stage-summary.json` explicitly sets `acceptance_claim` to false.
+It does not create a final archive or a passing full-acceptance summary. Omit
+`--stage`, or select `full-acceptance`, only for the final L8 composition after
+the diagnostic stages pass.
+
 For a reviewed detached launch, add `--unattended` to the final command. This
 permits an automation process whose stdin is not the configured Linux VT, but
 does not permit a different active console: the root doctor and just-in-time

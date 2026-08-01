@@ -25,7 +25,8 @@ from evidence import (
     validate_archive, validate_restore,
 )
 from live_runner import (
-    BUILD_ROOT, FIXED_BINARIES, LIVE_UNITS, RUNTIME_ROOT, FixedLiveRunner,
+    BUILD_ROOT, DIAGNOSTIC_STACK_STAGES, FIXED_BINARIES, LIVE_UNITS,
+    RUNTIME_ROOT, FixedLiveRunner,
     _control_group_has_live_scope, require_live_harness_scope,
 )
 from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
@@ -145,11 +146,16 @@ def _live_failure_summary(
 
 def milestone14(config_path: Path, required_base: str, tested_commit: str,
                 confirmed: bool, unattended: bool, dry: bool,
-                fixture_dir: Path | None, artifact_dir: Path) -> int:
+                fixture_dir: Path | None, artifact_dir: Path,
+                stage: str = "full-acceptance") -> int:
     if not confirmed:
         print("gw-hw: milestone14-vrr-test requires the literal --yes", file=sys.stderr)
         return 2
     if dry:
+        if stage != "full-acceptance":
+            print("gw-hw: --stage is valid only for a live hardware run",
+                  file=sys.stderr)
+            return 2
         if unattended:
             print("gw-hw: --unattended is valid only for the live hardware run",
                   file=sys.stderr)
@@ -170,8 +176,21 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
             raise HarnessError("live doctor failed")
         runner = FixedLiveRunner(
             config, artifact_dir, detached_invocation=unattended)
-        runner.run()
-        finalize_live(config, artifact_dir, runner)
+        runner.run_stage(stage)
+        if stage == "full-acceptance":
+            finalize_live(config, artifact_dir, runner)
+        else:
+            _write_json(
+                artifact_dir / "milestone14-stage-summary.json",
+                {
+                    "schema": ARTIFACT_SCHEMA,
+                    "stage": stage,
+                    "passed": True,
+                    "acceptance_claim": False,
+                    "restoration": True,
+                    "tested_commit": config["tested_commit"],
+                },
+            )
         return 0
     except (HarnessError, OSError, json.JSONDecodeError,
             subprocess.SubprocessError) as error:
@@ -718,6 +737,11 @@ def parser() -> argparse.ArgumentParser:
     milestone_parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     milestone_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     milestone_parser.add_argument("--artifact-dir", required=True, type=Path)
+    milestone_parser.add_argument(
+        "--stage",
+        choices=(*DIAGNOSTIC_STACK_STAGES, "full-acceptance"),
+        default="full-acceptance",
+    )
     analyze_parser = subparsers.add_parser(
         "analyze-milestone14-nvidia-vrr-probe")
     analyze_parser.add_argument("--report", required=True, type=Path)
@@ -742,7 +766,8 @@ def main(arguments: list[str] | None = None) -> int:
         return milestone14(options.config, options.required_base,
                            options.tested_commit, options.yes,
                            options.unattended, options.dry_run,
-                           options.fixture_dir, options.artifact_dir)
+                           options.fixture_dir, options.artifact_dir,
+                           options.stage)
     if options.command == "analyze-milestone14-nvidia-vrr-probe":
         try:
             summary = analyze_probe(options.report, parse_config(options.config))

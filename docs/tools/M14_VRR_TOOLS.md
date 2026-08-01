@@ -109,6 +109,13 @@ DRM takeover. See
 [M14 NVIDIA VRR bring-up](../output/M14_NVIDIA_VRR_BRINGUP.md) for the build,
 host, and recovery procedure.
 
+The complete stack command accepts restored diagnostic stages
+`stack-cadence`, `policy-matrix`, `vt-cycle`, `restart-gwm`,
+`restart-gwcomp`, and `pixel-parity` through `--stage NAME`. Each uses the
+reviewed full physical build and normal safety preflight, but it writes a
+non-acceptance stage summary instead of the final archive. The default remains
+`full-acceptance` for backward compatibility; use that default only at L8.
+
 An existing raw report can be classified repeatedly without hardware access:
 
 ```sh

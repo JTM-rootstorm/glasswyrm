@@ -94,6 +94,13 @@ display manager inactive and independent recovery access available. Do not run
 it from the current graphical session or a TTY whose interruption would be
 noticeable.
 
+For post-L4 diagnosis, add one of `--stage stack-cadence`,
+`--stage policy-matrix`, `--stage vt-cycle`, `--stage restart-gwm`,
+`--stage restart-gwcomp`, or `--stage pixel-parity` to the complete stack
+command. Each run still requires a new private artifact directory and exact
+restoration. Diagnostic stage summaries cannot satisfy the full acceptance
+archive contract.
+
 `range_source` is reported as `debugfs` only when the connector debugfs data
 contains one unambiguous labelled minimum/maximum refresh pair that exactly
 matches the reviewed configuration. Missing, malformed, ambiguous, or
