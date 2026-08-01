@@ -40,3 +40,27 @@ After L3 passes, run only the minimal L4 NVIDIA VRR truth probe. Advance to the
 three-process cadence stage only when that probe reports
 `accepted-probe-distinction`. Property readback without distinguishable raw
 page-flip cadence is not positive M14 evidence.
+
+## Offline replay
+
+The repository analyzer consumes a completed probe JSONL without opening a DRM
+node or changing host state:
+
+```sh
+./tools/gw-hw analyze-milestone14-nvidia-vrr-probe \
+  --report RAW.jsonl \
+  --config REVIEWED.toml \
+  --output SUMMARY.json
+```
+
+The output path must not already exist. The analyzer bounds report bytes and
+record counts, requires exact start/flip/restore schemas, rejects wall-clock
+fields, mixed CRTC identities, duplicate or discontinuous ordinals, timestamp
+regressions, readback divergence, and incomplete restoration. CRTC-sequence
+and legacy-vblank samples remain serialized diagnostics but never contribute
+to the acceptance percentage.
+
+Only raw page-flip timestamps feed the frozen 120-interval, 75-percent enabled,
+and below-25-percent disabled thresholds. A valid negative classification is a
+useful blocker result; only `accepted-probe-distinction` returns success and
+authorizes L5.

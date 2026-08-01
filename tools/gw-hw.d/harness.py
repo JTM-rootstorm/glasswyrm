@@ -28,6 +28,7 @@ from live_runner import (
     BUILD_ROOT, FIXED_BINARIES, LIVE_UNITS, RUNTIME_ROOT, FixedLiveRunner,
     _control_group_has_live_scope, require_live_harness_scope,
 )
+from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
 
 def dry_run(config_path: Path, required_base: str, tested_commit: str,
             fixture_dir: Path, artifact_dir: Path) -> int:
@@ -716,6 +717,11 @@ def parser() -> argparse.ArgumentParser:
     milestone_parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
     milestone_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     milestone_parser.add_argument("--artifact-dir", required=True, type=Path)
+    analyze_parser = subparsers.add_parser(
+        "analyze-milestone14-nvidia-vrr-probe")
+    analyze_parser.add_argument("--report", required=True, type=Path)
+    analyze_parser.add_argument("--config", required=True, type=Path)
+    analyze_parser.add_argument("--output", required=True, type=Path)
     subparsers.add_parser("self-test", help=argparse.SUPPRESS)
     return result
 
@@ -731,6 +737,17 @@ def main(arguments: list[str] | None = None) -> int:
                            options.tested_commit, options.yes,
                            options.unattended, options.dry_run,
                            options.fixture_dir, options.artifact_dir)
+    if options.command == "analyze-milestone14-nvidia-vrr-probe":
+        try:
+            summary = analyze_probe(options.report, parse_config(options.config))
+            write_summary_exclusive(options.output, summary)
+        except (HarnessError, OSError, json.JSONDecodeError) as error:
+            print(f"gw-hw: NVIDIA VRR probe analysis failed: {error}",
+                  file=sys.stderr)
+            return 1
+        print(f"gw-hw: NVIDIA VRR probe classification: "
+              f"{summary['classification']}")
+        return 0 if summary["passed"] else 1
     return self_test()
 
 

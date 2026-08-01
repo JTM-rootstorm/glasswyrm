@@ -22,6 +22,15 @@ test(
 m14_host_fixture_validator_test = find_program(
   tests_source_dir / 'compat/m14/validate_host_fixtures_test.py',
 )
+
+m14_nvidia_probe_analyzer_test = find_program(
+  tests_source_dir / 'compat/m14/analyze_nvidia_vrr_probe_test.py',
+)
+test(
+  'm14-nvidia-probe-analyzer',
+  m14_nvidia_probe_analyzer_test,
+  timeout: 15,
+)
 test(
   'm14-host-fixture-validator',
   m14_host_fixture_validator_test,
