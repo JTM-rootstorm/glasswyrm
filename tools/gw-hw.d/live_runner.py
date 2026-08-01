@@ -52,6 +52,17 @@ LIVE_MANAGED_UNITS = (
     *(f"m14-hardware-client-{tag}.service" for tag in LIVE_CLIENT_TAGS),
 )
 
+FULL_ACCEPTANCE_STAGES = (
+    "start-stack",
+    "stack-cadence",
+    "policy-matrix",
+    "vt-cycle",
+    "restart-gwm",
+    "restart-gwcomp",
+    "pixel-parity",
+    "shutdown-and-restore",
+)
+
 PATH_WAIT_ATTEMPTS = 200
 CLIENT_RESULT_WAIT_ATTEMPTS = 1200
 COMMAND_TIMEOUT_SECONDS = 120
@@ -1118,19 +1129,145 @@ class FixedLiveRunner:
     def _handle_termination(signum: int, _frame: object) -> None:
         raise HarnessError(f"live run interrupted by signal {signum}")
 
+    def stage_start_stack(self) -> None:
+        self._step(1)
+        self.before_state = self.state_reader()
+        self.getty_was_active = bool(self.before_state["getty_active"])
+        if self.verify_paths:
+            self.command([
+                str(FIXED_BINARIES["drm-probe"]), "--device",
+                str(self.config["drm_device"]), "--connector",
+                str(self.config["connector"]), "--require-mode",
+                str(self.config["mode"]).split("@", 1)[0],
+                "--snapshot-state", "--output",
+                str(self.artifacts / "kms-before.json"),
+            ])
+        self.verify_live_console()
+        self.command([
+            str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit,
+        ])
+        self.getty_stopped = True
+        self._step(2)
+        self.start_unit(
+            LIVE_UNITS["gwm"], "gwm",
+            ["--ipc-socket", str(RUNTIME_ROOT / "gwm.sock")])
+        self.wait_path(RUNTIME_ROOT / "gwm.sock")
+        self._step(3)
+        self.start_stack_after_gwm()
+        self._step(4)
+        self.start_server()
+
+    def stage_stack_cadence(self) -> None:
+        self._step(5)
+        self.begin_cadence("off-cadence")
+        self.start_client("off-cadence", "cadence", "default", True)
+        self._step(6)
+        self._step(7)
+        self.snapshot("milestone14-off.json", "off", False)
+        self.finish_cadence("off-cadence", False)
+        self.stop_client("off-cadence")
+        self.wait_policy_cleanup()
+        self._step(8)
+        self.set_policy("fullscreen")
+        self._step(9)
+        self.begin_cadence("on-cadence")
+        self.start_client("on-cadence", "cadence", "default", True)
+        self._step(10)
+        self.snapshot("milestone14-fullscreen.log", "fullscreen", True)
+        self._step(11)
+        self.finish_cadence("on-cadence", True)
+        self.stop_client("on-cadence")
+        self.wait_policy_cleanup()
+        self._step(12)
+        self.snapshot("milestone14-fullscreen-exit.json", "fullscreen", False)
+
+    def stage_policy_matrix(self) -> None:
+        self._step(13)
+        self.start_client("borderless", "borderless", "default")
+        self._step(14)
+        self.snapshot("milestone14-borderless.log", "fullscreen", True)
+        self.stop_client("borderless")
+        self.wait_policy_cleanup()
+        self._step(15)
+        self.set_policy("focused")
+        self.start_client("focus-a", "windowed", "default")
+        self.snapshot("milestone14-focused.log", "focused", True)
+        self.start_client("focus-b", "windowed", "default")
+        self.snapshot("milestone14-focused-transfer.json", "focused", True)
+        self.stop_client("focus-b")
+        self.stop_client("focus-a")
+        self.wait_policy_cleanup()
+        self._step(16)
+        self.run_app_requested_scenarios()
+        self._step(17)
+        self.set_policy("always-eligible")
+        self.start_client(
+            "always", "windowed", "default", repaint=True)
+        self.snapshot("milestone14-always.log", "always-eligible", True)
+        self._step(18)
+        self.set_policy("off")
+        self.snapshot("milestone14-policy-off.json", "off", False)
+        self.set_policy("always-eligible")
+
+    def stage_vt_cycle(self) -> None:
+        self._step(19)
+        self.command([
+            str(FIXED_BINARIES["chvt"]), self.alternate_tty,
+        ])
+        self.snapshot("milestone14-vt-inactive.json", "always-eligible", False)
+        active_tty = TTY_PATTERN.fullmatch(
+            str(self.config["tty"])).group(1)  # type: ignore[union-attr]
+        self.command([str(FIXED_BINARIES["chvt"]), active_tty])
+        self._step(20)
+        if self.validate_runtime:
+            shutil.copyfile(
+                self.artifacts / "milestone14-vt-inactive.json",
+                self.artifacts / "milestone14-vt.log")
+        self._step(21)
+        self.verify_active_vt_reevaluation()
+
+    def stage_restart_gwm(self) -> None:
+        self._step(22)
+        gwm_socket = RUNTIME_ROOT / "gwm.sock"
+        old_inode = gwm_socket.stat().st_ino if self.validate_runtime else 0
+        self.command([
+            str(FIXED_BINARIES["systemctl"]), "restart", LIVE_UNITS["gwm"],
+        ])
+        self.wait_replaced(gwm_socket, old_inode)
+        self.snapshot("milestone14-restart-gwm.json", "always-eligible", True)
+
+    def stage_restart_gwcomp(self) -> None:
+        self._step(23)
+        compositor_socket = RUNTIME_ROOT / "gwcomp.sock"
+        self.stop_unit(LIVE_UNITS["gwcomp"])
+        self.wait_absent(compositor_socket)
+        if self.validate_runtime:
+            os.replace(
+                self.artifacts / "vrr-part-1.jsonl",
+                self.artifacts / "vrr-part-0.jsonl")
+            os.replace(
+                self.artifacts / "milestone14-drm-report.jsonl",
+                self.artifacts / "drm-part-0.jsonl")
+        self.start_stack_after_gwm()
+        self._step(24)
+        self.verify_compositor_restart()
+
+    def stage_pixel_parity(self) -> None:
+        self._step(25)
+        self.capture_pixels()
+
+    def stage_shutdown_and_restore(self) -> None:
+        self._step(26)
+        self.stop_client("always")
+        self._step(27)
+        self.cleanup()
+        self._step(28)
+        self._step(29)
+
     def run(self) -> None:
         self.preflight()
         previous_handlers: dict[int, Any] = {}
         try:
-            self._step(1)
-            self.before_state = self.state_reader()
-            self.getty_was_active = bool(self.before_state["getty_active"])
-            if self.verify_paths:
-                self.command([str(FIXED_BINARIES["drm-probe"]), "--device", str(self.config["drm_device"]),
-                              "--connector", str(self.config["connector"]), "--require-mode",
-                              str(self.config["mode"]).split("@", 1)[0], "--snapshot-state", "--output",
-                              str(self.artifacts / "kms-before.json")])
-            self.verify_live_console()
             if self.verify_paths:
                 for signum, handler in (
                         (signal.SIGHUP, signal.SIG_IGN),
@@ -1138,42 +1275,9 @@ class FixedLiveRunner:
                         (signal.SIGTERM, self._handle_termination)):
                     previous_handlers[signum] = signal.getsignal(signum)
                     signal.signal(signum, handler)
-            self.command([str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit])
-            self.getty_stopped = True
-            self._step(2); self.start_unit(LIVE_UNITS["gwm"], "gwm", ["--ipc-socket", str(RUNTIME_ROOT / "gwm.sock")]); self.wait_path(RUNTIME_ROOT / "gwm.sock")
-            self._step(3)
-            # Start compositor and server through the same fixed builder used by start_stack.
-            self.start_stack_after_gwm()
-            self._step(4); self.start_server()
-            self._step(5); self.begin_cadence("off-cadence"); self.start_client("off-cadence", "cadence", "default", True)
-            self._step(6)
-            self._step(7); self.snapshot("milestone14-off.json", "off", False); self.finish_cadence("off-cadence", False); self.stop_client("off-cadence"); self.wait_policy_cleanup()
-            self._step(8); self.set_policy("fullscreen")
-            self._step(9); self.begin_cadence("on-cadence"); self.start_client("on-cadence", "cadence", "default", True)
-            self._step(10); self.snapshot("milestone14-fullscreen.log", "fullscreen", True)
-            self._step(11); self.finish_cadence("on-cadence", True); self.stop_client("on-cadence"); self.wait_policy_cleanup()
-            self._step(12); self.snapshot("milestone14-fullscreen-exit.json", "fullscreen", False)
-            self._step(13); self.start_client("borderless", "borderless", "default")
-            self._step(14); self.snapshot("milestone14-borderless.log", "fullscreen", True); self.stop_client("borderless"); self.wait_policy_cleanup()
-            self._step(15); self.set_policy("focused"); self.start_client("focus-a", "windowed", "default"); self.snapshot("milestone14-focused.log", "focused", True); self.start_client("focus-b", "windowed", "default"); self.snapshot("milestone14-focused-transfer.json", "focused", True); self.stop_client("focus-b"); self.stop_client("focus-a"); self.wait_policy_cleanup()
-            self._step(16); self.run_app_requested_scenarios()
-            self._step(17); self.set_policy("always-eligible"); self.start_client("always", "windowed", "default", repaint=True); self.snapshot("milestone14-always.log", "always-eligible", True)
-            self._step(18); self.set_policy("off"); self.snapshot("milestone14-policy-off.json", "off", False); self.set_policy("always-eligible")
-            self._step(19); self.command([str(FIXED_BINARIES["chvt"]), self.alternate_tty]); self.snapshot("milestone14-vt-inactive.json", "always-eligible", False); self.command([str(FIXED_BINARIES["chvt"]), TTY_PATTERN.fullmatch(str(self.config["tty"])).group(1)])  # type: ignore[union-attr]
-            self._step(20); shutil.copyfile(self.artifacts / "milestone14-vt-inactive.json", self.artifacts / "milestone14-vt.log") if self.validate_runtime else None
-            self._step(21); self.verify_active_vt_reevaluation()
-            self._step(22); gwm_socket = RUNTIME_ROOT / "gwm.sock"; old_inode = gwm_socket.stat().st_ino if self.validate_runtime else 0; self.command([str(FIXED_BINARIES["systemctl"]), "restart", LIVE_UNITS["gwm"]]); self.wait_replaced(gwm_socket, old_inode); self.snapshot("milestone14-restart-gwm.json", "always-eligible", True)
-            self._step(23); compositor_socket = RUNTIME_ROOT / "gwcomp.sock"; self.stop_unit(LIVE_UNITS["gwcomp"]); self.wait_absent(compositor_socket)
-            if self.validate_runtime:
-                os.replace(self.artifacts / "vrr-part-1.jsonl", self.artifacts / "vrr-part-0.jsonl")
-                os.replace(self.artifacts / "milestone14-drm-report.jsonl", self.artifacts / "drm-part-0.jsonl")
-            self.start_stack_after_gwm()
-            self._step(24); self.verify_compositor_restart()
-            self._step(25); self.capture_pixels()
-            self._step(26); self.stop_client("always")
-            self._step(27); self.cleanup()
-            self._step(28)
-            self._step(29)
+            for stage in FULL_ACCEPTANCE_STAGES:
+                method = getattr(self, "stage_" + stage.replace("-", "_"))
+                method()
         finally:
             if not self.cleanup_attempted:
                 self.cleanup()
