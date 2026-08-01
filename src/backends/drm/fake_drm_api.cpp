@@ -170,8 +170,9 @@ DrmEvent FakeDrmApi::service_events(const int handle, const short revents) {
   auto event = std::move(events_.front());
   events_.pop_front();
   if (event.kind == DrmEventKind::PageFlip && event_cookie_) {
-    if (event.timestamp_available && last_page_flip_timestamp_ &&
-        event.kernel_timestamp_nanoseconds < *last_page_flip_timestamp_) {
+    if (event.timestamp_available &&
+        !page_flip_timestamp_advances(event.kernel_timestamp_nanoseconds,
+                                      last_page_flip_timestamp_)) {
       event.timestamp_available = false;
       event.kernel_timestamp_nanoseconds = 0;
       event_cookie_->timestamp_invalid = true;

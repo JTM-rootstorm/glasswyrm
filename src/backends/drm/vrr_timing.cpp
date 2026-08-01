@@ -66,6 +66,14 @@ VrrTimestampResult convert_page_flip_timestamp(
   return {VrrTimestampStatus::Success, value};
 }
 
+bool page_flip_timestamp_advances(
+    const std::uint64_t candidate_nanoseconds,
+    const std::optional<std::uint64_t> high_water_nanoseconds) noexcept {
+  return candidate_nanoseconds != 0 &&
+         (!high_water_nanoseconds ||
+          candidate_nanoseconds > *high_water_nanoseconds);
+}
+
 CrtcSequenceSample assess_crtc_sequence_sample(
     const std::uint64_t event_timestamp_nanoseconds,
     const bool event_timestamp_available, const bool query_succeeded,

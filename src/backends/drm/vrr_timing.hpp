@@ -86,6 +86,10 @@ legacy_vblank_crtc_selector(std::uint32_t crtc_index) noexcept;
     std::uint64_t seconds, std::uint64_t microseconds,
     std::optional<std::uint64_t> previous_nanoseconds = std::nullopt) noexcept;
 
+[[nodiscard]] bool page_flip_timestamp_advances(
+    std::uint64_t candidate_nanoseconds,
+    std::optional<std::uint64_t> high_water_nanoseconds) noexcept;
+
 [[nodiscard]] CrtcSequenceSample assess_crtc_sequence_sample(
     std::uint64_t event_timestamp_nanoseconds, bool event_timestamp_available,
     bool query_succeeded, bool timestamp_monotonic,

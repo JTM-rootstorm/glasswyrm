@@ -96,6 +96,13 @@ int main() {
       convert_page_flip_timestamp(1, 0, 1'000'000'001ULL).status ==
           VrrTimestampStatus::Regression,
       "timestamp regression is rejected");
+  gw::test::require(
+      page_flip_timestamp_advances(100, std::nullopt) &&
+          !page_flip_timestamp_advances(90, 100) &&
+          !page_flip_timestamp_advances(95, 100) &&
+          !page_flip_timestamp_advances(100, 100) &&
+          page_flip_timestamp_advances(101, 100),
+      "page-flip timestamp high-water never regresses after a bad sample");
 
   const auto query_failed =
       assess_crtc_sequence_sample(2'000'000'000ULL, true, false, true, 0, 0);
@@ -209,11 +216,32 @@ int main() {
                         !regressed_event.timestamp_available &&
                         regressed->completed && regressed->timestamp_invalid,
                     "timestamp regression preserves completed page-flip truth");
-  auto abandoned = std::make_shared<PageFlipCookie>(3);
+  auto still_regressed = std::make_shared<PageFlipCookie>(3);
+  gw::test::require(api.arm_page_flip(opened.handle, still_regressed, error),
+                    "third timed fake page flip arms");
+  api.queue_page_flip(11, 40, 9, 1'999'999'999ULL, true);
+  const auto still_regressed_event = api.service_events(opened.handle, POLLIN);
+  gw::test::require(
+      still_regressed_event.kind == DrmEventKind::PageFlip &&
+          still_regressed_event.token == 3 &&
+          !still_regressed_event.timestamp_available &&
+          still_regressed->completed && still_regressed->timestamp_invalid,
+      "a bad sample cannot lower the fake page-flip timestamp high-water");
+  auto recovered = std::make_shared<PageFlipCookie>(4);
+  gw::test::require(api.arm_page_flip(opened.handle, recovered, error),
+                    "recovered timed fake page flip arms");
+  api.queue_page_flip(12, 40, 10, 2'000'000'001ULL, true);
+  const auto recovered_event = api.service_events(opened.handle, POLLIN);
+  gw::test::require(recovered_event.kind == DrmEventKind::PageFlip &&
+                        recovered_event.token == 4 &&
+                        recovered_event.timestamp_available &&
+                        recovered->timestamp_available,
+                    "a timestamp above the valid high-water recovers timing");
+  auto abandoned = std::make_shared<PageFlipCookie>(5);
   gw::test::require(api.arm_page_flip(opened.handle, abandoned, error),
                     "abandoned timed fake page flip arms");
   api.abandon_page_flip(opened.handle, abandoned);
-  api.queue_page_flip(11, 40, 9, 1'999'999'998ULL, true);
+  api.queue_page_flip(13, 40, 11, 1'999'999'998ULL, true);
   gw::test::require(api.service_events(opened.handle, POLLIN).kind ==
                         DrmEventKind::None,
                     "late abandoned timestamp regression is consumed");

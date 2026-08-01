@@ -686,10 +686,11 @@ DrmEvent RealDrmApi::service_events(const int handle, const short revents) {
       }
       const auto previous = last_page_flip_timestamps_.find(handle);
       if (cookie->timestamp_available &&
-          previous != last_page_flip_timestamps_.end() &&
-          cookie->kernel_timestamp_nanoseconds <= previous->second) {
-        last_page_flip_timestamps_[handle] =
-            cookie->kernel_timestamp_nanoseconds;
+          !page_flip_timestamp_advances(
+              cookie->kernel_timestamp_nanoseconds,
+              previous == last_page_flip_timestamps_.end()
+                  ? std::nullopt
+                  : std::optional{previous->second})) {
         cookie->timestamp_available = false;
         cookie->timestamp_invalid = true;
         cookie->kernel_timestamp_nanoseconds = 0;
