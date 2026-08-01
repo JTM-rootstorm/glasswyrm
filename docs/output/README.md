@@ -36,6 +36,9 @@ or GWIPC authority.
   statistics, and frozen positive/negative cadence thresholds.
 - [Milestone 14 hardware validation](M14_VRR_HARDWARE_VALIDATION.md): safe
   physical-target setup, fixed acceptance order, recovery, and evidence.
+- [Milestone 14 NVIDIA VRR bring-up](M14_NVIDIA_VRR_BRINGUP.md): read-only
+  NVIDIA/Gentoo prerequisites, stable failure classifications, and the L3-to-L4
+  progression boundary.
 
 The VT lifecycle also documents the capability-gated M11 coordination which
 suspends server-owned libinput before display release and resumes it after

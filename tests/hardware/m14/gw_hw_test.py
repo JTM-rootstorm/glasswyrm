@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools" / "gw-hw.d"))
 from config_doctor import (  # noqa: E402
     ConfigError, _connector_profile, _modetest_commands,
+    _nvidia_boolean_parameter_state, _nvidia_module_flavor,
     _parse_debugfs_refresh_range, _reviewed_range_source,
     _vblank_notification_state, doctor_config, parse_config,
 )
@@ -75,7 +76,12 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "minimum_refresh_hz": 48, "maximum_refresh_hz": 144,
         "no_competing_drm_master": True, "session_permissions": True,
         "kernel": "fixture-kernel", "libdrm": "fixture-libdrm",
-        "driver": "fixture-driver", "vblank_notifications": "not-applicable",
+        "driver": "fixture-driver", "driver_version": "fixture-driver-version",
+        "nvidia_module_flavor": "not-applicable",
+        "nvidia_drm_modeset": "not-applicable",
+        "nvidia_drm_fbdev": "not-applicable",
+        "vblank_notifications": "not-applicable",
+        "nvidia_conceal_vrr_caps": "not-applicable",
         "firmware": "fixture-firmware",
         "keyboard_device": "/dev/input/event0",
         "pointer_device": "/dev/input/event1",
@@ -237,6 +243,16 @@ def main() -> int:
             "not-applicable"
         assert _vblank_notification_state(
             "nvidia", root / "missing-vblank") == "unavailable"
+        conceal = root / "conceal-vrr-caps"
+        conceal.write_text("0\n", encoding="ascii")
+        assert _nvidia_boolean_parameter_state("nvidia", conceal) == "disabled"
+        conceal.write_text("1\n", encoding="ascii")
+        assert _nvidia_boolean_parameter_state("nvidia", conceal) == "enabled"
+        license_file = root / "nvidia-license"
+        license_file.write_text("Dual MIT/GPL\n", encoding="ascii")
+        assert _nvidia_module_flavor("nvidia", license_file) == "open"
+        license_file.write_text("NVIDIA\n", encoding="ascii")
+        assert _nvidia_module_flavor("nvidia", license_file) == "proprietary"
         duplicate_vt = CONFIG_TEXT.replace(
             'alternate_tty = "/dev/tty1"', 'alternate_tty = "/dev/tty2"')
         config.write_text(duplicate_vt, encoding="utf-8")
@@ -281,6 +297,7 @@ def main() -> int:
         assert checked.returncode == 0, checked.stderr
         report = json.loads((doctor_artifacts / "milestone14-hardware-doctor.json").read_text())
         assert report["passed"] is True
+        assert report["failure_reasons"] == []
 
         parsed_config = parse_config(config)
         config.write_text(
@@ -351,6 +368,28 @@ def main() -> int:
         )
         assert rejected_vblank.returncode == 1
         assert "DRM vblank notifications" in rejected_vblank.stdout
+        write_json(fixture / "doctor.json", unavailable)
+
+        concealed = dict(
+            unavailable, driver="nvidia", driver_version="fixture-nvidia",
+            nvidia_module_flavor="open", nvidia_drm_modeset="enabled",
+            nvidia_drm_fbdev="enabled", vblank_notifications="enabled",
+            nvidia_conceal_vrr_caps="enabled",
+        )
+        write_json(fixture / "doctor.json", concealed)
+        rejected_concealment = run(
+            "doctor", "--config", str(config),
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--fixture-dir", str(fixture),
+            "--artifact-dir", str(root / "concealed-doctor"),
+        )
+        assert rejected_concealment.returncode == 1
+        concealment_report = json.loads(
+            (root / "concealed-doctor" /
+             "milestone14-hardware-doctor.json").read_text(encoding="utf-8"))
+        assert concealment_report["failure_reasons"] == [
+            "nvidia-vrr-capability-concealment-disabled"]
         write_json(fixture / "doctor.json", unavailable)
 
         artifacts = root / "artifacts"

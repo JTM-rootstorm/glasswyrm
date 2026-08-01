@@ -27,6 +27,12 @@ from provenance import validate_build_provenance
 
 MODETEST_MODULE_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 NVIDIA_VBLANK_PARAMETER = Path("/sys/module/nvidia_drm/parameters/vblank")
+NVIDIA_MODESET_PARAMETER = Path("/sys/module/nvidia_drm/parameters/modeset")
+NVIDIA_FBDEV_PARAMETER = Path("/sys/module/nvidia_drm/parameters/fbdev")
+NVIDIA_CONCEAL_VRR_CAPS_PARAMETER = Path(
+    "/sys/module/nvidia_modeset/parameters/conceal_vrr_caps")
+NVIDIA_VERSION_PARAMETER = Path("/sys/module/nvidia/version")
+NVIDIA_LICENSE_PARAMETER = Path("/sys/module/nvidia/license")
 
 
 def _modetest_commands(
@@ -57,9 +63,8 @@ def _query_modetest(executable: str, drm: Path, driver: str) -> str:
     return ""
 
 
-def _vblank_notification_state(
-        driver: str, parameter: Path = NVIDIA_VBLANK_PARAMETER) -> str:
-    """Return the NVIDIA DRM vblank-notification prerequisite state."""
+def _nvidia_boolean_parameter_state(driver: str, parameter: Path) -> str:
+    """Return one read-only NVIDIA Boolean module-parameter state."""
     if driver != "nvidia":
         return "not-applicable"
     try:
@@ -71,6 +76,28 @@ def _vblank_notification_state(
     if value in {"0", "n", "no", "false", "off"}:
         return "disabled"
     return "unavailable"
+
+
+def _vblank_notification_state(
+        driver: str, parameter: Path = NVIDIA_VBLANK_PARAMETER) -> str:
+    """Return the NVIDIA DRM vblank-notification prerequisite state."""
+    return _nvidia_boolean_parameter_state(driver, parameter)
+
+
+def _nvidia_module_flavor(
+        driver: str, parameter: Path = NVIDIA_LICENSE_PARAMETER) -> str:
+    """Classify the loaded NVIDIA kernel module from its fixed license file."""
+    if driver != "nvidia":
+        return "not-applicable"
+    try:
+        value = parameter.read_text(encoding="ascii").strip().lower()
+    except (OSError, UnicodeError):
+        return "unavailable"
+    if "mit" in value or "gpl" in value:
+        return "open"
+    if "nvidia" in value or "proprietary" in value:
+        return "proprietary"
+    return "unknown"
 
 
 def parse_config(path: Path) -> dict[str, object]:
@@ -415,12 +442,25 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
         facts.get("vblank_notifications") in {"enabled", "not-applicable"},
         facts.get("vblank_notifications"),
     ))
+    checks.append((
+        "NVIDIA VRR capability concealment disabled",
+        facts.get("nvidia_conceal_vrr_caps") in {
+            "disabled", "unavailable", "not-applicable"},
+        facts.get("nvidia_conceal_vrr_caps"),
+    ))
     checks.append(("reviewed range source", facts.get("range_source") in {"debugfs", "config-reviewed"}, facts.get("range_source")))
     checks.append(("target cadence distinguishes fixed refresh", target_distinguishes_fixed_refresh(config), config["target_refresh_hz"]))
-    for field in ("kernel", "libdrm", "driver", "firmware"):
+    for field in ("kernel", "libdrm", "driver", "driver_version",
+                  "nvidia_module_flavor", "nvidia_drm_modeset",
+                  "nvidia_drm_fbdev", "firmware"):
         value = facts.get(field)
         checks.append((f"recorded {field}", isinstance(value, str) and bool(value), value))
-    records = [{"check": label, "passed": ok, "value": detail} for label, ok, detail in checks]
+    records = [{
+        "check": label,
+        "reason": re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-"),
+        "passed": ok,
+        "value": detail,
+    } for label, ok, detail in checks]
     return all(ok for _, ok, _ in checks), records
 
 
@@ -461,6 +501,13 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
     except OSError:
         driver = "unavailable"
     vblank_notifications = _vblank_notification_state(driver)
+    nvidia_modeset = _nvidia_boolean_parameter_state(
+        driver, NVIDIA_MODESET_PARAMETER)
+    nvidia_fbdev = _nvidia_boolean_parameter_state(
+        driver, NVIDIA_FBDEV_PARAMETER)
+    nvidia_conceal_vrr_caps = _nvidia_boolean_parameter_state(
+        driver, NVIDIA_CONCEAL_VRR_CAPS_PARAMETER)
+    nvidia_module_flavor = _nvidia_module_flavor(driver)
     try:
         edid = (root / "edid").read_bytes()
         digest = hashlib.sha256(edid).hexdigest() if edid else ""
@@ -553,7 +600,14 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
         "no_competing_drm_master": clients_available and not competing,
         "session_permissions": os.access(drm, os.R_OK | os.W_OK),
         "kernel": os.uname().release, "libdrm": libdrm, "driver": driver,
+        "driver_version": text(
+            NVIDIA_VERSION_PARAMETER if driver == "nvidia" else
+            Path("/sys/module") / driver / "version"),
+        "nvidia_module_flavor": nvidia_module_flavor,
+        "nvidia_drm_modeset": nvidia_modeset,
+        "nvidia_drm_fbdev": nvidia_fbdev,
         "vblank_notifications": vblank_notifications,
+        "nvidia_conceal_vrr_caps": nvidia_conceal_vrr_caps,
         "firmware": text(Path("/sys/class/drm") / card / "device" / "firmware_node"),
         "keyboard_device": config["keyboard_device"],
         "pointer_device": config["pointer_device"],
@@ -577,6 +631,9 @@ def doctor_config(config: dict[str, object],
         report = {"schema": ARTIFACT_SCHEMA, "passed": passed,
                   "required_base_commit": config["required_base_commit"],
                   "tested_commit": config["tested_commit"], "checks": checks,
+                  "failure_reasons": [
+                      check["reason"] for check in checks
+                      if not check["passed"]],
                   "facts": facts}
         if artifact_dir:
             artifact_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -586,6 +643,9 @@ def doctor_config(config: dict[str, object],
                 "schema", "drm_device", "driver", "connector", "mode",
                 "selected_mode_available", "vrr_capable", "atomic_kms",
                 "vrr_enabled_property", "vblank_notifications", "range_source",
+                "driver_version", "nvidia_module_flavor",
+                "nvidia_drm_modeset", "nvidia_drm_fbdev",
+                "nvidia_conceal_vrr_caps",
                 "minimum_refresh_hz", "maximum_refresh_hz")}
             _write_json(artifact_dir / "milestone14-drm-capability.json", capability)
         for check in checks:

@@ -22,6 +22,12 @@ For proprietary NVIDIA DRM the doctor also requires the root-readable
 load-time `nvidia_drm.vblank` parameter to report enabled. This prevents a
 disruptive run from relying on zero-sequence fake flip events when DRM vblank
 notifications were left at the driver default.
+The same read-only preflight records `modeset`, `fbdev`, the NVIDIA driver
+version and module flavor, and the optional
+`nvidia_modeset.conceal_vrr_caps` parameter. An observed enabled concealment
+parameter fails positive preflight because it hides the connector capability
+that the M14 proof must validate. Missing optional concealment metadata is
+recorded but does not itself fail the doctor.
 
 The live runner repeats the active-VT and `KD_TEXT` checks for both configured
 VTs at takeover time and again immediately before stopping the getty. Cleanup
