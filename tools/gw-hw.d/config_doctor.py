@@ -403,7 +403,9 @@ def _modetest_crtc_property_value(
     return values[0] if len(values) == 1 else None
 
 
-def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> tuple[bool, list[dict[str, object]]]:
+def _validate_doctor_facts(
+        config: dict[str, object], facts: dict[str, Any],
+        require_input: bool = True) -> tuple[bool, list[dict[str, object]]]:
     if set(facts) != DOCTOR_FACT_KEYS:
         raise HarnessError("doctor fixture has a non-exact schema")
     if facts["schema"] != ARTIFACT_SCHEMA:
@@ -415,9 +417,12 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
         "connector": config["connector"], "edid_sha256": config["edid_sha256"],
         "mode": config["mode"], "minimum_refresh_hz": config["expected_min_refresh_hz"],
         "maximum_refresh_hz": config["expected_max_refresh_hz"],
-        "keyboard_device": config["keyboard_device"],
-        "pointer_device": config["pointer_device"],
     }
+    if require_input:
+        expected.update({
+            "keyboard_device": config["keyboard_device"],
+            "pointer_device": config["pointer_device"],
+        })
     checks: list[tuple[str, bool, object]] = []
     for name, value in expected.items():
         checks.append((f"exact {name}", facts.get(name) == value, facts.get(name)))
@@ -428,8 +433,12 @@ def _validate_doctor_facts(config: dict[str, object], facts: dict[str, Any]) -> 
                  "atomic_kms", "vrr_enabled_property",
                  "selected_mode_available",
                  "no_competing_drm_master", "session_permissions",
-                 "keyboard_character_device", "pointer_character_device"):
+                 ):
         checks.append((name.replace("_", " "), facts.get(name) is True, facts.get(name)))
+    if require_input:
+        for name in ("keyboard_character_device", "pointer_character_device"):
+            checks.append((name.replace("_", " "), facts.get(name) is True,
+                           facts.get(name)))
     checks.append(("exactly one connected connector",
                    facts.get("connected_connector_count") == 1,
                    facts.get("connected_connector_count")))
@@ -618,7 +627,8 @@ def _live_doctor_facts(config: dict[str, object]) -> dict[str, Any]:
 
 def doctor_config(config: dict[str, object],
                   fixture_dir: Path | None = None,
-                  artifact_dir: Path | None = None) -> int:
+                  artifact_dir: Path | None = None,
+                  require_input: bool = True) -> int:
     """Run the doctor against one already parsed and identity-checked config."""
     try:
         if fixture_dir is None:
@@ -627,7 +637,8 @@ def doctor_config(config: dict[str, object],
             print("[ok] exact physical build provenance")
         facts = (_read_json(fixture_dir / "doctor.json")
                  if fixture_dir else _live_doctor_facts(config))
-        passed, checks = _validate_doctor_facts(config, facts)
+        passed, checks = _validate_doctor_facts(
+            config, facts, require_input=require_input)
         report = {"schema": ARTIFACT_SCHEMA, "passed": passed,
                   "required_base_commit": config["required_base_commit"],
                   "tested_commit": config["tested_commit"], "checks": checks,

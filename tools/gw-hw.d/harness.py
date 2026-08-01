@@ -29,6 +29,7 @@ from live_runner import (
     _control_group_has_live_scope, require_live_harness_scope,
 )
 from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
+from probe_runner import run_nvidia_vrr_probe
 
 def dry_run(config_path: Path, required_base: str, tested_commit: str,
             fixture_dir: Path, artifact_dir: Path) -> int:
@@ -722,6 +723,11 @@ def parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument("--report", required=True, type=Path)
     analyze_parser.add_argument("--config", required=True, type=Path)
     analyze_parser.add_argument("--output", required=True, type=Path)
+    probe_parser = subparsers.add_parser("milestone14-nvidia-vrr-probe")
+    probe_parser.add_argument("--config", required=True, type=Path)
+    probe_parser.add_argument("--artifact-dir", required=True, type=Path)
+    probe_parser.add_argument("--yes", action="store_true")
+    probe_parser.add_argument("--fixture-dir", type=Path, help=argparse.SUPPRESS)
     subparsers.add_parser("self-test", help=argparse.SUPPRESS)
     return result
 
@@ -748,6 +754,10 @@ def main(arguments: list[str] | None = None) -> int:
         print(f"gw-hw: NVIDIA VRR probe classification: "
               f"{summary['classification']}")
         return 0 if summary["passed"] else 1
+    if options.command == "milestone14-nvidia-vrr-probe":
+        return run_nvidia_vrr_probe(
+            options.config, options.artifact_dir, options.yes,
+            options.fixture_dir)
     return self_test()
 
 
