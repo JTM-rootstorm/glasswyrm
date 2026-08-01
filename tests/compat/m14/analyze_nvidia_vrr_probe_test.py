@@ -48,7 +48,7 @@ def records(off_interval: int = 8_333_333,
         "mode": "2560x1440@120000", "hardware_capable": True,
         "atomic_test_off": True, "atomic_test_on": True,
         "target_refresh_hz": 70, "warmup_flips": 10,
-        "recorded_flips": 140,
+        "recorded_flips": 140, "restore_confirmation_flips": 1,
     }]
     token = 1
     for phase, interval, start in (
@@ -83,6 +83,25 @@ def records(off_interval: int = 8_333_333,
             })
             prior = timestamp
             token += 1
+    timestamp = 20_000_000_000
+    values.append({
+        "schema": PROBE_SCHEMA, "record": "flip", "run_id": run_id,
+        "phase": "restore-off", "ordinal": 0, "sample_kind": "warmup",
+        "framebuffer_id": 100 + token % 2, "atomic_request_token": token,
+        "requested_vrr_enabled": False, "readback_vrr_enabled": False,
+        "crtc_id": 77, "raw_event_sequence": 0,
+        "raw_event_seconds": timestamp // 1_000_000_000,
+        "raw_event_microseconds": 0,
+        "raw_kernel_timestamp_nanoseconds": timestamp,
+        "raw_timestamp_available": True, "raw_timestamp_invalid_reason": "",
+        "raw_interval_nanoseconds": None, "transition_serial": 3,
+        "submit_deadline_nanoseconds": timestamp - 2_000_000,
+        "submit_monotonic_timestamp_nanoseconds": timestamp - 1_000_000,
+        "completion_dequeue_timestamp_nanoseconds": timestamp + 1_000_000,
+        "crtc_sequence_query": {}, "legacy_vblank_query": {},
+        "atomic_status": "success", "atomic_errno": 0,
+        "property_readback_status": "success",
+    })
     values.append({
         "schema": PROBE_SCHEMA, "record": "restore", "run_id": run_id,
         "kms_state_equal": True, "vrr_property_restored": True,
@@ -121,6 +140,31 @@ def main() -> int:
                                      off_interval=14_285_714))
         assert analyze_probe(forced, CONFIG)["classification"] == \
             "off-variable-on-variable"
+
+        rejected_test = records()
+        rejected_test[0]["atomic_test_on"] = False
+        rejected_test = [rejected_test[0], rejected_test[-1]]
+        rejected_test_path = root / "atomic-on-rejected.jsonl"
+        write_report(rejected_test_path, rejected_test)
+        assert analyze_probe(rejected_test_path, CONFIG)["classification"] == \
+            "atomic-on-rejected"
+
+        failed_submission = records()
+        failed_submission[1]["atomic_status"] = "failed"
+        failed_submission[1]["raw_timestamp_available"] = False
+        failed_submission[1]["raw_timestamp_invalid_reason"] = \
+            "unavailable-or-regressed"
+        failed_submission[1]["raw_kernel_timestamp_nanoseconds"] = 0
+        failed_submission[1]["raw_event_seconds"] = 0
+        failed_submission[1]["raw_event_microseconds"] = 0
+        failed_submission[1]["raw_interval_nanoseconds"] = None
+        failed_submission = [failed_submission[0], failed_submission[1],
+                             failed_submission[-1]]
+        failed_submission_path = root / "atomic-off-failed.jsonl"
+        write_report(failed_submission_path, failed_submission)
+        assert analyze_probe(
+            failed_submission_path, CONFIG)["classification"] == \
+            "atomic-off-rejected"
 
         regressed_values = records()
         first_on = next(index for index, value in enumerate(regressed_values)

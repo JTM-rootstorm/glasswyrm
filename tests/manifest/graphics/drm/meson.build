@@ -131,6 +131,14 @@ if get_option('drm_backend')
       include_directories: test_source_root_include,
     )
     test('drm-probe', drm_probe_test, timeout: 10)
+
+    drm_vrr_probe_test = executable(
+      'drm_vrr_probe_test',
+      files(tests_source_dir / 'drm/drm_vrr_probe_test.cpp'),
+      dependencies: gw_drm_vrr_probe_dep,
+      include_directories: test_source_root_include,
+    )
+    test('drm-vrr-probe', drm_vrr_probe_test, timeout: 10)
   endif
 
   vt_session_test = executable(

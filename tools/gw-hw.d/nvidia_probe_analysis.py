@@ -24,6 +24,7 @@ START_KEYS = {
     "schema", "record", "run_id", "connector", "crtc_id", "mode",
     "hardware_capable", "atomic_test_off", "atomic_test_on",
     "target_refresh_hz", "warmup_flips", "recorded_flips",
+    "restore_confirmation_flips",
 }
 FLIP_KEYS = {
     "schema", "record", "run_id", "phase", "ordinal", "sample_kind",
@@ -152,6 +153,10 @@ def analyze_probe(path: Path, config: dict[str, object]) -> dict[str, object]:
     atomic_test_off = _boolean(start.get("atomic_test_off"), "atomic off test")
     atomic_test_on = _boolean(start.get("atomic_test_on"), "atomic on test")
 
+    restore_confirmation_flips = _integer(
+        start.get("restore_confirmation_flips"), "restore confirmation flips", 1)
+    if restore_confirmation_flips != 1:
+        raise HarnessError("probe requires one off-restore confirmation flip")
     phase_timestamps: dict[str, int | None] = {phase: None for phase in PHASES}
     intervals: dict[str, list[int]] = {phase: [] for phase in PHASES}
     recorded_counts = {phase: 0 for phase in PHASES}
@@ -160,6 +165,7 @@ def analyze_probe(path: Path, config: dict[str, object]) -> dict[str, object]:
     readback_diverged = False
     atomic_failures: set[bool] = set()
     expected_framebuffer: int | None = None
+    restore_ordinals: set[int] = set()
     for value in records[1:-1]:
         _exact_keys(value, FLIP_KEYS, "flip")
         if value.get("schema") != PROBE_SCHEMA or value.get("record") != "flip":
@@ -167,14 +173,16 @@ def analyze_probe(path: Path, config: dict[str, object]) -> dict[str, object]:
         if value.get("run_id") != run_id:
             raise HarnessError("probe flip run identity diverged")
         phase = value.get("phase")
-        if phase not in PHASES:
+        if phase not in {*PHASES, "restore-off"}:
             raise HarnessError("probe flip phase is invalid")
         if _integer(value.get("crtc_id"), "flip CRTC ID", 1) != crtc_id:
             raise HarnessError("probe CRTC identity changed")
         ordinal = _integer(value.get("ordinal"), "flip ordinal")
-        if ordinal in ordinals[phase]:
+        phase_ordinals = (restore_ordinals if phase == "restore-off"
+                          else ordinals[phase])
+        if ordinal in phase_ordinals:
             raise HarnessError("probe contains a duplicate phase ordinal")
-        ordinals[phase].add(ordinal)
+        phase_ordinals.add(ordinal)
         framebuffer = _integer(value.get("framebuffer_id"), "framebuffer ID", 1)
         if expected_framebuffer == framebuffer:
             raise HarnessError("probe did not alternate framebuffer IDs")
@@ -222,7 +230,7 @@ def analyze_probe(path: Path, config: dict[str, object]) -> dict[str, object]:
         reason = value.get("raw_timestamp_invalid_reason")
         if not isinstance(reason, str):
             raise HarnessError("probe raw timestamp reason is not text")
-        previous = phase_timestamps[phase]
+        previous = None if phase == "restore-off" else phase_timestamps[phase]
         if raw_available:
             if reason or raw_timestamp == 0:
                 raise HarnessError("available raw timestamp is marked invalid")
@@ -233,24 +241,33 @@ def analyze_probe(path: Path, config: dict[str, object]) -> dict[str, object]:
             expected_interval = None if previous is None else raw_timestamp - previous
             if raw_interval != expected_interval:
                 raise HarnessError("probe raw interval does not match event timestamps")
-            phase_timestamps[phase] = raw_timestamp
-            if sample_kind == "recorded" and expected_interval is not None:
+            if phase != "restore-off":
+                phase_timestamps[phase] = raw_timestamp
+            if (phase != "restore-off" and sample_kind == "recorded" and
+                    expected_interval is not None):
                 intervals[phase].append(expected_interval)
         else:
             if raw_timestamp != 0 or raw_interval is not None or not reason:
                 raise HarnessError("unavailable raw timestamp lacks exact degradation")
-            if sample_kind == "recorded":
+            if phase != "restore-off" and sample_kind == "recorded":
                 lost_counts[phase] += 1
-        if sample_kind == "recorded":
+        if phase != "restore-off" and sample_kind == "recorded":
             recorded_counts[phase] += 1
 
     expected_per_phase = warmup_flips + recorded_flips
-    if any(ordinals[phase] != set(range(expected_per_phase))
-           for phase in PHASES):
-        raise HarnessError(
-            "probe phase ordinals differ from the contiguous declaration")
-    if any(recorded_counts[phase] != recorded_flips for phase in PHASES):
-        raise HarnessError("probe recorded sample count differs from its declaration")
+    incomplete_probe = (not hardware_capable or not atomic_test_off or
+                        not atomic_test_on or bool(atomic_failures) or
+                        readback_diverged)
+    if not incomplete_probe:
+        if any(ordinals[phase] != set(range(expected_per_phase))
+               for phase in PHASES):
+            raise HarnessError(
+                "probe phase ordinals differ from the contiguous declaration")
+        if restore_ordinals != {0}:
+            raise HarnessError("probe off-restore confirmation is incomplete")
+        if any(recorded_counts[phase] != recorded_flips for phase in PHASES):
+            raise HarnessError(
+                "probe recorded sample count differs from its declaration")
     restored = (_boolean(restore.get("passed"), "restore result") and
                 _boolean(restore.get("kms_state_equal"), "KMS restoration") and
                 _boolean(restore.get("vrr_property_restored"), "VRR restoration"))

@@ -64,4 +64,21 @@ if get_option('drm_backend')
     dependencies: gw_drm_probe_dep,
     install: false,
   )
+
+  gw_drm_vrr_probe_lib = static_library(
+    'gw-drm-vrr-probe',
+    files('../src/tools/drm_vrr_probe.cpp'),
+    dependencies: gw_drm_api_dep,
+    install: false,
+  )
+  gw_drm_vrr_probe_dep = declare_dependency(
+    link_with: gw_drm_vrr_probe_lib,
+    dependencies: gw_drm_api_dep,
+  )
+  gw_drm_vrr_probe_program = executable(
+    'gw_drm_vrr_probe',
+    files('../src/tools/drm_vrr_probe_main.cpp'),
+    dependencies: gw_drm_vrr_probe_dep,
+    install: false,
+  )
 endif
