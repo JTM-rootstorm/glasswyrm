@@ -92,21 +92,57 @@ impl BackendCapabilities {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VrrPolicy {
     Off,
-    Automatic,
+    Fullscreen,
+    Focused,
+    AppRequested,
     AlwaysEligible,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VrrWindowPreference {
+    #[default]
+    Default,
+    Disable,
+    Allow,
+    Prefer,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VrrEligibility {
-    pub fullscreen: bool,
+    pub output_enabled: bool,
+    pub visible: bool,
+    pub managed: bool,
     pub focused: bool,
-    pub single_visible_surface: bool,
+    pub fullscreen: bool,
+    pub borderless_fullscreen: bool,
+    pub exclusive_output_membership: bool,
+    pub preference: VrrWindowPreference,
 }
 
 impl VrrEligibility {
     #[must_use]
-    pub const fn eligible(self) -> bool {
-        self.fullscreen && self.focused && self.single_visible_surface
+    pub const fn common_candidate(self) -> bool {
+        self.output_enabled
+            && self.visible
+            && self.managed
+            && self.focused
+            && self.exclusive_output_membership
+            && !matches!(self.preference, VrrWindowPreference::Disable)
+    }
+
+    #[must_use]
+    pub const fn eligible_for(self, policy: VrrPolicy) -> bool {
+        match policy {
+            VrrPolicy::Off => false,
+            VrrPolicy::Fullscreen => {
+                self.common_candidate() && (self.fullscreen || self.borderless_fullscreen)
+            }
+            VrrPolicy::Focused => self.common_candidate(),
+            VrrPolicy::AppRequested => {
+                self.common_candidate() && matches!(self.preference, VrrWindowPreference::Prefer)
+            }
+            VrrPolicy::AlwaysEligible => self.output_enabled,
+        }
     }
 }
 
@@ -150,7 +186,7 @@ pub const fn plan_vrr(
             reason: VrrPolicyReason::Unsupported,
         };
     }
-    if matches!(policy, VrrPolicy::Automatic) && !eligibility.eligible() {
+    if !eligibility.eligible_for(policy) {
         return VrrPlan {
             desired_enabled: false,
             reason: VrrPolicyReason::Ineligible,

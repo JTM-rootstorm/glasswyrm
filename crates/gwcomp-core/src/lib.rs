@@ -18,7 +18,7 @@ pub use model::{
     BackendCapabilities, BackendError, BackendEvent, CapabilityOrigin, CommitDisposition,
     CommitRequest, OutputCommitResult, OutputInfo, OutputMode, PresentDisposition, PresentRequest,
     PresentResult, RejectionReason, ValidationResult, VrrCapability, VrrEligibility,
-    VrrObservation, VrrPlan, VrrPolicy, VrrPolicyReason, plan_vrr,
+    VrrObservation, VrrPlan, VrrPolicy, VrrPolicyReason, VrrWindowPreference, plan_vrr,
 };
-pub use replay::{QueuedRejection, ReplayLedger, RestartReplay};
+pub use replay::{PeerEpoch, QueuedRejection, ReplayLedger, RestartReplay};
 pub use scripted::{RecordedMutation, ScriptedMockBackend};
