@@ -2,7 +2,7 @@
 name = "gw-types"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.95"
 license = "GPL-3.0-only"
 description = "Dependency-free shared types for Glasswyrm"
 
