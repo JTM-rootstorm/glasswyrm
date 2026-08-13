@@ -1,0 +1,54 @@
+{
+  "schema": "glasswyrm.rust-transition-baseline.v1",
+  "captured_at": "2026-08-13T18:23:55-05:00",
+  "behavior_anchor": "36009a8bbe50794d6808d142ac57b623062a1e63",
+  "source_commit": "a39c7788bb5226e793698192028b9a4a57202f8d",
+  "branch": "migration/rust-first",
+  "hardware_accessed": false,
+  "toolchains": {
+    "gcc": "15.3.0",
+    "clang": "22.1.8",
+    "meson": "1.11.1",
+    "ninja": "1.13.2",
+    "rustc": "1.96.1",
+    "cargo": "1.96.1"
+  },
+  "dependencies": {
+    "libdrm": "2.4.134",
+    "libinput": "1.31.3",
+    "xkbcommon": "1.13.2",
+    "egl": "1.5",
+    "glesv2": "3.2",
+    "gbm": "26.1.6"
+  },
+  "build": {
+    "directory": "build-rust-transition-baseline",
+    "profile": "debugoptimized",
+    "werror": true,
+    "drm_backend_compiled": true,
+    "libinput_backend_compiled": true,
+    "gles_renderer_compiled": true,
+    "result": "passed"
+  },
+  "tests": {
+    "meson_total": 286,
+    "meson_passed": 286,
+    "meson_failed": 0,
+    "headless_gate": "5/5 passed",
+    "restart_gate": "4/4 passed outside the socket-restricted sandbox",
+    "harness_selftests": "5/5 passed",
+    "physical_hardware": "not run"
+  },
+  "fixture_manifest_sha256": {
+    "m4": "580438abccf379083ab5bf2a5ae80392940b80cd3cf81ba0a4bcc3a7da2da28b",
+    "m5": "f6ac01a4f0096f291d90842817a43458a6ab984e96f9cda38ce36d7e1fd6cbd9",
+    "m6": "3fcaa544b4ea6130242c86465359b96a1bc56e160cecf7166173877d988b84b7",
+    "m7": "b1c05d21a5c389b7ca78db87520728be3e82afdb01b341f272466357781bbd5d",
+    "m8": "6da42bd4d2f1ef81837cca2e5325dd0610fb770fffe0b8cae2f916f9bce90b88",
+    "m9": "04d0d5e4705eff56a12cd5f74ee50f3f50694482df7a88ff5001001027af7bdd",
+    "m11": "ee0f51ac696eb6f1b0c9a69501ddc7cefbd455a6d22dde1d2b9180a9bdce1d66",
+    "m12": "d1ff2006d1e687c41c775733a26a31f39bcc142a686f941430b7414aad00a354",
+    "m13": "30111a12ec594f40a8c82cb08bdcb7e42665b8f936724ba447800a383d2efbdf",
+    "m14": "8f6f8db107062439169e3a2239fae76909eea996eacc79b15c2ad750d7c2bf3a"
+  }
+}

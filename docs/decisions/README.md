@@ -23,3 +23,4 @@ Current decisions:
 - [0014: Bound the Efficient SDL Buffer Path](0014-efficient-x11-buffer-path.md)
 - [0015: Make Output Layout and Scaling Explicit](0015-output-model-and-scaling.md)
 - [0016: Split VRR Intent, Policy, and Display Authority](0016-vrr-policy-and-kms-control.md)
+- [0017: Make the Glasswyrm Runtime Rust-First](0017-rust-first-transition.md)

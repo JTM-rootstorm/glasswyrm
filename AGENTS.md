@@ -2,7 +2,7 @@
 
 This repository is the source of truth for the Glasswyrm project.
 
-Glasswyrm is a from-scratch, local-first, X11-compatible display stack for modern Linux/Gentoo. It is intended to be implemented in C, C++, and selective x86_64 assembly. It is not a fork of Xorg, XLibre, Xwayland, wlroots, Weston, Mutter, KWin, or any other display server/compositor stack.
+Glasswyrm is a from-scratch, local-first, X11-compatible display stack for modern Linux/Gentoo. Its runtime is Rust-first, with bounded C and selective x86_64 assembly where those are justified. C++ is migration-only legacy code. Glasswyrm is not a fork of Xorg, XLibre, Xwayland, wlroots, Weston, Mutter, KWin, or any other display server/compositor stack.
 
 ## Read first
 
@@ -39,45 +39,63 @@ Primary target:
 
 Allowed implementation languages:
 
-- C
-- C++
-- x86_64 assembly
+- Rust (default)
+- C (bounded platform and ABI shims)
+- C++ (existing migration-only code and temporary comparison adapters)
+- x86_64 assembly (profiled optional hot paths)
 
-Do not introduce Rust, Go, Zig, Java, C#, Python runtime components, or other implementation languages unless explicitly instructed by the user.
+Do not introduce Go, Zig, Java, C#, Python runtime components, or other implementation languages unless explicitly instructed by the user.
 
-Python, shell, or similar scripting is acceptable for build helpers, generators, and tests when justified, but the Glasswyrm runtime stack itself should remain C/C++/assembly.
+### Rust rules
 
-### C rules
-
-Use C for low-level platform boundaries, DRM/KMS, libinput, udev, C ABI boundaries, and small protocol/platform helpers.
-
-### C++ rules
-
-Use C++ for architecture-heavy code: server state, resources, windows, window
-manager policy, IPC contracts, compositor scene graph, output policy, event
-routing, and renderer abstraction.
+Use Rust by default for new runtime code, including server and resource state,
+X11 parsing and dispatch, window-manager policy, IPC codecs and contracts,
+compositor and output state, display policy, event and input orchestration,
+renderer orchestration, configuration, command-line tools, process supervision,
+and test infrastructure.
 
 Prefer:
 
-- RAII for resource lifetime
-- explicit ownership
-- small interfaces
-- fixed-width integer types for protocol data
-- simple state machines
+- explicit ownership and typed IDs
+- small state machines and enums instead of magic constants
+- `Result`-based error propagation
+- deterministic pure functions for policy decisions
+- narrow, documented `unsafe` boundaries
+- dependency-light crates with one clear responsibility
 
-Avoid:
+Pure policy and wire crates should forbid unsafe code. Platform/FFI crates must
+keep unsafe operations in explicit blocks and document the safety invariants.
 
-- framework-heavy designs
-- inheritance forests
-- exceptions across subsystem boundaries
-- hidden global mutable state
-- unrelated formatting churn
+Python, shell, or similar scripting is acceptable for build helpers,
+generators, and tests when justified, but the Glasswyrm runtime stack itself
+should remain Rust with bounded C/assembly and migration-only C++.
+
+### C rules
+
+Use C only for bounded platform or ABI shims where C is simpler and more
+auditable than reproducing the system boundary directly in Rust. Candidate
+boundaries include selected DRM/KMS, GBM/EGL/GLES, libinput, udev, generated
+system glue, and temporary stable C ABI exports for legacy code.
+
+C shims should expose small opaque-handle APIs and plain fixed-width data. Rust
+owns high-level lifecycle and policy.
+
+### C++ rules
+
+C++ is allowed only for existing implementation that has not yet migrated,
+temporary adapters that compare legacy and Rust behavior, or a dependency with
+no practical C or Rust boundary. Do not add new architecture-heavy production
+C++ during the transition. Preserve explicit ownership and narrow interfaces
+while migrating; do not refactor legacy code merely to make it more elegant.
 
 ### Assembly rules
 
-Assembly is allowed only when it is isolated, tested, and has a C/C++ fallback.
+Assembly is allowed only when it is isolated, tested, and has a correct Rust or
+C reference implementation.
 
-Do not implement a new feature only in assembly. First implement a reference C/C++ path, then add the assembly optimization behind runtime CPU feature detection and build flags.
+Do not implement a new feature only in assembly. First implement a Rust or C
+reference path, then add the assembly optimization behind runtime CPU feature
+detection and build flags.
 
 Assembly is appropriate for:
 
@@ -110,7 +128,8 @@ Allowed/recommended dependencies include:
 - Mesa/GBM/EGL where appropriate
 - Vulkan later if explicitly useful
 - `xcb-proto` XML for protocol reference/code generation
-- standard C/C++ libraries
+- the Rust standard library and narrowly justified Rust crates
+- standard C/C++ libraries required by retained native code
 - test libraries when justified
 
 Do not depend on:
@@ -124,7 +143,12 @@ Do not depend on:
 
 ## Build expectations
 
-Preferred build system: Meson + Ninja.
+Cargo is the primary Rust inner-loop build and test interface. Meson + Ninja
+remain authoritative for the legacy C/C++ graph and retained native shims
+during the transition. Keep the graphs independent: ordinary `cargo check`
+must not build the whole Meson tree, and ordinary Meson configuration must not
+build every Rust test binary. A developer orchestration command may invoke
+both explicitly for checkpoint and acceptance suites.
 
 Every meaningful implementation should preserve:
 
@@ -141,14 +165,23 @@ Tests are mandatory for new behavior unless there is a documented reason they ar
 
 Preferred test order:
 
-1. Unit tests
-2. Protocol parser tests
-3. Window-manager policy tests
-4. IPC contract and metadata round-trip tests
-5. Headless integration tests
-6. Pixel/golden tests
-7. Fuzz or malformed-input tests where appropriate
-8. Real DRM/KMS tests only as explicit hardware tests
+1. Tier 0: targeted `cargo check` or compile/type feedback
+2. Tier 1: unit, parser, pure-policy, and fake-backend tests
+3. Tier 2: IPC, wire, component, fixture, and cross-language contract tests
+4. Tier 3: minimal-process and headless integration tests
+5. Tier 4: full software acceptance, compatibility, sanitizer, install, and VM tests
+6. Tier 5: explicitly authorized physical DRM/KMS acceptance
+
+Run the cheapest tier capable of disproving a change first. A harness, parser,
+timeout, readiness, fixture, or expected-value defect is a first-class bug:
+add a focused harness regression, run it alone, then run the smallest affected
+subsystem and software checkpoint. Do not repeat physical validation merely
+because harness interpretation changed.
+
+Do not migrate implementation and expected behavior together. First prove the
+ported test against the legacy oracle, preserve the accepted fixture, then run
+the same test against the Rust replacement. Retire legacy code only after that
+replacement passes its compatibility gate.
 
 Do not make real hardware access required for normal development tests.
 
@@ -161,6 +194,15 @@ be testable without real hardware whenever possible.
 
 Prefer synthetic clients, a headless `gwcomp` backend, and explicit IPC fixtures
 before touching DRM/KMS. Real hardware work must include rollback/recovery notes when appropriate.
+
+During the Rust transition, physical hardware execution is not part of the
+development loop. Hardware-capable commands must fail closed unless
+`GW_ALLOW_HARDWARE_TESTS=1` is set to the exact value `1`, and ordinary test
+wrappers must omit it.
+Do not acquire DRM master, stop Mike's desktop/session, or ask him to free the
+GPU for intermediate migration validation. Use the Glasswyrm VM for applicable
+software, packaging, and non-real-hardware gates. Physical M14 re-acceptance is
+a bounded final stage after Tier 4 is green and Mike explicitly authorizes it.
 
 ## Commit workflow
 
@@ -254,7 +296,11 @@ Compatibility targets should progress by tiers described in `docs/GLASSWYRM_SPEC
 
 HDR, VRR, and per-output scaling are core goals, but they should not destabilize the foundation.
 
-Recommended order:
+Milestone 15 feature work is frozen until the Rust-first transition acceptance
+gate passes. Critical correctness fixes are allowed, but new HDR/color
+architecture must not accumulate in the C++ tree merely to be migrated later.
+
+The preserved architectural order remains:
 
 1. core protocol/server
 2. `libgwipc` contract skeleton

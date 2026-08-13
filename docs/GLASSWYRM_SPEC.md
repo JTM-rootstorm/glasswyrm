@@ -1,8 +1,8 @@
 # Glasswyrm Project Specification
 
-Status: Initial planning specification  
-Repository source of truth: https://github.com/JTM-rootstorm/glasswyrm  
-Primary target: Gentoo Linux on x86_64  
+Status: Living project specification
+Repository source of truth: https://github.com/JTM-rootstorm/glasswyrm
+Primary target: Gentoo Linux on x86_64
 Project tag / code prefix: `gw`
 
 ## 1. Project identity
@@ -34,7 +34,7 @@ The stack should initially target modern local desktop use only. It should not p
 - Gentoo first.
 - Usable on both systemd and OpenRC systems.
 - x86_64 first.
-- C, C++, and selective x86_64 assembly.
+- Rust-first runtime with bounded C, migration-only C++, and selective x86_64 assembly.
 - Clean internal compositor-centric architecture.
 - X11 protocol compatibility as an external interface, not as an internal design prison.
 - Modern display behavior designed in from the start.
@@ -65,65 +65,72 @@ Optional future work can revisit these only after the local-first stack is usefu
 
 ## 4. Language and implementation choices
 
-Glasswyrm should use a deliberate mix of C, C++, and x86_64 assembly.
+Glasswyrm is Rust-first. Rust is the default implementation language for new
+runtime code and for migrated behavior. C is a bounded platform/ABI tool, C++
+is migration-only legacy code, and x86_64 assembly is reserved for measured
+optional hot paths.
 
-### 4.1 C
+### 4.1 Rust
 
-Use C for:
+Use Rust for:
 
-- DRM/KMS backend glue.
-- libinput and udev integration.
-- Low-level platform interfaces.
-- C ABI boundaries between major subsystems.
-- Small compatibility libraries.
-- Test fixtures where C makes protocol behavior easier to inspect.
+- server state, resources, windows, and event routing;
+- X11 parsing, dispatch, extension state, and supported protocol behavior;
+- GWIPC codecs, contracts, transports, snapshots, and replay;
+- window-manager policy and process orchestration;
+- compositor scene, output, scaling, VRR, HDR, and color policy;
+- input and renderer orchestration;
+- configuration, command-line tools, and process supervision; and
+- migration and runtime test infrastructure.
 
-Recommended C dialect: C17 initially, with optional C23 only when build support is proven across Gentoo toolchains.
+Prefer explicit ownership, typed IDs, enums, small state machines,
+`Result`-based error propagation, deterministic pure policy functions, narrow
+unsafe boundaries, and dependency-light crates. Pure policy and wire crates
+must forbid unsafe code. Platform and FFI crates must use explicit unsafe
+blocks and document their safety invariants.
 
-### 4.2 C++
+### 4.2 C
 
-Use C++ for:
+Use C only when a bounded platform or ABI shim is simpler and more auditable
+than expressing the boundary directly in Rust. Candidate uses include selected
+DRM/KMS, GBM/EGL/GLES, libinput, udev, generated system glue, and temporary C
+ABI exports used by legacy code.
 
-- Server architecture.
-- Resource lifetime management.
-- Window and surface model.
-- Compositor scene graph.
-- Event routing.
-- Output policy.
-- Protocol dispatch tables.
-- Renderer abstraction.
-- Test harnesses where RAII improves cleanup.
+C shims expose small opaque handles and fixed-width plain data. Rust owns
+high-level lifecycle and policy. Recommended C dialect remains C17, with C23
+only after Gentoo toolchain support is proven.
 
-Recommended C++ dialect: C++20 initially. C++23 may be adopted after compiler and standard library support is confirmed.
+### 4.3 C++
 
-Recommended C++ style:
+C++ is permitted only for:
 
-- Use RAII for file descriptors, DRM resources, mapped memory, client connections, and buffers.
-- Prefer explicit ownership over hidden shared state.
-- Keep module interfaces small.
-- Avoid exceptions across subsystem boundaries.
-- Avoid framework-heavy C++ patterns.
-- Keep RTTI optional and avoid relying on it for core dispatch.
-- Prefer `std::span`, `std::string_view`, and fixed-width integer types where appropriate.
-- Prefer simple structs and explicit state machines over inheritance-heavy hierarchies.
+- the existing implementation until its Rust replacement passes the defined
+  compatibility gate;
+- temporary adapters used to compare legacy and Rust implementations; and
+- a dependency with no practical C or Rust boundary.
 
-### 4.3 x86_64 assembly
+Do not add new architecture-heavy production C++. Preserve narrow interfaces
+and explicit ownership while migrating, but do not broadly refactor legacy
+code simply to make the soon-to-be-retired implementation more elegant.
 
-Assembly is allowed and encouraged only where it is useful, educational, and testable.
+### 4.4 x86_64 assembly
+
+Assembly is allowed only where profiling demonstrates a meaningful hot path
+and the optimization is isolated and testable.
 
 Use assembly for:
 
-- Software compositor hot paths after a C/C++ reference implementation exists.
+- Software compositor hot paths after a Rust or C reference implementation exists.
 - Pixel blending.
 - Pixel format conversion.
 - Scaling blits.
 - Color conversion experiments.
 - Carefully isolated ABI experiments.
-- Optional optimized protocol or copy routines after profiling.
+- Optional optimized copy routines after profiling.
 
 Assembly rules:
 
-- No assembly-only feature may exist without a portable C/C++ fallback.
+- No assembly-only feature may exist without a correct Rust or C fallback.
 - No assembly path may be accepted without golden tests comparing it to the reference implementation.
 - Assembly files should use preprocessed `.S` when build-time feature gating is needed.
 - Assembly must not be used for high-level policy, window lifetime, input routing, KMS state, selections, or protocol semantics.
@@ -144,7 +151,8 @@ Allowed and recommended dependencies:
 - GBM/EGL for graphics buffer management and rendering experiments.
 - Vulkan later, if useful.
 - `xcb-proto` XML as a protocol reference/code-generation source, subject to license preservation.
-- Standard C/C++ libraries.
+- The Rust standard library and narrowly justified Rust crates.
+- Standard C/C++ libraries required by retained native code.
 - Common test libraries when justified.
 
 Avoid or prohibit initially:
@@ -156,20 +164,31 @@ Avoid or prohibit initially:
 - Depending on Wayland protocols for core runtime behavior.
 - Large third-party frameworks that obscure the display-stack internals.
 
-## 6. Build system recommendation
+## 6. Build system strategy
 
-Recommended build system: Meson + Ninja.
+Cargo is the primary Rust build and test interface. Meson + Ninja remain in
+place during the transition for the legacy C/C++ graph and retained native
+shims. These are independent graphs: ordinary targeted Cargo commands must not
+invoke a whole Meson build, and ordinary Meson configuration must not rebuild
+every Rust test target. A deliberate orchestration command may combine them
+for subsystem checkpoints and acceptance gates.
 
-Reasons:
+Representative Rust inner-loop commands are:
 
-- Good fit for C, C++, and assembly.
-- Common in the freedesktop/Linux graphics ecosystem.
-- Fast incremental builds.
-- Good support for `compile_commands.json`.
-- Friendly to Gentoo ebuild packaging.
-- Clean feature options for assembly paths, sanitizers, render backends, and experimental extensions.
+```sh
+cargo check -p gw-ipc
+cargo test -p gw-ipc
+cargo test -p gwm-core
+cargo test -p gwcomp-core
+cargo xtask test unit
+cargo xtask test contract
+cargo xtask test headless gwcomp
+```
 
-The build should provide options similar to:
+The exact orchestration spelling may evolve; the separation of compile, unit,
+contract, headless, software-acceptance, and guarded hardware tiers may not.
+
+The legacy/native Meson build continues to provide options similar to:
 
 ```meson
 -Dbackend_headless=true
@@ -190,7 +209,15 @@ The build should provide options similar to:
 -Dexperimental=true
 ```
 
-Early development should support both GCC and Clang where practical. CI or local test scripts should build at least one strict configuration and one sanitizer configuration.
+Retained native code should support both GCC and Clang where practical. Local
+acceptance should include at least one strict native configuration, one
+applicable sanitizer configuration, and Rust formatting/linting/testing.
+
+Do not combine initial Cargo bootstrap with total Meson removal. After all
+production C++ is retired, prefer Cargo as the authoritative project build and
+retain Meson only if the remaining C/assembly/platform surface or Gentoo
+packaging derives clear value from it. That final arrangement is a separate,
+bisectable decision.
 
 Split-process options must not blur authority boundaries. A built-in WM policy
 mode is acceptable only as an explicitly labeled development/test path; it must
@@ -200,14 +227,34 @@ the same `libgwipc` message contracts used by the real split.
 
 ## 7. Repository layout
 
-Recommended initial repository layout:
+Recommended transition repository layout:
 
 ```text
 /
   AGENTS.md
   README.md
+  Cargo.toml
+  rust-toolchain.toml
   meson.build
   meson_options.txt
+  .cargo/
+  crates/
+    gw-types/
+    gw-wire/
+    gw-ipc/
+    gw-ipc-capi/
+    gw-sys/
+    gw-platform-linux/
+    gw-test-support/
+    gwm-core/
+    gwm/
+    gwcomp-core/
+    gwcomp/
+    glasswyrm-x11/
+    glasswyrm-core/
+    glasswyrmd/
+    gw-tools/
+    xtask/
   docs/
     GLASSWYRM_SPEC.md
     architecture/
@@ -258,11 +305,12 @@ Recommended initial repository layout:
     gentoo/
 ```
 
-Process-specific directories may start as stubs. `src/compositor/`,
-`src/backends/`, and `src/render/` are `gwcomp`-facing implementation areas
-unless tests use them in isolation. `src/ipc/` owns versioned message contracts
-shared across `glasswyrmd`, `gwm`, and `gwcomp`. Nested and GL/Vulkan backends
-may remain placeholders until their phase begins.
+Add the Rust workspace beside the legacy source so migration diffs remain
+reviewable. Do not move the C++ tree merely to imitate the crate layout.
+`src/compositor/`, `src/backends/`, `src/render/`, and `src/ipc/` remain the
+legacy oracle until their replacement gates pass. Temporary `gw-ipc-capi`
+exists only to cross the migration boundary. `gw-sys` is the unsafe quarantine
+zone; `gwm-core` and `gwcomp-core` must remain testable without hardware.
 
 ## 8. Component names
 
@@ -488,7 +536,9 @@ Use generated packet definitions where practical.
 Recommended approach:
 
 - Use `xcb-proto` XML as a reference source.
-- Generate C/C++ packet structures, opcode metadata, decoder tables, and test vectors where useful.
+- Generate Rust packet/domain metadata, decoder tables, and test vectors where
+  useful; retain C declarations only for an intentional installed ABI or
+  temporary migration bridge.
 - Keep generated code isolated under a clear path.
 - Preserve licenses for any vendored protocol definitions.
 - Document regeneration commands.
@@ -742,7 +792,9 @@ Recommended Gentoo plan:
 - Keep upstream project source clean first.
 - Add `packaging/gentoo` once the basic build works.
 - Maintain a local overlay under `packaging/gentoo/overlay/` once ebuild work begins.
-- Provide live ebuilds only after Meson options stabilize.
+- During migration, keep live ebuilds pinned and explicit about their Cargo and
+  Meson component paths; do not publish a final build arrangement until it
+  stabilizes.
 - Prefer release-tarball ebuilds for reproducible VM tests once releases exist.
 - Do not replace system Xorg automatically.
 - Provide clear install/remove/rollback notes.
@@ -787,10 +839,10 @@ not rebuild the compositor or server unless an installed shared library or IPC
 ABI changed. A compositor renderer/KMS update should not rebuild `gwm` unless
 WM/compositor policy contracts changed.
 
-The split is not complete until Meson exposes narrow build/install targets or
-options for `glasswyrmd`, `gwm`, `gwcomp`, tools, and installed libraries.
-Component ebuilds should use those targets instead of compiling the full stack
-and discarding unrelated install artifacts.
+The split is not complete until the active Cargo/Meson arrangement exposes
+narrow build/install targets or options for `glasswyrmd`, `gwm`, `gwcomp`,
+tools, and installed libraries. Component ebuilds should use those targets
+instead of compiling the full stack and discarding unrelated install artifacts.
 
 `libgwipc` should be treated as the first serious ABI-bearing library. Until the
 contract stabilizes, runtime components should depend on a matching version of
@@ -843,8 +895,8 @@ emerge --metadata
 A shared directory is useful for passing the overlay, source tarballs, distfiles,
 binary packages, logs, and test reports into or out of the VM. It must not be
 the only validation path. The fresh VM test should exercise Portage dependency
-resolution, USE flags, Meson component options, install paths, service/session
-files, and uninstall behavior.
+resolution, USE flags, Cargo features and Meson component options where
+applicable, install paths, service/session files, and uninstall behavior.
 
 Recommended VM checks:
 
@@ -871,37 +923,59 @@ source tarball so split packages reuse the same cached distfile.
 
 Testing is mandatory from the first implementation sprint.
 
-Test layers:
+Tests are organized by the cheapest tier capable of disproving a change:
 
-- Unit tests for protocol packet parsing.
-- Unit tests for resource table behavior.
-- Unit tests for event masks and dispatch.
-- Unit tests for `gwm` policy decisions.
-- IPC contract tests between `glasswyrmd`, `gwm`, and `gwcomp`.
-- Metadata round-trip tests for scale, color, HDR, and presentation state.
-- Pixel tests for software compositor output.
-- Golden tests for C/C++ reference render paths.
-- Golden tests for assembly render paths.
-- Integration tests using toy clients.
-- Headless compositor tests.
-- Fuzzing for protocol decoders.
-- Sanitizer builds.
-- Fresh Gentoo VM packaging tests through a local overlay.
-- Narrow component-update tests for `gwm`, `gwcomp`, and `libgwipc`.
+1. **Tier 0 — compile/type feedback:** targeted Cargo check, format, lint, and
+   retained native compilation. No process or fixture use.
+2. **Tier 1 — unit/pure policy:** codecs, geometry, scaling, resource state,
+   focus/stacking, output/VRR decisions, damage, software rendering, and fake
+   backend behavior.
+3. **Tier 2 — contract/component:** canonical GWIPC bytes, C/Rust
+   interoperability, installed ABI, malformed input, FD lifecycle,
+   snapshot/replay, and structured fixture validation.
+4. **Tier 3 — headless process integration:** only the processes required for
+   the scenario, using explicit readiness, deterministic teardown, and
+   per-process failure artifacts.
+5. **Tier 4 — full software acceptance:** all earlier tiers plus compatibility
+   fixtures, software goldens, strict builds, sanitizers, install/package
+   smoke, and applicable Gentoo/QXL VM gates.
+6. **Tier 5 — physical hardware acceptance:** explicitly authorized,
+   preflighted DRM/KMS and VRR validation against already-built artifacts.
 
-Recommended early commands:
+Run the narrow test first and broaden only at coherent checkpoints. A harness,
+readiness, timeout, parser, fixture, or expected-value bug is a first-class
+defect: add a focused harness regression and do not repeat physical validation
+merely because harness interpretation changed.
 
-```sh
-meson setup build -Dbackend_headless=true -Drender_software=true -Dasan=true -Dubsan=true
-meson test -C build
-```
+Never move the implementation and oracle together. Port a test so it first
+passes against the legacy implementation, preserve its accepted fixture, then
+point the same test at the Rust replacement. Do not serialize Rust memory
+layout as GWIPC. Message numbers, integer widths, byte order, framing, version
+negotiation, FD ownership, ordering, and snapshot/replay semantics are explicit
+Tier 2 contracts.
 
-Real DRM/KMS tests should not be required for normal CI-style validation. They should be explicit hardware tests.
+Process tests should use observable readiness such as a successful socket/GWIPC
+handshake or expected snapshot, not a fixed sleep as the sole proof. On failure,
+retain commands, individual stdout/stderr, exit/signal status, monotonic event
+timing, structured traces/snapshots, configuration, and fixture checksums.
+
+Real DRM/KMS is not a normal development prerequisite. During the Rust
+transition, any command capable of live display takeover or physical testing
+must fail closed unless `GW_ALLOW_HARDWARE_TESTS=1` is set to the exact value
+`1`. Ordinary test wrappers omit it. Offline doctor, dry-run, self-test,
+analysis, recorded-state replay, fake DRM, headless simulation, and QXL do not
+need this authorization, but none provides positive physical VRR proof.
 
 Gentoo packaging tests should not be replaced by shared-directory artifact
 copies. Shared directories may provide an overlay, distfiles, binary packages,
 and logs, but at least one fresh VM path should run `emerge` against the local
 overlay so the ebuilds, dependencies, USE flags, and install layout are tested.
+Use the `glasswyrm` VM for applicable packaging, QXL, VT/restart, and supported
+client gates that do not require real hardware, after the local software tiers
+are green.
+
+The detailed transition classification and migration topology are maintained
+in `docs/maintenance/RUST_TRANSITION_TEST_MAP.md`.
 
 ## 22. Logging, diagnostics, and tracing
 
@@ -1028,7 +1102,8 @@ M11 Interactive desktop baseline                complete
 M12 Efficient buffers and game-oriented clients        complete
 M13 Output model and per-output scaling          complete
 M14 Variable refresh rate                       implementation present; acceptance pending
-M15 Color management and HDR
+R   Rust-first runtime transition              active; M15 feature freeze
+M15 Color management and HDR                   paused until transition acceptance
 M16 Toolkit and daily-driver expansion
 ```
 
@@ -1180,6 +1255,14 @@ exposes `gwout`, `gwinfo`, and experimental `GW_VRR` 0.1 interfaces. The
 host/fake/simulated proof is present, but neither the required clean QXL gate
 nor the separate physical-display positive gate is recorded as accepted yet.
 
+The Rust transition preserves M14 behavior against anchor
+`36009a8bbe50794d6808d142ac57b623062a1e63` while carrying forward the later
+software/diagnostic source at
+`a39c7788bb5226e793698192028b9a4a57202f8d`. These identifiers have different
+roles and must not be conflated. Milestone 15 implementation is frozen until
+the Rust stack passes full software acceptance and bounded M14 physical
+re-acceptance. Critical correctness fixes remain allowed.
+
 The candidate M14 release boundary is:
 
 Supported by the implementation:
@@ -1233,6 +1316,7 @@ meson compile -C /var/tmp/glasswyrm-build-m14
   --required-base 6864ea631d61636289a21c7d2d6655a17be0c004 \
   --tested-commit "$tested_commit" \
   --artifact-dir /var/tmp/glasswyrm-m14-doctor
+GW_ALLOW_HARDWARE_TESTS=1 \
 systemd-run --scope --unit=glasswyrm-m14-harness \
   --collect --quiet -- \
   ./tools/gw-hw milestone14-vrr-test \
@@ -1246,6 +1330,11 @@ The physical harness fails closed unless the fixed build contains the
 Meson-generated provenance manifest for the exact clean tested commit and the
 current sizes and SHA-256 hashes of all seven repository executables match it.
 The validated manifest is part of the checksummed evidence archive.
+The live command additionally requires `GW_ALLOW_HARDWARE_TESTS` to equal
+exactly `1`; unset and malformed values are rejected before the tool validates
+the live scope, creates artifacts, accesses devices, or begins session
+takeover. Doctor, dry-run, self-test, analysis, and fixture replay remain
+offline and do not require the opt-in.
 Direct live execution is rejected before artifact creation or hardware
 takeover: the fixed transient scope keeps the harness alive when it stops the
 configured getty and retains the unconditional restoration guard.
