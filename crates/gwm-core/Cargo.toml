@@ -1,0 +1,17 @@
+[package]
+name = "gwm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic window-management policy for Glasswyrm"
+publish = false
+
+[dependencies]
+gw-types = { path = "../gw-types" }
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -43,5 +43,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwm-core"
+version = "0.2.0"
+dependencies = [
+ "gw-types",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
