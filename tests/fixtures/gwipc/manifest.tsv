@@ -1,0 +1,18 @@
+name	message_type	wire_kind	wire_version	hex_file	fd_count	expected_decode	meaning
+pong-record	0x0005	record	1.0	pong-record.hex	0	ok	Pong reply envelope and payload correlation
+hello	0x0001	payload	1.0	hello.hex	0	ok	Producer role capability and limit offer
+welcome	0x0002	payload	1.0	welcome.hex	0	ok	Consumer negotiation result and connection identity
+reject	0x0003	payload	1.0	reject.hex	0	ok	Role-not-allowed handshake rejection
+output-upsert	0x0100	payload	1.0	output-upsert.hex	0	ok	M1-M12 compositor output geometry scale and SDR metadata
+buffer-attach	0x0120	payload	1.0	buffer-attach.hex	1	ok	ARGB buffer geometry storage and color metadata
+output-descriptor-upsert	0x0102	payload	1.0	output-descriptor-upsert.hex	0	ok	M13 output inventory and scale limits
+policy-window-upsert	0x0201	payload	1.0	policy-window-upsert.hex	0	ok	Window-management policy input
+policy-lifecycle-window-upsert	0x0203	payload	1.0	policy-lifecycle-window-upsert.hex	0	ok	M9 lifecycle geometry and stacking serials
+synthetic-motion	0x0300	payload	1.0	synthetic-motion.hex	0	ok	Synthetic pointer motion input
+session-state-change	0x0400	payload	1.0	session-state-change.hex	0	ok	Session activation generation
+output-configuration-acknowledged	0x0502	payload	1.0	output-configuration-acknowledged.hex	0	ok	M13-M14 output commit acceptance
+output-vrr-capability-upsert	0x0104	payload	1.0	output-vrr-capability-upsert.hex	0	ok	M14 VRR capability and refresh range
+presentation-timing	0x0142	payload	1.0	presentation-timing.hex	0	ok	M14 simulated presentation timing
+malformed-envelope-magic	0x0005	record	1.0	malformed-envelope-magic.hex	0	reject	Pong record with invalid envelope magic
+malformed-hello-truncated	0x0001	payload	1.0	malformed-hello-truncated.hex	0	reject	Hello missing final label byte
+malformed-vrr-capability-boolean	0x0104	payload	1.0	malformed-vrr-capability-boolean.hex	0	reject	VRR capability with noncanonical boolean

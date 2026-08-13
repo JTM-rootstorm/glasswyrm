@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "gw-ipc"
+version = "0.2.0"
+dependencies = [
+ "gw-types",
+ "gw-wire",
+]
+
+[[package]]
 name = "gw-test-support"
 version = "0.1.0"
 
@@ -12,13 +20,6 @@ version = "0.1.0"
 
 [[package]]
 name = "gw-wire"
-version = "0.1.0"
-dependencies = [
- "gw-types",
-]
-
-[[package]]
-name = "gwcomp-core"
 version = "0.1.0"
 dependencies = [
  "gw-types",

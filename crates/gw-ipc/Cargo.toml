@@ -1,0 +1,13 @@
+[package]
+name = "gw-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+
+[lints]
+workspace = true

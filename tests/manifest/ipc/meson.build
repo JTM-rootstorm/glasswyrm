@@ -18,6 +18,7 @@ if get_option('libgwipc')
         'gwipc-api-' + consumer_api[0] + '-' + consumer_api[1] + '-' + language + '-consumer',
         consumer_program,
         timeout: 10,
+        suite: test_contract_suites,
       )
     endforeach
   endforeach
@@ -27,17 +28,17 @@ if get_option('libgwipc')
     files(tests_source_dir / 'unit/ipc/public_control_api_test.cpp'),
     dependencies: gwipc_dep,
   )
-  test('gwipc-public-control-api', public_control_api_test, timeout: 10)
+  test('gwipc-public-control-api', public_control_api_test, timeout: 10, suite: test_contract_suites)
   gwipc_wire_codec_test = executable(
     'gwipc_wire_codec_test',
     files(tests_source_dir / 'unit/ipc/wire_codec_test.cpp'),
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-wire-codec', gwipc_wire_codec_test, timeout: 10)
-  test('gwipc-envelope', gwipc_wire_codec_test, timeout: 10)
-  test('gwipc-control-codec', gwipc_wire_codec_test, timeout: 10)
-  test('gwipc-snapshot-codec', gwipc_wire_codec_test, timeout: 10)
+  test('gwipc-wire-codec', gwipc_wire_codec_test, timeout: 10, suite: test_contract_suites)
+  test('gwipc-envelope', gwipc_wire_codec_test, timeout: 10, suite: test_contract_suites)
+  test('gwipc-control-codec', gwipc_wire_codec_test, timeout: 10, suite: test_contract_suites)
+  test('gwipc-snapshot-codec', gwipc_wire_codec_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_contract_codec_test = executable(
     'gwipc_contract_codec_test',
@@ -45,7 +46,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10)
+  test('gwipc-compositor-contract', gwipc_contract_codec_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_output_contract_test = executable(
     'gwipc_output_contract_test',
@@ -53,7 +54,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-output-contract', gwipc_output_contract_test, timeout: 10)
+  test('gwipc-output-contract', gwipc_output_contract_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_vrr_contract_test = executable(
     'gwipc_vrr_contract_test',
@@ -61,7 +62,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-vrr-contract', gwipc_vrr_contract_test, timeout: 10)
+  test('gwipc-vrr-contract', gwipc_vrr_contract_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_buffer_sync_validation_test = executable(
     'gwipc_buffer_sync_validation_test',
@@ -75,6 +76,7 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-buffer-sync-validation', gwipc_buffer_sync_validation_test,
+         suite: test_contract_suites,
        timeout: 10)
 
   gwipc_vrr_connection_validation_test = executable(
@@ -89,7 +91,8 @@ if get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('gwipc-vrr-connection-validation',
-       gwipc_vrr_connection_validation_test, timeout: 10)
+       gwipc_vrr_connection_validation_test, timeout: 10,
+       suite: test_contract_suites)
 
   gwipc_policy_contract_test = executable(
     'gwipc_policy_contract_test',
@@ -97,7 +100,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10)
+  test('gwipc-policy-contract', gwipc_policy_contract_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_lifecycle_contract_test = executable(
     'gwipc_lifecycle_contract_test',
@@ -105,7 +108,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10)
+  test('gwipc-lifecycle-contract', gwipc_lifecycle_contract_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_input_contract_test = executable(
     'gwipc_input_contract_test',
@@ -113,14 +116,14 @@ if get_option('libgwipc')
     dependencies: [gwipc_wire_dep, gwipc_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-input-contract', gwipc_input_contract_test, timeout: 10)
+  test('gwipc-input-contract', gwipc_input_contract_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_public_contract_api_test = executable(
     'gwipc_public_contract_api_test',
     files(tests_source_dir / 'unit/ipc/public_contract_api_test.cpp'),
     dependencies: gwipc_dep,
   )
-  test('gwipc-public-contract-api', gwipc_public_contract_api_test, timeout: 10)
+  test('gwipc-public-contract-api', gwipc_public_contract_api_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_public_output_api_test = executable(
     'gwipc_public_output_api_test',
@@ -128,7 +131,7 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-public-output-api', gwipc_public_output_api_test, timeout: 10)
+  test('gwipc-public-output-api', gwipc_public_output_api_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_public_vrr_api_test = executable(
     'gwipc_public_vrr_api_test',
@@ -136,7 +139,7 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-public-vrr-api', gwipc_public_vrr_api_test, timeout: 10)
+  test('gwipc-public-vrr-api', gwipc_public_vrr_api_test, timeout: 10, suite: test_contract_suites)
 
   vrr_membership_hint_test = executable(
     'vrr_membership_hint_test',
@@ -144,7 +147,7 @@ if get_option('libgwipc')
     include_directories: [test_source_root_include,
                           include_directories('../../../src')],
   )
-  test('gwipc-vrr-membership-hint', vrr_membership_hint_test, timeout: 10)
+  test('gwipc-vrr-membership-hint', vrr_membership_hint_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_decoder_fuzz_test = executable(
     'gwipc_decoder_fuzz_test',
@@ -152,7 +155,7 @@ if get_option('libgwipc')
     dependencies: gwipc_wire_dep,
     include_directories: test_source_root_include,
   )
-  test('gwipc-malformed', gwipc_decoder_fuzz_test, timeout: 15)
+  test('gwipc-malformed', gwipc_decoder_fuzz_test, timeout: 15, suite: test_contract_suites)
 
   gwipc_transport_test = executable(
     'gwipc_transport_test',
@@ -160,7 +163,7 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-transport', gwipc_transport_test, timeout: 10)
+  test('gwipc-transport', gwipc_transport_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_output_protocol_test = executable(
     'gwipc_output_protocol_test',
@@ -178,14 +181,14 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-output-protocol', gwipc_output_protocol_test, timeout: 10)
+  test('gwipc-output-protocol', gwipc_output_protocol_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_endpoint_test = executable(
     'gwipc_endpoint_test',
     files(tests_source_dir / 'integration/gwipc_endpoint_test.cpp'),
     dependencies: gwipc_dep,
   )
-  test('gwipc-endpoint', gwipc_endpoint_test, timeout: 10)
+  test('gwipc-endpoint', gwipc_endpoint_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_fault_test = executable(
     'gwipc_fault_test',
@@ -196,7 +199,7 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-fault-atomicity', gwipc_fault_test, timeout: 10)
+  test('gwipc-fault-atomicity', gwipc_fault_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_protocol_edge_test = executable(
     'gwipc_protocol_edge_test',
@@ -207,7 +210,7 @@ if get_option('libgwipc')
     dependencies: [gwipc_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwipc-protocol-edges', gwipc_protocol_edge_test, timeout: 10)
+  test('gwipc-protocol-edges', gwipc_protocol_edge_test, timeout: 10, suite: test_contract_suites)
 
   gwipc_symbols_test = find_program(tests_source_dir / 'tools/gwipc_symbols_test.sh')
   test(
@@ -216,5 +219,31 @@ if get_option('libgwipc')
     args: [gwipc_library.full_path()],
     depends: gwipc_library,
     timeout: 10,
+    suite: test_contract_suites,
+  )
+
+  gwipc_interop_fixture_root = tests_source_dir / 'fixtures/gwipc'
+  rust_gwipc_interop_probe = executable(
+    'rust_gwipc_interop_probe',
+    files(tests_source_dir / 'integration/rust_gwipc_interop_probe.cpp'),
+    dependencies: gwipc_wire_dep,
+    include_directories: test_source_root_include,
+  )
+  test(
+    'gwipc-legacy-interop-fixtures',
+    rust_gwipc_interop_probe,
+    args: ['verify', gwipc_interop_fixture_root],
+    timeout: 10,
+    suite: test_contract_suites,
+  )
+
+  sha256sum_program = find_program('sha256sum')
+  test(
+    'gwipc-interop-fixture-checksums',
+    sha256sum_program,
+    args: ['--check', gwipc_interop_fixture_root / 'SHA256SUMS'],
+    workdir: gwipc_interop_fixture_root,
+    timeout: 10,
+    suite: test_contract_suites,
   )
 endif
