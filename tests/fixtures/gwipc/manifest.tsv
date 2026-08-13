@@ -3,16 +3,58 @@ pong-record	0x0005	record	1.0	pong-record.hex	0	ok	Pong reply envelope and paylo
 hello	0x0001	payload	1.0	hello.hex	0	ok	Producer role capability and limit offer
 welcome	0x0002	payload	1.0	welcome.hex	0	ok	Consumer negotiation result and connection identity
 reject	0x0003	payload	1.0	reject.hex	0	ok	Role-not-allowed handshake rejection
-output-upsert	0x0100	payload	1.0	output-upsert.hex	0	ok	M1-M12 compositor output geometry scale and SDR metadata
-buffer-attach	0x0120	payload	1.0	buffer-attach.hex	1	ok	ARGB buffer geometry storage and color metadata
-output-descriptor-upsert	0x0102	payload	1.0	output-descriptor-upsert.hex	0	ok	M13 output inventory and scale limits
+ping	0x0004	payload	1.0	ping.hex	0	ok	Control ping nonce
+pong	0x0005	payload	1.0	pong.hex	0	ok	Control pong nonce
+protocol-error	0x0006	payload	1.0	protocol-error.hex	0	ok	Malformed-payload diagnostic
+snapshot-begin	0x0010	payload	1.0	snapshot-begin.hex	0	ok	Test-domain snapshot begin
+snapshot-end	0x0011	payload	1.0	snapshot-end.hex	0	ok	Snapshot completion count
+snapshot-abort	0x0012	payload	1.0	snapshot-abort.hex	0	ok	Snapshot cancellation diagnostic
+output-upsert	0x0100	payload	1.0	output-upsert.hex	0	ok	Compositor output geometry scale and SDR metadata
+output-remove	0x0101	payload	1.0	output-remove.hex	0	ok	Compositor output removal
+output-descriptor-upsert	0x0102	payload	1.0	output-descriptor-upsert.hex	0	ok	Output inventory and scale limits
+output-mode-upsert	0x0103	payload	1.0	output-mode-upsert.hex	0	ok	Output mode dimensions and refresh
+output-vrr-capability-upsert	0x0104	payload	1.0	output-vrr-capability-upsert.hex	0	ok	VRR capability and refresh range
+output-vrr-policy-upsert	0x0105	payload	1.0	output-vrr-policy-upsert.hex	0	ok	VRR output policy mode
+output-vrr-state-upsert	0x0106	payload	1.0	output-vrr-state-upsert.hex	0	ok	VRR output decision and presentation state
+surface-upsert	0x0110	payload	1.0	surface-upsert.hex	0	ok	Compositor surface geometry and metadata
+surface-remove	0x0111	payload	1.0	surface-remove.hex	0	ok	Compositor surface removal
+surface-policy-upsert	0x0112	payload	1.0	surface-policy-upsert.hex	0	ok	Applied surface policy
+surface-output-state	0x0113	payload	1.0	surface-output-state.hex	0	ok	Surface output membership and scale
+surface-vrr-state	0x0114	payload	1.0	surface-vrr-state.hex	0	ok	Surface VRR eligibility state
+buffer-attach	0x0120	payload	1.0	buffer-attach.hex	1	ok	ARGB buffer storage and color metadata
+buffer-detach	0x0121	payload	1.0	buffer-detach.hex	0	ok	Surface buffer detachment
+buffer-release	0x0122	payload	1.0	buffer-release.hex	0	ok	Consumer buffer release
+surface-damage	0x0130	payload	1.0	surface-damage.hex	0	ok	Surface damage rectangle list
+frame-commit	0x0140	payload	1.0	frame-commit.hex	0	ok	Producer frame commit
+frame-acknowledged	0x0141	payload	1.0	frame-acknowledged.hex	0	ok	Consumer frame acknowledgement
+presentation-timing	0x0142	payload	1.0	presentation-timing.hex	0	ok	Simulated presentation timing
+policy-context-upsert	0x0200	payload	1.0	policy-context-upsert.hex	0	ok	Window policy workspace context
 policy-window-upsert	0x0201	payload	1.0	policy-window-upsert.hex	0	ok	Window-management policy input
-policy-lifecycle-window-upsert	0x0203	payload	1.0	policy-lifecycle-window-upsert.hex	0	ok	M9 lifecycle geometry and stacking serials
+policy-window-remove	0x0202	payload	1.0	policy-window-remove.hex	0	ok	Policy window removal
+policy-lifecycle-window-upsert	0x0203	payload	1.0	policy-lifecycle-window-upsert.hex	0	ok	Lifecycle geometry and stacking serials
+policy-output-upsert	0x0204	payload	1.0	policy-output-upsert.hex	0	ok	Window-policy output work area
+policy-window-output-hint	0x0205	payload	1.0	policy-window-output-hint.hex	0	ok	Window output preference hint
+policy-window-vrr-upsert	0x0206	payload	1.0	policy-window-vrr-upsert.hex	0	ok	Window VRR preference
+policy-output-vrr-upsert	0x0207	payload	1.0	policy-output-vrr-upsert.hex	0	ok	Policy output VRR capability
+policy-commit	0x0210	payload	1.0	policy-commit.hex	0	ok	Policy snapshot commit
+policy-window-state	0x0211	payload	1.0	policy-window-state.hex	0	ok	Applied policy window state
+policy-acknowledged	0x0212	payload	1.0	policy-acknowledged.hex	0	ok	Policy commit acknowledgement
+policy-bindings-upsert	0x0213	payload	1.0	policy-bindings-upsert.hex	0	ok	Interactive window-manager bindings
+policy-window-vrr-state	0x0214	payload	1.0	policy-window-vrr-state.hex	0	ok	Applied window VRR state
+policy-output-vrr-state	0x0215	payload	1.0	policy-output-vrr-state.hex	0	ok	Applied output VRR state
 synthetic-motion	0x0300	payload	1.0	synthetic-motion.hex	0	ok	Synthetic pointer motion input
+synthetic-button	0x0301	payload	1.0	synthetic-button.hex	0	ok	Synthetic pointer button input
+synthetic-key	0x0302	payload	1.0	synthetic-key.hex	0	ok	Synthetic keyboard input
+synthetic-barrier	0x0303	payload	1.0	synthetic-barrier.hex	0	ok	Synthetic input ordering barrier
+synthetic-input-acknowledged	0x0310	payload	1.0	synthetic-input-acknowledged.hex	0	ok	Synthetic input delivery result
 session-state-change	0x0400	payload	1.0	session-state-change.hex	0	ok	Session activation generation
-output-configuration-acknowledged	0x0502	payload	1.0	output-configuration-acknowledged.hex	0	ok	M13-M14 output commit acceptance
-output-vrr-capability-upsert	0x0104	payload	1.0	output-vrr-capability-upsert.hex	0	ok	M14 VRR capability and refresh range
-presentation-timing	0x0142	payload	1.0	presentation-timing.hex	0	ok	M14 simulated presentation timing
+session-state-acknowledged	0x0401	payload	1.0	session-state-acknowledged.hex	0	ok	Session state application result
+output-state-query	0x0500	payload	1.0	output-state-query.hex	0	ok	Output state query flags
+output-configuration-commit	0x0501	payload	1.0	output-configuration-commit.hex	0	ok	Output configuration transaction
+output-configuration-acknowledged	0x0502	payload	1.0	output-configuration-acknowledged.hex	0	ok	Output commit acceptance
 malformed-envelope-magic	0x0005	record	1.0	malformed-envelope-magic.hex	0	reject	Pong record with invalid envelope magic
 malformed-hello-truncated	0x0001	payload	1.0	malformed-hello-truncated.hex	0	reject	Hello missing final label byte
 malformed-vrr-capability-boolean	0x0104	payload	1.0	malformed-vrr-capability-boolean.hex	0	reject	VRR capability with noncanonical boolean
+rust-malformed-synthetic-button-boolean	0x0301	payload	1.0	rust-malformed-synthetic-button-boolean.hex	0	reject	Rust mutation with noncanonical pressed boolean
+rust-malformed-surface-output-count	0x0113	payload	1.0	rust-malformed-surface-output-count.hex	0	reject	Rust mutation exceeding managed output limit
+rust-malformed-policy-vrr-reserved	0x0215	payload	1.0	rust-malformed-policy-vrr-reserved.hex	0	reject	Rust mutation setting reserved policy VRR byte
