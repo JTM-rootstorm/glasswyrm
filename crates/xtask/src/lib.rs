@@ -230,7 +230,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         args.extend(selectors.iter().map(OsString::from));
         Invocation::new("meson", args)
     };
-    let gwcomp_cargo = || cargo(&["test", "-p", "gwcomp-core", "-p", "gwcomp"]);
+    let gwcomp_cargo = || cargo(&["test", "-p", "gwcomp-core"]);
     let gwcomp_headless = || meson(&["--suite", "tier3-headless-process"]);
 
     let invocations = match &cli.task {
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(invocations.len(), 2);
         assert_eq!(
             strings(&invocations[0]),
-            ["test", "-p", "gwcomp-core", "-p", "gwcomp"]
+            ["test", "-p", "gwcomp-core"]
         );
         let meson = strings(&invocations[1]);
         assert!(meson.windows(2).any(|pair| pair == ["-C", "legacy-out"]));

@@ -3,6 +3,7 @@ members = [
   "crates/gw-test-support",
   "crates/gw-types",
   "crates/gw-wire",
+  "crates/gwcomp-core",
   "crates/gw-ipc",
   "crates/xtask",
 ]
