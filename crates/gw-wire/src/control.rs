@@ -157,11 +157,10 @@ pub fn decode_hello(bytes: &[u8]) -> Result<Hello, ControlDecodeError> {
     let mut reader = ByteReader::new(bytes);
     let minimum_version = WireVersion::new(reader.read_u16()?, reader.read_u16()?);
     let maximum_version = WireVersion::new(reader.read_u16()?, reader.read_u16()?);
-    let sender_role = decode_peer_role(reader.read_u16()?)?;
+    let sender_role = reader.read_u16()?;
     let reserved = reader.read_u16()?;
     let offered_capabilities = Capabilities::from_bits_retain(reader.read_u64()?);
-    let required_capabilities =
-        Capabilities::from_bits(reader.read_u64()?).ok_or(ControlDecodeError::InvalidValue)?;
+    let required_capabilities = reader.read_u64()?;
     let maximum_payload = reader.read_u32()?;
     let maximum_fd_count = reader.read_u16()?;
     let name_size = usize::from(reader.read_u16()?);
@@ -172,10 +171,15 @@ pub fn decode_hello(bytes: &[u8]) -> Result<Hello, ControlDecodeError> {
     if name_size > MAXIMUM_INSTANCE_LABEL_BYTES {
         return Err(ControlDecodeError::LimitExceeded);
     }
-    let name = std::str::from_utf8(reader.read_bytes(name_size)?)
+    let name = reader.read_bytes(name_size)?;
+    reader.finish()?;
+
+    let sender_role = decode_peer_role(sender_role)?;
+    let required_capabilities =
+        Capabilities::from_bits(required_capabilities).ok_or(ControlDecodeError::InvalidValue)?;
+    let name = std::str::from_utf8(name)
         .map_err(|_| ControlDecodeError::InvalidValue)?
         .to_owned();
-    reader.finish()?;
 
     if reserved != 0
         || minimum_version > maximum_version
@@ -219,10 +223,9 @@ pub fn encode_welcome(value: &Welcome) -> Vec<u8> {
 pub fn decode_welcome(bytes: &[u8]) -> Result<Welcome, ControlDecodeError> {
     let mut reader = ByteReader::new(bytes);
     let selected_version = WireVersion::new(reader.read_u16()?, reader.read_u16()?);
-    let sender_role = decode_peer_role(reader.read_u16()?)?;
+    let sender_role = reader.read_u16()?;
     let reserved1 = reader.read_u16()?;
-    let negotiated_capabilities =
-        Capabilities::from_bits(reader.read_u64()?).ok_or(ControlDecodeError::InvalidValue)?;
+    let negotiated_capabilities = reader.read_u64()?;
     let negotiated_maximum_payload = reader.read_u32()?;
     let negotiated_maximum_fd_count = reader.read_u16()?;
     let reserved2 = reader.read_u16()?;
@@ -232,6 +235,10 @@ pub fn decode_welcome(bytes: &[u8]) -> Result<Welcome, ControlDecodeError> {
         .try_into()
         .map_err(|_| ControlDecodeError::Truncated)?;
     reader.finish()?;
+
+    let sender_role = decode_peer_role(sender_role)?;
+    let negotiated_capabilities =
+        Capabilities::from_bits(negotiated_capabilities).ok_or(ControlDecodeError::InvalidValue)?;
 
     if reserved1 != 0
         || reserved2 != 0
@@ -276,8 +283,7 @@ pub fn encode_reject(value: &Reject) -> Result<Vec<u8>, ControlEncodeError> {
 
 pub fn decode_reject(bytes: &[u8]) -> Result<Reject, ControlDecodeError> {
     let mut reader = ByteReader::new(bytes);
-    let reason = RejectReason::try_from(reader.read_u16()?)
-        .map_err(|()| ControlDecodeError::InvalidValue)?;
+    let reason = reader.read_u16()?;
     let detail_size = usize::from(reader.read_u16()?);
     let supported_minimum_version = WireVersion::new(reader.read_u16()?, reader.read_u16()?);
     let supported_maximum_version = WireVersion::new(reader.read_u16()?, reader.read_u16()?);
@@ -285,10 +291,13 @@ pub fn decode_reject(bytes: &[u8]) -> Result<Reject, ControlDecodeError> {
     if detail_size > MAXIMUM_DIAGNOSTIC_BYTES {
         return Err(ControlDecodeError::LimitExceeded);
     }
-    let detail = std::str::from_utf8(reader.read_bytes(detail_size)?)
+    let detail = reader.read_bytes(detail_size)?;
+    reader.finish()?;
+
+    let reason = RejectReason::try_from(reason).map_err(|()| ControlDecodeError::InvalidValue)?;
+    let detail = std::str::from_utf8(detail)
         .map_err(|_| ControlDecodeError::InvalidValue)?
         .to_owned();
-    reader.finish()?;
 
     if reserved != 0 || supported_minimum_version > supported_maximum_version {
         return Err(ControlDecodeError::InvalidValue);
@@ -347,8 +356,7 @@ pub fn encode_protocol_error(value: &ProtocolError) -> Result<Vec<u8>, ControlEn
 
 pub fn decode_protocol_error(bytes: &[u8]) -> Result<ProtocolError, ControlDecodeError> {
     let mut reader = ByteReader::new(bytes);
-    let code = ProtocolErrorCode::try_from(reader.read_u16()?)
-        .map_err(|()| ControlDecodeError::InvalidValue)?;
+    let code = reader.read_u16()?;
     let offending_type = MessageType::new(reader.read_u16()?);
     let reserved1 = reader.read_u32()?;
     let offending_sequence = Sequence::new(reader.read_u64()?);
@@ -357,10 +365,12 @@ pub fn decode_protocol_error(bytes: &[u8]) -> Result<ProtocolError, ControlDecod
     if detail_size > MAXIMUM_DIAGNOSTIC_BYTES {
         return Err(ControlDecodeError::LimitExceeded);
     }
-    let detail = std::str::from_utf8(reader.read_bytes(detail_size)?)
+    let detail = reader.read_bytes(detail_size)?;
+    reader.finish()?;
+    let code = ProtocolErrorCode::try_from(code).map_err(|()| ControlDecodeError::InvalidValue)?;
+    let detail = std::str::from_utf8(detail)
         .map_err(|_| ControlDecodeError::InvalidValue)?
         .to_owned();
-    reader.finish()?;
     if reserved1 != 0 || reserved2 != 0 || offending_sequence.get() == 0 {
         return Err(ControlDecodeError::InvalidValue);
     }
@@ -387,13 +397,13 @@ pub fn encode_snapshot_begin(value: SnapshotBegin) -> Vec<u8> {
 pub fn decode_snapshot_begin(bytes: &[u8]) -> Result<SnapshotBegin, ControlDecodeError> {
     let mut reader = ByteReader::new(bytes);
     let snapshot_id = SnapshotId::new(reader.read_u64()?);
-    let domain = SnapshotDomain::try_from(reader.read_u16()?)
-        .map_err(|()| ControlDecodeError::InvalidValue)?;
+    let domain = reader.read_u16()?;
     let flags = reader.read_u16()?;
     let generation = Generation::new(reader.read_u64()?);
     let expected_item_count = reader.read_u32()?;
     let reserved = reader.read_u32()?;
     reader.finish()?;
+    let domain = SnapshotDomain::try_from(domain).map_err(|()| ControlDecodeError::InvalidValue)?;
     if snapshot_id.get() == 0 || flags != 0 || reserved != 0 {
         return Err(ControlDecodeError::InvalidValue);
     }
@@ -455,10 +465,11 @@ pub fn decode_snapshot_abort(bytes: &[u8]) -> Result<SnapshotAbort, ControlDecod
     if detail_size > MAXIMUM_DIAGNOSTIC_BYTES {
         return Err(ControlDecodeError::LimitExceeded);
     }
-    let detail = std::str::from_utf8(reader.read_bytes(detail_size)?)
+    let detail = reader.read_bytes(detail_size)?;
+    reader.finish()?;
+    let detail = std::str::from_utf8(detail)
         .map_err(|_| ControlDecodeError::InvalidValue)?
         .to_owned();
-    reader.finish()?;
     if snapshot_id.get() == 0 || reason == 0 || reserved != 0 {
         return Err(ControlDecodeError::InvalidValue);
     }
@@ -703,5 +714,25 @@ mod tests {
 
         assert_eq!(decode_ping(&[0; 7]), Err(ControlDecodeError::Truncated));
         assert_eq!(decode_ping(&[0; 9]), Err(ControlDecodeError::TrailingData));
+    }
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 16];
+        assert_eq!(
+            decode_reject(&invalid),
+            Err(ControlDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_reject(&invalid[..15]),
+            Err(ControlDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_reject(&trailing),
+            Err(ControlDecodeError::TrailingData)
+        );
     }
 }

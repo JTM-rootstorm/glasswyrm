@@ -253,14 +253,14 @@ pub fn decode_policy_window_upsert(bytes: &[u8]) -> Result<PolicyWindowUpsert, P
     let requested_width = reader.read_u32()?;
     let requested_height = reader.read_u32()?;
     let border_width = reader.read_u32()?;
-    let window_type = decode_window_type(reader.read_u16()?)?;
-    let map_intent = decode_map_intent(reader.read_u16()?)?;
-    let override_redirect = decode_bool(reader.read_u8()?)?;
+    let window_type = reader.read_u16()?;
+    let map_intent = reader.read_u16()?;
+    let override_redirect = reader.read_u8()?;
     let decoration_preference = u16::from(reader.read_u8()?);
-    let fullscreen_requested = decode_bool(reader.read_u8()?)?;
-    let maximized_requested = decode_bool(reader.read_u8()?)?;
-    let minimized_requested = decode_bool(reader.read_u8()?)?;
-    let attention_requested = decode_bool(reader.read_u8()?)?;
+    let fullscreen_requested = reader.read_u8()?;
+    let maximized_requested = reader.read_u8()?;
+    let minimized_requested = reader.read_u8()?;
+    let attention_requested = reader.read_u8()?;
     let reserved16 = reader.read_u16()?;
     let creation_serial = reader.read_u64()?;
     let map_serial = reader.read_u64()?;
@@ -268,6 +268,13 @@ pub fn decode_policy_window_upsert(bytes: &[u8]) -> Result<PolicyWindowUpsert, P
     let flags = reader.read_u32()?;
     let reserved32 = reader.read_u32()?;
     reader.finish()?;
+    let window_type = decode_window_type(window_type)?;
+    let map_intent = decode_map_intent(map_intent)?;
+    let override_redirect = decode_bool(override_redirect)?;
+    let fullscreen_requested = decode_bool(fullscreen_requested)?;
+    let maximized_requested = decode_bool(maximized_requested)?;
+    let minimized_requested = decode_bool(minimized_requested)?;
+    let attention_requested = decode_bool(attention_requested)?;
     if window_id == 0
         || requested_width == 0
         || requested_height == 0
@@ -395,19 +402,27 @@ pub fn decode_policy_window_state(bytes: &[u8]) -> Result<PolicyWindowState, Pol
     let final_width = reader.read_u32()?;
     let final_height = reader.read_u32()?;
     let stacking = reader.read_i32()?;
-    let window_type = decode_window_type(reader.read_u16()?)?;
-    let applied_state = decode_applied_state(reader.read_u16()?)?;
-    let visible = decode_bool(reader.read_u8()?)?;
-    let focused = decode_bool(reader.read_u8()?)?;
-    let managed = decode_bool(reader.read_u8()?)?;
-    let decoration_eligible = decode_bool(reader.read_u8()?)?;
-    let override_redirect = decode_bool(reader.read_u8()?)?;
-    let attention_requested = decode_bool(reader.read_u8()?)?;
+    let window_type = reader.read_u16()?;
+    let applied_state = reader.read_u16()?;
+    let visible = reader.read_u8()?;
+    let focused = reader.read_u8()?;
+    let managed = reader.read_u8()?;
+    let decoration_eligible = reader.read_u8()?;
+    let override_redirect = reader.read_u8()?;
+    let attention_requested = reader.read_u8()?;
     let fullscreen_eligible = u16::from(reader.read_u8()?);
     let direct_scanout_eligible = u16::from(reader.read_u8()?);
     let flags = reader.read_u32()?;
     let reserved2 = reader.read_u32()?;
     reader.finish()?;
+    let window_type = decode_window_type(window_type)?;
+    let applied_state = decode_applied_state(applied_state)?;
+    let visible = decode_bool(visible)?;
+    let focused = decode_bool(focused)?;
+    let managed = decode_bool(managed)?;
+    let decoration_eligible = decode_bool(decoration_eligible)?;
+    let override_redirect = decode_bool(override_redirect)?;
+    let attention_requested = decode_bool(attention_requested)?;
     if window_id == 0
         || workspace_id == 0
         || output_id == 0
@@ -465,9 +480,10 @@ pub fn decode_policy_acknowledged(bytes: &[u8]) -> Result<PolicyAcknowledged, Po
     let applied_generation = reader.read_u64()?;
     let policy_hash = reader.read_u64()?;
     let window_count = reader.read_u32()?;
-    let result = decode_policy_result(reader.read_u16()?)?;
+    let result = reader.read_u16()?;
     let reserved = reader.read_u16()?;
     reader.finish()?;
+    let result = decode_policy_result(result)?;
     if commit_id == 0 || producer_generation == 0 || reserved != 0 {
         return Err(PolicyDecodeError::InvalidValue);
     }
@@ -515,11 +531,13 @@ pub fn decode_policy_bindings_upsert(
     let close_keysym = reader.read_u32()?;
     let minimum_width = reader.read_u32()?;
     let minimum_height = reader.read_u32()?;
-    let raise_on_focus = decode_bool(reader.read_u8()?)?;
-    let consume_wm_bindings = decode_bool(reader.read_u8()?)?;
+    let raise_on_focus = reader.read_u8()?;
+    let consume_wm_bindings = reader.read_u8()?;
     let reserved3 = reader.read_u16()?;
     let reserved4 = reader.read_u32()?;
     reader.finish()?;
+    let raise_on_focus = decode_bool(raise_on_focus)?;
+    let consume_wm_bindings = decode_bool(consume_wm_bindings)?;
     if (move_modifiers | resize_modifiers | close_modifiers) & !0x00ff != 0
         || !(1..=9).contains(&move_button)
         || !(1..=9).contains(&resize_button)
@@ -599,5 +617,30 @@ fn decode_policy_result(value: u16) -> Result<PolicyResult, PolicyDecodeError> {
         6 => Ok(PolicyResult::RejectedLimit),
         7 => Ok(PolicyResult::RejectedUnsupportedMetadata),
         _ => Err(PolicyDecodeError::InvalidValue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let mut invalid = vec![0; POLICY_WINDOW_UPSERT_WIRE_SIZE];
+        invalid[40..42].copy_from_slice(&u16::MAX.to_le_bytes());
+        assert_eq!(
+            decode_policy_window_upsert(&invalid),
+            Err(PolicyDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_policy_window_upsert(&invalid[..POLICY_WINDOW_UPSERT_WIRE_SIZE - 1]),
+            Err(PolicyDecodeError::Truncated)
+        );
+
+        invalid.push(0);
+        assert_eq!(
+            decode_policy_window_upsert(&invalid),
+            Err(PolicyDecodeError::TrailingData)
+        );
     }
 }

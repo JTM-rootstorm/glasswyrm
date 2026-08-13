@@ -112,8 +112,8 @@ fn finish(r: ByteReader<'_>, valid: bool) -> Result<(), ContractDecodeError> {
         Err(ContractDecodeError::InvalidValue)
     }
 }
-fn read_bool(r: &mut ByteReader<'_>) -> Result<bool, ContractDecodeError> {
-    match r.read_u8()? {
+fn decode_bool(value: u8) -> Result<bool, ContractDecodeError> {
+    match value {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(ContractDecodeError::InvalidValue),
@@ -169,7 +169,7 @@ pub fn decode_output_descriptor_upsert(
 ) -> Result<OutputDescriptorUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
     let output_id = r.read_u64()?;
-    let kind = r.read_u16()?.try_into()?;
+    let kind = r.read_u16()?;
     let name_size = r.read_u16()? as usize;
     let capability_flags = r.read_u32()?;
     let physical_width_millimeters = r.read_u32()?;
@@ -185,7 +185,10 @@ pub fn decode_output_descriptor_upsert(
     if name_size > MAXIMUM_OUTPUT_NAME_BYTES {
         return Err(ContractDecodeError::LimitExceeded);
     }
-    let name = std::str::from_utf8(r.read_bytes(name_size)?)
+    let name = r.read_bytes(name_size)?;
+    finish(r, true)?;
+    let kind = kind.try_into()?;
+    let name = std::str::from_utf8(name)
         .map_err(|_| ContractDecodeError::InvalidValue)?
         .to_owned();
     let v = OutputDescriptorUpsert {
@@ -231,7 +234,9 @@ pub fn decode_output_descriptor_upsert(
             <= u64::from(maximum_scale_numerator) * u64::from(minimum_scale_denominator)
         && (1..=4096).contains(&maximum_physical_width)
         && (1..=4096).contains(&maximum_physical_height);
-    finish(r, valid)?;
+    if !valid {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -252,34 +257,40 @@ pub fn encode_output_mode_upsert(v: &OutputModeUpsert) -> Vec<u8> {
 }
 pub fn decode_output_mode_upsert(bytes: &[u8]) -> Result<OutputModeUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = OutputModeUpsert {
-        output_id: r.read_u64()?,
-        mode_id: r.read_u64()?,
-        physical_width: r.read_u32()?,
-        physical_height: r.read_u32()?,
-        refresh_millihertz: r.read_u32()?,
-        preferred: read_bool(&mut r)?,
-        current: read_bool(&mut r)?,
-        flags: {
-            if r.read_u16()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u32()?
-        },
-    };
+    let output_id = r.read_u64()?;
+    let mode_id = r.read_u64()?;
+    let physical_width = r.read_u32()?;
+    let physical_height = r.read_u32()?;
+    let refresh_millihertz = r.read_u32()?;
+    let preferred = r.read_u8()?;
+    let current = r.read_u8()?;
+    let reserved16 = r.read_u16()?;
+    let flags = r.read_u32()?;
     let reserved = r.read_u32()?;
+    finish(r, true)?;
+    let v = OutputModeUpsert {
+        output_id,
+        mode_id,
+        physical_width,
+        physical_height,
+        refresh_millihertz,
+        preferred: decode_bool(preferred)?,
+        current: decode_bool(current)?,
+        flags,
+    };
     let pixels = u64::from(v.physical_width) * u64::from(v.physical_height);
-    finish(
-        r,
-        v.output_id != 0
-            && v.mode_id != 0
-            && (1..=4096).contains(&v.physical_width)
-            && (1..=4096).contains(&v.physical_height)
-            && pixels <= 16_777_216
-            && v.refresh_millihertz != 0
-            && v.flags == 0
-            && reserved == 0,
-    )?;
+    if !(v.output_id != 0
+        && v.mode_id != 0
+        && (1..=4096).contains(&v.physical_width)
+        && (1..=4096).contains(&v.physical_height)
+        && pixels <= 16_777_216
+        && v.refresh_millihertz != 0
+        && v.flags == 0
+        && reserved16 == 0
+        && reserved == 0)
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -313,7 +324,7 @@ pub fn decode_surface_output_state(
     let preferred_scale_numerator = r.read_u32()?;
     let preferred_scale_denominator = r.read_u32()?;
     let client_buffer_scale = r.read_u32()?;
-    let scale_mode = r.read_u16()?.try_into()?;
+    let scale_mode = r.read_u16()?;
     let reserved = r.read_u16()?;
     let flags = r.read_u32()?;
     let count = r.read_u32()? as usize;
@@ -324,6 +335,8 @@ pub fn decode_surface_output_state(
     for _ in 0..count {
         output_ids.push(r.read_u64()?)
     }
+    finish(r, true)?;
+    let scale_mode = scale_mode.try_into()?;
     let v = SurfaceOutputState {
         surface_id,
         primary_output_id,
@@ -350,7 +363,9 @@ pub fn decode_surface_output_state(
         && layout_generation != 0
         && flags == 0
         && reserved == 0;
-    finish(r, valid)?;
+    if !valid {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -378,22 +393,38 @@ pub fn decode_policy_output_upsert(
     bytes: &[u8],
 ) -> Result<PolicyOutputUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
+    let output_id = r.read_u64()?;
+    let logical_x = r.read_i32()?;
+    let logical_y = r.read_i32()?;
+    let logical_width = r.read_u32()?;
+    let logical_height = r.read_u32()?;
+    let work_x = r.read_i32()?;
+    let work_y = r.read_i32()?;
+    let work_width = r.read_u32()?;
+    let work_height = r.read_u32()?;
+    let scale_numerator = r.read_u32()?;
+    let scale_denominator = r.read_u32()?;
+    let transform = r.read_u16()?;
+    let enabled = r.read_u8()?;
+    let primary = r.read_u8()?;
+    let flags = r.read_u32()?;
+    finish(r, true)?;
     let v = PolicyOutputUpsert {
-        output_id: r.read_u64()?,
-        logical_x: r.read_i32()?,
-        logical_y: r.read_i32()?,
-        logical_width: r.read_u32()?,
-        logical_height: r.read_u32()?,
-        work_x: r.read_i32()?,
-        work_y: r.read_i32()?,
-        work_width: r.read_u32()?,
-        work_height: r.read_u32()?,
-        scale_numerator: r.read_u32()?,
-        scale_denominator: r.read_u32()?,
-        transform: r.read_u16()?.try_into()?,
-        enabled: read_bool(&mut r)?,
-        primary: read_bool(&mut r)?,
-        flags: r.read_u32()?,
+        output_id,
+        logical_x,
+        logical_y,
+        logical_width,
+        logical_height,
+        work_x,
+        work_y,
+        work_width,
+        work_height,
+        scale_numerator,
+        scale_denominator,
+        transform: transform.try_into()?,
+        enabled: decode_bool(enabled)?,
+        primary: decode_bool(primary)?,
+        flags,
     };
     let disabled = !v.enabled
         && !v.primary
@@ -416,13 +447,13 @@ pub fn decode_policy_output_upsert(
             <= v.logical_x as u64 + u64::from(v.logical_width)
         && (v.work_y as u64 + u64::from(v.work_height))
             <= v.logical_y as u64 + u64::from(v.logical_height);
-    finish(
-        r,
-        v.output_id != 0
-            && v.flags == 0
-            && valid_scale(v.scale_numerator, v.scale_denominator, 120)
-            && (disabled || (enabled && extents)),
-    )?;
+    if !(v.output_id != 0
+        && v.flags == 0
+        && valid_scale(v.scale_numerator, v.scale_denominator, 120)
+        && (disabled || (enabled && extents)))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -519,32 +550,63 @@ pub fn decode_output_configuration_acknowledged(
     bytes: &[u8],
 ) -> Result<OutputConfigurationAcknowledged, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = OutputConfigurationAcknowledged {
-        request_id: r.read_u64()?,
-        applied_generation: r.read_u64()?,
-        result: r.read_u16()?.try_into()?,
-        flags: {
-            if r.read_u16()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u32()?
-        },
-        primary_output_id: r.read_u64()?,
-        root_logical_width: r.read_u32()?,
-        root_logical_height: r.read_u32()?,
-        enabled_output_count: r.read_u32()?,
-    };
+    let request_id = r.read_u64()?;
+    let applied_generation = r.read_u64()?;
+    let result = r.read_u16()?;
+    let reserved = r.read_u16()?;
+    let flags = r.read_u32()?;
+    let primary_output_id = r.read_u64()?;
+    let root_logical_width = r.read_u32()?;
+    let root_logical_height = r.read_u32()?;
+    let enabled_output_count = r.read_u32()?;
     let z = r.read_u32()?;
-    finish(
-        r,
-        v.request_id != 0
-            && v.applied_generation != 0
-            && v.flags == 0
-            && v.primary_output_id != 0
-            && (1..=32767).contains(&v.root_logical_width)
-            && (1..=32767).contains(&v.root_logical_height)
-            && (1..=MAXIMUM_MANAGED_OUTPUTS as u32).contains(&v.enabled_output_count)
-            && z == 0,
-    )?;
+    finish(r, true)?;
+    let v = OutputConfigurationAcknowledged {
+        request_id,
+        applied_generation,
+        result: result.try_into()?,
+        flags,
+        primary_output_id,
+        root_logical_width,
+        root_logical_height,
+        enabled_output_count,
+    };
+    if !(v.request_id != 0
+        && v.applied_generation != 0
+        && reserved == 0
+        && v.flags == 0
+        && v.primary_output_id != 0
+        && (1..=32767).contains(&v.root_logical_width)
+        && (1..=32767).contains(&v.root_logical_height)
+        && (1..=MAXIMUM_MANAGED_OUTPUTS as u32).contains(&v.enabled_output_count)
+        && z == 0)
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 48];
+        assert_eq!(
+            decode_output_configuration_acknowledged(&invalid),
+            Err(ContractDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_output_configuration_acknowledged(&invalid[..47]),
+            Err(ContractDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_output_configuration_acknowledged(&trailing),
+            Err(ContractDecodeError::TrailingData)
+        );
+    }
 }

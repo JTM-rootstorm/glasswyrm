@@ -133,10 +133,11 @@ pub fn decode_synthetic_button(bytes: &[u8]) -> Result<SyntheticButton, InputDec
     let input_id = reader.read_u64()?;
     let time_ms = reader.read_u32()?;
     let button = reader.read_u8()?;
-    let pressed = decode_bool(reader.read_u8()?)?;
+    let pressed = reader.read_u8()?;
     let reserved = reader.read_u16()?;
     let flags = reader.read_u32()?;
     reader.finish()?;
+    let pressed = decode_bool(pressed)?;
     validate_identity(input_id, time_ms, flags)?;
     if !(1..=5).contains(&button) || reserved != 0 {
         return Err(InputDecodeError::InvalidValue);
@@ -167,10 +168,11 @@ pub fn decode_synthetic_key(bytes: &[u8]) -> Result<SyntheticKey, InputDecodeErr
     let input_id = reader.read_u64()?;
     let time_ms = reader.read_u32()?;
     let keycode = reader.read_u8()?;
-    let pressed = decode_bool(reader.read_u8()?)?;
+    let pressed = reader.read_u8()?;
     let reserved = reader.read_u16()?;
     let flags = reader.read_u32()?;
     reader.finish()?;
+    let pressed = decode_bool(pressed)?;
     validate_identity(input_id, time_ms, flags)?;
     if keycode < 8 || reserved != 0 {
         return Err(InputDecodeError::InvalidValue);
@@ -228,7 +230,7 @@ pub fn decode_synthetic_input_acknowledged(
     let mut reader = ByteReader::new(bytes);
     let input_id = reader.read_u64()?;
     let time_ms = reader.read_u32()?;
-    let result = decode_result(reader.read_u16()?)?;
+    let result = reader.read_u16()?;
     let root_x = reader.read_i32()?;
     let root_y = reader.read_i32()?;
     let pointer_window = reader.read_u32()?;
@@ -238,6 +240,7 @@ pub fn decode_synthetic_input_acknowledged(
     let delivered_event_count = reader.read_u32()?;
     let flags = reader.read_u32()?;
     reader.finish()?;
+    let result = decode_result(result)?;
     validate_identity(input_id, time_ms, flags)?;
     if reserved != 0 {
         return Err(InputDecodeError::InvalidValue);
@@ -281,5 +284,30 @@ fn decode_result(value: u16) -> Result<SyntheticInputResult, InputDecodeError> {
         5 => Ok(SyntheticInputResult::FocusRejected),
         6 => Ok(SyntheticInputResult::LimitExceeded),
         _ => Err(InputDecodeError::InvalidValue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let mut invalid = vec![0; 20];
+        invalid[13] = 2;
+        assert_eq!(
+            decode_synthetic_button(&invalid),
+            Err(InputDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_synthetic_button(&invalid[..19]),
+            Err(InputDecodeError::Truncated)
+        );
+
+        invalid.push(0);
+        assert_eq!(
+            decode_synthetic_button(&invalid),
+            Err(InputDecodeError::TrailingData)
+        );
     }
 }

@@ -99,19 +99,25 @@ pub fn encode_policy_lifecycle_window_upsert(value: &PolicyLifecycleWindowUpsert
 pub fn decode_policy_lifecycle_window_upsert(
     bytes: &[u8],
 ) -> Result<PolicyLifecycleWindowUpsert, LifecycleDecodeError> {
-    if bytes.len() < POLICY_WINDOW_UPSERT_WIRE_SIZE {
+    const TRAILER_WIRE_SIZE: usize = 32;
+    let expected_size = POLICY_WINDOW_UPSERT_WIRE_SIZE + TRAILER_WIRE_SIZE;
+    if bytes.len() < expected_size {
         return Err(LifecycleDecodeError::Truncated);
+    }
+    if bytes.len() > expected_size {
+        return Err(LifecycleDecodeError::TrailingData);
     }
     let window = decode_policy_window_upsert(&bytes[..POLICY_WINDOW_UPSERT_WIRE_SIZE])?;
     let mut reader = ByteReader::new(&bytes[POLICY_WINDOW_UPSERT_WIRE_SIZE..]);
     let geometry_serial = reader.read_u64()?;
     let stack_serial = reader.read_u64()?;
     let stack_sibling = reader.read_u32()?;
-    let stack_mode = decode_stack_mode(reader.read_u16()?)?;
+    let stack_mode = reader.read_u16()?;
     let reserved1 = reader.read_u16()?;
     let flags = reader.read_u32()?;
     let reserved2 = reader.read_u32()?;
     reader.finish()?;
+    let stack_mode = decode_stack_mode(stack_mode)?;
     let no_stack = stack_serial == 0;
     if reserved1 != 0
         || reserved2 != 0
@@ -160,19 +166,26 @@ pub fn decode_surface_policy_upsert(
     let surface_id = reader.read_u64()?;
     let x11_window_id = reader.read_u32()?;
     let workspace_id = reader.read_u32()?;
-    let window_type = decode_window_type(reader.read_u16()?)?;
-    let applied_state = decode_applied_state(reader.read_u16()?)?;
-    let focused = decode_bool(reader.read_u8()?)?;
-    let managed = decode_bool(reader.read_u8()?)?;
-    let decoration_eligible = decode_bool(reader.read_u8()?)?;
-    let override_redirect = decode_bool(reader.read_u8()?)?;
-    let attention_requested = decode_bool(reader.read_u8()?)?;
+    let window_type = reader.read_u16()?;
+    let applied_state = reader.read_u16()?;
+    let focused = reader.read_u8()?;
+    let managed = reader.read_u8()?;
+    let decoration_eligible = reader.read_u8()?;
+    let override_redirect = reader.read_u8()?;
+    let attention_requested = reader.read_u8()?;
     let fullscreen_eligible = u16::from(reader.read_u8()?);
     let direct_scanout_eligible = u16::from(reader.read_u8()?);
     let reserved1 = reader.read_u8()?;
     let flags = reader.read_u32()?;
     let reserved2 = reader.read_u32()?;
     reader.finish()?;
+    let window_type = decode_window_type(window_type)?;
+    let applied_state = decode_applied_state(applied_state)?;
+    let focused = decode_bool(focused)?;
+    let managed = decode_bool(managed)?;
+    let decoration_eligible = decode_bool(decoration_eligible)?;
+    let override_redirect = decode_bool(override_redirect)?;
+    let attention_requested = decode_bool(attention_requested)?;
     if surface_id == 0
         || x11_window_id == 0
         || workspace_id == 0
@@ -235,5 +248,30 @@ fn decode_stack_mode(value: u16) -> Result<PolicyStackMode, LifecycleDecodeError
         1 => Ok(PolicyStackMode::Above),
         2 => Ok(PolicyStackMode::Below),
         _ => Err(LifecycleDecodeError::InvalidValue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 36];
+        assert_eq!(
+            decode_surface_policy_upsert(&invalid),
+            Err(LifecycleDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_surface_policy_upsert(&invalid[..35]),
+            Err(LifecycleDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_surface_policy_upsert(&trailing),
+            Err(LifecycleDecodeError::TrailingData)
+        );
     }
 }

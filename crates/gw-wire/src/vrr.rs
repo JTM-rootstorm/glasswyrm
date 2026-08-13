@@ -118,8 +118,8 @@ pub struct PresentationTiming {
     pub timestamp_available: bool,
 }
 
-fn read_bool(r: &mut ByteReader<'_>) -> Result<bool, ContractDecodeError> {
-    match r.read_u8()? {
+fn decode_bool(value: u8) -> Result<bool, ContractDecodeError> {
+    match value {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(ContractDecodeError::InvalidValue),
@@ -165,18 +165,25 @@ pub fn decode_output_vrr_capability_upsert(
 ) -> Result<OutputVrrCapabilityUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
     let output_id = r.read_u64()?;
-    let connector_property_present = read_bool(&mut r)?;
-    let hardware_capable = read_bool(&mut r)?;
-    let kms_controllable = read_bool(&mut r)?;
-    let simulated = read_bool(&mut r)?;
-    let range_available = read_bool(&mut r)?;
-    let atomic_required = read_bool(&mut r)?;
+    let connector_property_present = r.read_u8()?;
+    let hardware_capable = r.read_u8()?;
+    let kms_controllable = r.read_u8()?;
+    let simulated = r.read_u8()?;
+    let range_available = r.read_u8()?;
+    let atomic_required = r.read_u8()?;
     let reserved16 = r.read_u16()?;
     let minimum_refresh_millihertz = r.read_u32()?;
     let maximum_refresh_millihertz = r.read_u32()?;
     let reason_flags = r.read_u64()?;
     let flags = r.read_u32()?;
     let reserved32 = r.read_u32()?;
+    finish(r, true)?;
+    let connector_property_present = decode_bool(connector_property_present)?;
+    let hardware_capable = decode_bool(hardware_capable)?;
+    let kms_controllable = decode_bool(kms_controllable)?;
+    let simulated = decode_bool(simulated)?;
+    let range_available = decode_bool(range_available)?;
+    let atomic_required = decode_bool(atomic_required)?;
     let v = OutputVrrCapabilityUpsert {
         output_id,
         connector_property_present,
@@ -195,17 +202,17 @@ pub fn decode_output_vrr_capability_upsert(
     } else {
         minimum_refresh_millihertz == 0 && maximum_refresh_millihertz == 0
     };
-    finish(
-        r,
-        output_id != 0
-            && reserved16 == 0
-            && reserved32 == 0
-            && flags == 0
-            && range
-            && reasons(reason_flags)
-            && (!hardware_capable || connector_property_present)
-            && (!simulated || !hardware_capable),
-    )?;
+    if !(output_id != 0
+        && reserved16 == 0
+        && reserved32 == 0
+        && flags == 0
+        && range
+        && reasons(reason_flags)
+        && (!hardware_capable || connector_property_present)
+        && (!simulated || !hardware_capable))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -222,17 +229,19 @@ pub fn decode_output_vrr_policy_upsert(
     bytes: &[u8],
 ) -> Result<OutputVrrPolicyUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
+    let output_id = r.read_u64()?;
+    let mode = r.read_u16()?;
+    let reserved = r.read_u16()?;
+    let flags = r.read_u32()?;
+    finish(r, true)?;
     let v = OutputVrrPolicyUpsert {
-        output_id: r.read_u64()?,
-        mode: r.read_u16()?.try_into()?,
-        flags: {
-            if r.read_u16()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u32()?
-        },
+        output_id,
+        mode: mode.try_into()?,
+        flags,
     };
-    finish(r, v.output_id != 0 && v.flags == 0)?;
+    if v.output_id == 0 || reserved != 0 || v.flags != 0 {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -268,45 +277,61 @@ pub fn decode_output_vrr_state_upsert(
     bytes: &[u8],
 ) -> Result<OutputVrrStateUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
+    let output_id = r.read_u64()?;
+    let requested_mode = r.read_u16()?;
+    let decision = r.read_u16()?;
+    let desired_enabled = r.read_u8()?;
+    let effective_enabled = r.read_u8()?;
+    let property_readback_valid = r.read_u8()?;
+    let session_active = r.read_u8()?;
+    let candidate_window_id = r.read_u32()?;
+    let reserved = r.read_u32()?;
+    let candidate_surface_id = r.read_u64()?;
+    let reason_flags = r.read_u64()?;
+    let state_generation = r.read_u64()?;
+    let transition_serial = r.read_u64()?;
+    let last_commit_id = r.read_u64()?;
+    let last_presented_generation = r.read_u64()?;
+    let last_flip_sequence = r.read_u32()?;
+    let flags = r.read_u32()?;
+    let last_flip_timestamp_nanoseconds = r.read_u64()?;
+    let last_interval_nanoseconds = r.read_u64()?;
+    finish(r, true)?;
     let v = OutputVrrStateUpsert {
-        output_id: r.read_u64()?,
-        requested_mode: r.read_u16()?.try_into()?,
-        decision: r.read_u16()?.try_into()?,
-        desired_enabled: read_bool(&mut r)?,
-        effective_enabled: read_bool(&mut r)?,
-        property_readback_valid: read_bool(&mut r)?,
-        session_active: read_bool(&mut r)?,
-        candidate_window_id: r.read_u32()?,
-        candidate_surface_id: {
-            if r.read_u32()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u64()?
-        },
-        reason_flags: r.read_u64()?,
-        state_generation: r.read_u64()?,
-        transition_serial: r.read_u64()?,
-        last_commit_id: r.read_u64()?,
-        last_presented_generation: r.read_u64()?,
-        last_flip_sequence: r.read_u32()?,
-        flags: r.read_u32()?,
-        last_flip_timestamp_nanoseconds: r.read_u64()?,
-        last_interval_nanoseconds: r.read_u64()?,
+        output_id,
+        requested_mode: requested_mode.try_into()?,
+        decision: decision.try_into()?,
+        desired_enabled: decode_bool(desired_enabled)?,
+        effective_enabled: decode_bool(effective_enabled)?,
+        property_readback_valid: decode_bool(property_readback_valid)?,
+        session_active: decode_bool(session_active)?,
+        candidate_window_id,
+        candidate_surface_id,
+        reason_flags,
+        state_generation,
+        transition_serial,
+        last_commit_id,
+        last_presented_generation,
+        last_flip_sequence,
+        flags,
+        last_flip_timestamp_nanoseconds,
+        last_interval_nanoseconds,
     };
     let simulated = v.reason_flags & VRR_REASON_SIMULATED_HEADLESS != 0;
     let enabled = !v.effective_enabled
         || (v.desired_enabled
             && v.decision == VrrDecision::Enabled
             && (v.property_readback_valid || simulated));
-    finish(
-        r,
-        v.output_id != 0
-            && v.flags == 0
-            && reasons(v.reason_flags)
-            && v.state_generation != 0
-            && enabled
-            && (v.decision == VrrDecision::Enabled || v.reason_flags != 0),
-    )?;
+    if !(v.output_id != 0
+        && reserved == 0
+        && v.flags == 0
+        && reasons(v.reason_flags)
+        && v.state_generation != 0
+        && enabled
+        && (v.decision == VrrDecision::Enabled || v.reason_flags != 0))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -340,44 +365,45 @@ pub fn decode_surface_vrr_state(bytes: &[u8]) -> Result<SurfaceVrrState, Contrac
     let window_id = r.read_u32()?;
     let a = r.read_u32()?;
     let output_id = r.read_u64()?;
-    let preference = r.read_u16()?.try_into()?;
-    let policy_selected = read_bool(&mut r)?;
-    let policy_eligible = read_bool(&mut r)?;
-    let focused = read_bool(&mut r)?;
-    let fullscreen = read_bool(&mut r)?;
-    let borderless_fullscreen = read_bool(&mut r)?;
-    let exclusive_output_membership = read_bool(&mut r)?;
+    let preference = r.read_u16()?;
+    let policy_selected = r.read_u8()?;
+    let policy_eligible = r.read_u8()?;
+    let focused = r.read_u8()?;
+    let fullscreen = r.read_u8()?;
+    let borderless_fullscreen = r.read_u8()?;
+    let exclusive_output_membership = r.read_u8()?;
     let reason_flags = r.read_u64()?;
     let policy_generation = r.read_u64()?;
     let flags = r.read_u32()?;
     let b = r.read_u32()?;
+    finish(r, true)?;
     let v = SurfaceVrrState {
         surface_id,
         window_id,
         output_id,
-        preference,
-        policy_selected,
-        policy_eligible,
-        focused,
-        fullscreen,
-        borderless_fullscreen,
-        exclusive_output_membership,
+        preference: preference.try_into()?,
+        policy_selected: decode_bool(policy_selected)?,
+        policy_eligible: decode_bool(policy_eligible)?,
+        focused: decode_bool(focused)?,
+        fullscreen: decode_bool(fullscreen)?,
+        borderless_fullscreen: decode_bool(borderless_fullscreen)?,
+        exclusive_output_membership: decode_bool(exclusive_output_membership)?,
         reason_flags,
         policy_generation,
         flags,
     };
-    finish(
-        r,
-        surface_id != 0
-            && window_id != 0
-            && output_id != 0
-            && a == 0
-            && b == 0
-            && flags == 0
-            && reasons(reason_flags)
-            && policy_generation != 0
-            && (!policy_selected || policy_eligible),
-    )?;
+    if !(surface_id != 0
+        && window_id != 0
+        && output_id != 0
+        && a == 0
+        && b == 0
+        && flags == 0
+        && reasons(reason_flags)
+        && policy_generation != 0
+        && (!v.policy_selected || v.policy_eligible))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -395,18 +421,20 @@ pub fn decode_policy_window_vrr_upsert(
     bytes: &[u8],
 ) -> Result<PolicyWindowVrrUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = PolicyWindowVrrUpsert {
-        window_id: r.read_u32()?,
-        preference: r.read_u16()?.try_into()?,
-        flags: {
-            if r.read_u16()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u32()?
-        },
-    };
+    let window_id = r.read_u32()?;
+    let preference = r.read_u16()?;
+    let reserved = r.read_u16()?;
+    let flags = r.read_u32()?;
     let z = r.read_u32()?;
-    finish(r, v.window_id != 0 && v.flags == 0 && z == 0)?;
+    finish(r, true)?;
+    let v = PolicyWindowVrrUpsert {
+        window_id,
+        preference: preference.try_into()?,
+        flags,
+    };
+    if v.window_id == 0 || reserved != 0 || v.flags != 0 || z != 0 {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 #[must_use]
@@ -423,14 +451,22 @@ pub fn decode_policy_output_vrr_upsert(
     bytes: &[u8],
 ) -> Result<PolicyOutputVrrUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
+    let output_id = r.read_u64()?;
+    let mode = r.read_u16()?;
+    let hardware_capable = r.read_u8()?;
+    let kms_controllable = r.read_u8()?;
+    let flags = r.read_u32()?;
+    finish(r, true)?;
     let v = PolicyOutputVrrUpsert {
-        output_id: r.read_u64()?,
-        mode: r.read_u16()?.try_into()?,
-        hardware_capable: read_bool(&mut r)?,
-        kms_controllable: read_bool(&mut r)?,
-        flags: r.read_u32()?,
+        output_id,
+        mode: mode.try_into()?,
+        hardware_capable: decode_bool(hardware_capable)?,
+        kms_controllable: decode_bool(kms_controllable)?,
+        flags,
     };
-    finish(r, v.output_id != 0 && v.flags == 0)?;
+    if v.output_id == 0 || v.flags != 0 {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -463,39 +499,40 @@ pub fn decode_policy_window_vrr_state(
     let window_id = r.read_u32()?;
     let a = r.read_u32()?;
     let output_id = r.read_u64()?;
-    let preference = r.read_u16()?.try_into()?;
-    let selected = read_bool(&mut r)?;
-    let eligible = read_bool(&mut r)?;
-    let focused = read_bool(&mut r)?;
-    let fullscreen = read_bool(&mut r)?;
-    let borderless_fullscreen = read_bool(&mut r)?;
-    let exclusive_output_membership = read_bool(&mut r)?;
+    let preference = r.read_u16()?;
+    let selected = r.read_u8()?;
+    let eligible = r.read_u8()?;
+    let focused = r.read_u8()?;
+    let fullscreen = r.read_u8()?;
+    let borderless_fullscreen = r.read_u8()?;
+    let exclusive_output_membership = r.read_u8()?;
     let reason_flags = r.read_u64()?;
     let flags = r.read_u32()?;
     let b = r.read_u32()?;
+    finish(r, true)?;
     let v = PolicyWindowVrrState {
         window_id,
         output_id,
-        preference,
-        selected,
-        eligible,
-        focused,
-        fullscreen,
-        borderless_fullscreen,
-        exclusive_output_membership,
+        preference: preference.try_into()?,
+        selected: decode_bool(selected)?,
+        eligible: decode_bool(eligible)?,
+        focused: decode_bool(focused)?,
+        fullscreen: decode_bool(fullscreen)?,
+        borderless_fullscreen: decode_bool(borderless_fullscreen)?,
+        exclusive_output_membership: decode_bool(exclusive_output_membership)?,
         reason_flags,
         flags,
     };
-    finish(
-        r,
-        window_id != 0
-            && output_id != 0
-            && a == 0
-            && b == 0
-            && flags == 0
-            && reasons(reason_flags)
-            && (!selected || eligible),
-    )?;
+    if !(window_id != 0
+        && output_id != 0
+        && a == 0
+        && b == 0
+        && flags == 0
+        && reasons(reason_flags)
+        && (!v.selected || v.eligible))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 #[must_use]
@@ -515,24 +552,32 @@ pub fn decode_policy_output_vrr_state(
     bytes: &[u8],
 ) -> Result<PolicyOutputVrrState, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = PolicyOutputVrrState {
-        output_id: r.read_u64()?,
-        mode: r.read_u16()?.try_into()?,
-        desired_enabled: read_bool(&mut r)?,
-        candidate_required: read_bool(&mut r)?,
-        selected_window_id: r.read_u32()?,
-        reason_flags: r.read_u64()?,
-        flags: r.read_u32()?,
-    };
+    let output_id = r.read_u64()?;
+    let mode = r.read_u16()?;
+    let desired_enabled = r.read_u8()?;
+    let candidate_required = r.read_u8()?;
+    let selected_window_id = r.read_u32()?;
+    let reason_flags = r.read_u64()?;
+    let flags = r.read_u32()?;
     let z = r.read_u32()?;
-    finish(
-        r,
-        v.output_id != 0
-            && z == 0
-            && v.flags == 0
-            && reasons(v.reason_flags)
-            && (!v.candidate_required || v.selected_window_id != 0 || !v.desired_enabled),
-    )?;
+    finish(r, true)?;
+    let v = PolicyOutputVrrState {
+        output_id,
+        mode: mode.try_into()?,
+        desired_enabled: decode_bool(desired_enabled)?,
+        candidate_required: decode_bool(candidate_required)?,
+        selected_window_id,
+        reason_flags,
+        flags,
+    };
+    if !(v.output_id != 0
+        && z == 0
+        && v.flags == 0
+        && reasons(v.reason_flags)
+        && (!v.candidate_required || v.selected_window_id != 0 || !v.desired_enabled))
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -554,33 +599,68 @@ pub fn encode_presentation_timing(v: &PresentationTiming) -> Vec<u8> {
 }
 pub fn decode_presentation_timing(bytes: &[u8]) -> Result<PresentationTiming, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = PresentationTiming {
-        output_id: r.read_u64()?,
-        commit_id: r.read_u64()?,
-        presented_generation: r.read_u64()?,
-        flip_sequence: r.read_u32()?,
-        flags: r.read_u32()?,
-        kernel_timestamp_nanoseconds: r.read_u64()?,
-        interval_nanoseconds: r.read_u64()?,
-        effective_vrr_enabled: read_bool(&mut r)?,
-        timestamp_available: read_bool(&mut r)?,
-    };
+    let output_id = r.read_u64()?;
+    let commit_id = r.read_u64()?;
+    let presented_generation = r.read_u64()?;
+    let flip_sequence = r.read_u32()?;
+    let flags = r.read_u32()?;
+    let kernel_timestamp_nanoseconds = r.read_u64()?;
+    let interval_nanoseconds = r.read_u64()?;
+    let effective_vrr_enabled = r.read_u8()?;
+    let timestamp_available = r.read_u8()?;
     let a = r.read_u16()?;
     let b = r.read_u32()?;
+    finish(r, true)?;
+    let v = PresentationTiming {
+        output_id,
+        commit_id,
+        presented_generation,
+        flip_sequence,
+        flags,
+        kernel_timestamp_nanoseconds,
+        interval_nanoseconds,
+        effective_vrr_enabled: decode_bool(effective_vrr_enabled)?,
+        timestamp_available: decode_bool(timestamp_available)?,
+    };
     let timing = if v.timestamp_available {
         v.kernel_timestamp_nanoseconds != 0
     } else {
         v.kernel_timestamp_nanoseconds == 0 && v.interval_nanoseconds == 0
     };
-    finish(
-        r,
-        v.output_id != 0
-            && v.commit_id != 0
-            && v.presented_generation != 0
-            && (v.flags & !PRESENTATION_TIMING_SIMULATED) == 0
-            && a == 0
-            && b == 0
-            && timing,
-    )?;
+    if !(v.output_id != 0
+        && v.commit_id != 0
+        && v.presented_generation != 0
+        && (v.flags & !PRESENTATION_TIMING_SIMULATED) == 0
+        && a == 0
+        && b == 0
+        && timing)
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 16];
+        assert_eq!(
+            decode_policy_output_vrr_upsert(&invalid),
+            Err(ContractDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_policy_output_vrr_upsert(&invalid[..15]),
+            Err(ContractDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_policy_output_vrr_upsert(&trailing),
+            Err(ContractDecodeError::TrailingData)
+        );
+    }
 }

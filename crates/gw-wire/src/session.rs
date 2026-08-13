@@ -77,10 +77,11 @@ pub fn encode_session_state_change(value: &SessionStateChange) -> Vec<u8> {
 pub fn decode_session_state_change(bytes: &[u8]) -> Result<SessionStateChange, SessionDecodeError> {
     let mut reader = ByteReader::new(bytes);
     let generation = reader.read_u64()?;
-    let state = decode_state(reader.read_u16()?)?;
+    let state = reader.read_u16()?;
     let reserved = reader.read_u16()?;
     let flags = reader.read_u32()?;
     reader.finish()?;
+    let state = decode_state(state)?;
     if generation == 0 || reserved != 0 || flags != 0 {
         return Err(SessionDecodeError::InvalidValue);
     }
@@ -106,10 +107,12 @@ pub fn decode_session_state_acknowledged(
 ) -> Result<SessionStateAcknowledged, SessionDecodeError> {
     let mut reader = ByteReader::new(bytes);
     let generation = reader.read_u64()?;
-    let state = decode_state(reader.read_u16()?)?;
-    let result = decode_result(reader.read_u16()?)?;
+    let state = reader.read_u16()?;
+    let result = reader.read_u16()?;
     let flags = reader.read_u32()?;
     reader.finish()?;
+    let state = decode_state(state)?;
+    let result = decode_result(result)?;
     if generation == 0 || flags != 0 {
         return Err(SessionDecodeError::InvalidValue);
     }
@@ -136,5 +139,30 @@ fn decode_result(value: u16) -> Result<SessionStateResult, SessionDecodeError> {
         3 => Ok(SessionStateResult::InputUnavailable),
         4 => Ok(SessionStateResult::Failed),
         _ => Err(SessionDecodeError::InvalidValue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 16];
+        assert_eq!(
+            decode_session_state_acknowledged(&invalid),
+            Err(SessionDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_session_state_acknowledged(&invalid[..15]),
+            Err(SessionDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_session_state_acknowledged(&trailing),
+            Err(SessionDecodeError::TrailingData)
+        );
     }
 }

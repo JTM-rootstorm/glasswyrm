@@ -182,8 +182,8 @@ pub struct FrameAcknowledged {
     pub result: FrameResult,
 }
 
-fn read_bool(r: &mut ByteReader<'_>) -> Result<bool, ContractDecodeError> {
-    match r.read_u8()? {
+fn decode_bool(value: u8) -> Result<bool, ContractDecodeError> {
+    match value {
         0 => Ok(false),
         1 => Ok(true),
         _ => Err(ContractDecodeError::InvalidValue),
@@ -208,30 +208,50 @@ fn write_color(w: &mut ByteWriter, c: &SdrColorMetadata) {
     w.write_u32(c.maximum_luminance_millinit);
     w.write_u32(c.max_frame_average_luminance_millinit);
 }
-fn read_color(r: &mut ByteReader<'_>) -> Result<SdrColorMetadata, ContractDecodeError> {
-    let color = SdrColorMetadata {
-        color_space: r.read_u16()?.try_into()?,
-        transfer_function: r.read_u16()?.try_into()?,
-        primaries: r.read_u16()?.try_into()?,
-        luminance_available: read_bool(r)?,
-        minimum_luminance_millinit: {
-            if r.read_u8()? != 0 {
-                return Err(ContractDecodeError::InvalidValue);
-            }
-            r.read_u32()?
-        },
+struct RawSdrColorMetadata {
+    color_space: u16,
+    transfer_function: u16,
+    primaries: u16,
+    luminance_available: u8,
+    reserved: u8,
+    minimum_luminance_millinit: u32,
+    maximum_luminance_millinit: u32,
+    max_frame_average_luminance_millinit: u32,
+}
+
+fn read_color(r: &mut ByteReader<'_>) -> Result<RawSdrColorMetadata, ContractDecodeError> {
+    Ok(RawSdrColorMetadata {
+        color_space: r.read_u16()?,
+        transfer_function: r.read_u16()?,
+        primaries: r.read_u16()?,
+        luminance_available: r.read_u8()?,
+        reserved: r.read_u8()?,
+        minimum_luminance_millinit: r.read_u32()?,
         maximum_luminance_millinit: r.read_u32()?,
         max_frame_average_luminance_millinit: r.read_u32()?,
+    })
+}
+
+fn decode_color(raw: RawSdrColorMetadata) -> Result<SdrColorMetadata, ContractDecodeError> {
+    let color = SdrColorMetadata {
+        color_space: raw.color_space.try_into()?,
+        transfer_function: raw.transfer_function.try_into()?,
+        primaries: raw.primaries.try_into()?,
+        luminance_available: decode_bool(raw.luminance_available)?,
+        minimum_luminance_millinit: raw.minimum_luminance_millinit,
+        maximum_luminance_millinit: raw.maximum_luminance_millinit,
+        max_frame_average_luminance_millinit: raw.max_frame_average_luminance_millinit,
     };
-    let valid = if color.luminance_available {
-        color.maximum_luminance_millinit != 0
-            && color.minimum_luminance_millinit <= color.maximum_luminance_millinit
-            && color.max_frame_average_luminance_millinit <= color.maximum_luminance_millinit
-    } else {
-        color.minimum_luminance_millinit == 0
-            && color.maximum_luminance_millinit == 0
-            && color.max_frame_average_luminance_millinit == 0
-    };
+    let valid = raw.reserved == 0
+        && if color.luminance_available {
+            color.maximum_luminance_millinit != 0
+                && color.minimum_luminance_millinit <= color.maximum_luminance_millinit
+                && color.max_frame_average_luminance_millinit <= color.maximum_luminance_millinit
+        } else {
+            color.minimum_luminance_millinit == 0
+                && color.maximum_luminance_millinit == 0
+                && color.max_frame_average_luminance_millinit == 0
+        };
     if valid {
         Ok(color)
     } else {
@@ -269,25 +289,34 @@ pub fn encode_output_upsert(v: &OutputUpsert) -> Vec<u8> {
 pub fn decode_output_upsert(bytes: &[u8]) -> Result<OutputUpsert, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
     let output_id = r.read_u64()?;
-    let enabled = read_bool(&mut r)?;
-    if r.read_u8()? != 0 {
-        return Err(ContractDecodeError::InvalidValue);
-    }
-    let transform = r.read_u16()?.try_into()?;
+    let enabled = r.read_u8()?;
+    let reserved = r.read_u8()?;
+    let transform = r.read_u16()?;
+    let logical_x = r.read_i32()?;
+    let logical_y = r.read_i32()?;
+    let logical_width = r.read_u32()?;
+    let logical_height = r.read_u32()?;
+    let physical_pixel_width = r.read_u32()?;
+    let physical_pixel_height = r.read_u32()?;
+    let refresh_millihertz = r.read_u32()?;
+    let scale_numerator = r.read_u32()?;
+    let scale_denominator = r.read_u32()?;
+    let color = read_color(&mut r)?;
+    finish(r, true)?;
     let v = OutputUpsert {
         output_id,
-        enabled,
-        transform,
-        logical_x: r.read_i32()?,
-        logical_y: r.read_i32()?,
-        logical_width: r.read_u32()?,
-        logical_height: r.read_u32()?,
-        physical_pixel_width: r.read_u32()?,
-        physical_pixel_height: r.read_u32()?,
-        refresh_millihertz: r.read_u32()?,
-        scale_numerator: r.read_u32()?,
-        scale_denominator: r.read_u32()?,
-        color: read_color(&mut r)?,
+        enabled: decode_bool(enabled)?,
+        transform: transform.try_into()?,
+        logical_x,
+        logical_y,
+        logical_width,
+        logical_height,
+        physical_pixel_width,
+        physical_pixel_height,
+        refresh_millihertz,
+        scale_numerator,
+        scale_denominator,
+        color: decode_color(color)?,
     };
     let valid = v.output_id != 0
         && v.scale_numerator != 0
@@ -298,7 +327,9 @@ pub fn decode_output_upsert(bytes: &[u8]) -> Result<OutputUpsert, ContractDecode
                 && v.physical_pixel_width != 0
                 && v.physical_pixel_height != 0
                 && v.refresh_millihertz != 0));
-    finish(r, valid)?;
+    if reserved != 0 || !valid {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -357,9 +388,9 @@ pub fn decode_surface_upsert(bytes: &[u8]) -> Result<SurfaceUpsert, ContractDeco
     let logical_width = r.read_u32()?;
     let logical_height = r.read_u32()?;
     let stacking = r.read_i32()?;
-    let visible = read_bool(&mut r)?;
-    let clipping = read_bool(&mut r)?;
-    let transform = r.read_u16()?.try_into()?;
+    let visible = r.read_u8()?;
+    let clipping = r.read_u8()?;
+    let transform = r.read_u16()?;
     let clip_x = r.read_i32()?;
     let clip_y = r.read_i32()?;
     let clip_width = r.read_u32()?;
@@ -369,9 +400,10 @@ pub fn decode_surface_upsert(bytes: &[u8]) -> Result<SurfaceUpsert, ContractDeco
     let scale_denominator = r.read_u32()?;
     let color = read_color(&mut r)?;
     let presentation_flags = r.read_u32()?;
-    let fullscreen_eligible = r.read_u8()?.try_into()?;
-    let direct_scanout_eligible = r.read_u8()?.try_into()?;
+    let fullscreen_eligible = r.read_u8()?;
+    let direct_scanout_eligible = r.read_u8()?;
     let reserved2 = r.read_u16()?;
+    finish(r, true)?;
     let v = SurfaceUpsert {
         surface_id,
         x11_window_id,
@@ -382,20 +414,20 @@ pub fn decode_surface_upsert(bytes: &[u8]) -> Result<SurfaceUpsert, ContractDeco
         logical_width,
         logical_height,
         stacking,
-        visible,
-        clipping,
+        visible: decode_bool(visible)?,
+        clipping: decode_bool(clipping)?,
         clip_x,
         clip_y,
         clip_width,
         clip_height,
-        transform,
+        transform: transform.try_into()?,
         opacity,
         scale_numerator,
         scale_denominator,
-        color,
+        color: decode_color(color)?,
         presentation_flags,
-        fullscreen_eligible,
-        direct_scanout_eligible,
+        fullscreen_eligible: fullscreen_eligible.try_into()?,
+        direct_scanout_eligible: direct_scanout_eligible.try_into()?,
     };
     let valid = v.surface_id != 0
         && v.logical_width != 0
@@ -414,7 +446,9 @@ pub fn decode_surface_upsert(bytes: &[u8]) -> Result<SurfaceUpsert, ContractDeco
                 width: v.clip_width,
                 height: v.clip_height,
             }));
-    finish(r, valid)?;
+    if !valid {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -461,13 +495,14 @@ pub fn decode_buffer_attach(bytes: &[u8]) -> Result<BufferAttach, ContractDecode
     let reserved1 = r.read_u32()?;
     let byte_offset = r.read_u64()?;
     let storage_size = r.read_u64()?;
-    let pixel_format = r.read_u16()?.try_into()?;
-    let alpha_semantics = r.read_u16()?.try_into()?;
+    let pixel_format = r.read_u16()?;
+    let alpha_semantics = r.read_u16()?;
     let modifier = r.read_u64()?;
     let color = read_color(&mut r)?;
-    let synchronization = r.read_u16()?.try_into()?;
+    let synchronization = r.read_u16()?;
     let reserved2 = r.read_u16()?;
     let flags = r.read_u32()?;
+    finish(r, true)?;
     let v = BufferAttach {
         buffer_id,
         surface_id,
@@ -476,11 +511,11 @@ pub fn decode_buffer_attach(bytes: &[u8]) -> Result<BufferAttach, ContractDecode
         stride,
         byte_offset,
         storage_size,
-        pixel_format,
+        pixel_format: pixel_format.try_into()?,
         modifier,
-        alpha_semantics,
-        color,
-        synchronization,
+        alpha_semantics: alpha_semantics.try_into()?,
+        color: decode_color(color)?,
+        synchronization: synchronization.try_into()?,
         flags,
     };
     let row = u64::from(width) * 4;
@@ -492,21 +527,21 @@ pub fn decode_buffer_attach(bytes: &[u8]) -> Result<BufferAttach, ContractDecode
         && width <= u32::MAX / 4
         && u64::from(stride) >= row
         && required.is_some_and(|n| byte_offset <= storage_size && n <= storage_size - byte_offset);
-    let format = (pixel_format == PixelFormat::Xrgb8888
-        && alpha_semantics == AlphaSemantics::Opaque)
-        || (pixel_format == PixelFormat::Argb8888
-            && alpha_semantics == AlphaSemantics::Premultiplied);
-    finish(
-        r,
-        buffer_id != 0
-            && surface_id != 0
-            && reserved1 == 0
-            && reserved2 == 0
-            && geometry
-            && format
-            && modifier == 0
-            && flags == 0,
-    )?;
+    let format = (v.pixel_format == PixelFormat::Xrgb8888
+        && v.alpha_semantics == AlphaSemantics::Opaque)
+        || (v.pixel_format == PixelFormat::Argb8888
+            && v.alpha_semantics == AlphaSemantics::Premultiplied);
+    if !(buffer_id != 0
+        && surface_id != 0
+        && reserved1 == 0
+        && reserved2 == 0
+        && geometry
+        && format
+        && modifier == 0
+        && flags == 0)
+    {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -537,13 +572,18 @@ pub fn encode_buffer_release(v: &BufferRelease) -> Vec<u8> {
 }
 pub fn decode_buffer_release(bytes: &[u8]) -> Result<BufferRelease, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = BufferRelease {
-        buffer_id: r.read_u64()?,
-        reason: r.read_u16()?.try_into()?,
-    };
+    let buffer_id = r.read_u64()?;
+    let reason = r.read_u16()?;
     let a = r.read_u16()?;
     let b = r.read_u32()?;
-    finish(r, v.buffer_id != 0 && a == 0 && b == 0)?;
+    finish(r, true)?;
+    let v = BufferRelease {
+        buffer_id,
+        reason: reason.try_into()?,
+    };
+    if v.buffer_id == 0 || a != 0 || b != 0 {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
 }
 
@@ -634,14 +674,46 @@ pub fn encode_frame_acknowledged(v: &FrameAcknowledged) -> Vec<u8> {
 }
 pub fn decode_frame_acknowledged(bytes: &[u8]) -> Result<FrameAcknowledged, ContractDecodeError> {
     let mut r = ByteReader::new(bytes);
-    let v = FrameAcknowledged {
-        commit_id: r.read_u64()?,
-        output_id: r.read_u64()?,
-        presented_generation: r.read_u64()?,
-        result: r.read_u16()?.try_into()?,
-    };
+    let commit_id = r.read_u64()?;
+    let output_id = r.read_u64()?;
+    let presented_generation = r.read_u64()?;
+    let result = r.read_u16()?;
     let a = r.read_u16()?;
     let b = r.read_u32()?;
-    finish(r, v.commit_id != 0 && a == 0 && b == 0)?;
+    finish(r, true)?;
+    let v = FrameAcknowledged {
+        commit_id,
+        output_id,
+        presented_generation,
+        result: result.try_into()?,
+    };
+    if v.commit_id == 0 || a != 0 || b != 0 {
+        return Err(ContractDecodeError::InvalidValue);
+    }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_value_does_not_mask_payload_shape() {
+        let invalid = vec![0; 32];
+        assert_eq!(
+            decode_frame_acknowledged(&invalid),
+            Err(ContractDecodeError::InvalidValue)
+        );
+        assert_eq!(
+            decode_frame_acknowledged(&invalid[..31]),
+            Err(ContractDecodeError::Truncated)
+        );
+
+        let mut trailing = invalid;
+        trailing.push(0);
+        assert_eq!(
+            decode_frame_acknowledged(&trailing),
+            Err(ContractDecodeError::TrailingData)
+        );
+    }
 }
