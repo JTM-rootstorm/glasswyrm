@@ -7,6 +7,7 @@ test(
   'm14-live-runner-lifecycle',
   m14_live_runner_test,
   timeout: 10,
+  suite: test_hardware_selftest_suites,
 )
 m14_live_runner_stage_test = find_program(
   tests_source_dir / 'hardware/m14/live_runner_stage_test.py',
@@ -15,6 +16,7 @@ test(
   'm14-live-runner-stages',
   m14_live_runner_stage_test,
   timeout: 10,
+  suite: test_hardware_selftest_suites,
 )
 
 m14_host_fixture_validator = find_program(
@@ -25,6 +27,7 @@ test(
   m14_host_fixture_validator,
   args: [m14_fixture_root],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m14_host_fixture_validator_test = find_program(
@@ -38,6 +41,7 @@ test(
   'm14-nvidia-probe-analyzer',
   m14_nvidia_probe_analyzer_test,
   timeout: 15,
+  suite: test_contract_suites,
 )
 m14_nvidia_probe_runner_test = find_program(
   tests_source_dir / 'hardware/m14/probe_runner_test.py',
@@ -46,12 +50,14 @@ test(
   'm14-nvidia-probe-runner',
   m14_nvidia_probe_runner_test,
   timeout: 15,
+  suite: test_hardware_selftest_suites,
 )
 test(
   'm14-host-fixture-validator',
   m14_host_fixture_validator_test,
   args: [m14_host_fixture_validator.full_path(), m14_fixture_root],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m14_client_state_validator = find_program(
@@ -62,6 +68,7 @@ test(
   m14_client_state_validator,
   args: [m14_fixture_root / 'm14-vrr-client.json'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m14_client_state_validator_test = find_program(
@@ -71,6 +78,7 @@ test(
   'm14-client-state-validator',
   m14_client_state_validator_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m14_vrr_client_test = executable(
@@ -82,7 +90,7 @@ m14_vrr_client_test = executable(
   ),
   include_directories: [test_source_root_include, gw_include_dir],
 )
-test('m14-vrr-client-unit', m14_vrr_client_test, timeout: 10)
+test('m14-vrr-client-unit', m14_vrr_client_test, timeout: 10, suite: test_unit_suites)
 
 m14_policy_fixture_test = executable(
   'm14_policy_fixture_test',
@@ -95,6 +103,7 @@ test(
   m14_policy_fixture_test,
   args: [m14_fixture_root],
   timeout: 10,
+  suite: test_unit_suites,
 )
 
 if get_option('glasswyrmd')
@@ -109,6 +118,7 @@ if get_option('glasswyrmd')
     m14_gw_vrr_fixture_test,
     args: [m14_fixture_root],
     timeout: 10,
+    suite: test_contract_suites,
   )
 
   if (xcb_test_dependency.found() and get_option('libgwipc') and
@@ -128,12 +138,14 @@ if get_option('glasswyrmd')
       m14_vrr_client,
       args: ['--help'],
       timeout: 10,
+      suite: test_contract_suites,
     )
     test(
       'm14-vrr-client-self-test',
       m14_vrr_client,
       args: ['--self-test'],
       timeout: 10,
+      suite: test_contract_suites,
     )
 
     if (get_option('experimental') and get_option('libgwipc') and
@@ -156,7 +168,7 @@ if get_option('glasswyrmd')
         ],
         depends: [gwm_program, gwcomp_program, glasswyrmd_program,
                   m14_vrr_client, gwinfo_program, gwout_program],
-        suite: 'm14-runtime',
+        suite: test_headless_process_suites + ['m14-runtime'],
         timeout: 20,
       )
 
@@ -189,7 +201,7 @@ if get_option('glasswyrmd')
           ],
           depends: [gwm_program, gwcomp_program, glasswyrmd_program,
                     m14_vrr_client, m14_bounded_damage_test],
-          suite: 'm14-runtime',
+          suite: test_headless_process_suites + ['m14-runtime'],
           timeout: m14_integrated_test_timeout,
         )
       endif
@@ -208,6 +220,7 @@ test(
   m14_vm_evidence_validator_test,
   args: [m14_vm_evidence_validator.full_path()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m14_vm_cli_contract_test = find_program(
@@ -225,12 +238,14 @@ test(
     meson.project_source_root() / 'tools/gw-hw.d',
   ],
   timeout: 15,
+  suite: test_contract_suites,
 )
 test(
   'm14-vm-cli-contract',
   m14_vm_cli_contract_test,
   args: [meson.project_source_root()],
   timeout: 15,
+  suite: test_contract_suites,
 )
 
 m14_dev_cli_contract_test = find_program(
@@ -241,6 +256,7 @@ test(
   m14_dev_cli_contract_test,
   args: [meson.project_source_root()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 if get_option('tools') and get_option('libgwipc')
@@ -254,5 +270,6 @@ if get_option('tools') and get_option('libgwipc')
            m14_fixture_root],
     depends: [output_tools_fake_server, gwinfo_program, gwout_program],
     timeout: 20,
+    suite: test_contract_suites,
   )
 endif

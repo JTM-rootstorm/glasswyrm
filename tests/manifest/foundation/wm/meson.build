@@ -5,7 +5,7 @@ if get_option('gwm')
     dependencies: gwm_options_dep,
     include_directories: test_source_root_include,
   )
-  test('gwm-options', gwm_options_test, timeout: 10)
+  test('gwm-options', gwm_options_test, timeout: 10, suite: test_unit_suites)
 
   wm_policy_test = executable(
     'wm_policy_test',
@@ -13,21 +13,21 @@ if get_option('gwm')
     dependencies: gw_wm_policy_dep,
     include_directories: test_source_root_include,
   )
-  test('wm-policy', wm_policy_test, timeout: 10)
+  test('wm-policy', wm_policy_test, timeout: 10, suite: test_unit_suites)
   multi_output_policy_test = executable(
     'multi_output_policy_test',
     files(tests_source_dir / 'wm/multi_output_policy_test.cpp'),
     dependencies: gw_wm_policy_dep,
     include_directories: test_source_root_include,
   )
-  test('multi-output-policy', multi_output_policy_test, timeout: 10)
+  test('multi-output-policy', multi_output_policy_test, timeout: 10, suite: test_unit_suites)
   interactive_policy_test = executable(
     'interactive_policy_test',
     files(tests_source_dir / 'wm/interactive_policy_test.cpp'),
     dependencies: gw_wm_policy_dep,
     include_directories: test_source_root_include,
   )
-  test('interactive-policy', interactive_policy_test, timeout: 10)
+  test('interactive-policy', interactive_policy_test, timeout: 10, suite: test_unit_suites)
 
   foreach wm_vrr_test : [
     ['wm-vrr-policy', 'vrr_policy_test.cpp'],
@@ -40,7 +40,7 @@ if get_option('gwm')
       dependencies: gw_wm_policy_dep,
       include_directories: test_source_root_include,
     )
-    test(wm_vrr_test[0], wm_vrr_test_executable, timeout: 10)
+    test(wm_vrr_test[0], wm_vrr_test_executable, timeout: 10, suite: test_unit_suites)
   endforeach
   if get_option('glasswyrmd')
     interactive_close_test = executable(
@@ -49,7 +49,7 @@ if get_option('gwm')
       dependencies: [gw_wm_policy_dep, gw_server_state_dep],
       include_directories: test_source_root_include,
     )
-    test('interactive-close', interactive_close_test, timeout: 10)
+    test('interactive-close', interactive_close_test, timeout: 10, suite: test_unit_suites)
   endif
 
   gwm_process_test = executable(
@@ -63,6 +63,7 @@ if get_option('gwm')
     args: [gwm_program.full_path()],
     depends: gwm_program,
     timeout: 15,
+    suite: test_headless_process_suites,
   )
   gwm_vrr_process_test = executable(
     'gwm_vrr_process_test',
@@ -77,13 +78,17 @@ if get_option('gwm')
     args: [gwm_program.full_path()],
     depends: gwm_program,
     timeout: 15,
+    suite: test_headless_process_suites,
   )
   test('gwm-help', gwm_program, args: ['--help'], depends: gwm_program,
+         suite: test_contract_suites,
        timeout: 10)
   test('gwm-version', gwm_program, args: ['--version'], depends: gwm_program,
+         suite: test_contract_suites,
        timeout: 10)
   test('gwm-m5-producer-help', gwm_m5_producer_program, args: ['--help'],
-       depends: gwm_m5_producer_program, timeout: 10)
+       depends: gwm_m5_producer_program, timeout: 10,
+       suite: test_contract_suites)
 
   gwm_scenario_matrix_test = executable(
     'gwm_scenario_matrix_test',
@@ -96,6 +101,7 @@ if get_option('gwm')
            meson.project_source_root() / 'tests/fixtures/m5'],
     depends: [gwm_program, gwm_m5_producer_program],
     timeout: 180,
+    suite: test_headless_process_suites,
   )
 
   gwm_robustness_test = executable(
@@ -109,6 +115,7 @@ if get_option('gwm')
     args: [gwm_program.full_path()],
     depends: gwm_program,
     timeout: 30,
+    suite: test_headless_process_suites,
   )
 
 endif

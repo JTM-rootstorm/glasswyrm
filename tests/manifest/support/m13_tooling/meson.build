@@ -7,12 +7,14 @@ test(
   m13_fixture_validator,
   args: [m13_fixture_root],
   timeout: 10,
+  suite: test_contract_suites,
 )
 test(
   'm13-fixture-complete',
   m13_fixture_validator,
   args: [m13_fixture_root, '--require-complete'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_fixture_validator_test = find_program(
@@ -26,6 +28,7 @@ test(
     tests_source_dir / 'fixtures/m13',
   ],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_fixture_promoter = find_program(
@@ -43,6 +46,7 @@ test(
     m13_fixture_validator.full_path(),
   ],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_evidence_validator = find_program(
@@ -56,6 +60,7 @@ test(
   m13_evidence_validator_test,
   args: [m13_evidence_validator.full_path()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_vm_cli_contract_test = find_program(
@@ -66,6 +71,7 @@ test(
   m13_vm_cli_contract_test,
   args: [meson.project_source_root()],
   timeout: 15,
+  suite: test_contract_suites,
 )
 
 m13_frame_comparator = find_program(
@@ -86,12 +92,14 @@ test(
   m13_frame_set_validator_test,
   args: [m13_frame_set_validator.full_path()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 test(
   'm13-frame-comparator',
   m13_frame_comparator_test,
   args: [m13_frame_comparator.full_path()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_raw_output_probe = find_program(
@@ -102,6 +110,7 @@ test(
   m13_raw_output_probe,
   args: ['--help'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m13_legacy_client = find_program(
@@ -112,4 +121,5 @@ test(
   m13_legacy_client,
   args: ['--help'],
   timeout: 10,
+  suite: test_contract_suites,
 )

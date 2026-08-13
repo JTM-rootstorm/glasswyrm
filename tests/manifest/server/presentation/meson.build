@@ -1,5 +1,5 @@
 if get_option('glasswyrmd') and get_option('libgwipc')
-  test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10)
+  test('gwinput-m8-help', gwinput_m8_program, args: ['--help'], timeout: 10, suite: test_contract_suites)
 
   m9_xeyes_path = get_option('m9_xeyes')
   m9_xclock_path = get_option('m9_xclock')
@@ -20,6 +20,7 @@ if get_option('glasswyrmd') and get_option('libgwipc')
                   gwinput_m8_program, m9_fixed_time],
         is_parallel: false,
         timeout: 30,
+        suite: test_headless_process_suites,
       )
     endforeach
   endif
@@ -30,29 +31,29 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     dependencies: gw_server_core_dep,
     include_directories: test_source_root_include,
   )
-  test('published-buffer', published_buffer_test, timeout: 10)
-  test('m12-extension-stress', m12_extension_stress_probe, timeout: 20)
+  test('published-buffer', published_buffer_test, timeout: 10, suite: test_unit_suites)
+  test('m12-extension-stress', m12_extension_stress_probe, timeout: 20, suite: test_unit_suites)
   content_presenter_test = executable(
     'content_presenter_test',
     files(tests_source_dir / 'unit/content_presenter_test.cpp'),
     dependencies: gw_server_core_dep,
     include_directories: test_source_root_include,
   )
-  test('content-presenter', content_presenter_test, timeout: 10)
+  test('content-presenter', content_presenter_test, timeout: 10, suite: test_unit_suites)
   cursor_presenter_test = executable(
     'cursor_presenter_test',
     files(tests_source_dir / 'unit/cursor_presenter_test.cpp'),
     dependencies: gw_server_core_dep,
     include_directories: test_source_root_include,
   )
-  test('cursor-presenter', cursor_presenter_test, timeout: 10)
+  test('cursor-presenter', cursor_presenter_test, timeout: 10, suite: test_unit_suites)
   lifecycle_projection_test = executable(
     'lifecycle_projection_test',
     files(tests_source_dir / 'unit/lifecycle_projection_test.cpp'),
     dependencies: gw_server_core_dep,
     include_directories: test_source_root_include,
   )
-  test('lifecycle-projection', lifecycle_projection_test, timeout: 10)
+  test('lifecycle-projection', lifecycle_projection_test, timeout: 10, suite: test_unit_suites)
   compositor_output_inventory_test = executable(
     'compositor_output_inventory_test',
     files(tests_source_dir / 'unit/compositor_output_inventory_test.cpp'),
@@ -60,5 +61,6 @@ if get_option('glasswyrmd') and get_option('libgwipc')
     include_directories: test_source_root_include,
   )
   test('compositor-output-inventory', compositor_output_inventory_test,
+         suite: test_unit_suites,
        timeout: 10)
 endif

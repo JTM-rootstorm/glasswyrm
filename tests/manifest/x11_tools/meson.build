@@ -5,7 +5,7 @@ x11_setup_parser_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-setup-parser', x11_setup_parser_test, timeout: 10)
+test('x11-setup-parser', x11_setup_parser_test, timeout: 10, suite: test_unit_suites)
 
 if get_option('tools') and get_option('libgwipc')
   output_client_unit_test = executable(
@@ -14,14 +14,14 @@ if get_option('tools') and get_option('libgwipc')
     dependencies: output_client_dep,
     include_directories: test_source_root_include,
   )
-  test('output-client-unit', output_client_unit_test, timeout: 10)
+  test('output-client-unit', output_client_unit_test, timeout: 10, suite: test_unit_suites)
   vrr_tool_unit_test = executable(
     'vrr_tool_unit_test',
     files(tests_source_dir / 'tools/vrr_tool_unit_test.cpp'),
     dependencies: output_client_dep,
     include_directories: test_source_root_include,
   )
-  test('vrr-tool-unit', vrr_tool_unit_test, timeout: 10)
+  test('vrr-tool-unit', vrr_tool_unit_test, timeout: 10, suite: test_unit_suites)
   output_tools_fake_server = executable(
     'output_tools_fake_server',
     files(tests_source_dir / 'tools/output_tools_fake_server.cpp'),
@@ -39,6 +39,7 @@ if get_option('tools') and get_option('libgwipc')
     args: [output_tools_fake_server],
     depends: output_tools_fake_server,
     timeout: 20,
+    suite: test_contract_suites,
   )
   output_tools_test = find_program(
     tests_source_dir / 'tools/output_tools_test.sh',
@@ -49,11 +50,12 @@ if get_option('tools') and get_option('libgwipc')
     args: [output_tools_fake_server, gwinfo_program, gwout_program],
     depends: [output_tools_fake_server, gwinfo_program, gwout_program],
     timeout: 20,
+    suite: test_contract_suites,
   )
-  test('gwinfo-help', gwinfo_program, args: ['--help'], timeout: 10)
-  test('gwinfo-version', gwinfo_program, args: ['--version'], timeout: 10)
-  test('gwout-help', gwout_program, args: ['--help'], timeout: 10)
-  test('gwout-version', gwout_program, args: ['--version'], timeout: 10)
+  test('gwinfo-help', gwinfo_program, args: ['--help'], timeout: 10, suite: test_contract_suites)
+  test('gwinfo-version', gwinfo_program, args: ['--version'], timeout: 10, suite: test_contract_suites)
+  test('gwout-help', gwout_program, args: ['--help'], timeout: 10, suite: test_contract_suites)
+  test('gwout-version', gwout_program, args: ['--version'], timeout: 10, suite: test_contract_suites)
 endif
 
 x11_setup_reply_test = executable(
@@ -62,7 +64,7 @@ x11_setup_reply_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-setup-reply', x11_setup_reply_test, timeout: 10)
+test('x11-setup-reply', x11_setup_reply_test, timeout: 10, suite: test_unit_suites)
 
 x11_request_framer_test = executable(
   'x11_request_framer_test',
@@ -70,7 +72,7 @@ x11_request_framer_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-request-framer', x11_request_framer_test, timeout: 10)
+test('x11-request-framer', x11_request_framer_test, timeout: 10, suite: test_unit_suites)
 
 x11_reply_atom_test = executable(
   'x11_reply_atom_test',
@@ -78,7 +80,7 @@ x11_reply_atom_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-reply-atom', x11_reply_atom_test, timeout: 10)
+test('x11-reply-atom', x11_reply_atom_test, timeout: 10, suite: test_unit_suites)
 
 if get_option('glasswyrmd')
   m13_scale_client_program = executable(
@@ -96,12 +98,14 @@ if get_option('glasswyrmd')
     m13_scale_client_program,
     args: ['--self-test'],
     timeout: 10,
+    suite: test_unit_suites,
   )
   test(
     'm13-scale-client-help',
     m13_scale_client_program,
     args: ['--help'],
     timeout: 10,
+    suite: test_contract_suites,
   )
 
   foreach unit_case : [
@@ -143,7 +147,7 @@ if get_option('glasswyrmd')
       dependencies: gw_server_state_dep,
       include_directories: test_source_root_include,
     )
-    test(unit_case[0], unit_program, timeout: 10)
+    test(unit_case[0], unit_program, timeout: 10, suite: test_unit_suites)
   endforeach
 
   gw_vrr_dispatch_test = executable(
@@ -152,7 +156,7 @@ if get_option('glasswyrmd')
     dependencies: gw_server_state_dep,
     include_directories: test_source_root_include,
   )
-  test('gw-vrr-dispatch', gw_vrr_dispatch_test, timeout: 10)
+  test('gw-vrr-dispatch', gw_vrr_dispatch_test, timeout: 10, suite: test_unit_suites)
 
   window_tree_test = executable(
     'window_tree_test',
@@ -160,10 +164,10 @@ if get_option('glasswyrmd')
     dependencies: gw_server_state_dep,
     include_directories: test_source_root_include,
   )
-  test('window-tree', window_tree_test, args: ['basic'], timeout: 10)
-  test('window-tree-deep', window_tree_test, args: ['deep'], timeout: 30)
-  test('window-tree-wide', window_tree_test, args: ['wide'], timeout: 30)
-  test('window-tree-mixed', window_tree_test, args: ['mixed'], timeout: 10)
+  test('window-tree', window_tree_test, args: ['basic'], timeout: 10, suite: test_unit_suites)
+  test('window-tree-deep', window_tree_test, args: ['deep'], timeout: 30, suite: test_unit_suites)
+  test('window-tree-wide', window_tree_test, args: ['wide'], timeout: 30, suite: test_unit_suites)
+  test('window-tree-mixed', window_tree_test, args: ['mixed'], timeout: 10, suite: test_unit_suites)
 
   foreach integration_case : [
     ['glasswyrmd-handshake', 'glasswyrmd_handshake_test.cpp'],
@@ -185,6 +189,7 @@ if get_option('glasswyrmd')
       args: [glasswyrmd_program.full_path()],
       depends: glasswyrmd_program,
       timeout: 15,
+      suite: test_headless_process_suites,
     )
   endforeach
 
@@ -198,6 +203,7 @@ test(
   m11_xterm_acceptance_test,
   args: [m11_xterm_acceptance],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m12_workload_environment_test = find_program(
@@ -207,6 +213,7 @@ test(
   'm12-workload-environment',
   m12_workload_environment_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m12_resident_workload_test = find_program(
@@ -216,6 +223,7 @@ test(
   'm12-resident-workload',
   m12_resident_workload_test,
   timeout: 15,
+  suite: test_contract_suites,
 )
 
 m12_trace_validator_test = find_program(tests_source_dir / 'compat/m12/validate_trace_test.py')
@@ -223,6 +231,7 @@ test(
   'm12-trace-validator',
   m12_trace_validator_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m12_fixture_trace_test = find_program(
@@ -232,6 +241,7 @@ test(
   'm12-fixture-trace-normalizer',
   m12_fixture_trace_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m12_fixture_promotion_test = find_program(
@@ -241,6 +251,7 @@ test(
   'm12-fixture-promotion',
   m12_fixture_promotion_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 m12_frame_evidence_test = find_program(tests_source_dir / 'compat/m12/frame_evidence_test.py')
@@ -248,6 +259,7 @@ test(
   'm12-frame-evidence',
   m12_frame_evidence_test,
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 gw_vm_cli_test = find_program(tests_source_dir / 'tools/gw_vm_cli_test.sh')
@@ -256,6 +268,7 @@ test(
   gw_vm_cli_test,
   args: [meson.project_source_root()],
   timeout: 60,
+  suite: test_contract_suites,
 )
 
 source_layout_test = find_program(tests_source_dir / 'tools/source_layout_test.sh')
@@ -263,6 +276,7 @@ test(
   'source-layout',
   source_layout_test,
   timeout: 30,
+  suite: test_unit_suites,
 )
 
 source_layout_archive_test = find_program(
@@ -273,4 +287,5 @@ test(
   source_layout_archive_test,
   args: [meson.project_source_root()],
   timeout: 30,
+  suite: test_unit_suites,
 )

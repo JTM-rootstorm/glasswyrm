@@ -4,7 +4,7 @@ scaffold_test = executable(
   dependencies: gw_scaffold_dep,
 )
 
-test('scaffold', scaffold_test)
+test('scaffold', scaffold_test, suite: test_unit_suites)
 
 output_scale_test = executable(
   'output_scale_test',
@@ -12,7 +12,7 @@ output_scale_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-scale', output_scale_test)
+test('output-scale', output_scale_test, suite: test_unit_suites)
 
 output_transform_test = executable(
   'output_transform_test',
@@ -20,7 +20,7 @@ output_transform_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-transform', output_transform_test)
+test('output-transform', output_transform_test, suite: test_unit_suites)
 
 output_identity_test = executable(
   'output_identity_test',
@@ -28,7 +28,7 @@ output_identity_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-identity', output_identity_test)
+test('output-identity', output_identity_test, suite: test_unit_suites)
 
 output_layout_test = executable(
   'output_layout_test',
@@ -36,7 +36,7 @@ output_layout_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-layout', output_layout_test)
+test('output-layout', output_layout_test, suite: test_unit_suites)
 
 output_mapping_test = executable(
   'output_mapping_test',
@@ -44,7 +44,7 @@ output_mapping_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-mapping', output_mapping_test)
+test('output-mapping', output_mapping_test, suite: test_unit_suites)
 
 vrr_decision_test = executable(
   'vrr_decision_test',
@@ -52,7 +52,7 @@ vrr_decision_test = executable(
   dependencies: gw_vrr_model_dep,
   include_directories: test_source_root_include,
 )
-test('vrr-decision', vrr_decision_test, timeout: 10)
+test('vrr-decision', vrr_decision_test, timeout: 10, suite: test_unit_suites)
 
 vrr_timing_stats_test = executable(
   'vrr_timing_stats_test',
@@ -60,7 +60,7 @@ vrr_timing_stats_test = executable(
   dependencies: gw_vrr_model_dep,
   include_directories: test_source_root_include,
 )
-test('vrr-timing-stats', vrr_timing_stats_test, timeout: 10)
+test('vrr-timing-stats', vrr_timing_stats_test, timeout: 10, suite: test_unit_suites)
 
 output_damage_mapping_test = executable(
   'output_damage_mapping_test',
@@ -68,7 +68,7 @@ output_damage_mapping_test = executable(
   dependencies: gw_output_model_dep,
   include_directories: test_source_include,
 )
-test('output-damage-mapping', output_damage_mapping_test)
+test('output-damage-mapping', output_damage_mapping_test, suite: test_unit_suites)
 
 if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
   session_launcher_test = executable(
@@ -77,18 +77,20 @@ if get_option('glasswyrmd') and get_option('gwm') and get_option('gwcomp')
     dependencies: [gw_session_launcher_dep, dependency('threads')],
     include_directories: test_source_root_include,
   )
-  test('session-launcher', session_launcher_test, timeout: 10)
+  test('session-launcher', session_launcher_test, timeout: 10, suite: test_unit_suites)
   test('session-launcher-help', glasswyrm_session_program, args: ['--help'],
-       depends: glasswyrm_session_program, timeout: 10)
+       depends: glasswyrm_session_program, timeout: 10,
+       suite: test_contract_suites)
 endif
 
 if host_machine.system() == 'linux'
   test('gw-uinput-m11-help', gw_uinput_m11_program, args: ['--help'],
+         suite: test_contract_suites,
        timeout: 10)
   uinput_m11_protocol_test = executable(
     'uinput_m11_protocol_test',
     files(tests_source_dir / 'unit/uinput_m11_protocol_test.cpp'),
     dependencies: uinput_m11_protocol_dep,
   )
-  test('gw-uinput-m11-protocol', uinput_m11_protocol_test, timeout: 10)
+  test('gw-uinput-m11-protocol', uinput_m11_protocol_test, timeout: 10, suite: test_unit_suites)
 endif

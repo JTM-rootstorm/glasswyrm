@@ -10,6 +10,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     m6_fixture_test,
     args: [meson.project_source_root() / 'tests/fixtures/m6'],
     timeout: 10,
+    suite: test_headless_unit_suites,
   )
   m6_fixture_validate = find_program(tests_source_dir / 'tools/m6_fixture_validate.sh')
   test(
@@ -17,6 +18,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     m6_fixture_validate,
     args: [meson.project_source_root() / 'tests/fixtures/m6'],
     timeout: 10,
+    suite: test_headless_unit_suites,
   )
 
   gwcomp_options_test = executable(
@@ -25,7 +27,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     dependencies: gwcomp_options_dep,
     include_directories: test_source_root_include,
   )
-  test('gwcomp-options', gwcomp_options_test, timeout: 10)
+  test('gwcomp-options', gwcomp_options_test, timeout: 10, suite: test_headless_unit_suites)
 
   gwcomp_metadata_scene_test = executable(
     'gwcomp_metadata_scene_test',
@@ -33,7 +35,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     dependencies: [gwcomp_options_dep, gwipc_dep],
     include_directories: test_source_root_include,
   )
-  test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10)
+  test('gwcomp-metadata-scene', gwcomp_metadata_scene_test, timeout: 10, suite: test_headless_unit_suites)
 
   scene_manifest_rollback_test = executable(
     'scene_manifest_rollback_test',
@@ -41,7 +43,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     dependencies: [gwcomp_options_dep, gwipc_dep],
     include_directories: test_source_root_include,
   )
-  test('scene-manifest-rollback', scene_manifest_rollback_test, timeout: 10)
+  test('scene-manifest-rollback', scene_manifest_rollback_test, timeout: 10, suite: test_headless_unit_suites)
 
   gwcomp_cursor_surface_test = executable(
     'gwcomp_cursor_surface_test',
@@ -49,7 +51,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     dependencies: [gwcomp_options_dep, gwipc_dep],
     include_directories: test_source_root_include,
   )
-  test('gwcomp-cursor-surface', gwcomp_cursor_surface_test, timeout: 10)
+  test('gwcomp-cursor-surface', gwcomp_cursor_surface_test, timeout: 10, suite: test_headless_unit_suites)
 
   gwcomp_output_model_presentation_test = executable(
     'gwcomp_output_model_presentation_test',
@@ -61,6 +63,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     'gwcomp-output-model-presentation',
     gwcomp_output_model_presentation_test,
     timeout: 10,
+    suite: test_headless_unit_suites,
   )
 
   gwcomp_metadata_process_test = executable(
@@ -74,6 +77,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: [gwcomp_program.full_path()],
     depends: gwcomp_program,
     timeout: 15,
+    suite: test_headless_process_suites,
   )
 
   gwcomp_process_test = executable(
@@ -88,6 +92,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: [gwcomp_program.full_path()],
     depends: gwcomp_program,
     timeout: 15,
+    suite: test_headless_process_suites,
   )
 
   gwcomp_output_inventory_process_test = executable(
@@ -101,6 +106,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: [gwcomp_program.full_path()],
     depends: gwcomp_program,
     timeout: 15,
+    suite: test_headless_process_suites,
   )
 
   gwcomp_golden_test = executable(
@@ -113,6 +119,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
     depends: [gwcomp_program, gwcomp_m4_producer_program],
     timeout: 15,
+    suite: test_headless_process_suites,
   )
 
   gwcomp_scenario_matrix_test = executable(
@@ -125,6 +132,7 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: [gwcomp_program.full_path(), gwcomp_m4_producer_program.full_path()],
     depends: [gwcomp_program, gwcomp_m4_producer_program],
     timeout: 75,
+    suite: test_headless_process_suites,
   )
 
   test(
@@ -133,5 +141,6 @@ if get_option('gwcomp') and get_option('headless_backend')
     args: ['--help'],
     depends: gwcomp_m4_producer_program,
     timeout: 10,
+    suite: test_contract_suites,
   )
 endif

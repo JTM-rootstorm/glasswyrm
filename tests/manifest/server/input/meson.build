@@ -6,35 +6,35 @@ if get_option('glasswyrmd')
       dependencies: gw_xkb_keymap_dep,
       include_directories: test_source_root_include,
     )
-    test('xkb-keymap', xkb_keymap_test, timeout: 10)
+    test('xkb-keymap', xkb_keymap_test, timeout: 10, suite: test_unit_suites)
     repeat_timer_test = executable(
       'repeat_timer_test',
       files(tests_source_dir / 'unit/repeat_timer_test.cpp'),
       dependencies: gw_xkb_keymap_dep,
       include_directories: test_source_root_include,
     )
-    test('repeat-timer', repeat_timer_test, timeout: 10)
+    test('repeat-timer', repeat_timer_test, timeout: 10, suite: test_unit_suites)
     libinput_path_allowlist_test = executable(
       'libinput_path_allowlist_test',
       files(tests_source_dir / 'unit/libinput_path_allowlist_test.cpp'),
       dependencies: gw_xkb_keymap_dep,
       include_directories: test_source_root_include,
     )
-    test('libinput-path-allowlist', libinput_path_allowlist_test, timeout: 10)
+    test('libinput-path-allowlist', libinput_path_allowlist_test, timeout: 10, suite: test_unit_suites)
     libinput_backend_test = executable(
       'libinput_backend_test',
       files(tests_source_dir / 'unit/libinput_backend_test.cpp'),
       dependencies: gw_xkb_keymap_dep,
       include_directories: test_source_root_include,
     )
-    test('libinput-backend', libinput_backend_test, timeout: 10)
+    test('libinput-backend', libinput_backend_test, timeout: 10, suite: test_unit_suites)
     real_input_controller_test = executable(
       'real_input_controller_test',
       files(tests_source_dir / 'unit/real_input_controller_test.cpp'),
       dependencies: gw_server_core_dep,
       include_directories: test_source_root_include,
     )
-    test('real-input-controller', real_input_controller_test, timeout: 10)
+    test('real-input-controller', real_input_controller_test, timeout: 10, suite: test_unit_suites)
     real_absolute_pointer_routing_test = executable(
       'real_absolute_pointer_routing_test',
       files(tests_source_dir / 'integration/real_absolute_pointer_routing_test.cpp'),
@@ -42,7 +42,8 @@ if get_option('glasswyrmd')
       include_directories: test_source_root_include,
     )
     test('real-absolute-pointer-routing',
-         real_absolute_pointer_routing_test, timeout: 10)
+         real_absolute_pointer_routing_test, timeout: 10,
+         suite: test_contract_suites)
   endif
 
 endif

@@ -3,7 +3,7 @@ x11_event_test = executable(
   files(tests_source_dir / 'protocol/x11_event_test.cpp'),
   dependencies: gw_x11_setup_dep,
 )
-test('x11-structural-events', x11_event_test, timeout: 10)
+test('x11-structural-events', x11_event_test, timeout: 10, suite: test_unit_suites)
 
 x11_input_event_test = executable(
   'x11_input_event_test',
@@ -11,7 +11,7 @@ x11_input_event_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-input-events', x11_input_event_test, timeout: 10)
+test('x11-input-events', x11_input_event_test, timeout: 10, suite: test_unit_suites)
 
 x11_exposure_event_test = executable(
   'x11_exposure_event_test',
@@ -19,7 +19,7 @@ x11_exposure_event_test = executable(
   dependencies: gw_x11_setup_dep,
   include_directories: test_source_root_include,
 )
-test('x11-exposure-events', x11_exposure_event_test, timeout: 10)
+test('x11-exposure-events', x11_exposure_event_test, timeout: 10, suite: test_unit_suites)
 
 m7_fixture_validate = find_program(tests_source_dir / 'tools/m7_fixture_validate.sh')
 test(
@@ -27,6 +27,7 @@ test(
   m7_fixture_validate,
   args: [meson.project_source_root() / 'tests/fixtures/m7'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m8_fixture_validate = find_program(tests_source_dir / 'tools/m8_fixture_validate.sh')
 test(
@@ -34,6 +35,7 @@ test(
   m8_fixture_validate,
   args: [meson.project_source_root() / 'tests/fixtures/m8'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m9_fixture_validate = find_program(tests_source_dir / 'tools/m9_fixture_validate.sh')
 test(
@@ -41,6 +43,7 @@ test(
   m9_fixture_validate,
   args: [meson.project_source_root()],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m9_trace_summarize_test = find_program(tests_source_dir / 'compat/m9/m9_trace_summarize_test.py')
 test(
@@ -48,6 +51,7 @@ test(
   m9_trace_summarize_test,
   args: [tests_source_dir / 'compat/m9/m9_trace_summarize'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m11_trace_summarize_test = find_program(tests_source_dir / 'compat/m11/m11_trace_summarize_test.py')
 test(
@@ -55,6 +59,7 @@ test(
   m11_trace_summarize_test,
   args: [tests_source_dir / 'compat/m11/m11_trace_summarize'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m11_fixture_validate_test = find_program(tests_source_dir / 'tools/m11_fixture_validate_test.py')
 test(
@@ -62,12 +67,14 @@ test(
   m11_fixture_validate_test,
   args: [tests_source_dir / 'tools/m11_fixture_validate.py'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 test(
   'm11-fixture-checksum',
   find_program(tests_source_dir / 'tools/m11_fixture_validate.py'),
   args: [meson.project_source_root() / 'tests/fixtures/m11'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 m12_fixture_validate = find_program(tests_source_dir / 'compat/m12/validate_fixtures.py')
 test(
@@ -75,6 +82,7 @@ test(
   m12_fixture_validate,
   args: [meson.project_source_root() / 'tests/fixtures/m12'],
   timeout: 10,
+  suite: test_contract_suites,
 )
 
 x11_lifecycle_request_test = executable(
@@ -82,7 +90,7 @@ x11_lifecycle_request_test = executable(
   files(tests_source_dir / 'protocol/x11_lifecycle_request_test.cpp'),
   dependencies: gw_x11_setup_dep,
 )
-test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10)
+test('x11-lifecycle-request-decode', x11_lifecycle_request_test, timeout: 10, suite: test_unit_suites)
 
 m9_fixed_time_test = executable(
   'm9_fixed_time_test',
@@ -106,4 +114,5 @@ test(
   env: m9_fixed_time_environment,
   depends: m9_fixed_time,
   timeout: 10,
+  suite: test_unit_suites,
 )

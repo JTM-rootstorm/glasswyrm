@@ -5,7 +5,7 @@ gwcomp_session_state_test = executable(
   dependencies: gwcomp_options_dep,
   include_directories: test_source_root_include,
 )
-test('gwcomp-session-state', gwcomp_session_state_test, timeout: 10)
+test('gwcomp-session-state', gwcomp_session_state_test, timeout: 10, suite: test_unit_suites)
 
 gwcomp_signal_runtime_test = executable(
   'gwcomp_signal_runtime_test',
@@ -13,7 +13,7 @@ gwcomp_signal_runtime_test = executable(
   dependencies: gwcomp_options_dep,
   include_directories: test_source_root_include,
 )
-test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
+test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10, suite: test_unit_suites)
 
   gwcomp_buffer_readiness_test = executable(
   'gwcomp_buffer_readiness_test',
@@ -21,7 +21,7 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
   dependencies: gwcomp_options_dep,
   include_directories: test_source_root_include,
 )
-  test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10)
+  test('gwcomp-buffer-readiness', gwcomp_buffer_readiness_test, timeout: 10, suite: test_unit_suites)
 
   gwcomp_output_inventory_publisher_test = executable(
     'gwcomp_output_inventory_publisher_test',
@@ -30,7 +30,8 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
     include_directories: test_source_root_include,
   )
   test('gwcomp-output-inventory-publisher',
-       gwcomp_output_inventory_publisher_test, timeout: 10)
+       gwcomp_output_inventory_publisher_test, timeout: 10,
+       suite: test_unit_suites)
 
   gwcomp_vrr_inventory_test = executable(
     'gwcomp_vrr_inventory_test',
@@ -38,7 +39,7 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
     dependencies: [gwcomp_options_dep, gwipc_wire_dep],
     include_directories: test_source_root_include,
   )
-  test('gwcomp-vrr-inventory', gwcomp_vrr_inventory_test, timeout: 10)
+  test('gwcomp-vrr-inventory', gwcomp_vrr_inventory_test, timeout: 10, suite: test_unit_suites)
 
   compositor_vrr_state_test = executable(
     'compositor_vrr_state_test',
@@ -46,7 +47,7 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
     dependencies: gwcomp_options_dep,
     include_directories: test_source_root_include,
   )
-  test('compositor-vrr-state', compositor_vrr_state_test, timeout: 10)
+  test('compositor-vrr-state', compositor_vrr_state_test, timeout: 10, suite: test_unit_suites)
 
   compositor_vrr_runtime_test = executable(
     'compositor_vrr_runtime_test',
@@ -54,7 +55,7 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
     dependencies: gwcomp_options_dep,
     include_directories: test_source_root_include,
   )
-  test('compositor-vrr-runtime', compositor_vrr_runtime_test, timeout: 10)
+  test('compositor-vrr-runtime', compositor_vrr_runtime_test, timeout: 10, suite: test_unit_suites)
 
   gwcomp_vrr_presentation_test = executable(
     'gwcomp_vrr_presentation_test',
@@ -62,7 +63,7 @@ test('gwcomp-signal-runtime', gwcomp_signal_runtime_test, timeout: 10)
     dependencies: gwcomp_options_dep,
     include_directories: test_source_root_include,
   )
-  test('gwcomp-vrr-presentation', gwcomp_vrr_presentation_test, timeout: 10)
+  test('gwcomp-vrr-presentation', gwcomp_vrr_presentation_test, timeout: 10, suite: test_unit_suites)
 
 compositor_geometry_test = executable(
   'compositor_geometry_test',
@@ -70,7 +71,7 @@ compositor_geometry_test = executable(
   dependencies: gw_compositor_geometry_dep,
   include_directories: test_source_root_include,
 )
-test('compositor-geometry', compositor_geometry_test, timeout: 10)
+test('compositor-geometry', compositor_geometry_test, timeout: 10, suite: test_unit_suites)
 
 compositor_scene_test = executable(
   'compositor_scene_test',
@@ -78,7 +79,7 @@ compositor_scene_test = executable(
   dependencies: gw_compositor_geometry_dep,
   include_directories: test_source_root_include,
 )
-test('compositor-scene', compositor_scene_test, timeout: 10)
+test('compositor-scene', compositor_scene_test, timeout: 10, suite: test_unit_suites)
 
 compositor_multi_output_scene_test = executable(
   'compositor_multi_output_scene_test',
@@ -87,6 +88,7 @@ compositor_multi_output_scene_test = executable(
   include_directories: test_source_root_include,
 )
 test('compositor-multi-output-scene', compositor_multi_output_scene_test,
+       suite: test_unit_suites,
      timeout: 10)
 
 output_damage_test = executable(
@@ -95,7 +97,7 @@ output_damage_test = executable(
   dependencies: [gw_render_software_dep, gw_output_dep],
   include_directories: test_source_root_include,
 )
-test('output-damage-transaction', output_damage_test, timeout: 10)
+test('output-damage-transaction', output_damage_test, timeout: 10, suite: test_unit_suites)
 
 compositor_buffer_test = executable(
   'compositor_buffer_test',
@@ -103,7 +105,7 @@ compositor_buffer_test = executable(
   dependencies: gw_compositor_geometry_dep,
   include_directories: test_source_root_include,
 )
-test('compositor-buffer', compositor_buffer_test, timeout: 10)
+test('compositor-buffer', compositor_buffer_test, timeout: 10, suite: test_unit_suites)
 
 software_renderer_test = executable(
   'software_renderer_test',
@@ -111,7 +113,7 @@ software_renderer_test = executable(
   dependencies: gw_render_software_dep,
   include_directories: test_source_root_include,
 )
-test('software-renderer', software_renderer_test, timeout: 10)
+test('software-renderer', software_renderer_test, timeout: 10, suite: test_unit_suites)
 
 software_scene_renderer_test = executable(
   'software_scene_renderer_test',
@@ -135,6 +137,7 @@ test(
   software_scene_renderer_test,
   env: software_scene_renderer_environment,
   timeout: 10,
+  suite: test_unit_suites,
 )
 
 multi_output_software_scene_renderer_test = executable(
@@ -156,6 +159,7 @@ test(
   multi_output_software_scene_renderer_test,
   env: multi_output_software_scene_renderer_environment,
   timeout: 10,
+  suite: test_unit_suites,
 )
 
 output_renderer_report_test = executable(
@@ -164,7 +168,7 @@ output_renderer_report_test = executable(
   dependencies: [gw_render_software_dep, gw_output_dep],
   include_directories: test_source_root_include,
 )
-test('output-renderer-report', output_renderer_report_test, timeout: 10)
+test('output-renderer-report', output_renderer_report_test, timeout: 10, suite: test_unit_suites)
 
 software_frame_test = executable(
   'software_frame_test',
@@ -172,7 +176,7 @@ software_frame_test = executable(
   dependencies: gw_output_dep,
   include_directories: test_source_root_include,
 )
-test('software-frame', software_frame_test, timeout: 10)
+test('software-frame', software_frame_test, timeout: 10, suite: test_unit_suites)
 
 frame_dump_staging_test = executable(
   'frame_dump_staging_test',
@@ -180,7 +184,7 @@ frame_dump_staging_test = executable(
   dependencies: gw_output_dep,
   include_directories: test_source_root_include,
 )
-test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
+test('frame-dump-staging', frame_dump_staging_test, timeout: 10, suite: test_unit_suites)
 
   if get_option('headless_backend')
     headless_inventory_test = executable(
@@ -189,7 +193,7 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
       dependencies: gw_headless_dep,
       include_directories: test_source_root_include,
     )
-    test('headless-inventory', headless_inventory_test, timeout: 10)
+    test('headless-inventory', headless_inventory_test, timeout: 10, suite: test_headless_unit_suites)
 
     headless_vrr_simulation_test = executable(
       'headless_vrr_simulation_test',
@@ -197,7 +201,7 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
       dependencies: gw_headless_dep,
       include_directories: test_source_root_include,
     )
-    test('headless-vrr-simulation', headless_vrr_simulation_test, timeout: 10)
+    test('headless-vrr-simulation', headless_vrr_simulation_test, timeout: 10, suite: test_headless_unit_suites)
 
     headless_vrr_presenter_test = executable(
       'headless_vrr_presenter_test',
@@ -205,7 +209,7 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
       dependencies: [gw_headless_dep, gw_vrr_model_dep],
       include_directories: test_source_root_include,
     )
-    test('headless-vrr-presenter', headless_vrr_presenter_test, timeout: 10)
+    test('headless-vrr-presenter', headless_vrr_presenter_test, timeout: 10, suite: test_headless_unit_suites)
 
     headless_output_test = executable(
     'headless_output_test',
@@ -213,7 +217,7 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
     dependencies: gw_headless_dep,
     include_directories: test_source_root_include,
   )
-  test('headless-output', headless_output_test, timeout: 10)
+  test('headless-output', headless_output_test, timeout: 10, suite: test_headless_unit_suites)
 
   headless_presenter_test = executable(
     'headless_presenter_test',
@@ -221,6 +225,6 @@ test('frame-dump-staging', frame_dump_staging_test, timeout: 10)
     dependencies: gw_headless_dep,
     include_directories: test_source_root_include,
   )
-  test('headless-presenter', headless_presenter_test, timeout: 10)
+  test('headless-presenter', headless_presenter_test, timeout: 10, suite: test_headless_unit_suites)
 endif
 endif

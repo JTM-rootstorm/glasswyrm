@@ -6,6 +6,20 @@ test_source_root_include = [
   include_directories('..'),
 ]
 
+# Every registered Meson test is software-only. Tests of the guarded hardware
+# harness use mocks, fixtures, or dry-run paths and are deliberately labeled
+# `hardware-selftest`; no test registered here is physical hardware acceptance.
+test_software_suites = ['tier4-software', 'software']
+test_unit_suites = test_software_suites + ['tier1-unit']
+test_contract_suites = test_software_suites + ['tier2-contract']
+test_headless_unit_suites = test_unit_suites + ['headless']
+test_headless_process_suites = test_software_suites + [
+  'tier3-headless-process',
+  'headless',
+  'process',
+]
+test_hardware_selftest_suites = test_unit_suites + ['hardware-selftest']
+
 # Runtime and compatibility tooling consumes these artifacts directly from the
 # tests build directory. Their source manifests are split by subsystem, while
 # target creation remains here to preserve the established artifact paths.

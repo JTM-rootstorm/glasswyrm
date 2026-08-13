@@ -15,6 +15,7 @@ test(
     tests_build_dir / 'm9-runner-evidence',
   ],
   timeout: 10,
+  suite: test_headless_process_suites,
 )
 
 gw_hw_test = find_program(tests_source_dir / 'hardware/m14/gw_hw_test.py')
@@ -22,4 +23,5 @@ test(
   'gw-hw-parser-doctor-dry-run',
   gw_hw_test,
   timeout: 30,
+  suite: test_hardware_selftest_suites,
 )

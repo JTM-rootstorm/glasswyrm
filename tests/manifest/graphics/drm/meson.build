@@ -5,7 +5,7 @@ if get_option('drm_backend')
     dependencies: gw_drm_model_dep,
     include_directories: test_source_root_include,
   )
-  test('drm-inventory', drm_inventory_test, timeout: 10)
+  test('drm-inventory', drm_inventory_test, timeout: 10, suite: test_unit_suites)
 
   drm_runtime_selection_test = executable(
     'drm_runtime_selection_test',
@@ -13,7 +13,7 @@ if get_option('drm_backend')
     dependencies: gwcomp_options_dep,
     include_directories: test_source_root_include,
   )
-  test('drm-runtime-selection', drm_runtime_selection_test, timeout: 10)
+  test('drm-runtime-selection', drm_runtime_selection_test, timeout: 10, suite: test_unit_suites)
 
   foreach drm_model_test : [
     ['drm-connector-name', 'connector_name_test.cpp'],
@@ -31,7 +31,7 @@ if get_option('drm_backend')
       dependencies: gw_drm_model_dep,
       include_directories: test_source_root_include,
     )
-    test(drm_model_test[0], drm_test_executable, timeout: 10)
+    test(drm_model_test[0], drm_test_executable, timeout: 10, suite: test_unit_suites)
   endforeach
 
   drm_dumb_buffer_test = executable(
@@ -40,7 +40,7 @@ if get_option('drm_backend')
     dependencies: [gw_drm_model_dep, gw_output_dep],
     include_directories: test_source_root_include,
   )
-  test('drm-dumb-buffer', drm_dumb_buffer_test, timeout: 10)
+  test('drm-dumb-buffer', drm_dumb_buffer_test, timeout: 10, suite: test_unit_suites)
 
   drm_presentation_transaction_test = executable(
     'drm_presentation_transaction_test',
@@ -51,6 +51,7 @@ if get_option('drm_backend')
     include_directories: test_source_root_include,
   )
   test('drm-presentation-transaction', drm_presentation_transaction_test,
+         suite: test_unit_suites,
        timeout: 10)
 
   drm_presenter_test = executable(
@@ -59,7 +60,7 @@ if get_option('drm_backend')
     dependencies: gw_drm_presenter_dep,
     include_directories: test_source_root_include,
   )
-  test('drm-presenter', drm_presenter_test, timeout: 10)
+  test('drm-presenter', drm_presenter_test, timeout: 10, suite: test_unit_suites)
 
   m14_bounded_damage_test = executable(
     'm14_bounded_damage_test',
@@ -70,7 +71,7 @@ if get_option('drm_backend')
   test(
     'm14-bounded-damage-fake-drm',
     m14_bounded_damage_test,
-    suite: 'm14-runtime',
+    suite: test_unit_suites + ['m14-runtime'],
     timeout: 60,
   )
 
@@ -84,7 +85,7 @@ if get_option('drm_backend')
       dependencies: gw_drm_presenter_dep,
       include_directories: test_source_root_include,
     )
-    test(presenter_vrr_test[0], presenter_vrr_executable, timeout: 10)
+    test(presenter_vrr_test[0], presenter_vrr_executable, timeout: 10, suite: test_unit_suites)
   endforeach
 
   drm_m13_presenter_test = executable(
@@ -93,7 +94,7 @@ if get_option('drm_backend')
     dependencies: gw_drm_presenter_dep,
     include_directories: test_source_root_include,
   )
-  test('drm-m13-presenter', drm_m13_presenter_test, timeout: 10)
+  test('drm-m13-presenter', drm_m13_presenter_test, timeout: 10, suite: test_unit_suites)
 
   drm_ipc_integration_test = executable(
     'drm_ipc_integration_test',
@@ -104,7 +105,8 @@ if get_option('drm_backend')
     dependencies: [gwcomp_options_dep, gwipc_dep, gw_drm_presenter_dep],
     include_directories: test_source_root_include,
   )
-  test('drm-ipc-integration', drm_ipc_integration_test, timeout: 15)
+  test('drm-ipc-integration', drm_ipc_integration_test, timeout: 15,
+       suite: test_contract_suites)
 
   foreach drm_api_test : [
     ['drm-device-api', 'device_api_test.cpp'],
@@ -120,7 +122,7 @@ if get_option('drm_backend')
       dependencies: gw_drm_api_dep,
       include_directories: test_source_root_include,
     )
-    test(drm_api_test[0], drm_api_test_executable, timeout: 10)
+    test(drm_api_test[0], drm_api_test_executable, timeout: 10, suite: test_unit_suites)
   endforeach
 
   if get_option('tools')
@@ -130,7 +132,7 @@ if get_option('drm_backend')
       dependencies: gw_drm_probe_dep,
       include_directories: test_source_root_include,
     )
-    test('drm-probe', drm_probe_test, timeout: 10)
+    test('drm-probe', drm_probe_test, timeout: 10, suite: test_unit_suites)
 
     drm_vrr_probe_test = executable(
       'drm_vrr_probe_test',
@@ -138,7 +140,7 @@ if get_option('drm_backend')
       dependencies: gw_drm_vrr_probe_dep,
       include_directories: test_source_root_include,
     )
-    test('drm-vrr-probe', drm_vrr_probe_test, timeout: 10)
+    test('drm-vrr-probe', drm_vrr_probe_test, timeout: 10, suite: test_unit_suites)
   endif
 
   vt_session_test = executable(
@@ -147,7 +149,7 @@ if get_option('drm_backend')
     dependencies: gw_session_dep,
     include_directories: test_source_root_include,
   )
-  test('vt-session', vt_session_test, timeout: 10)
+  test('vt-session', vt_session_test, timeout: 10, suite: test_unit_suites)
 
   external_session_test = executable(
     'external_session_test',
@@ -155,5 +157,5 @@ if get_option('drm_backend')
     dependencies: gw_session_dep,
     include_directories: test_source_root_include,
   )
-  test('external-session', external_session_test, timeout: 10)
+  test('external-session', external_session_test, timeout: 10, suite: test_unit_suites)
 endif

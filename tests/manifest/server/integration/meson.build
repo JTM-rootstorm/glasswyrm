@@ -17,6 +17,7 @@ if get_option('glasswyrmd')
                gwcomp_program.full_path()],
         depends: [glasswyrmd_program, gwm_program, gwcomp_program],
         timeout: 30,
+        suite: test_headless_process_suites,
       )
       m13_rejecting_compositor_peer = executable(
         'm13_rejecting_compositor_peer',
@@ -44,6 +45,7 @@ if get_option('glasswyrmd')
         depends: [glasswyrmd_program, gwm_program, gwcomp_program,
                   x11_milestone2_probe, m13_rejecting_compositor_peer],
         timeout: 45,
+        suite: test_headless_process_suites,
       )
     endif
     glasswyrmd_peer_bootstrap_test = executable(
@@ -58,6 +60,7 @@ if get_option('glasswyrmd')
       args: [gwm_program.full_path(), gwcomp_program.full_path()],
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
+      suite: test_headless_process_suites,
     )
     runtime_bridge_transaction_test = executable(
       'runtime_bridge_transaction_test',
@@ -71,6 +74,7 @@ if get_option('glasswyrmd')
       args: [gwm_program.full_path(), gwcomp_program.full_path()],
       depends: [gwm_program, gwcomp_program],
       timeout: 15,
+      suite: test_headless_process_suites,
     )
     compositor_peer_vrr_buffer_release_test = executable(
       'compositor_peer_vrr_buffer_release_test',
@@ -86,6 +90,7 @@ if get_option('glasswyrmd')
       args: [gwcomp_program.full_path()],
       depends: [gwcomp_program],
       timeout: 10,
+      suite: test_headless_process_suites,
     )
     server_vrr_lifecycle_test = executable(
       'server_vrr_lifecycle_test',
@@ -93,7 +98,7 @@ if get_option('glasswyrmd')
       dependencies: gw_server_core_dep,
       include_directories: test_source_root_include,
     )
-    test('server-vrr-lifecycle', server_vrr_lifecycle_test, timeout: 10)
+    test('server-vrr-lifecycle', server_vrr_lifecycle_test, timeout: 10, suite: test_unit_suites)
     glasswyrmd_integrated_startup_test = executable(
       'glasswyrmd_integrated_startup_test',
       files(tests_source_dir / 'integration/glasswyrmd_integrated_startup_test.cpp'),
@@ -105,6 +110,7 @@ if get_option('glasswyrmd')
              gwcomp_program.full_path()],
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 20,
+      suite: test_headless_process_suites,
     )
     glasswyrmd_integrated_lifecycle_test = executable(
       'glasswyrmd_integrated_lifecycle_test',
@@ -123,6 +129,7 @@ if get_option('glasswyrmd')
              gwcomp_program.full_path()],
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 45,
+      suite: test_headless_process_suites,
     )
     if get_option('experimental')
       glasswyrmd_m12_game_profile_test = executable(
@@ -142,6 +149,7 @@ if get_option('glasswyrmd')
                gwcomp_program.full_path()],
         depends: [glasswyrmd_program, gwm_program, gwcomp_program],
         timeout: 45,
+        suite: test_headless_process_suites,
       )
       glasswyrmd_integrated_property_test = executable(
         'glasswyrmd_integrated_property_test',
@@ -160,6 +168,7 @@ if get_option('glasswyrmd')
                gwcomp_program.full_path()],
         depends: [glasswyrmd_program, gwm_program, gwcomp_program],
         timeout: 45,
+        suite: test_headless_process_suites,
       )
     endif
     glasswyrmd_input_recovery_test = executable(
@@ -178,6 +187,7 @@ if get_option('glasswyrmd')
              gwcomp_program.full_path()],
       depends: [glasswyrmd_program, gwm_program, gwcomp_program],
       timeout: 30,
+      suite: test_headless_process_suites,
     )
   endif
 endif
