@@ -10,6 +10,7 @@ import sys
 from common import (
     ARTIFACT_SCHEMA, HarnessError, MAX_JSON_BYTES,
     _prepare_private_empty_directory, _read_regular, _write_json,
+    require_hardware_test_opt_in,
 )
 from config_doctor import doctor_config, parse_config
 from live_runner import FIXED_BINARIES, FixedLiveRunner, require_live_harness_scope
@@ -57,6 +58,14 @@ def run_nvidia_vrr_probe(
             file=sys.stderr,
         )
         return 2
+
+    if fixture_dir is None:
+        try:
+            require_hardware_test_opt_in()
+        except HarnessError as error:
+            print(f"gw-hw: NVIDIA VRR probe failed during guard: {error}",
+                  file=sys.stderr)
+            return 1
 
     stage = "scope"
     command_evidence: dict[str, object] | None = None

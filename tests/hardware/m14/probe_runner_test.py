@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -17,7 +18,12 @@ from analyze_nvidia_vrr_probe_test import records, write_report  # noqa: E402
 from gw_hw_test import make_fixture  # noqa: E402
 
 
-def command(*arguments: object) -> subprocess.CompletedProcess[str]:
+def command(*arguments: object,
+            hardware_opt_in: str | None = None) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.pop("GW_ALLOW_HARDWARE_TESTS", None)
+    if hardware_opt_in is not None:
+        environment["GW_ALLOW_HARDWARE_TESTS"] = hardware_opt_in
     return subprocess.run(
         [sys.executable, str(ROOT / "tools" / "gw-hw"),
          "milestone14-nvidia-vrr-probe",
@@ -27,6 +33,7 @@ def command(*arguments: object) -> subprocess.CompletedProcess[str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=environment,
     )
 
 
@@ -87,7 +94,30 @@ def main() -> int:
         direct = command(
             "--config", config, "--artifact-dir", direct_artifacts, "--yes")
         assert direct.returncode == 1
-        assert "requires systemd-run --scope" in direct.stderr
+        assert "requires exactly GW_ALLOW_HARDWARE_TESTS=1" in direct.stderr
+        assert not direct_artifacts.exists()
+
+        existing_artifacts = root / "existing-direct"
+        existing_artifacts.mkdir(mode=0o700)
+        rejected_existing = command(
+            "--config", config, "--artifact-dir", existing_artifacts, "--yes")
+        assert rejected_existing.returncode == 1
+        assert not any(existing_artifacts.iterdir())
+
+        invalid_guard = command(
+            "--config", config, "--artifact-dir", direct_artifacts, "--yes",
+            hardware_opt_in="true")
+        assert invalid_guard.returncode == 1
+        assert "requires exactly GW_ALLOW_HARDWARE_TESTS=1" in \
+            invalid_guard.stderr
+        assert not direct_artifacts.exists()
+
+        guarded_direct = command(
+            "--config", config, "--artifact-dir", direct_artifacts, "--yes",
+            hardware_opt_in="1")
+        assert guarded_direct.returncode == 1
+        assert "GW_ALLOW_HARDWARE_TESTS" not in guarded_direct.stderr
+        assert "requires systemd-run --scope" in guarded_direct.stderr
         assert not direct_artifacts.exists()
 
     print("M14 NVIDIA VRR probe runner test: ok")

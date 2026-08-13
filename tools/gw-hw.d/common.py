@@ -42,6 +42,15 @@ NON_BLOCKING_VRR_REASONS = frozenset({
     "timing-unavailable", "hardware-behavior-unconfirmed",
     "simulated-headless", "manual-always-eligible",
 })
+HARDWARE_TEST_OPT_IN = "GW_ALLOW_HARDWARE_TESTS"
+
+
+def require_hardware_test_opt_in() -> None:
+    """Reject live hardware work unless the operator opted in exactly."""
+    if os.environ.get(HARDWARE_TEST_OPT_IN) != "1":
+        raise HarnessError(
+            f"live hardware execution requires exactly "
+            f"{HARDWARE_TEST_OPT_IN}=1")
 
 
 def vrr_rejection_reasons(value: object) -> list[str] | None:

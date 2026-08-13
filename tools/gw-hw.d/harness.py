@@ -14,6 +14,7 @@ import tempfile
 from common import (
     ARCHIVE_STATE_ARTIFACTS, ARTIFACT_SCHEMA, ConfigError, HarnessError,
     RUN_STEPS, _prepare_private_empty_directory, _read_json, _write_json,
+    require_hardware_test_opt_in,
 )
 from config_doctor import (
     _modetest_connector_property_value, _modetest_crtc_property_value,
@@ -165,6 +166,11 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
             return 2
         return dry_run(config_path, required_base, tested_commit,
                        fixture_dir, artifact_dir)
+    try:
+        require_hardware_test_opt_in()
+    except HarnessError as error:
+        print(f"gw-hw: live run failed: {error}", file=sys.stderr)
+        return 1
     runner: FixedLiveRunner | None = None
     try:
         require_live_harness_scope()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -45,9 +46,15 @@ REQUIRED_BASE = "6864ea631d61636289a21c7d2d6655a17be0c004"
 TESTED_COMMIT = "b" * 40
 
 
-def run(*arguments: str) -> subprocess.CompletedProcess[str]:
+def run(*arguments: str,
+        hardware_opt_in: str | None = None) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment.pop("GW_ALLOW_HARDWARE_TESTS", None)
+    if hardware_opt_in is not None:
+        environment["GW_ALLOW_HARDWARE_TESTS"] = hardware_opt_in
     return subprocess.run([sys.executable, str(TOOL), *arguments], check=False,
-                          text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                          text=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, env=environment)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -298,7 +305,40 @@ def main() -> int:
                      "--tested-commit", TESTED_COMMIT,
                      "--artifact-dir", str(direct_artifacts), "--yes")
         assert direct.returncode == 1
-        assert "requires systemd-run --scope" in direct.stderr
+        assert "GW_ALLOW_HARDWARE_TESTS=1" in direct.stderr
+        assert not direct_artifacts.exists()
+        existing_artifacts = root / "existing-direct-live"
+        existing_artifacts.mkdir(mode=0o700)
+        rejected_existing = run(
+            "milestone14-vrr-test", "--config", str(config),
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--artifact-dir", str(existing_artifacts), "--yes",
+        )
+        assert rejected_existing.returncode == 1
+        assert not any(existing_artifacts.iterdir())
+        for invalid_opt_in in ("", "0", "true", "01", " 1", "1 "):
+            rejected_guard = run(
+                "milestone14-vrr-test", "--config", str(config),
+                "--required-base", REQUIRED_BASE,
+                "--tested-commit", TESTED_COMMIT,
+                "--artifact-dir", str(direct_artifacts), "--yes",
+                hardware_opt_in=invalid_opt_in,
+            )
+            assert rejected_guard.returncode == 1
+            assert "requires exactly GW_ALLOW_HARDWARE_TESTS=1" in \
+                rejected_guard.stderr
+            assert not direct_artifacts.exists()
+        guarded_direct = run(
+            "milestone14-vrr-test", "--config", str(config),
+            "--required-base", REQUIRED_BASE,
+            "--tested-commit", TESTED_COMMIT,
+            "--artifact-dir", str(direct_artifacts), "--yes",
+            hardware_opt_in="1",
+        )
+        assert guarded_direct.returncode == 1
+        assert "GW_ALLOW_HARDWARE_TESTS" not in guarded_direct.stderr
+        assert "requires systemd-run --scope" in guarded_direct.stderr
         assert not direct_artifacts.exists()
         doctor_artifacts = root / "doctor-artifacts"
         checked = run("doctor", "--config", str(config),
