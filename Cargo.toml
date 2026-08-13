@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/gw-test-support",
+  "crates/gw-transition-tests",
   "crates/gw-types",
   "crates/gw-wire",
   "crates/gwcomp-core",

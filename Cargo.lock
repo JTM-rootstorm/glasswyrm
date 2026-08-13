@@ -15,6 +15,16 @@ name = "gw-test-support"
 version = "0.1.0"
 
 [[package]]
+name = "gw-transition-tests"
+version = "0.2.0"
+dependencies = [
+ "gw-ipc",
+ "gw-test-support",
+ "gw-types",
+ "gw-wire",
+]
+
+[[package]]
 name = "gw-types"
 version = "0.1.0"
 

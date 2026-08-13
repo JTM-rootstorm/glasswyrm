@@ -1,0 +1,21 @@
+[package]
+name = "gw-transition-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Legacy-oracle process gates for the Glasswyrm Rust transition"
+publish = false
+
+[[bin]]
+name = "legacy-output-restart"
+path = "src/main.rs"
+
+[dependencies]
+gw-ipc = { path = "../gw-ipc" }
+gw-test-support = { path = "../gw-test-support" }
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+
+[lints]
+workspace = true
