@@ -18,7 +18,13 @@ const SOCK_SEQPACKET: c_int = 5;
 const SOCK_CLOEXEC: c_int = 0o2_000_000;
 const SOCK_NONBLOCK: c_int = 0o4_000;
 const SOL_SOCKET: c_int = 1;
+const SO_TYPE: c_int = 3;
 const SCM_RIGHTS: c_int = 1;
+const F_GETFD: c_int = 1;
+const F_SETFD: c_int = 2;
+const F_GETFL: c_int = 3;
+const F_SETFL: c_int = 4;
+const FD_CLOEXEC: c_int = 1;
 const MSG_CTRUNC: c_int = 0x08;
 const MSG_TRUNC: c_int = 0x20;
 const MSG_DONTWAIT: c_int = 0x40;
@@ -52,6 +58,14 @@ struct ControlHeader {
 
 unsafe extern "C" {
     fn socketpair(domain: c_int, kind: c_int, protocol: c_int, sockets: *mut c_int) -> c_int;
+    fn getsockopt(
+        socket: c_int,
+        level: c_int,
+        option: c_int,
+        value: *mut c_void,
+        length: *mut u32,
+    ) -> c_int;
+    fn fcntl(fd: c_int, command: c_int, ...) -> c_int;
     fn sendmsg(socket: c_int, message: *const MessageHeader, flags: c_int) -> isize;
     fn recvmsg(socket: c_int, message: *mut MessageHeader, flags: c_int) -> isize;
 }
@@ -106,6 +120,7 @@ pub struct ReceivedRecord {
 pub enum TransportError {
     Io(io::Error),
     InvalidLimits,
+    InvalidTransportDescriptor,
     Disconnected,
     RecordTruncated,
     AncillaryTruncated,
@@ -120,6 +135,8 @@ impl fmt::Display for TransportError {
         match self {
             Self::Io(error) => write!(formatter, "GWIPC transport I/O failed: {error}"),
             Self::InvalidLimits => formatter.write_str("GWIPC transport limits are invalid"),
+            Self::InvalidTransportDescriptor => formatter
+                .write_str("GWIPC transport descriptor is not a Unix SOCK_SEQPACKET socket"),
             Self::Disconnected => formatter.write_str("GWIPC peer disconnected"),
             Self::RecordTruncated => formatter.write_str("GWIPC record was truncated"),
             Self::AncillaryTruncated => {
@@ -193,10 +210,12 @@ impl Transport {
 
     /// Adopts an already connected `SOCK_SEQPACKET` descriptor.
     ///
-    /// The caller retains responsibility for creating the descriptor with the
-    /// nonblocking and close-on-exec flags required by GWIPC.
+    /// The descriptor is rejected unless it is a `SOCK_SEQPACKET` socket.
+    /// Nonblocking and close-on-exec flags are set before the transport is
+    /// exposed to callers.
     pub fn from_owned_fd(fd: OwnedFd, limits: TransportLimits) -> Result<Self, TransportError> {
         let limits = TransportLimits::new(limits.maximum_payload, limits.maximum_fd_count)?;
+        prepare_transport_fd(fd.as_raw_fd())?;
         Ok(Self { fd, limits })
     }
 
@@ -234,7 +253,14 @@ impl Transport {
     pub fn receive(&self) -> Result<ReceivedRecord, TransportError> {
         let capacity = GWIPC_ENVELOPE_SIZE + self.limits.maximum_payload as usize;
         let mut bytes = vec![0_u8; capacity];
-        let mut control = vec![0_u8; cmsg_space(size_of::<RawFd>() * HARD_MAXIMUM_FDS as usize)];
+        // Leave room beyond the negotiated rights payload so an adopted socket
+        // with credentials/timestamps enabled cannot hide later SCM_RIGHTS
+        // records behind an avoidable ancillary truncation.
+        let mut control = vec![
+            0_u8;
+            cmsg_space(size_of::<RawFd>() * HARD_MAXIMUM_FDS as usize)
+                + cmsg_space(256)
+        ];
         let mut vector = Iovec {
             iov_base: bytes.as_mut_ptr().cast(),
             iov_len: bytes.len(),
@@ -355,9 +381,62 @@ fn send_raw(fd: RawFd, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<(), Trans
     Ok(())
 }
 
+fn prepare_transport_fd(fd: RawFd) -> Result<(), TransportError> {
+    let mut socket_type: c_int = 0;
+    let mut length = size_of::<c_int>() as u32;
+    // SAFETY: both output pointers refer to initialized writable values of the
+    // sizes advertised in `length` for the duration of the call.
+    let type_status = unsafe {
+        getsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_TYPE,
+            (&mut socket_type as *mut c_int).cast(),
+            &mut length,
+        )
+    };
+    if type_status != 0 {
+        let error = io::Error::last_os_error();
+        return if error.raw_os_error() == Some(88) {
+            Err(TransportError::InvalidTransportDescriptor)
+        } else {
+            Err(error.into())
+        };
+    }
+    if length as usize != size_of::<c_int>() || socket_type != SOCK_SEQPACKET {
+        return Err(TransportError::InvalidTransportDescriptor);
+    }
+
+    // SAFETY: `fcntl` is called with commands whose argument shapes are fixed:
+    // the GET commands have no third argument and the SET commands take an int.
+    let descriptor_flags = unsafe { fcntl(fd, F_GETFD) };
+    if descriptor_flags < 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    if descriptor_flags & FD_CLOEXEC == 0 {
+        // SAFETY: F_SETFD consumes the integer flags passed as its third argument.
+        if unsafe { fcntl(fd, F_SETFD, descriptor_flags | FD_CLOEXEC) } < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+    }
+    // SAFETY: same fixed-command argument reasoning as above.
+    let status_flags = unsafe { fcntl(fd, F_GETFL) };
+    if status_flags < 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    if status_flags & SOCK_NONBLOCK == 0 {
+        // SAFETY: F_SETFL consumes the integer flags passed as its third argument.
+        if unsafe { fcntl(fd, F_SETFL, status_flags | SOCK_NONBLOCK) } < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+    }
+    Ok(())
+}
+
 fn parse_control(control: &[u8]) -> Result<Vec<OwnedFd>, TransportError> {
     let mut descriptors = Vec::new();
     let mut offset = 0_usize;
+    let mut invalid = false;
     while offset < control.len() {
         if control.len() - offset < size_of::<ControlHeader>() {
             return Err(TransportError::InvalidAncillaryData);
@@ -372,31 +451,36 @@ fn parse_control(control: &[u8]) -> Result<Vec<OwnedFd>, TransportError> {
             return Err(TransportError::InvalidAncillaryData);
         }
         if header.cmsg_level != SOL_SOCKET || header.cmsg_type != SCM_RIGHTS {
-            return Err(TransportError::InvalidAncillaryData);
-        }
-        let data_length = header.cmsg_len - minimum;
-        if !data_length.is_multiple_of(size_of::<RawFd>()) {
-            return Err(TransportError::InvalidAncillaryData);
-        }
-        let data_offset = offset + minimum;
-        for index in 0..(data_length / size_of::<RawFd>()) {
-            // SAFETY: `cmsg_len` and divisibility checks keep this read inside
-            // the current control message. Each received raw descriptor is a
-            // fresh process-local descriptor transferred by `SCM_RIGHTS`.
-            let raw = unsafe {
-                ptr::read_unaligned(
-                    control
-                        .as_ptr()
-                        .add(data_offset + index * size_of::<RawFd>())
-                        .cast::<RawFd>(),
-                )
-            };
-            if raw < 0 {
-                return Err(TransportError::InvalidAncillaryData);
+            invalid = true;
+        } else {
+            let data_length = header.cmsg_len - minimum;
+            if !data_length.is_multiple_of(size_of::<RawFd>()) {
+                invalid = true;
+            } else {
+                let data_offset = offset + minimum;
+                for index in 0..(data_length / size_of::<RawFd>()) {
+                    // SAFETY: `cmsg_len` and divisibility checks keep this read
+                    // inside the current control message. Each received raw
+                    // descriptor is a fresh process-local descriptor transferred
+                    // by `SCM_RIGHTS`.
+                    let raw = unsafe {
+                        ptr::read_unaligned(
+                            control
+                                .as_ptr()
+                                .add(data_offset + index * size_of::<RawFd>())
+                                .cast::<RawFd>(),
+                        )
+                    };
+                    if raw < 0 {
+                        invalid = true;
+                        continue;
+                    }
+                    // SAFETY: `SCM_RIGHTS` created this descriptor for the
+                    // receiving process and no other Rust owner has been
+                    // constructed for it.
+                    descriptors.push(unsafe { OwnedFd::from_raw_fd(raw) });
+                }
             }
-            // SAFETY: `SCM_RIGHTS` created this descriptor for the receiving
-            // process and no other Rust owner has been constructed for it.
-            descriptors.push(unsafe { OwnedFd::from_raw_fd(raw) });
         }
         let next = offset
             .checked_add(cmsg_align(header.cmsg_len))
@@ -406,7 +490,13 @@ fn parse_control(control: &[u8]) -> Result<Vec<OwnedFd>, TransportError> {
         }
         offset = next.min(control.len());
     }
-    Ok(descriptors)
+    if invalid {
+        // Dropping the accumulated owners closes every rights descriptor even
+        // though another ancillary record made the message invalid.
+        Err(TransportError::InvalidAncillaryData)
+    } else {
+        Ok(descriptors)
+    }
 }
 
 const fn cmsg_align(length: usize) -> usize {
@@ -428,6 +518,7 @@ mod tests {
     use gw_types::{MessageType, Sequence};
     use std::fs::File;
     use std::io::Read;
+    use std::os::fd::IntoRawFd;
 
     fn receive_blocking(transport: &Transport) -> Result<ReceivedRecord, TransportError> {
         for _ in 0..1000 {
@@ -472,11 +563,107 @@ mod tests {
     }
 
     #[test]
+    fn adopted_descriptor_must_be_seqpacket_and_is_hardened() {
+        let mut sockets = [-1; 2];
+        // SAFETY: the array provides space for both descriptors returned by a
+        // successful socketpair call.
+        let pair_status = unsafe { socketpair(AF_UNIX, SOCK_SEQPACKET, 0, sockets.as_mut_ptr()) };
+        assert_eq!(pair_status, 0);
+        // SAFETY: successful socketpair returned two fresh descriptors.
+        let adopted = unsafe { OwnedFd::from_raw_fd(sockets[0]) };
+        // SAFETY: same ownership argument for the peer descriptor.
+        let peer = unsafe { OwnedFd::from_raw_fd(sockets[1]) };
+        let mut socket_type: c_int = 0;
+        let mut length = size_of::<c_int>() as u32;
+        // SAFETY: writable type and length outputs remain alive for this call.
+        if unsafe {
+            getsockopt(
+                adopted.as_raw_fd(),
+                SOL_SOCKET,
+                SO_TYPE,
+                (&mut socket_type as *mut c_int).cast(),
+                &mut length,
+            )
+        } != 0
+            && io::Error::last_os_error().kind() == io::ErrorKind::PermissionDenied
+        {
+            // The managed test sandbox denies getsockopt. The same test runs
+            // unskipped in the VM/software acceptance environment.
+            return;
+        }
+
+        let regular: OwnedFd = File::open("/dev/null").unwrap().into();
+        assert!(matches!(
+            Transport::from_owned_fd(regular, TransportLimits::default()),
+            Err(TransportError::InvalidTransportDescriptor)
+        ));
+        let transport = Transport::from_owned_fd(adopted, TransportLimits::default()).unwrap();
+
+        // SAFETY: GET commands have no third argument and do not mutate memory.
+        let descriptor_flags = unsafe { fcntl(transport.fd.as_raw_fd(), F_GETFD) };
+        // SAFETY: same fixed-command reasoning for status flags.
+        let status_flags = unsafe { fcntl(transport.fd.as_raw_fd(), F_GETFL) };
+        assert_ne!(descriptor_flags & FD_CLOEXEC, 0);
+        assert_ne!(status_flags & SOCK_NONBLOCK, 0);
+        drop(peer);
+    }
+
+    #[test]
+    fn invalid_ancillary_record_still_closes_later_rights() {
+        let raw = File::open("/dev/null").unwrap().into_raw_fd();
+        let first_length = cmsg_len(0);
+        let second_offset = cmsg_align(first_length);
+        let rights_length = cmsg_len(size_of::<RawFd>());
+        let mut control = vec![0_u8; second_offset + cmsg_space(size_of::<RawFd>())];
+
+        // SAFETY: each unaligned write is bounded by the sizes used to allocate
+        // `control`. Ownership of `raw` is deliberately represented only by the
+        // synthetic SCM_RIGHTS record after `into_raw_fd` above.
+        unsafe {
+            ptr::write_unaligned(
+                control.as_mut_ptr().cast::<ControlHeader>(),
+                ControlHeader {
+                    cmsg_len: first_length,
+                    cmsg_level: SOL_SOCKET,
+                    cmsg_type: 0x7fff,
+                },
+            );
+            ptr::write_unaligned(
+                control
+                    .as_mut_ptr()
+                    .add(second_offset)
+                    .cast::<ControlHeader>(),
+                ControlHeader {
+                    cmsg_len: rights_length,
+                    cmsg_level: SOL_SOCKET,
+                    cmsg_type: SCM_RIGHTS,
+                },
+            );
+            ptr::write_unaligned(
+                control
+                    .as_mut_ptr()
+                    .add(second_offset + cmsg_align(size_of::<ControlHeader>()))
+                    .cast::<RawFd>(),
+                raw,
+            );
+        }
+
+        assert!(matches!(
+            parse_control(&control),
+            Err(TransportError::InvalidAncillaryData)
+        ));
+        // SAFETY: F_GETFD takes no third argument. EBADF proves the temporary
+        // OwnedFd constructed while traversing the invalid message was dropped.
+        assert_eq!(unsafe { fcntl(raw, F_GETFD) }, -1);
+        assert_eq!(io::Error::last_os_error().raw_os_error(), Some(9));
+    }
+
+    #[test]
     fn oversized_record_is_rejected_without_partial_delivery() {
         let sender_limits = TransportLimits::new(64, 0).unwrap();
         let receiver_limits = TransportLimits::new(8, 0).unwrap();
-        let (sender, receiver) = Transport::pair(sender_limits).unwrap();
-        let receiver = Transport::from_owned_fd(receiver.fd, receiver_limits).unwrap();
+        let (sender, mut receiver) = Transport::pair(sender_limits).unwrap();
+        receiver.set_limits(receiver_limits).unwrap();
         let envelope = Envelope::request(MessageType::PING, Sequence::new(1), 16);
         sender.send(&envelope, &[0; 16], &[]).unwrap();
         assert!(matches!(

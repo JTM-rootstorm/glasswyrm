@@ -62,7 +62,6 @@ impl HandshakeConfig {
             || self.limits.maximum_payload == 0
             || self.limits.maximum_payload > HARD_MAXIMUM_PAYLOAD
             || self.limits.maximum_fd_count > HARD_MAXIMUM_FDS
-            || self.offered_capabilities.bits() & !Capabilities::KNOWN_MASK != 0
             || self.required_peer_capabilities.bits() & !Capabilities::KNOWN_MASK != 0
         {
             return Err(HandshakeError::InvalidConfig);
@@ -200,7 +199,15 @@ pub fn accept_hello(
             );
         }
     };
-    if hello.minimum_version > GWIPC_WIRE_VERSION || hello.maximum_version < GWIPC_WIRE_VERSION {
+    // Preserve the legacy 1.0 handshake exactly. The C++ implementation checks
+    // each version component independently rather than treating the pair as a
+    // lexicographically ordered semantic version. In particular, an offered
+    // range of 0.1 through 1.0 is incompatible with legacy wire 1.0.
+    if !legacy_version_overlaps(
+        hello.minimum_version,
+        hello.maximum_version,
+        GWIPC_WIRE_VERSION,
+    ) {
         return rejection(
             received.envelope.sequence,
             RejectReason::IncompatibleVersion,
@@ -327,6 +334,17 @@ fn rejection(
     })
 }
 
+fn legacy_version_overlaps(
+    minimum: gw_types::WireVersion,
+    maximum: gw_types::WireVersion,
+    selected: gw_types::WireVersion,
+) -> bool {
+    minimum.major <= selected.major
+        && maximum.major >= selected.major
+        && minimum.minor <= selected.minor
+        && maximum.minor >= selected.minor
+}
+
 const fn role_bit(role: Role) -> u64 {
     1_u64 << role as u16
 }
@@ -365,6 +383,20 @@ mod tests {
         }
     }
 
+    fn hello_with_versions(
+        config: &HandshakeConfig,
+        minimum_version: gw_types::WireVersion,
+        maximum_version: gw_types::WireVersion,
+    ) -> ReceivedRecord {
+        let mut record = make_hello(config).unwrap();
+        let mut hello = decode_hello(&record.payload).unwrap();
+        hello.minimum_version = minimum_version;
+        hello.maximum_version = maximum_version;
+        record.payload = encode_hello(&hello).unwrap();
+        record.envelope.payload_size = record.payload.len() as u32;
+        transfer(&record)
+    }
+
     #[test]
     fn hello_welcome_negotiates_legacy_limits_and_capabilities() {
         let client = config(Role::WindowManager, 1, Role::Compositor);
@@ -386,6 +418,45 @@ mod tests {
             client_peer.capabilities,
             Capabilities::SNAPSHOTS.with(Capabilities::FD_PASSING)
         );
+    }
+
+    #[test]
+    fn version_overlap_matches_legacy_component_checks() {
+        use gw_types::WireVersion;
+
+        let client = config(Role::WindowManager, 1, Role::Compositor);
+        let server = config(Role::Compositor, 2, Role::WindowManager);
+        let cases = [
+            (WireVersion::new(1, 0), WireVersion::new(1, 0), true),
+            (WireVersion::new(0, 0), WireVersion::new(1, 0), true),
+            (WireVersion::new(1, 0), WireVersion::new(1, 1), true),
+            (WireVersion::new(0, 0), WireVersion::new(2, 0), true),
+            // A lexicographic range check accepts this. Legacy rejects it
+            // because minimum_minor (1) is newer than wire minor 0.
+            (WireVersion::new(0, 1), WireVersion::new(1, 0), false),
+            (WireVersion::new(1, 1), WireVersion::new(2, 1), false),
+            (WireVersion::new(0, 0), WireVersion::new(0, 9), false),
+            (WireVersion::new(2, 0), WireVersion::new(2, 0), false),
+        ];
+
+        for (minimum, maximum, accepted) in cases {
+            let received = hello_with_versions(&client, minimum, maximum);
+            let response = accept_hello(&received, &server, ConnectionId::new(1)).unwrap();
+            assert_eq!(
+                matches!(response, ServerHandshakeResponse::Accepted { .. }),
+                accepted,
+                "legacy result for offered range {minimum:?} through {maximum:?}"
+            );
+            if !accepted {
+                assert!(matches!(
+                    response,
+                    ServerHandshakeResponse::Rejected {
+                        reason: RejectReason::IncompatibleVersion,
+                        ..
+                    }
+                ));
+            }
+        }
     }
 
     #[test]
@@ -439,5 +510,19 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn unknown_offered_capabilities_are_ignored_like_legacy() {
+        let known = Capabilities::FD_PASSING.with(Capabilities::SNAPSHOTS);
+        let client = config(Role::WindowManager, 1, Role::Compositor)
+            .offer(Capabilities::from_bits_retain(known.bits() | (1_u64 << 63)));
+        let server = config(Role::Compositor, 2, Role::WindowManager);
+        let hello = transfer(&make_hello(&client).unwrap());
+        let response = accept_hello(&hello, &server, ConnectionId::new(1)).unwrap();
+        let ServerHandshakeResponse::Accepted { peer, .. } = response else {
+            panic!("legacy-compatible extension capability was rejected");
+        };
+        assert_eq!(peer.capabilities, known);
     }
 }
