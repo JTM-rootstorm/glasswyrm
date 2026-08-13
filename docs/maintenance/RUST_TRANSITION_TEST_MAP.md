@@ -48,7 +48,9 @@ capable of disproving the change first.
 - Rust formatting/checks for changed crates;
 - targeted Meson/Ninja compilation for legacy/native code still involved;
 - C/C++ strict compiler checks while legacy targets remain; and
-- source-layout/static-schema checks that require no runtime behavior.
+- source-layout/static-schema checks are static feedback conceptually, but the
+  existing Meson registrations remain in `tier1-unit` because Meson has no
+  compile-only Tier 0 test suite.
 
 Ordinary Cargo checks must not invoke Meson. The combined checkpoint driver
 may invoke both graphs explicitly.
@@ -70,7 +72,10 @@ deterministic/fake inputs:
   `m13/*_test.py`, and `m14/*_test.py` when they validate supplied data only;
   and
 - `tests/hardware/m14/*_test.py`, which tests guard, provenance, evidence, and
-  live-runner interpretation with injected fixtures and must remain offline.
+  live-runner interpretation with injected fixtures and must remain offline;
+  and
+- `tests/integration/server_vrr_lifecycle_test.cpp`, which is an in-process
+  lifecycle component test despite its historical integration-directory path.
 
 Rust destinations include policy tests in `gwm-core`, renderer/output tests in
 `gwcomp-core`, protocol tests in `glasswyrm-x11`, and focused harness tests in
@@ -106,7 +111,6 @@ not matters to defer to process acceptance.
   input/cursor, and supported-client probe scenarios that launch server peers;
 - `output_control_peer_process_test.cpp`,
   `compositor_peer_vrr_buffer_release_test.cpp`,
-  `server_vrr_lifecycle_test.cpp`, and
   `output_configuration_process_test.cpp`;
 - applicable `tests/apps/*_runtime_test.sh` and integrated headless scripts; and
 - mixed legacy/Rust topologies used at an active migration boundary.
