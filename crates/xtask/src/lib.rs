@@ -249,6 +249,15 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
             meson(&["--suite", "tier2-contract"]),
         ],
         Task::Test(TestTier::SoftwareAcceptance) => vec![
+            cargo(&["fmt", "--all", "--", "--check"]),
+            cargo(&[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ]),
             cargo(&["test", "--workspace"]),
             meson(&["--suite", "tier4-software"]),
         ],
@@ -379,6 +388,36 @@ mod tests {
             meson
                 .windows(2)
                 .any(|pair| pair == ["--suite", "tier1-unit"])
+        );
+    }
+
+    #[test]
+    fn software_acceptance_includes_rust_format_lint_and_tests() {
+        let cli = Cli::parse(
+            ["test", "software-acceptance"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .unwrap();
+        let invocations = plan(&cli, &context()).unwrap();
+        assert_eq!(invocations.len(), 4);
+        assert_eq!(strings(&invocations[0]), ["fmt", "--all", "--", "--check"]);
+        assert_eq!(
+            strings(&invocations[1]),
+            [
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings"
+            ]
+        );
+        assert_eq!(strings(&invocations[2]), ["test", "--workspace"]);
+        assert!(
+            strings(&invocations[3])
+                .windows(2)
+                .any(|pair| pair == ["--suite", "tier4-software"])
         );
     }
 
