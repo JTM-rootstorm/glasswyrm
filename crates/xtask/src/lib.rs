@@ -58,6 +58,7 @@ pub struct Context {
 pub struct Invocation {
     pub program: OsString,
     pub args: Vec<OsString>,
+    pub remove_hardware_authorization: bool,
 }
 
 impl Invocation {
@@ -68,6 +69,7 @@ impl Invocation {
         Self {
             program: program.into(),
             args: args.into_iter().map(Into::into).collect(),
+            remove_hardware_authorization: true,
         }
     }
 
@@ -271,10 +273,12 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
             }
             let mut harness_arguments = vec![OsString::from("milestone14-vrr-test")];
             harness_arguments.extend(arguments.iter().map(OsString::from));
-            vec![Invocation::new(
+            let mut invocation = Invocation::new(
                 context.workspace_root.join("tools/gw-hw").into_os_string(),
                 harness_arguments,
-            )]
+            );
+            invocation.remove_hardware_authorization = false;
+            vec![invocation]
         }
     };
     Ok(invocations)
@@ -283,9 +287,12 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
 pub fn execute(invocations: &[Invocation], workspace_root: &Path) -> Result<(), String> {
     for invocation in invocations {
         eprintln!("xtask: running {}", invocation.display());
-        let status = Command::new(&invocation.program)
-            .args(&invocation.args)
-            .current_dir(workspace_root)
+        let mut command = Command::new(&invocation.program);
+        command.args(&invocation.args).current_dir(workspace_root);
+        if invocation.remove_hardware_authorization {
+            command.env_remove("GW_ALLOW_HARDWARE_TESTS");
+        }
+        let status = command
             .status()
             .map_err(|error| format!("could not start {}: {error}", invocation.display()))?;
         if !status.success() {
@@ -358,6 +365,11 @@ mod tests {
         let cli = Cli::parse(["test", "unit"].into_iter().map(str::to_owned)).unwrap();
         let invocations = plan(&cli, &context()).unwrap();
         assert_eq!(invocations.len(), 2);
+        assert!(
+            invocations
+                .iter()
+                .all(|item| item.remove_hardware_authorization)
+        );
         assert_eq!(invocations[0].program, "cargo");
         assert_eq!(strings(&invocations[0]), ["test", "--workspace", "--lib"]);
         assert_eq!(invocations[1].program, "meson");
@@ -402,10 +414,7 @@ mod tests {
         context.legacy_build_env = Some(PathBuf::from("legacy-out"));
         let invocations = plan(&cli, &context).unwrap();
         assert_eq!(invocations.len(), 2);
-        assert_eq!(
-            strings(&invocations[0]),
-            ["test", "-p", "gwcomp-core"]
-        );
+        assert_eq!(strings(&invocations[0]), ["test", "-p", "gwcomp-core"]);
         let meson = strings(&invocations[1]);
         assert!(meson.windows(2).any(|pair| pair == ["-C", "legacy-out"]));
         assert!(
@@ -447,6 +456,7 @@ mod tests {
         context.hardware_allowed = true;
         let invocations = plan(&cli, &context).unwrap();
         assert_eq!(invocations.len(), 1);
+        assert!(!invocations[0].remove_hardware_authorization);
         assert_eq!(invocations[0].program, "/workspace/tools/gw-hw");
         assert_eq!(
             strings(&invocations[0]),
