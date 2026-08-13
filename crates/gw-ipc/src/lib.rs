@@ -10,9 +10,11 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("gw-ipc currently supports Linux only");
 
+mod application;
 mod handshake;
 mod transport;
 
+pub use application::{ApplicationError, ApplicationValidator, MessageDirection, SnapshotState};
 pub use handshake::{
     HandshakeConfig, HandshakeError, HandshakeRecord, NegotiatedPeer, ServerHandshakeResponse,
     accept_hello, make_hello, validate_server_response,
