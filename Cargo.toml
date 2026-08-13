@@ -1,0 +1,26 @@
+[workspace]
+members = [
+  "crates/gw-test-support",
+  "crates/gw-types",
+  "crates/gw-wire",
+  "crates/xtask",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.96"
+license = "GPL-3.0-only"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1

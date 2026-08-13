@@ -1,0 +1,13 @@
+[package]
+name = "gw-test-support"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "GPL-3.0-only"
+description = "Deterministic process-test support for Glasswyrm"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"

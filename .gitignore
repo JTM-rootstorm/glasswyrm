@@ -2,6 +2,7 @@
 /build/
 /build-*/
 /build_*/
+/target/
 
 # Meson generated metadata
 /meson-logs/
@@ -15,6 +16,11 @@
 # VM validation artifacts
 /artifacts/vm/*
 !/artifacts/vm/.gitkeep
+/artifacts/rust-transition/*
+!/artifacts/rust-transition/.gitkeep
+!/artifacts/rust-transition/baseline/
+/artifacts/rust-transition/baseline/*
+!/artifacts/rust-transition/baseline/manifest.json
 
 # Local VM configuration
 /tools/gw-vm.d/config.toml
