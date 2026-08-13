@@ -12,6 +12,8 @@ source "$GW_VM_DIR/lib/config.sh"
 source "$GW_VM_DIR/lib/guest.sh"
 # shellcheck source=gw-vm.d/lib/libvirt.sh
 source "$GW_VM_DIR/lib/libvirt.sh"
+# shellcheck source=gw-vm.d/lib/rust_transition.sh
+source "$GW_VM_DIR/lib/rust_transition.sh"
 # shellcheck source=gw-vm.d/lib/milestone1.sh
 source "$GW_VM_DIR/lib/milestone1.sh"
 # shellcheck source=gw-vm.d/lib/milestone2.sh
@@ -65,6 +67,7 @@ Commands:
   narrow-test gwm [--allow-abi-rebuild]
                                     Check that a gwm update stays narrow.
   collect                           Collect guest Portage diagnostics.
+  rust-transition-software-test    Run fixed Rust workspace software gates.
   full-packaging-test --yes         Run the canonical fresh-VM scenario.
   milestone1-runtime-test --yes     Build and exercise M1 in the Gentoo VM.
   milestone2-runtime-test --yes     Build and exercise M2 in the Gentoo VM.
@@ -89,6 +92,7 @@ Examples:
   GLASSWYRM_VM_NAME=gentoo-test ./tools/gw-vm status
   ./tools/gw-vm pretend x11-base/glasswyrm
   ./tools/gw-vm full-packaging-test --yes
+  ./tools/gw-vm rust-transition-software-test
   ./tools/gw-vm milestone1-runtime-test --yes
   ./tools/gw-vm milestone2-runtime-test --yes
   ./tools/gw-vm milestone3-runtime-test --yes
@@ -298,6 +302,10 @@ run_named_scenario() {
     unmerge-gwm) action_unmerge x11-wm/gwm "$@" ;;
     narrow-test-gwm) narrow_test_gwm "$@" ;;
     collect-logs) require_no_extra_args "$name" "$@"; collect_logs ;;
+    rust-transition-software-test)
+      require_no_extra_args "$name" "$@"
+      rust_transition_software_test
+      ;;
     full-packaging-test) action_full "$@" ;;
     milestone1-runtime-test) action_milestone1 "$@" ;;
     milestone2-runtime-test) action_milestone2 "$@" ;;
@@ -489,6 +497,10 @@ main() {
       narrow_test_gwm "$@"
       ;;
     collect) require_no_extra_args collect "$@"; collect_logs ;;
+    rust-transition-software-test)
+      require_no_extra_args rust-transition-software-test "$@"
+      rust_transition_software_test
+      ;;
     full-packaging-test) action_full "$@" ;;
     milestone1-runtime-test) action_milestone1 "$@" ;;
     milestone2-runtime-test) action_milestone2 "$@" ;;

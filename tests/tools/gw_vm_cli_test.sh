@@ -751,6 +751,27 @@ if [[ -n ${GW_VM_TEST_FAIL_MATCH:-} && $script == *"$GW_VM_TEST_FAIL_MATCH"* ]];
   exit 42
 fi
 
+if [[ $script == *'rust-transition-stage=complete'* ]]; then
+  if [[ ${GW_VM_TEST_RUST_MARKER_MISSING:-0} == 1 ]]; then
+    printf '%s\n' 'Owned source marker is missing or invalid: test marker' >&2
+    exit 20
+  fi
+  if [[ ${GW_VM_TEST_RUST_TOOL_MISSING:-0} == 1 ]]; then
+    printf '%s\n' 'Required guest Rust tool is missing: cargo' >&2
+    exit 21
+  fi
+  printf '%s\n' \
+    'rust-transition-stage=toolchain' \
+    'rustc 1.96.1' \
+    'cargo 1.96.1' \
+    'rust-transition-stage=fmt' \
+    'rust-transition-stage=check' \
+    'rust-transition-stage=test' \
+    'rust-transition-stage=clippy' \
+    'rust-transition-stage=complete'
+  exit 0
+fi
+
 case "$script" in
   *'emerge --info'*) printf 'Portage 3.0 test guest\n' ;;
   *'eselect profile list'*) printf '  [1] default/linux/amd64/23.0 *\n' ;;
@@ -944,7 +965,7 @@ unset GLASSWYRM_VM_OVERLAY_PATH GLASSWYRM_VM_ARTIFACTS_PATH
 [[ -x $gw_vm ]] || fail "$gw_vm is missing or not executable"
 
 run_success "$work_dir/help.out" "$gw_vm" help
-for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone13-runtime-test milestone14-runtime-test milestone11-interactive-rerun; do
+for command in doctor status reset pretend emerge unmerge narrow-test collect full-packaging-test push-source rust-transition-software-test milestone1-runtime-test milestone2-runtime-test milestone3-runtime-test milestone4-runtime-test milestone5-runtime-test milestone6-runtime-test milestone7-runtime-test milestone10-runtime-test milestone11-runtime-test milestone12-runtime-test milestone13-runtime-test milestone14-runtime-test milestone11-interactive-rerun; do
   assert_contains "$work_dir/help.out" "$command"
 done
 
@@ -1148,6 +1169,56 @@ assert_contains "$work_dir/push-source-symlink-failure.out" 'Refusing symlink so
 assert_not_contains "$command_log" 'rsync'
 [[ -f $symlink_target/must-survive ]] || fail 'symlink destination target was modified'
 rm -f "$guest_source_dir"
+
+: >"$command_log"
+run_success "$work_dir/rust-transition-push-source.out" "$gw_vm" push-source
+run_success "$work_dir/rust-transition.out" "$gw_vm" rust-transition-software-test
+assert_contains "$work_dir/rust-transition.out" 'rust-transition-stage=complete'
+assert_contains "$work_dir/rust-transition.out" 'Rust transition VM software test passed.'
+assert_contains "$command_log" 'marker=$source_dir/.glasswyrm-vm-source'
+assert_contains "$command_log" 'cargo fmt --all -- --check'
+assert_contains "$command_log" 'cargo check --workspace --all-targets --locked'
+assert_contains "$command_log" 'cargo test --workspace --all-targets --locked'
+assert_contains "$command_log" 'cargo clippy --workspace --all-targets --locked -- -D warnings'
+assert_contains "$command_log" 'unset GW_ALLOW_HARDWARE_TESTS'
+assert_contains "$command_log" 'export RUSTUP_AUTO_INSTALL=0'
+assert_not_contains "$command_log" '/dev/dri'
+assert_not_contains "$command_log" 'chvt'
+assert_not_contains "$command_log" 'systemctl'
+assert_not_contains "$command_log" 'GW_ALLOW_HARDWARE_TESTS=1'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"scenario": "rust-transition-software-test"'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"passed": true'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"hardware_authorized": false'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-extra-arg.out" \
+  "$gw_vm" rust-transition-software-test --yes
+assert_contains "$work_dir/rust-transition-extra-arg.out" \
+  "Command 'rust-transition-software-test' does not accept: --yes"
+[[ ! -s $command_log ]] || fail 'Rust transition extra argument reached guest transport'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-marker.out" \
+  env GW_VM_TEST_RUST_MARKER_MISSING=1 "$gw_vm" scenario rust-transition-software-test
+assert_contains "$work_dir/rust-transition-marker.out" \
+  'Owned source marker is missing or invalid'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"passed": false'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"exit_status": 20'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-tool.out" \
+  env GW_VM_TEST_RUST_TOOL_MISSING=1 "$gw_vm" rust-transition-software-test
+assert_contains "$work_dir/rust-transition-tool.out" \
+  'Required guest Rust tool is missing: cargo'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"exit_status": 21'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-injection.out" \
+  "$gw_vm" scenario 'rust-transition-software-test;id'
+assert_contains "$work_dir/rust-transition-injection.out" 'Scenario names are fixed'
+[[ ! -s $command_log ]] || fail 'Rust transition scenario injection reached guest transport'
 
 : >"$command_log"
 run_failure "$work_dir/milestone1-gate.out" "$gw_vm" milestone1-runtime-test

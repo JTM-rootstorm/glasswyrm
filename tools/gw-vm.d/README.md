@@ -81,6 +81,7 @@ actions:
 ./tools/gw-vm unmerge x11-wm/gwm --yes
 ./tools/gw-vm narrow-test gwm
 ./tools/gw-vm collect
+./tools/gw-vm rust-transition-software-test
 ./tools/gw-vm full-packaging-test --yes
 ./tools/gw-vm milestone1-runtime-test --yes
 ./tools/gw-vm milestone2-runtime-test --yes
@@ -104,6 +105,13 @@ unrelated directory.
 `push-source` similarly requires `.glasswyrm-vm-source` and excludes `.git/`,
 `Plans/`, artifacts, host build directories, and the ignored local VM config.
 It refuses a non-empty destination that lacks the ownership marker.
+
+`rust-transition-software-test` is a fixed, non-hardware scenario for an
+already booted guest populated by `push-source`. It requires the source
+ownership marker and an existing guest Rust toolchain, then runs workspace
+format, check, test, and clippy gates with the lockfile enforced. It neither
+installs dependencies nor accesses DRM or virtual terminals. Its log and JSON
+summary are written beneath the configured host artifact directory.
 
 `narrow-test gwm` checks the Portage pretend output for unexpected rebuilds of
 `x11-base/glasswyrmd` and `x11-base/gwcomp`. Use `--allow-abi-rebuild` only when
