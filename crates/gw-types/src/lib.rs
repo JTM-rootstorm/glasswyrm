@@ -232,6 +232,70 @@ pub enum RejectReason {
     InternalError = 7,
 }
 
+/// Reason a peer reported a GWIPC protocol violation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(u16)]
+pub enum ProtocolErrorCode {
+    MalformedEnvelope = 1,
+    MalformedPayload = 2,
+    UnsupportedMessage = 3,
+    MissingCapability = 4,
+    InvalidDescriptorCount = 5,
+    InvalidDescriptor = 6,
+    OutOfOrderSequence = 7,
+    UnexpectedReply = 8,
+    SnapshotViolation = 9,
+    LimitExceeded = 10,
+    InternalError = 11,
+}
+
+impl TryFrom<u16> for ProtocolErrorCode {
+    type Error = ();
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::MalformedEnvelope),
+            2 => Ok(Self::MalformedPayload),
+            3 => Ok(Self::UnsupportedMessage),
+            4 => Ok(Self::MissingCapability),
+            5 => Ok(Self::InvalidDescriptorCount),
+            6 => Ok(Self::InvalidDescriptor),
+            7 => Ok(Self::OutOfOrderSequence),
+            8 => Ok(Self::UnexpectedReply),
+            9 => Ok(Self::SnapshotViolation),
+            10 => Ok(Self::LimitExceeded),
+            11 => Ok(Self::InternalError),
+            _ => Err(()),
+        }
+    }
+}
+
+/// State domain carried by a GWIPC snapshot transaction.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(u16)]
+pub enum SnapshotDomain {
+    Outputs = 1,
+    Surfaces = 2,
+    WindowPolicy = 3,
+    CompleteSession = 4,
+    Test = 5,
+}
+
+impl TryFrom<u16> for SnapshotDomain {
+    type Error = ();
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Outputs),
+            2 => Ok(Self::Surfaces),
+            3 => Ok(Self::WindowPolicy),
+            4 => Ok(Self::CompleteSession),
+            5 => Ok(Self::Test),
+            _ => Err(()),
+        }
+    }
+}
+
 impl TryFrom<u16> for RejectReason {
     type Error = ();
 
