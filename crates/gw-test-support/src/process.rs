@@ -96,10 +96,12 @@ impl ProcessSpec {
         command.process_group(0);
 
         let child = command.spawn()?;
+        let process_group_id = child.id();
         Ok(SupervisedChild {
             name: instance_name.to_owned(),
             command_line: self.command_line(),
             child,
+            process_group_id,
             stdout_path,
             stderr_path,
             exit: None,
@@ -152,6 +154,7 @@ pub struct SupervisedChild {
     name: String,
     command_line: String,
     child: Child,
+    process_group_id: u32,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
     exit: Option<ExitInfo>,
@@ -230,7 +233,7 @@ impl SupervisedChild {
                 format!("process {} has already exited", self.name),
             ));
         }
-        signal_process_group(self.id(), signal)
+        signal_process_group(self.process_group_id, signal)
     }
 
     #[cfg(not(unix))]
@@ -255,6 +258,9 @@ impl SupervisedChild {
     /// Sends SIGTERM to the complete process group, then escalates to SIGKILL.
     pub fn terminate(&mut self, timeout: Duration) -> io::Result<ExitInfo> {
         if let Some(exit) = self.refresh_status()? {
+            // The group leader may have exited before a descendant. Retain the
+            // independently recorded PGID and clear any surviving descendants.
+            let _ = signal_process_group(self.process_group_id, Signal::Kill);
             return Ok(exit);
         }
 
@@ -269,10 +275,11 @@ impl SupervisedChild {
             })?;
         }
         if let Some(exit) = self.wait_timeout(timeout)? {
+            let _ = signal_process_group(self.process_group_id, Signal::Kill);
             return Ok(exit);
         }
 
-        if self.signal(Signal::Kill).is_err() {
+        if signal_process_group(self.process_group_id, Signal::Kill).is_err() {
             self.child.kill()?;
         }
         self.wait()
@@ -425,6 +432,49 @@ mod tests {
         child.resume().unwrap();
         let exit = child.terminate(Duration::from_millis(500)).unwrap();
         assert_eq!(exit.signal, Some(15));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn terminate_kills_descendants_after_the_group_leader_exits() {
+        let dir = process_dir("descendants");
+        let pid_file = dir.join("descendant.pid");
+        let script = "trap 'exit 0' TERM; sh -c 'trap \"\" TERM; while :; do sleep 1; done' & echo $! > \"$1\"; while :; do sleep 1; done";
+        let mut child = ProcessSpec::new("descendants", "sh")
+            .args([
+                OsString::from("-c"),
+                OsString::from(script),
+                OsString::from("sh"),
+                pid_file.as_os_str().to_owned(),
+            ])
+            .spawn(&dir)
+            .unwrap();
+        poll_until(
+            "descendant pid file",
+            Duration::from_secs(1),
+            Duration::from_millis(5),
+            || Ok(pid_file.exists().then_some(())),
+        )
+        .unwrap();
+        let descendant = fs::read_to_string(&pid_file).unwrap();
+        let descendant = descendant.trim();
+
+        child.terminate(Duration::from_millis(500)).unwrap();
+        poll_until(
+            "descendant process group cleanup",
+            Duration::from_secs(1),
+            Duration::from_millis(10),
+            || {
+                let status = Command::new("kill")
+                    .args(["-0", "--", descendant])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()?;
+                Ok((!status.success()).then_some(()))
+            },
+        )
+        .unwrap();
         fs::remove_dir_all(dir).unwrap();
     }
 

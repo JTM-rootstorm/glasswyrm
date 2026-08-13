@@ -20,7 +20,7 @@ pub use fixture::{
 pub use id::{TestId, deterministic_seed};
 pub use poll::{
     Clock, FakeClock, PollError, SystemClock, poll_until, poll_until_with_clock, wait_for_path,
-    wait_for_unix_socket,
+    wait_for_unix_stream_socket,
 };
 pub use process::{ExitInfo, ProcessSpec, RestartableProcess, Signal, SupervisedChild};
 pub use runtime::RuntimeDir;

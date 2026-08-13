@@ -179,7 +179,11 @@ pub fn wait_for_path(
 }
 
 #[cfg(unix)]
-pub fn wait_for_unix_socket(
+/// Waits for a `SOCK_STREAM` Unix listener to accept connections.
+///
+/// GWIPC uses `SOCK_SEQPACKET`; its readiness must be established with a
+/// protocol-aware seqpacket connector and handshake instead of this helper.
+pub fn wait_for_unix_stream_socket(
     path: impl AsRef<Path>,
     timeout: Duration,
     interval: Duration,
@@ -196,7 +200,7 @@ pub fn wait_for_unix_socket(
 }
 
 #[cfg(not(unix))]
-pub fn wait_for_unix_socket(
+pub fn wait_for_unix_stream_socket(
     path: impl AsRef<Path>,
     timeout: Duration,
     _interval: Duration,
@@ -257,7 +261,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn unix_socket_readiness_requires_a_connection() {
+    fn unix_stream_socket_readiness_requires_a_connection() {
         use std::os::unix::net::UnixListener;
 
         let path = std::env::temp_dir().join(format!(
@@ -278,7 +282,8 @@ mod tests {
             }
             Err(error) => panic!("could not bind test socket: {error}"),
         };
-        wait_for_unix_socket(&path, Duration::from_millis(100), Duration::from_millis(1)).unwrap();
+        wait_for_unix_stream_socket(&path, Duration::from_millis(100), Duration::from_millis(1))
+            .unwrap();
         drop(listener);
         std::fs::remove_file(path).unwrap();
     }
