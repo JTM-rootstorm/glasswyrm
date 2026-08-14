@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+gw-sys = { path = "../gw-sys" }
 gw-types = { path = "../gw-types" }
 gw-wire = { path = "../gw-wire" }
 

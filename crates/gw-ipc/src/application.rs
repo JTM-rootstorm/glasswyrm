@@ -283,9 +283,8 @@ impl ApplicationValidator {
                 roles,
             )?;
         } else {
-            self.require_capabilities(required_capabilities(message_type))?;
-            validate_special_direction(message_type, roles)?;
-            validate_base_payload_and_flags(message_type, flags, payload, snapshot)?;
+            validate_base_contract(message_type, flags, roles, self.capabilities)?;
+            validate_base_payload(message_type, payload, snapshot)?;
             if message_type == MessageType::SURFACE_UPSERT {
                 self.validate_surface_presentation_capabilities(payload)?;
             }
@@ -635,81 +634,294 @@ fn validate_envelope_application_shape(
     Ok(())
 }
 
-fn required_capabilities(message_type: MessageType) -> u64 {
-    match message_type {
+#[derive(Clone, Copy)]
+enum BaseRoles {
+    AnyEstablished,
+    SnapshotPeers,
+    OutputState,
+    OutputRemoval,
+    SurfaceState,
+    SceneSubmission,
+    SceneResponse,
+    PolicyInput,
+    PolicyOutput,
+    SyntheticInput,
+    SyntheticResponse,
+    SessionChange,
+    SessionResponse,
+}
+
+#[derive(Clone, Copy)]
+enum AllowedFlags {
+    None,
+    AckRequired,
+    Reply,
+    ErrorReply,
+    SnapshotItem,
+    NoneOrSnapshotItem,
+}
+
+#[derive(Clone, Copy)]
+struct BaseContract {
+    required_capabilities: u64,
+    roles: BaseRoles,
+    flags: AllowedFlags,
+}
+
+fn base_contract(message_type: MessageType) -> Result<BaseContract, ApplicationError> {
+    use AllowedFlags::{AckRequired, ErrorReply, None, NoneOrSnapshotItem, Reply, SnapshotItem};
+    use BaseRoles::{
+        AnyEstablished, OutputRemoval, OutputState, PolicyInput, PolicyOutput, SceneResponse,
+        SceneSubmission, SessionChange, SessionResponse, SnapshotPeers, SurfaceState,
+        SyntheticInput, SyntheticResponse,
+    };
+
+    let contract = match message_type {
+        MessageType::PING => BaseContract {
+            required_capabilities: 0,
+            roles: AnyEstablished,
+            flags: AckRequired,
+        },
+        MessageType::PONG => BaseContract {
+            required_capabilities: 0,
+            roles: AnyEstablished,
+            flags: Reply,
+        },
+        MessageType::PROTOCOL_ERROR => BaseContract {
+            required_capabilities: 0,
+            roles: AnyEstablished,
+            flags: ErrorReply,
+        },
         MessageType::SNAPSHOT_BEGIN | MessageType::SNAPSHOT_END | MessageType::SNAPSHOT_ABORT => {
-            Capabilities::SNAPSHOTS.bits()
+            BaseContract {
+                required_capabilities: Capabilities::SNAPSHOTS.bits(),
+                roles: SnapshotPeers,
+                flags: None,
+            }
         }
-        MessageType::OUTPUT_UPSERT | MessageType::OUTPUT_REMOVE => {
-            Capabilities::OUTPUT_STATE.bits()
-        }
-        MessageType::SURFACE_UPSERT | MessageType::SURFACE_REMOVE => {
-            Capabilities::SURFACE_STATE.bits()
-        }
-        MessageType::SURFACE_POLICY_UPSERT => {
-            Capabilities::SURFACE_STATE.bits() | Capabilities::WINDOW_LIFECYCLE.bits()
-        }
-        MessageType::BUFFER_ATTACH => {
-            Capabilities::FD_PASSING.bits() | Capabilities::MEMFD_BUFFERS.bits()
-        }
-        MessageType::SURFACE_DAMAGE => Capabilities::DAMAGE_REGIONS.bits(),
-        MessageType::FRAME_ACKNOWLEDGED => Capabilities::FRAME_ACKNOWLEDGEMENT.bits(),
-        MessageType::POLICY_CONTEXT_UPSERT
-        | MessageType::POLICY_WINDOW_UPSERT
-        | MessageType::POLICY_WINDOW_REMOVE
-        | MessageType::POLICY_COMMIT
-        | MessageType::POLICY_WINDOW_STATE
-        | MessageType::POLICY_ACKNOWLEDGED => Capabilities::WINDOW_POLICY.bits(),
-        MessageType::POLICY_LIFECYCLE_WINDOW_UPSERT => {
-            Capabilities::WINDOW_POLICY.bits() | Capabilities::WINDOW_LIFECYCLE.bits()
-        }
+        MessageType::OUTPUT_UPSERT => BaseContract {
+            required_capabilities: Capabilities::OUTPUT_STATE.bits(),
+            roles: OutputState,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::OUTPUT_REMOVE => BaseContract {
+            required_capabilities: Capabilities::OUTPUT_STATE.bits(),
+            roles: OutputRemoval,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::SURFACE_UPSERT => BaseContract {
+            required_capabilities: Capabilities::SURFACE_STATE.bits(),
+            roles: SurfaceState,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::SURFACE_REMOVE => BaseContract {
+            required_capabilities: Capabilities::SURFACE_STATE.bits(),
+            roles: SceneSubmission,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::SURFACE_POLICY_UPSERT => BaseContract {
+            required_capabilities: Capabilities::SURFACE_STATE.bits()
+                | Capabilities::WINDOW_LIFECYCLE.bits(),
+            roles: SceneSubmission,
+            flags: SnapshotItem,
+        },
+        MessageType::BUFFER_ATTACH | MessageType::BUFFER_DETACH => BaseContract {
+            required_capabilities: Capabilities::FD_PASSING.bits()
+                | Capabilities::MEMFD_BUFFERS.bits(),
+            roles: SceneSubmission,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::BUFFER_RELEASE => BaseContract {
+            required_capabilities: Capabilities::FD_PASSING.bits()
+                | Capabilities::MEMFD_BUFFERS.bits(),
+            roles: SceneResponse,
+            flags: None,
+        },
+        MessageType::SURFACE_DAMAGE => BaseContract {
+            required_capabilities: Capabilities::DAMAGE_REGIONS.bits(),
+            roles: SceneSubmission,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::FRAME_COMMIT | MessageType::FRAME_ACKNOWLEDGED => BaseContract {
+            required_capabilities: Capabilities::FRAME_ACKNOWLEDGEMENT.bits(),
+            roles: if message_type == MessageType::FRAME_ACKNOWLEDGED {
+                SceneResponse
+            } else {
+                SceneSubmission
+            },
+            flags: if message_type == MessageType::FRAME_ACKNOWLEDGED {
+                Reply
+            } else {
+                AckRequired
+            },
+        },
+        MessageType::POLICY_CONTEXT_UPSERT | MessageType::POLICY_WINDOW_UPSERT => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits(),
+            roles: PolicyInput,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::POLICY_WINDOW_REMOVE => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits(),
+            roles: PolicyInput,
+            flags: None,
+        },
+        MessageType::POLICY_LIFECYCLE_WINDOW_UPSERT => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits()
+                | Capabilities::WINDOW_LIFECYCLE.bits(),
+            roles: PolicyInput,
+            flags: NoneOrSnapshotItem,
+        },
+        MessageType::POLICY_COMMIT => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits(),
+            roles: PolicyInput,
+            flags: AckRequired,
+        },
+        MessageType::POLICY_WINDOW_STATE => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits(),
+            roles: PolicyOutput,
+            flags: SnapshotItem,
+        },
+        MessageType::POLICY_ACKNOWLEDGED => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits(),
+            roles: PolicyOutput,
+            flags: Reply,
+        },
+        MessageType::POLICY_BINDINGS_UPSERT => BaseContract {
+            required_capabilities: Capabilities::WINDOW_POLICY.bits()
+                | Capabilities::INTERACTIVE_POLICY.bits(),
+            roles: PolicyOutput,
+            flags: SnapshotItem,
+        },
         MessageType::SYNTHETIC_MOTION
         | MessageType::SYNTHETIC_BUTTON
         | MessageType::SYNTHETIC_KEY
-        | MessageType::SYNTHETIC_BARRIER
-        | MessageType::SYNTHETIC_INPUT_ACKNOWLEDGED => Capabilities::SYNTHETIC_INPUT.bits(),
-        MessageType::POLICY_BINDINGS_UPSERT => {
-            Capabilities::WINDOW_POLICY.bits() | Capabilities::INTERACTIVE_POLICY.bits()
+        | MessageType::SYNTHETIC_BARRIER => BaseContract {
+            required_capabilities: Capabilities::SYNTHETIC_INPUT.bits(),
+            roles: SyntheticInput,
+            flags: AckRequired,
+        },
+        MessageType::SYNTHETIC_INPUT_ACKNOWLEDGED => BaseContract {
+            required_capabilities: Capabilities::SYNTHETIC_INPUT.bits(),
+            roles: SyntheticResponse,
+            flags: Reply,
+        },
+        MessageType::SESSION_STATE_CHANGE => BaseContract {
+            required_capabilities: Capabilities::SESSION_STATE.bits(),
+            roles: SessionChange,
+            flags: AckRequired,
+        },
+        MessageType::SESSION_STATE_ACKNOWLEDGED => BaseContract {
+            required_capabilities: Capabilities::SESSION_STATE.bits(),
+            roles: SessionResponse,
+            flags: Reply,
+        },
+        _ => return Err(ApplicationError::UnsupportedMessage),
+    };
+    Ok(contract)
+}
+
+fn validate_base_contract(
+    message_type: MessageType,
+    flags: MessageFlags,
+    roles: (Role, Role),
+    capabilities: Capabilities,
+) -> Result<(), ApplicationError> {
+    let contract = base_contract(message_type)?;
+    if capabilities.bits() & contract.required_capabilities != contract.required_capabilities {
+        return Err(ApplicationError::CapabilityMismatch);
+    }
+    if !base_roles_allow(contract.roles, roles) || !base_flags_allow(contract.flags, flags) {
+        return Err(ApplicationError::Protocol);
+    }
+    Ok(())
+}
+
+fn base_roles_allow(contract: BaseRoles, roles: (Role, Role)) -> bool {
+    let test_submission = matches!(
+        roles,
+        (Role::TestProducer, Role::TestConsumer) | (Role::TestProducer, Role::Compositor)
+    );
+    let test_response = matches!(
+        roles,
+        (Role::TestConsumer, Role::TestProducer) | (Role::Compositor, Role::TestProducer)
+    );
+    match contract {
+        BaseRoles::AnyEstablished => true,
+        BaseRoles::SnapshotPeers => {
+            test_submission
+                || test_response
+                || matches!(
+                    roles,
+                    (Role::ProtocolServer, Role::Compositor)
+                        | (Role::Compositor, Role::ProtocolServer)
+                        | (Role::ProtocolServer, Role::WindowManager)
+                        | (Role::WindowManager, Role::ProtocolServer)
+                        | (Role::ProtocolServer, Role::DiagnosticTool)
+                        | (Role::DiagnosticTool, Role::ProtocolServer)
+                )
         }
-        MessageType::SESSION_STATE_CHANGE | MessageType::SESSION_STATE_ACKNOWLEDGED => {
-            Capabilities::SESSION_STATE.bits()
+        BaseRoles::OutputState => {
+            test_submission
+                || matches!(
+                    roles,
+                    (Role::ProtocolServer, Role::Compositor)
+                        | (Role::Compositor, Role::ProtocolServer)
+                        | (Role::ProtocolServer, Role::DiagnosticTool)
+                        | (Role::DiagnosticTool, Role::ProtocolServer)
+                )
         }
-        _ => 0,
+        BaseRoles::OutputRemoval => {
+            test_submission
+                || matches!(
+                    roles,
+                    (Role::ProtocolServer, Role::Compositor)
+                        | (Role::Compositor, Role::ProtocolServer)
+                )
+        }
+        BaseRoles::SurfaceState => {
+            test_submission
+                || matches!(
+                    roles,
+                    (Role::ProtocolServer, Role::Compositor)
+                        | (Role::ProtocolServer, Role::DiagnosticTool)
+                )
+        }
+        BaseRoles::SceneSubmission => {
+            test_submission || roles == (Role::ProtocolServer, Role::Compositor)
+        }
+        BaseRoles::SceneResponse => {
+            test_response || roles == (Role::Compositor, Role::ProtocolServer)
+        }
+        BaseRoles::PolicyInput => roles == (Role::ProtocolServer, Role::WindowManager),
+        BaseRoles::PolicyOutput => roles == (Role::WindowManager, Role::ProtocolServer),
+        BaseRoles::SyntheticInput => roles == (Role::TestProducer, Role::ProtocolServer),
+        BaseRoles::SyntheticResponse => roles == (Role::ProtocolServer, Role::TestProducer),
+        BaseRoles::SessionChange => roles == (Role::Compositor, Role::ProtocolServer),
+        BaseRoles::SessionResponse => roles == (Role::ProtocolServer, Role::Compositor),
     }
 }
 
-fn validate_special_direction(
-    message_type: MessageType,
-    roles: (Role, Role),
-) -> Result<(), ApplicationError> {
-    let valid = match message_type {
-        MessageType::SESSION_STATE_CHANGE => roles == (Role::Compositor, Role::ProtocolServer),
-        MessageType::SESSION_STATE_ACKNOWLEDGED => {
-            roles == (Role::ProtocolServer, Role::Compositor)
-        }
-        MessageType::POLICY_BINDINGS_UPSERT => roles == (Role::WindowManager, Role::ProtocolServer),
-        _ => true,
-    };
-    valid.then_some(()).ok_or(ApplicationError::Protocol)
+fn base_flags_allow(contract: AllowedFlags, flags: MessageFlags) -> bool {
+    let bits = flags.bits();
+    match contract {
+        AllowedFlags::None => bits == 0,
+        AllowedFlags::AckRequired => bits == MessageFlags::ACK_REQUIRED.bits(),
+        AllowedFlags::Reply => bits == MessageFlags::REPLY.bits(),
+        AllowedFlags::ErrorReply => bits == MessageFlags::REPLY.with(MessageFlags::ERROR).bits(),
+        AllowedFlags::SnapshotItem => bits == MessageFlags::SNAPSHOT_ITEM.bits(),
+        AllowedFlags::NoneOrSnapshotItem => bits == 0 || bits == MessageFlags::SNAPSHOT_ITEM.bits(),
+    }
 }
 
-fn validate_base_payload_and_flags(
+fn validate_base_payload(
     message_type: MessageType,
-    flags: MessageFlags,
     payload: &[u8],
     snapshot: SnapshotState,
 ) -> Result<(), ApplicationError> {
-    let bits = flags.bits();
-    let none_or_item = bits == 0 || bits == MessageFlags::SNAPSHOT_ITEM.bits();
     let valid = match message_type {
-        MessageType::PING => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_ping(payload).is_ok()
-        }
-        MessageType::PONG => bits == MessageFlags::REPLY.bits() && decode_pong(payload).is_ok(),
-        MessageType::PROTOCOL_ERROR => {
-            bits == MessageFlags::REPLY.with(MessageFlags::ERROR).bits()
-                && decode_protocol_error(payload).is_ok()
-        }
+        MessageType::PING => decode_ping(payload).is_ok(),
+        MessageType::PONG => decode_pong(payload).is_ok(),
+        MessageType::PROTOCOL_ERROR => decode_protocol_error(payload).is_ok(),
         MessageType::SNAPSHOT_BEGIN => decode_snapshot_begin(payload).is_ok(),
         MessageType::SNAPSHOT_END => decode_snapshot_end(payload).is_ok(),
         MessageType::SNAPSHOT_ABORT => decode_snapshot_abort(payload).is_ok(),
@@ -721,66 +933,29 @@ fn validate_base_payload_and_flags(
         MessageType::BUFFER_DETACH => decode_buffer_detach(payload).is_ok(),
         MessageType::BUFFER_RELEASE => decode_buffer_release(payload).is_ok(),
         MessageType::SURFACE_DAMAGE => decode_surface_damage(payload).is_ok(),
-        MessageType::FRAME_COMMIT => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_frame_commit(payload).is_ok()
-        }
-        MessageType::FRAME_ACKNOWLEDGED => {
-            bits == MessageFlags::REPLY.bits() && decode_frame_acknowledged(payload).is_ok()
-        }
-        MessageType::POLICY_CONTEXT_UPSERT => {
-            none_or_item && decode_policy_context_upsert(payload).is_ok()
-        }
-        MessageType::POLICY_WINDOW_UPSERT => {
-            none_or_item && decode_policy_window_upsert(payload).is_ok()
-        }
-        MessageType::POLICY_WINDOW_REMOVE => {
-            bits == 0 && decode_policy_window_remove(payload).is_ok()
-        }
-        MessageType::POLICY_COMMIT => {
-            bits == MessageFlags::ACK_REQUIRED.bits()
-                && !snapshot.active
-                && decode_policy_commit(payload).is_ok()
-        }
-        MessageType::POLICY_WINDOW_STATE => {
-            bits == MessageFlags::SNAPSHOT_ITEM.bits()
-                && decode_policy_window_state(payload).is_ok()
-        }
-        MessageType::POLICY_ACKNOWLEDGED => {
-            bits == MessageFlags::REPLY.bits() && decode_policy_acknowledged(payload).is_ok()
-        }
+        MessageType::FRAME_COMMIT => decode_frame_commit(payload).is_ok(),
+        MessageType::FRAME_ACKNOWLEDGED => decode_frame_acknowledged(payload).is_ok(),
+        MessageType::POLICY_CONTEXT_UPSERT => decode_policy_context_upsert(payload).is_ok(),
+        MessageType::POLICY_WINDOW_UPSERT => decode_policy_window_upsert(payload).is_ok(),
+        MessageType::POLICY_WINDOW_REMOVE => decode_policy_window_remove(payload).is_ok(),
+        MessageType::POLICY_COMMIT => !snapshot.active && decode_policy_commit(payload).is_ok(),
+        MessageType::POLICY_WINDOW_STATE => decode_policy_window_state(payload).is_ok(),
+        MessageType::POLICY_ACKNOWLEDGED => decode_policy_acknowledged(payload).is_ok(),
         MessageType::POLICY_LIFECYCLE_WINDOW_UPSERT => {
-            none_or_item && decode_policy_lifecycle_window_upsert(payload).is_ok()
+            decode_policy_lifecycle_window_upsert(payload).is_ok()
         }
-        MessageType::POLICY_BINDINGS_UPSERT => {
-            bits == MessageFlags::SNAPSHOT_ITEM.bits()
-                && decode_policy_bindings_upsert(payload).is_ok()
-        }
-        MessageType::SURFACE_POLICY_UPSERT => {
-            bits == MessageFlags::SNAPSHOT_ITEM.bits()
-                && decode_surface_policy_upsert(payload).is_ok()
-        }
-        MessageType::SYNTHETIC_MOTION => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_synthetic_motion(payload).is_ok()
-        }
-        MessageType::SYNTHETIC_BUTTON => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_synthetic_button(payload).is_ok()
-        }
-        MessageType::SYNTHETIC_KEY => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_synthetic_key(payload).is_ok()
-        }
-        MessageType::SYNTHETIC_BARRIER => {
-            bits == MessageFlags::ACK_REQUIRED.bits() && decode_synthetic_barrier(payload).is_ok()
-        }
+        MessageType::POLICY_BINDINGS_UPSERT => decode_policy_bindings_upsert(payload).is_ok(),
+        MessageType::SURFACE_POLICY_UPSERT => decode_surface_policy_upsert(payload).is_ok(),
+        MessageType::SYNTHETIC_MOTION => decode_synthetic_motion(payload).is_ok(),
+        MessageType::SYNTHETIC_BUTTON => decode_synthetic_button(payload).is_ok(),
+        MessageType::SYNTHETIC_KEY => decode_synthetic_key(payload).is_ok(),
+        MessageType::SYNTHETIC_BARRIER => decode_synthetic_barrier(payload).is_ok(),
         MessageType::SYNTHETIC_INPUT_ACKNOWLEDGED => {
-            bits == MessageFlags::REPLY.bits()
-                && decode_synthetic_input_acknowledged(payload).is_ok()
+            decode_synthetic_input_acknowledged(payload).is_ok()
         }
-        MessageType::SESSION_STATE_CHANGE => {
-            bits == MessageFlags::ACK_REQUIRED.bits()
-                && decode_session_state_change(payload).is_ok()
-        }
+        MessageType::SESSION_STATE_CHANGE => decode_session_state_change(payload).is_ok(),
         MessageType::SESSION_STATE_ACKNOWLEDGED => {
-            bits == MessageFlags::REPLY.bits() && decode_session_state_acknowledged(payload).is_ok()
+            decode_session_state_acknowledged(payload).is_ok()
         }
         _ => return Err(ApplicationError::UnsupportedMessage),
     };
@@ -1287,6 +1462,184 @@ mod tests {
     }
 
     #[test]
+    fn every_base_message_has_an_explicit_contract() {
+        let base_messages = [
+            MessageType::PING,
+            MessageType::PONG,
+            MessageType::PROTOCOL_ERROR,
+            MessageType::SNAPSHOT_BEGIN,
+            MessageType::SNAPSHOT_END,
+            MessageType::SNAPSHOT_ABORT,
+            MessageType::OUTPUT_UPSERT,
+            MessageType::OUTPUT_REMOVE,
+            MessageType::SURFACE_UPSERT,
+            MessageType::SURFACE_REMOVE,
+            MessageType::SURFACE_POLICY_UPSERT,
+            MessageType::BUFFER_ATTACH,
+            MessageType::BUFFER_DETACH,
+            MessageType::BUFFER_RELEASE,
+            MessageType::SURFACE_DAMAGE,
+            MessageType::FRAME_COMMIT,
+            MessageType::FRAME_ACKNOWLEDGED,
+            MessageType::POLICY_CONTEXT_UPSERT,
+            MessageType::POLICY_WINDOW_UPSERT,
+            MessageType::POLICY_WINDOW_REMOVE,
+            MessageType::POLICY_LIFECYCLE_WINDOW_UPSERT,
+            MessageType::POLICY_COMMIT,
+            MessageType::POLICY_WINDOW_STATE,
+            MessageType::POLICY_ACKNOWLEDGED,
+            MessageType::POLICY_BINDINGS_UPSERT,
+            MessageType::SYNTHETIC_MOTION,
+            MessageType::SYNTHETIC_BUTTON,
+            MessageType::SYNTHETIC_KEY,
+            MessageType::SYNTHETIC_BARRIER,
+            MessageType::SYNTHETIC_INPUT_ACKNOWLEDGED,
+            MessageType::SESSION_STATE_CHANGE,
+            MessageType::SESSION_STATE_ACKNOWLEDGED,
+        ];
+        for message_type in base_messages {
+            assert!(
+                base_contract(message_type).is_ok(),
+                "missing contract for {message_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn base_contract_enforces_canonical_roles_capabilities_and_flags() {
+        let valid = [
+            (
+                MessageType::SNAPSHOT_BEGIN,
+                (Role::TestProducer, Role::Compositor),
+                Capabilities::SNAPSHOTS,
+                MessageFlags::default(),
+            ),
+            (
+                MessageType::OUTPUT_UPSERT,
+                (Role::DiagnosticTool, Role::ProtocolServer),
+                Capabilities::OUTPUT_STATE,
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::SURFACE_UPSERT,
+                (Role::ProtocolServer, Role::DiagnosticTool),
+                Capabilities::SURFACE_STATE,
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::BUFFER_ATTACH,
+                (Role::ProtocolServer, Role::Compositor),
+                capabilities(&[Capabilities::FD_PASSING, Capabilities::MEMFD_BUFFERS]),
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::BUFFER_RELEASE,
+                (Role::Compositor, Role::ProtocolServer),
+                capabilities(&[Capabilities::FD_PASSING, Capabilities::MEMFD_BUFFERS]),
+                MessageFlags::default(),
+            ),
+            (
+                MessageType::BUFFER_ATTACH,
+                (Role::TestProducer, Role::Compositor),
+                capabilities(&[Capabilities::FD_PASSING, Capabilities::MEMFD_BUFFERS]),
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::FRAME_ACKNOWLEDGED,
+                (Role::Compositor, Role::TestProducer),
+                Capabilities::FRAME_ACKNOWLEDGEMENT,
+                MessageFlags::REPLY,
+            ),
+            (
+                MessageType::FRAME_COMMIT,
+                (Role::ProtocolServer, Role::Compositor),
+                Capabilities::FRAME_ACKNOWLEDGEMENT,
+                MessageFlags::ACK_REQUIRED,
+            ),
+            (
+                MessageType::SURFACE_DAMAGE,
+                (Role::ProtocolServer, Role::Compositor),
+                Capabilities::DAMAGE_REGIONS,
+                MessageFlags::default(),
+            ),
+            (
+                MessageType::SURFACE_DAMAGE,
+                (Role::ProtocolServer, Role::Compositor),
+                Capabilities::DAMAGE_REGIONS,
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::POLICY_COMMIT,
+                (Role::ProtocolServer, Role::WindowManager),
+                Capabilities::WINDOW_POLICY,
+                MessageFlags::ACK_REQUIRED,
+            ),
+            (
+                MessageType::POLICY_WINDOW_STATE,
+                (Role::WindowManager, Role::ProtocolServer),
+                Capabilities::WINDOW_POLICY,
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
+                MessageType::SYNTHETIC_BARRIER,
+                (Role::TestProducer, Role::ProtocolServer),
+                Capabilities::SYNTHETIC_INPUT,
+                MessageFlags::ACK_REQUIRED,
+            ),
+            (
+                MessageType::SESSION_STATE_CHANGE,
+                (Role::Compositor, Role::ProtocolServer),
+                Capabilities::SESSION_STATE,
+                MessageFlags::ACK_REQUIRED,
+            ),
+        ];
+        for (message_type, roles, caps, flags) in valid {
+            assert_eq!(
+                validate_base_contract(message_type, flags, roles, caps),
+                Ok(()),
+                "canonical contract rejected for {message_type:?}"
+            );
+        }
+
+        assert_eq!(
+            validate_base_contract(
+                MessageType::SURFACE_REMOVE,
+                MessageFlags::default(),
+                (Role::DiagnosticTool, Role::ProtocolServer),
+                Capabilities::SURFACE_STATE,
+            ),
+            Err(ApplicationError::Protocol)
+        );
+        assert_eq!(
+            validate_base_contract(
+                MessageType::OUTPUT_REMOVE,
+                MessageFlags::SNAPSHOT_ITEM,
+                (Role::DiagnosticTool, Role::ProtocolServer),
+                Capabilities::OUTPUT_STATE,
+            ),
+            Err(ApplicationError::Protocol)
+        );
+        assert_eq!(
+            validate_base_contract(
+                MessageType::FRAME_COMMIT,
+                MessageFlags::ACK_REQUIRED,
+                (Role::ProtocolServer, Role::Compositor),
+                Capabilities::default(),
+            ),
+            Err(ApplicationError::CapabilityMismatch)
+        );
+        assert_eq!(
+            validate_base_contract(
+                MessageType::OUTPUT_UPSERT,
+                MessageFlags::CRITICAL,
+                (Role::ProtocolServer, Role::Compositor),
+                Capabilities::OUTPUT_STATE,
+            ),
+            Err(ApplicationError::Protocol)
+        );
+    }
+
+    #[test]
     fn buffer_attach_fd_shape_matches_legacy_modes() {
         let caps = capabilities(&[
             Capabilities::FD_PASSING,
@@ -1643,8 +1996,8 @@ mod tests {
             result: FrameResult::Accepted,
         });
         let mut validator = ApplicationValidator::new(
-            Role::ProtocolServer,
             Role::Compositor,
+            Role::ProtocolServer,
             Capabilities::FRAME_ACKNOWLEDGEMENT,
             8,
         );

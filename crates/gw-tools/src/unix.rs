@@ -2,7 +2,7 @@ use core::ffi::{c_char, c_int, c_short, c_void};
 use core::mem::size_of;
 use std::ffi::OsStr;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::time::{Duration, Instant};
 
@@ -76,33 +76,33 @@ pub(crate) fn connect_seqpacket(path: &OsStr, deadline: Instant) -> io::Result<O
             length,
         )
     };
-    if status == 0 {
-        return Ok(fd);
+    if status != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(EINPROGRESS) {
+            return Err(error);
+        }
+        wait_writable(fd.as_raw_fd(), deadline)?;
+        let mut socket_error: c_int = 0;
+        let mut socket_error_size = size_of::<c_int>() as u32;
+        // SAFETY: the output pointers refer to writable storage of the
+        // advertised size for the duration of `getsockopt`.
+        if unsafe {
+            getsockopt(
+                fd.as_raw_fd(),
+                SOL_SOCKET,
+                SO_ERROR,
+                (&raw mut socket_error).cast::<c_void>(),
+                &raw mut socket_error_size,
+            )
+        } != 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if socket_error != 0 {
+            return Err(io::Error::from_raw_os_error(socket_error));
+        }
     }
-    let error = io::Error::last_os_error();
-    if error.raw_os_error() != Some(EINPROGRESS) {
-        return Err(error);
-    }
-    wait_writable(fd.as_raw_fd(), deadline)?;
-    let mut socket_error: c_int = 0;
-    let mut socket_error_size = size_of::<c_int>() as u32;
-    // SAFETY: the output pointers refer to writable storage of the advertised
-    // size for the duration of `getsockopt`.
-    if unsafe {
-        getsockopt(
-            fd.as_raw_fd(),
-            SOL_SOCKET,
-            SO_ERROR,
-            (&raw mut socket_error).cast::<c_void>(),
-            &raw mut socket_error_size,
-        )
-    } != 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    if socket_error != 0 {
-        return Err(io::Error::from_raw_os_error(socket_error));
-    }
+    gw_ipc::require_same_euid_peer(fd.as_fd())?;
     Ok(fd)
 }
 

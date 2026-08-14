@@ -8,7 +8,7 @@ use core::ffi::{c_char, c_int, c_void};
 use core::mem::size_of;
 use std::fs;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -177,8 +177,12 @@ impl EndpointListener {
             }
             // SAFETY: successful `accept4` returned a fresh descriptor.
             let peer = unsafe { OwnedFd::from_raw_fd(raw) };
-            if peer_is_same_euid(peer.as_raw_fd())? {
-                return Ok(Some(peer));
+            match require_same_euid_peer(peer.as_fd()) {
+                Ok(()) => return Ok(Some(peer)),
+                Err(error)
+                    if error.kind() == io::ErrorKind::PermissionDenied
+                        && error.raw_os_error().is_none() => {}
+                Err(error) => return Err(error),
             }
             // Drop and continue so an unauthorized queued peer cannot prevent
             // a same-user peer behind it from being serviced.
@@ -267,7 +271,12 @@ fn endpoint_is_live(address: &SockAddrUnix, length: u32) -> io::Result<bool> {
     }
 }
 
-fn peer_is_same_euid(fd: c_int) -> io::Result<bool> {
+/// Requires a connected Unix socket peer to have the process's effective UID.
+///
+/// Call this only after a nonblocking connect has completed successfully. It
+/// deliberately checks the kernel's peer credentials rather than trusting the
+/// ownership or permissions of the socket pathname.
+pub fn require_same_euid_peer(fd: BorrowedFd<'_>) -> io::Result<()> {
     let mut credentials = Credentials {
         pid: 0,
         uid: 0,
@@ -278,19 +287,34 @@ fn peer_is_same_euid(fd: c_int) -> io::Result<bool> {
     // is an accepted Unix socket descriptor.
     if unsafe {
         getsockopt(
-            fd,
+            fd.as_raw_fd(),
             SOL_SOCKET,
             SO_PEERCRED,
             (&raw mut credentials).cast::<c_void>(),
             &raw mut length,
         )
     } != 0
-        || length as usize != size_of::<Credentials>()
     {
         return Err(io::Error::last_os_error());
     }
+    if length as usize != size_of::<Credentials>() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "SO_PEERCRED returned an invalid credential size",
+        ));
+    }
     // SAFETY: `geteuid` has no preconditions.
-    Ok(credentials.uid == unsafe { geteuid() })
+    require_matching_euid(credentials.uid, unsafe { geteuid() })
+}
+
+fn require_matching_euid(peer_uid: u32, effective_uid: u32) -> io::Result<()> {
+    if peer_uid != effective_uid {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "GWIPC peer effective UID does not match this process",
+        ));
+    }
+    Ok(())
 }
 
 fn unlink_if_owned(path: &Path, identity: EndpointIdentity) {
@@ -302,9 +326,23 @@ fn unlink_if_owned(path: &Path, identity: EndpointIdentity) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsFd;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_PATH: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn connected_same_euid_peer_is_accepted() {
+        let (first, _second) = crate::Transport::pair(crate::TransportLimits::DEFAULT).unwrap();
+        require_same_euid_peer(first.as_fd()).unwrap();
+    }
+
+    #[test]
+    fn different_euid_peer_is_rejected() {
+        let error = require_matching_euid(1000, 1001).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(error.raw_os_error(), None);
+    }
 
     fn path(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

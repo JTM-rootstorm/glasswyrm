@@ -2,9 +2,12 @@ use core::ffi::{c_int, c_void};
 use core::fmt;
 use core::mem::{align_of, size_of};
 use core::ptr;
+use std::ffi::OsStr;
+use std::fs;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 
+use gw_wire::compositor::{SynchronizationMode, decode_buffer_attach};
 use gw_wire::{
     DecodeLimits, Envelope, EnvelopeDecodeError, GWIPC_ENVELOPE_SIZE, decode_envelope,
     encode_envelope,
@@ -25,6 +28,9 @@ const F_SETFD: c_int = 2;
 const F_GETFL: c_int = 3;
 const F_SETFL: c_int = 4;
 const FD_CLOEXEC: c_int = 1;
+const O_ACCMODE: c_int = 0o3;
+const O_WRONLY: c_int = 0o1;
+const O_PATH: c_int = 0o10_000_000;
 const MSG_CTRUNC: c_int = 0x08;
 const MSG_TRUNC: c_int = 0x20;
 const MSG_DONTWAIT: c_int = 0x40;
@@ -125,6 +131,7 @@ pub enum TransportError {
     RecordTruncated,
     AncillaryTruncated,
     InvalidAncillaryData,
+    InvalidDescriptor,
     DescriptorLimitExceeded,
     MalformedEnvelope(EnvelopeDecodeError),
     ShortWrite,
@@ -144,6 +151,9 @@ impl fmt::Display for TransportError {
             }
             Self::InvalidAncillaryData => {
                 formatter.write_str("GWIPC record contains invalid ancillary data")
+            }
+            Self::InvalidDescriptor => {
+                formatter.write_str("GWIPC record contains an invalid file descriptor")
             }
             Self::DescriptorLimitExceeded => {
                 formatter.write_str("GWIPC record exceeds the negotiated descriptor limit")
@@ -247,6 +257,7 @@ impl Transport {
             fds.len(),
             DecodeLimits::new(self.limits.maximum_payload),
         )?;
+        validate_record_descriptors(envelope, payload, fds)?;
         send_raw(self.fd.as_raw_fd(), &bytes, fds)
     }
 
@@ -310,12 +321,69 @@ impl Transport {
             DecodeLimits::new(self.limits.maximum_payload),
         )?;
         let payload = bytes.split_off(GWIPC_ENVELOPE_SIZE);
+        validate_record_descriptors(&envelope, &payload, &fds)?;
         Ok(ReceivedRecord {
             envelope,
             payload,
             fds,
         })
     }
+}
+
+fn validate_record_descriptors<F: AsFd>(
+    envelope: &Envelope,
+    payload: &[u8],
+    fds: &[F],
+) -> Result<(), TransportError> {
+    if envelope.message_type != gw_types::MessageType::BUFFER_ATTACH {
+        return Ok(());
+    }
+    let Ok(attachment) = decode_buffer_attach(payload) else {
+        // Payload decoding remains the application validator's responsibility.
+        return Ok(());
+    };
+    let synchronized = attachment.synchronization == SynchronizationMode::EventFd;
+    let expected = if synchronized { 2 } else { 1 };
+    if fds.len() != expected || !valid_pixel_descriptor(fds[0].as_fd(), attachment.storage_size) {
+        return Err(TransportError::InvalidDescriptor);
+    }
+    if synchronized && !valid_event_descriptor(fds[1].as_fd()) {
+        return Err(TransportError::InvalidDescriptor);
+    }
+    Ok(())
+}
+
+fn valid_pixel_descriptor(fd: BorrowedFd<'_>, storage_size: u64) -> bool {
+    // SAFETY: F_GETFL takes no variadic argument and does not mutate memory.
+    let flags = unsafe { gw_sys::fcntl(fd.as_raw_fd(), gw_sys::F_GETFL) };
+    if flags < 0 || flags & O_PATH != 0 || flags & O_ACCMODE == O_WRONLY {
+        return false;
+    }
+    let mut status = gw_sys::stat::default();
+    // SAFETY: `status` is writable for a complete `stat` value and `fd`
+    // remains borrowed and open for the duration of the call.
+    if unsafe { gw_sys::fstat(fd.as_raw_fd(), &raw mut status) } != 0 {
+        return false;
+    }
+    status.st_mode & gw_sys::S_IFMT == gw_sys::S_IFREG
+        && status.st_size >= 0
+        && status.st_size as u64 >= storage_size
+}
+
+fn valid_event_descriptor(fd: BorrowedFd<'_>) -> bool {
+    // SAFETY: F_GETFL takes no variadic argument and does not mutate memory.
+    let status_flags = unsafe { gw_sys::fcntl(fd.as_raw_fd(), gw_sys::F_GETFL) };
+    // SAFETY: F_GETFD takes no variadic argument and does not mutate memory.
+    let descriptor_flags = unsafe { gw_sys::fcntl(fd.as_raw_fd(), gw_sys::F_GETFD) };
+    if status_flags < 0
+        || status_flags & gw_sys::O_NONBLOCK == 0
+        || descriptor_flags < 0
+        || descriptor_flags & gw_sys::FD_CLOEXEC == 0
+    {
+        return false;
+    }
+    fs::read_link(format!("/proc/self/fd/{}", fd.as_raw_fd()))
+        .is_ok_and(|target| target.as_os_str() == OsStr::new("anon_inode:[eventfd]"))
 }
 
 impl AsFd for Transport {
@@ -516,9 +584,51 @@ const fn cmsg_space(data_length: usize) -> usize {
 mod tests {
     use super::*;
     use gw_types::{MessageType, Sequence};
-    use std::fs::File;
+    use gw_wire::compositor::{
+        AlphaSemantics, BufferAttach, PixelFormat, SdrColorMetadata, SynchronizationMode,
+        encode_buffer_attach,
+    };
+    use std::fs::{File, OpenOptions};
     use std::io::Read;
-    use std::os::fd::IntoRawFd;
+    use std::os::fd::{FromRawFd, IntoRawFd};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_FILE: AtomicU64 = AtomicU64::new(1);
+
+    fn buffer_payload(storage_size: u64, synchronization: SynchronizationMode) -> Vec<u8> {
+        encode_buffer_attach(&BufferAttach {
+            buffer_id: 1,
+            surface_id: 2,
+            width: 16,
+            height: 16,
+            stride: 64,
+            byte_offset: 0,
+            storage_size,
+            pixel_format: PixelFormat::Xrgb8888,
+            modifier: 0,
+            alpha_semantics: AlphaSemantics::Opaque,
+            color: SdrColorMetadata::default(),
+            synchronization,
+            flags: 0,
+        })
+    }
+
+    fn regular_storage(size: u64) -> File {
+        let path = std::env::temp_dir().join(format!(
+            "gw-ipc-storage-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        fs::remove_file(path).unwrap();
+        file.set_len(size).unwrap();
+        file
+    }
 
     fn receive_blocking(transport: &Transport) -> Result<ReceivedRecord, TransportError> {
         for _ in 0..1000 {
@@ -559,6 +669,82 @@ mod tests {
             Err(TransportError::MalformedEnvelope(
                 EnvelopeDecodeError::SizeMismatch
             ))
+        ));
+    }
+
+    #[test]
+    fn buffer_attach_rejects_non_regular_and_undersized_storage() {
+        let (sender, _receiver) = Transport::pair(TransportLimits::default()).unwrap();
+        let payload = buffer_payload(1024, SynchronizationMode::None);
+        let mut envelope = Envelope::request(
+            MessageType::BUFFER_ATTACH,
+            Sequence::new(1),
+            payload.len() as u32,
+        );
+        envelope.fd_count = 1;
+
+        let device = File::open("/dev/null").unwrap();
+        assert!(matches!(
+            sender.send(&envelope, &payload, &[device.as_fd()]),
+            Err(TransportError::InvalidDescriptor)
+        ));
+
+        let too_small = regular_storage(1023);
+        assert!(matches!(
+            sender.send(&envelope, &payload, &[too_small.as_fd()]),
+            Err(TransportError::InvalidDescriptor)
+        ));
+
+        let exact = regular_storage(1024);
+        sender.send(&envelope, &payload, &[exact.as_fd()]).unwrap();
+    }
+
+    #[test]
+    fn buffer_attach_requires_a_nonblocking_eventfd_for_synchronization() {
+        let payload = buffer_payload(1024, SynchronizationMode::EventFd);
+        let mut envelope = Envelope::request(
+            MessageType::BUFFER_ATTACH,
+            Sequence::new(1),
+            payload.len() as u32,
+        );
+        envelope.fd_count = 2;
+        let storage = regular_storage(1024);
+        let wrong_sync = regular_storage(8);
+        assert!(matches!(
+            validate_record_descriptors(
+                &envelope,
+                &payload,
+                &[storage.as_fd(), wrong_sync.as_fd()]
+            ),
+            Err(TransportError::InvalidDescriptor)
+        ));
+
+        // SAFETY: eventfd takes scalar arguments and returns a fresh descriptor.
+        let raw = unsafe { gw_sys::eventfd(0, gw_sys::EFD_CLOEXEC | gw_sys::EFD_NONBLOCK) };
+        assert!(raw >= 0, "eventfd failed: {}", io::Error::last_os_error());
+        // SAFETY: the successful eventfd result is uniquely owned here.
+        let event = unsafe { OwnedFd::from_raw_fd(raw) };
+        validate_record_descriptors(&envelope, &payload, &[storage.as_fd(), event.as_fd()])
+            .unwrap();
+    }
+
+    #[test]
+    fn inbound_buffer_attach_rejects_invalid_received_storage() {
+        let (sender, receiver) = Transport::pair(TransportLimits::default()).unwrap();
+        let payload = buffer_payload(1024, SynchronizationMode::None);
+        let mut envelope = Envelope::request(
+            MessageType::BUFFER_ATTACH,
+            Sequence::new(1),
+            payload.len() as u32,
+        );
+        envelope.fd_count = 1;
+        let mut bytes = encode_envelope(&envelope).to_vec();
+        bytes.extend_from_slice(&payload);
+        let invalid = File::open("/dev/null").unwrap();
+        send_raw(sender.fd.as_raw_fd(), &bytes, &[invalid.as_fd()]).unwrap();
+        assert!(matches!(
+            receive_blocking(&receiver),
+            Err(TransportError::InvalidDescriptor)
         ));
     }
 
