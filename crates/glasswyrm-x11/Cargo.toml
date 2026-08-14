@@ -1,0 +1,16 @@
+[package]
+name = "glasswyrm-x11"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Dependency-free X11 protocol codecs and domain metadata for Glasswyrm"
+publish = false
+
+[dependencies]
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

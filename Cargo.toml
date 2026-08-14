@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/glasswyrm-x11",
   "crates/gw-test-support",
   "crates/gw-transition-tests",
   "crates/gw-types",
