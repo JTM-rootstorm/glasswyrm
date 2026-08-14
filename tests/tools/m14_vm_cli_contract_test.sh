@@ -255,6 +255,7 @@ for expected in \
   'M14 QXL unsupported profile requires driver qxl' \
   'gwout: selected output does not provide controllable VRR' \
   '--backend drm' '--drm-api auto' '--connector "$connector"' \
+  '--setenv=GW_ALLOW_HARDWARE_TESTS=1' \
   '--mode 1024x768' '--property="TTYPath=$target_vt"' \
   '--property=KillMode=mixed' '--property=SuccessExitStatus=143' \
   'chvt 1' 'chvt "${target_vt#/dev/tty}"' 'vrr-restore' \

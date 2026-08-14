@@ -869,6 +869,7 @@ start_gwcomp() {
   current_scene=$scenes/$current_name-$compositor_generation.jsonl
   mkdir -p "$current_dump"
   systemd-run --unit="$current_gwcomp_unit" --property=PrivateDevices=no \
+    --setenv=GW_ALLOW_HARDWARE_TESTS=1 \
     --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
     --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
     --property=StandardInput=tty-force --property="TTYPath=$target_vt" \

@@ -50,4 +50,7 @@ enum class ParseOptionsResult { Run, ExitSuccess, ExitFailure };
 ParseOptionsResult parse_options(int argc, char** argv, Options& options,
                                  std::ostream& output, std::ostream& error);
 
+[[nodiscard]] bool drm_hardware_execution_authorized(
+    const Options& options) noexcept;
+
 }  // namespace glasswyrm::compositor

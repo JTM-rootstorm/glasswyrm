@@ -216,6 +216,9 @@ int main() {
       output.find("--renderer-report PATH") == std::string::npos)
     return 1;
 
+  if (output.find("GW_ALLOW_HARDWARE_TESTS=1") == std::string::npos)
+    return 1;
+
   options = {};
   if (parse({"gwcomp"}, options, output, error) !=
           ParseOptionsResult::ExitFailure ||
@@ -247,6 +250,22 @@ int main() {
       options.mirror_dump_dir != "/tmp/mirror" ||
       options.mirror_dump_trigger != "/tmp/mirror.trigger" ||
       options.drm_report != "/tmp/report.jsonl")
+    return 1;
+
+  ::unsetenv("GW_ALLOW_HARDWARE_TESTS");
+  if (glasswyrm::compositor::drm_hardware_execution_authorized(options))
+    return 1;
+  for (const auto* malformed : {"", "0", "true", "01", " 1", "1 "}) {
+    ::setenv("GW_ALLOW_HARDWARE_TESTS", malformed, 1);
+    if (glasswyrm::compositor::drm_hardware_execution_authorized(options))
+      return 1;
+  }
+  ::setenv("GW_ALLOW_HARDWARE_TESTS", "1", 1);
+  if (!glasswyrm::compositor::drm_hardware_execution_authorized(options))
+    return 1;
+  options = {};
+  ::unsetenv("GW_ALLOW_HARDWARE_TESTS");
+  if (!glasswyrm::compositor::drm_hardware_execution_authorized(options))
     return 1;
 
   options = {};

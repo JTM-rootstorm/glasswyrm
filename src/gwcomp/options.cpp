@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <ostream>
@@ -26,6 +27,7 @@ void print_usage(std::ostream& output) {
       "               [--drm-api auto|atomic|legacy]\n"
       "               [--mirror-dump-dir PATH]\n"
       "               [--mirror-dump-trigger PATH] [--drm-report PATH]\n"
+      "  drm execution requires exactly GW_ALLOW_HARDWARE_TESTS=1\n"
       "  renderer: [--renderer software|gles|auto] [--renderer-report PATH]\n"
       "  common: [--vrr-report PATH] [--once] [--max-frames N]\n"
       "          [--help] [--version]\n";
@@ -144,7 +146,10 @@ bool take_optional_path(int argc, char** argv, int& index,
 }
 
 bool validate_backend_options(const Options& options, std::ostream& error) {
-  if (options.vrr_report) {
+  // The DRM target is inspected only after main has enforced the explicit
+  // hardware authorization guard. The headless report remains an ordinary
+  // software artifact and retains its early parse-time diagnostic.
+  if (options.backend == Backend::Headless && options.vrr_report) {
     std::error_code path_error;
     const auto exists = std::filesystem::exists(*options.vrr_report, path_error);
     if (path_error) {
@@ -459,6 +464,12 @@ ParseOptionsResult parse_options(int argc, char** argv, Options& options,
     return ParseOptionsResult::ExitFailure;
   }
   return ParseOptionsResult::Run;
+}
+
+bool drm_hardware_execution_authorized(const Options& options) noexcept {
+  if (options.backend != Backend::Drm) return true;
+  const char* opt_in = std::getenv("GW_ALLOW_HARDWARE_TESTS");
+  return opt_in != nullptr && std::string_view(opt_in) == "1";
 }
 
 }  // namespace glasswyrm::compositor

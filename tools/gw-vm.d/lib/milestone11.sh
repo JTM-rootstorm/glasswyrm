@@ -572,6 +572,7 @@ launcher=("$runtime/src/glasswyrm-session" --runtime-dir /run/glasswyrm-m11 --di
 printf 'launcher'; printf ' <%s>' "${launcher[@]}"; printf '\n'
 systemd-run --unit=glasswyrm-session-m11.service \
   --setenv="PATH=$runtime/src:$client_dir/install/bin:/usr/bin:/bin" \
+  --setenv=GW_ALLOW_HARDWARE_TESTS=1 \
   --setenv="GW_M11_TRANSCRIPT=$transcript" --property=PrivateDevices=no \
   --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
   --property="DeviceAllow=$target_vt rw" --property="DeviceAllow=$keyboard r" \
@@ -598,6 +599,7 @@ systemd-run --unit=gwm-m11.service --property=PrivateDevices=yes \
 for _ in {1..200}; do [[ -S /run/glasswyrm-m11/gwm.sock ]] && break; sleep .05; done
 start_gwcomp() {
   systemd-run --unit=gwcomp-m11.service --property=PrivateDevices=no \
+    --setenv=GW_ALLOW_HARDWARE_TESTS=1 \
     --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
     --property="DeviceAllow=$target_vt rw" --property=RestrictAddressFamilies=AF_UNIX \
     --property=StandardInput=tty-force --property="TTYPath=$target_vt" \

@@ -1092,6 +1092,7 @@ capture_vt_state "$artifact_dir/milestone13-vt-before.json"
 systemctl mask --runtime --now "$logind_socket" "$logind_unit"
 systemd-run --unit=glasswyrm-m13-drm --property=Type=simple \
   --setenv="PATH=$software/src:/usr/bin:/bin" \
+  --setenv=GW_ALLOW_HARDWARE_TESTS=1 \
   --property=PrivateDevices=no --property=DevicePolicy=closed \
   --property="DeviceAllow=$drm_device rw" --property="DeviceAllow=$target_vt rw" \
   --property="DeviceAllow=$keyboard r" --property="DeviceAllow=$pointer r" \

@@ -1,4 +1,18 @@
 if get_option('drm_backend')
+  gwcomp_hardware_guard_test = executable(
+    'gwcomp_hardware_guard_test',
+    files(tests_source_dir / 'integration/gwcomp_hardware_guard_test.cpp'),
+    include_directories: test_source_root_include,
+  )
+  test(
+    'gwcomp-hardware-guard',
+    gwcomp_hardware_guard_test,
+    args: [gwcomp_program.full_path()],
+    depends: gwcomp_program,
+    timeout: 10,
+    suite: test_unit_suites,
+  )
+
   drm_inventory_test = executable(
     'drm_inventory_test',
     files(tests_source_dir / 'drm/drm_inventory_test.cpp'),

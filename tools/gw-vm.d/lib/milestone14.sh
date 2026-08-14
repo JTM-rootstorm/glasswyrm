@@ -954,6 +954,7 @@ systemd-run --unit=gwm-m14-qxl --property=Type=simple \
 wait_socket "$runtime/gwm.sock"
 start_qxl_gwcomp() {
   systemd-run --unit=gwcomp-m14-qxl --property=Type=simple \
+    --setenv=GW_ALLOW_HARDWARE_TESTS=1 \
     --property=SuccessExitStatus=143 --property=PrivateDevices=no \
     --property=DevicePolicy=closed --property="DeviceAllow=$drm_device rw" \
     --property="DeviceAllow=$target_vt rw" --property=StandardInput=tty-force \
