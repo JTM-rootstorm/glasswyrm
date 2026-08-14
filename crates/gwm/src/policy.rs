@@ -125,6 +125,10 @@ impl PeerPolicy {
         *self = Self::default();
     }
 
+    pub(crate) fn snapshot_active(&self) -> bool {
+        self.snapshot.is_some()
+    }
+
     pub fn dispatch(
         &mut self,
         envelope: &Envelope,

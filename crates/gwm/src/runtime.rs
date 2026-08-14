@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::os::fd::OwnedFd;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gw_ipc::{
     ApplicationError, ApplicationValidator, EndpointListener, HandshakeConfig, NegotiatedPeer,
@@ -17,6 +17,104 @@ use crate::socket::{install_signal_handlers, stop_requested};
 
 const MAXIMUM_MESSAGES_PER_TURN: usize = 64;
 const MAXIMUM_PAYLOAD_BYTES_PER_TURN: usize = 512 * 1024;
+const AWAITING_HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+const INITIAL_PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PeerTimeouts {
+    awaiting_hello: Duration,
+    initial_progress: Duration,
+    snapshot: Duration,
+}
+
+impl Default for PeerTimeouts {
+    fn default() -> Self {
+        Self {
+            awaiting_hello: AWAITING_HELLO_TIMEOUT,
+            initial_progress: INITIAL_PROGRESS_TIMEOUT,
+            snapshot: SNAPSHOT_TIMEOUT,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExpiredDeadline {
+    AwaitingHello,
+    InitialProgress,
+    Snapshot,
+}
+
+impl fmt::Display for ExpiredDeadline {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::AwaitingHello => "awaiting Hello",
+            Self::InitialProgress => "awaiting initial policy commit",
+            Self::Snapshot => "awaiting snapshot completion",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PeerLiveness {
+    timeouts: PeerTimeouts,
+    // These are absolute monotonic deadlines. Receiving a partial or otherwise
+    // valid record must not let a peer extend its ownership of the endpoint.
+    awaiting_hello_deadline: Option<Instant>,
+    initial_progress_deadline: Option<Instant>,
+    snapshot_deadline: Option<Instant>,
+}
+
+impl PeerLiveness {
+    fn awaiting_hello(now: Instant, timeouts: PeerTimeouts) -> Self {
+        Self {
+            timeouts,
+            awaiting_hello_deadline: Some(deadline_after(now, timeouts.awaiting_hello)),
+            initial_progress_deadline: None,
+            snapshot_deadline: None,
+        }
+    }
+
+    fn handshake_accepted(&mut self, now: Instant) {
+        self.awaiting_hello_deadline = None;
+        self.initial_progress_deadline = Some(deadline_after(now, self.timeouts.initial_progress));
+    }
+
+    fn dispatched(&mut self, now: Instant, accepted: bool, snapshot_active: bool) {
+        // This is called only after application validation and policy dispatch
+        // succeed, so invalid End/Abort records cannot disarm a snapshot timer.
+        if snapshot_active && self.snapshot_deadline.is_none() {
+            self.snapshot_deadline = Some(deadline_after(now, self.timeouts.snapshot));
+        } else if !snapshot_active {
+            self.snapshot_deadline = None;
+        }
+        if accepted {
+            self.initial_progress_deadline = None;
+        }
+    }
+
+    fn expired(&self, now: Instant) -> Option<ExpiredDeadline> {
+        if self
+            .awaiting_hello_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return Some(ExpiredDeadline::AwaitingHello);
+        }
+        if self
+            .snapshot_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return Some(ExpiredDeadline::Snapshot);
+        }
+        self.initial_progress_deadline
+            .is_some_and(|deadline| now >= deadline)
+            .then_some(ExpiredDeadline::InitialProgress)
+    }
+}
+
+fn deadline_after(now: Instant, duration: Duration) -> Instant {
+    now.checked_add(duration).unwrap_or(now)
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -71,16 +169,18 @@ struct Connection {
     validator: Option<ApplicationValidator>,
     policy: PeerPolicy,
     next_sequence: u64,
+    liveness: PeerLiveness,
 }
 
 impl Connection {
-    fn new(fd: OwnedFd) -> Result<Self, RuntimeError> {
+    fn new(fd: OwnedFd, now: Instant, timeouts: PeerTimeouts) -> Result<Self, RuntimeError> {
         Ok(Self {
             transport: Transport::from_owned_fd(fd, TransportLimits::default())?,
             negotiated: None,
             validator: None,
             policy: PeerPolicy::new(),
             next_sequence: 2,
+            liveness: PeerLiveness::awaiting_hello(now, timeouts),
         })
     }
 
@@ -105,6 +205,7 @@ impl Connection {
                     MAXIMUM_MESSAGES_PER_TURN,
                 ));
                 self.negotiated = Some(peer);
+                self.liveness.handshake_accepted(Instant::now());
                 Ok(HandshakeProgress::Accepted)
             }
             ServerHandshakeResponse::Rejected { record, .. } => {
@@ -123,6 +224,9 @@ impl Connection {
         let mut bytes = 0;
         let mut accepted = 0;
         while messages < MAXIMUM_MESSAGES_PER_TURN && bytes < MAXIMUM_PAYLOAD_BYTES_PER_TURN {
+            if let Some(expired) = self.liveness.expired(Instant::now()) {
+                return ProcessProgress::Expired(expired);
+            }
             let received = match self.transport.receive() {
                 Ok(received) => received,
                 Err(error) if would_block(&error) => break,
@@ -151,6 +255,11 @@ impl Connection {
                 .dispatch(&received.envelope, &received.payload, capabilities)
             {
                 Ok(outcome) => {
+                    self.liveness.dispatched(
+                        Instant::now(),
+                        outcome.accepted,
+                        self.policy.snapshot_active(),
+                    );
                     for record in outcome.records {
                         if let Err(error) = self.send(record) {
                             eprintln!("gwm: response send failed: {error}");
@@ -205,10 +314,15 @@ enum HandshakeProgress {
 enum ProcessProgress {
     Live { accepted: usize },
     Disconnected,
+    Expired(ExpiredDeadline),
 }
 
 pub fn run(options: &Options) -> Result<(), RuntimeError> {
     install_signal_handlers()?;
+    run_with_timeouts(options, PeerTimeouts::default())
+}
+
+fn run_with_timeouts(options: &Options, timeouts: PeerTimeouts) -> Result<(), RuntimeError> {
     let listener = EndpointListener::bind(&options.ipc_socket)?;
     eprintln!("gwm: listening socket={}", options.ipc_socket.display());
     let config = handshake_config();
@@ -221,11 +335,14 @@ pub fn run(options: &Options) -> Result<(), RuntimeError> {
         if connection.is_none()
             && let Some(fd) = listener.accept()?
         {
-            connection = Some(Connection::new(fd)?);
+            connection = Some(Connection::new(fd, Instant::now(), timeouts)?);
         }
         let mut disconnected = false;
         if let Some(active) = connection.as_mut() {
-            if active.negotiated.is_none() {
+            if let Some(expired) = active.liveness.expired(Instant::now()) {
+                eprintln!("gwm: closing peer after {expired} deadline expired");
+                disconnected = true;
+            } else if active.negotiated.is_none() {
                 match active.handshake(&config, ConnectionId::new(connection_id)) {
                     Ok(HandshakeProgress::Waiting) => {}
                     Ok(HandshakeProgress::Accepted) => {
@@ -249,6 +366,10 @@ pub fn run(options: &Options) -> Result<(), RuntimeError> {
                         }
                     }
                     ProcessProgress::Disconnected => disconnected = true,
+                    ProcessProgress::Expired(expired) => {
+                        eprintln!("gwm: closing peer after {expired} deadline expired");
+                        disconnected = true;
+                    }
                 }
             }
         }
@@ -325,4 +446,89 @@ fn log_dispatch_rejection(message_type: MessageType, error: DispatchError) {
         "gwm: rejected message type={:#06x}: {error}",
         message_type.get()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn timeouts() -> PeerTimeouts {
+        PeerTimeouts {
+            awaiting_hello: Duration::from_millis(10),
+            initial_progress: Duration::from_millis(20),
+            snapshot: Duration::from_millis(30),
+        }
+    }
+
+    #[test]
+    fn awaiting_hello_deadline_is_absolute() {
+        let started = Instant::now();
+        let liveness = PeerLiveness::awaiting_hello(started, timeouts());
+
+        assert_eq!(liveness.expired(started + Duration::from_millis(9)), None);
+        assert_eq!(
+            liveness.expired(started + Duration::from_millis(10)),
+            Some(ExpiredDeadline::AwaitingHello)
+        );
+    }
+
+    #[test]
+    fn initial_progress_requires_an_accepted_commit() {
+        let started = Instant::now();
+        let mut liveness = PeerLiveness::awaiting_hello(started, timeouts());
+        let established = started + Duration::from_millis(2);
+        liveness.handshake_accepted(established);
+
+        liveness.dispatched(established + Duration::from_millis(15), false, false);
+        assert_eq!(
+            liveness.expired(established + Duration::from_millis(19)),
+            None
+        );
+        assert_eq!(
+            liveness.expired(established + Duration::from_millis(20)),
+            Some(ExpiredDeadline::InitialProgress)
+        );
+
+        liveness.dispatched(established + Duration::from_millis(19), true, false);
+        assert_eq!(
+            liveness.expired(established + Duration::from_secs(60)),
+            None,
+            "an established peer with accepted state may remain idle"
+        );
+    }
+
+    #[test]
+    fn snapshot_deadline_is_absolute_and_rearmed_by_the_next_snapshot() {
+        let started = Instant::now();
+        let mut liveness = PeerLiveness::awaiting_hello(started, timeouts());
+        liveness.handshake_accepted(started);
+        liveness.dispatched(started, true, false);
+
+        let first_begin = started + Duration::from_millis(5);
+        liveness.dispatched(first_begin, false, true);
+        liveness.dispatched(first_begin + Duration::from_millis(29), false, true);
+        assert_eq!(
+            liveness.expired(first_begin + Duration::from_millis(30)),
+            Some(ExpiredDeadline::Snapshot),
+            "snapshot records must not refresh the deadline"
+        );
+
+        liveness.dispatched(first_begin + Duration::from_millis(20), false, false);
+        assert_eq!(
+            liveness.expired(first_begin + Duration::from_millis(50)),
+            None,
+            "a validated snapshot end or abort clears the deadline"
+        );
+
+        let second_begin = first_begin + Duration::from_millis(50);
+        liveness.dispatched(second_begin, false, true);
+        assert_eq!(
+            liveness.expired(second_begin + Duration::from_millis(29)),
+            None
+        );
+        assert_eq!(
+            liveness.expired(second_begin + Duration::from_millis(30)),
+            Some(ExpiredDeadline::Snapshot)
+        );
+    }
 }
