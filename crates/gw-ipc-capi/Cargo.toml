@@ -1,0 +1,14 @@
+[package]
+name = "gw-ipc-capi"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-only"
+description = "Temporary bounded C ABI bridge for the Rust GWIPC migration"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+path = "src/lib.rs"
+
+[lints]
+workspace = true

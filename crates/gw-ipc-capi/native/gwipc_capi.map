@@ -1,0 +1,19 @@
+GWIPC_0.1 {
+  global:
+    gwipc_get_api_version;
+    gwipc_get_max_wire_version;
+    gwipc_status_string;
+  local:
+    *;
+};
+
+GWIPC_0.2 {
+  global:
+    gwipc_contract_encode_surface_remove;
+    gwipc_contract_payload_data;
+    gwipc_contract_payload_destroy;
+    gwipc_contract_decode_message;
+    gwipc_decoded_contract_type;
+    gwipc_decoded_surface_remove;
+    gwipc_decoded_contract_destroy;
+} GWIPC_0.1;
