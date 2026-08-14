@@ -1774,7 +1774,7 @@ assert_contains "$work_dir/milestone10.out" 'reset; milestone9-runtime-test; res
 assert_contains "$artifact_dir/milestone10-summary.json" '"passed": true'
 assert_contains "$artifact_dir/milestone10-summary.json" \
   '"required_base_commit": "fe0faab39f7a6d28157ee6b96a4f6292a0b7984e"'
-for expected in /var/tmp/glasswyrm-build-m10 /var/tmp/glasswyrm-build-m10-asan /var/tmp/glasswyrm-build-m10-runtime /var/tmp/glasswyrm-build-m10-drm-only /var/tmp/glasswyrm-build-m10-headless /var/tmp/glasswyrm-build-m10-server /var/tmp/glasswyrm-build-m10-gwm /var/tmp/glasswyrm-build-m10-ipc-only /var/tmp/glasswyrm-m10-dumps /var/tmp/glasswyrm-m10-scenes /var/tmp/glasswyrm-m10-drm /var/tmp/glasswyrm-m10-control /var/tmp/glasswyrm-m10-artifacts x11-libs/libdrm 'qlist -IC x11-libs/libdrm' 'ldd "$headless/src/gwcomp"' -Ddrm_backend=false -Ddrm_backend=true -Dheadless_backend=false -Dasan=true -Dubsan=true source_layout_test.sh 'drm-ipc-integration.*OK' gw_drm_probe '--device auto' '--require-mode 1024x768' '--snapshot-state' '--expect-active' 'GW_ALLOW_HARDWARE_TESTS=1' '--expect-restored' 'getty_unit=getty@${target_vt##*/}.service' gwm-m10 gwcomp-m10 glasswyrmd-m10 '--backend drm' '--mirror-dump-dir' '--drm-report' 'DevicePolicy=closed' 'DeviceAllow=$drm_device rw' 'DeviceAllow=$target_vt rw' 'StandardInput=tty-force' 'TTYReset=yes' 'TTYVHangup=yes' 'TTYVTDisallocate=no' 'VT_GETSTATE=0x5603' 'KDGETMODE=0x4B3B' 'ExecMainStatus 0' 'tests/fixtures/m9/combined.ppm' 'm10_live_combined.sh' 'post-vt-input-complete' 'post-VT xeyes repaint' '/sys/kernel/debug/dri/' screenshot-ready screen-captured screenshot-after-vt-ready screen-after-vt-captured 'chvt 1' 'chvt 2' milestone10-kms-before.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-after.json; do
+for expected in /var/tmp/glasswyrm-build-m10 /var/tmp/glasswyrm-build-m10-asan /var/tmp/glasswyrm-build-m10-runtime /var/tmp/glasswyrm-build-m10-drm-only /var/tmp/glasswyrm-build-m10-headless /var/tmp/glasswyrm-build-m10-server /var/tmp/glasswyrm-build-m10-gwm /var/tmp/glasswyrm-build-m10-ipc-only /var/tmp/glasswyrm-m10-dumps /var/tmp/glasswyrm-m10-scenes /var/tmp/glasswyrm-m10-drm /var/tmp/glasswyrm-m10-control /var/tmp/glasswyrm-m10-artifacts x11-libs/libdrm 'qlist -IC x11-libs/libdrm' 'ldd "$headless/src/gwcomp"' -Ddrm_backend=false -Ddrm_backend=true -Dheadless_backend=false -Dasan=true -Dubsan=true source_layout_test.sh 'drm-ipc-integration.*OK' gw_drm_probe '--device auto' '--require-mode 1024x768' '--snapshot-state' '--expect-active' 'GW_ALLOW_HARDWARE_TESTS=1' 'GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe"' '--expect-restored' 'getty_unit=getty@${target_vt##*/}.service' gwm-m10 gwcomp-m10 glasswyrmd-m10 '--backend drm' '--mirror-dump-dir' '--drm-report' 'DevicePolicy=closed' 'DeviceAllow=$drm_device rw' 'DeviceAllow=$target_vt rw' 'StandardInput=tty-force' 'TTYReset=yes' 'TTYVHangup=yes' 'TTYVTDisallocate=no' 'VT_GETSTATE=0x5603' 'KDGETMODE=0x4B3B' 'ExecMainStatus 0' 'tests/fixtures/m9/combined.ppm' 'm10_live_combined.sh' 'post-vt-input-complete' 'post-VT xeyes repaint' '/sys/kernel/debug/dri/' screenshot-ready screen-captured screenshot-after-vt-ready screen-after-vt-captured 'chvt 1' 'chvt 2' milestone10-kms-before.json milestone10-kms-after.json milestone10-vt-before.json milestone10-vt-after.json; do
   assert_contains "$command_log" "$expected"
 done
 assert_contains "$command_log" "header.index('tgid')"
@@ -2002,6 +2002,8 @@ assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   '--setenv=GW_ALLOW_HARDWARE_TESTS=1'
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
+  'GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe"'
+assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   "r.get('record')=='vt' and r.get('transition')==transition"
 assert_contains "$repo_root/tools/gw-vm.d/lib/milestone11.sh" \
   "state=1 result=[12]"
@@ -2189,6 +2191,8 @@ assert_contains "$artifact_dir/milestone12-summary.json" '"passed": false'
 
 m12_lib=$repo_root/tools/gw-vm.d/lib/milestone12.sh
 assert_contains "$m12_lib" '--setenv=GW_ALLOW_HARDWARE_TESTS=1'
+assert_contains "$m12_lib" \
+  'GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe"'
 m12_guest_tail=$(bash -c 'source "$1"; milestone12_guest_script_tail' _ "$m12_lib")
 m12_match_function=$(awk '
   /^capture_matching_mirror\(\)/ { capture = 1 }

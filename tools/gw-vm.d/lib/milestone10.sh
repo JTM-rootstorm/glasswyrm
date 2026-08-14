@@ -410,7 +410,8 @@ done
 result[historical_components]=passed result[m4_m9_regressions]=passed
 
 failure_stage=drm-probe
-"$runtime/tools/gw_drm_probe" --device auto --require-mode 1024x768 --output "$artifact_dir/milestone10-drm-probe.json"
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" --device auto \
+  --require-mode 1024x768 --output "$artifact_dir/milestone10-drm-probe.json"
 python3 - "$artifact_dir/milestone10-drm-probe.json" <<'PY' >"$drm_dir/probe.env"
 import json,sys
 d=json.load(open(sys.argv[1])); s=d['selected_candidate']; c=d['capabilities']
@@ -427,7 +428,9 @@ source "$drm_dir/probe.env"
 [[ $probed_device =~ ^/dev/dri/card[0-9]+$ && -c $probed_device &&
    $probed_connector != */* && -n $probed_connector ]]
 drm_device=$probed_device connector=$probed_connector
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone10-kms-before.json"
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" --require-mode 1024x768 \
+  --snapshot-state --output "$artifact_dir/milestone10-kms-before.json"
 capture_vt_state "$artifact_dir/milestone10-vt-before.json"
 capture_getty_state
 [[ $getty_was_active == false ]] || systemctl stop "$getty_unit"
@@ -517,7 +520,9 @@ elif [[ $atomic_capability == true ]]; then
 else
   atomic_test_only=unsupported
 fi
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --expect-active --output "$artifact_dir/milestone10-kms-active.json"
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" --require-mode 1024x768 \
+  --expect-active --output "$artifact_dir/milestone10-kms-active.json"
 gwcomp_pid=$(systemctl show gwcomp-m10.service --property=MainPID --value)
 drm_clients=/sys/kernel/debug/dri/${drm_device##*card}/clients
 [[ $gwcomp_pid =~ ^[1-9][0-9]*$ && -r $drm_clients ]] || {
@@ -687,7 +692,10 @@ restore=next(r for r in reversed(records) if r.get('record')=='restore')
 if not all(restore.get(key) is True for key in ('kms','vt','master_drop','framebuffer_cleanup')):
     raise SystemExit('DRM shutdown report does not prove complete restoration')
 PY
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" --require-mode 1024x768 --expect-restored "$artifact_dir/milestone10-kms-before.json" --output "$artifact_dir/milestone10-kms-after.json"
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" --require-mode 1024x768 \
+  --expect-restored "$artifact_dir/milestone10-kms-before.json" \
+  --output "$artifact_dir/milestone10-kms-after.json"
 capture_vt_state "$artifact_dir/milestone10-vt-after.json"
 python3 - "$artifact_dir/milestone10-vt-before.json" "$artifact_dir/milestone10-vt-after.json" <<'PY'
 import json,sys

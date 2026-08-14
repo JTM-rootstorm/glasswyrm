@@ -148,6 +148,20 @@ if get_option('drm_backend')
     )
     test('drm-probe', drm_probe_test, timeout: 10, suite: test_unit_suites)
 
+    drm_probe_main_test = executable(
+      'drm_probe_main_test',
+      files(tests_source_dir / 'drm/drm_probe_main_test.cpp'),
+      include_directories: test_source_root_include,
+    )
+    test(
+      'drm-probe-main-guard',
+      drm_probe_main_test,
+      args: [gw_drm_probe_program.full_path()],
+      depends: [gw_drm_probe_program],
+      timeout: 10,
+      suite: test_unit_suites,
+    )
+
     drm_vrr_probe_test = executable(
       'drm_vrr_probe_test',
       files(tests_source_dir / 'drm/drm_vrr_probe_test.cpp'),
@@ -165,6 +179,7 @@ if get_option('drm_backend')
       'drm-vrr-probe-main-guard',
       drm_vrr_probe_main_test,
       args: [gw_drm_vrr_probe_program.full_path()],
+      depends: [gw_drm_vrr_probe_program],
       timeout: 10,
       suite: test_unit_suites,
     )

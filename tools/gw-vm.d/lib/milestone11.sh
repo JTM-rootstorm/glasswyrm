@@ -532,7 +532,8 @@ if before_mask != after_mask:
   print(f'VT open-mask changed (observational only): {before_mask!r} -> {after_mask!r}')
 PY
 }
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone11-kms-before.json"
 capture_vt_state "$artifact_dir/milestone11-vt-before.json"
 capture_getty_state
@@ -973,7 +974,8 @@ for unit in glasswyrmd-m11.service gwcomp-m11.service gwm-m11.service; do
   [[ $(systemctl show "$unit" -p ExecMainStatus --value) == 0 ]]
 done
 result[service_results]=passed
-"$runtime/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$runtime/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --expect-restored "$artifact_dir/milestone11-kms-before.json" \
   --output "$artifact_dir/milestone11-kms-after.json"
 capture_vt_state "$artifact_dir/milestone11-vt-after.json"

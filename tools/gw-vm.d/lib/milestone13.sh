@@ -1084,7 +1084,8 @@ print(struct.unpack('=HHH',state)[0])
 PY
 )
 getty_state_captured=true logind_state_captured=true
-"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --snapshot-state \
   --output "$artifact_dir/milestone13-kms-before.json"
 capture_vt_state "$artifact_dir/milestone13-vt-before.json"
@@ -1445,7 +1446,8 @@ logind_socket_enabled_after=$(systemctl is-enabled "$logind_socket" 2>/dev/null 
    $logind_socket_active_after == "$logind_socket_active_before" &&
    $logind_enabled_after == "$logind_enabled_before" &&
    $logind_socket_enabled_after == "$logind_socket_enabled_before" ]]
-"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --expect-restored "$artifact_dir/milestone13-kms-before.json" \
   --output "$artifact_dir/milestone13-kms-after.json"
 capture_vt_state "$artifact_dir/milestone13-vt-after.json"

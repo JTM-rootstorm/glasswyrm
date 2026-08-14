@@ -59,6 +59,7 @@ for expected in \
   '--backend drm' '--scale 4/3' '--transform rotate-180' \
   '--setenv="PATH=$software/src:/usr/bin:/bin"' \
   '--setenv=GW_ALLOW_HARDWARE_TESTS=1' \
+  'GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe"' \
   '--property="DeviceAllow=$keyboard r"' '--property="DeviceAllow=$pointer r"' \
   '--property=StandardOutput=journal' '--property=StandardError=journal' \
   '--property=KillMode=mixed' '--property=SuccessExitStatus=143' \

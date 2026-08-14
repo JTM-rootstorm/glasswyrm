@@ -530,7 +530,8 @@ logind_active_before=$(systemctl is-active "$logind_unit" 2>/dev/null || true)
 logind_socket_active_before=$(systemctl is-active "$logind_socket" 2>/dev/null || true)
 logind_enabled_before=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
 logind_socket_enabled_before=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
-"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --snapshot-state --output "$artifact_dir/milestone12-kms-before.json"
 capture_vt_state "$artifact_dir/milestone12-vt-before.json"
 [[ $getty_active_before != active ]] || systemctl stop "$getty_unit"
@@ -1111,7 +1112,8 @@ json.dump({'schema':1,'active_before':active_before,'active_after':active_after,
  enabled_before==enabled_after and socket_enabled_before==socket_enabled_after},
  open(out,'w'),sort_keys=True)
 PY
-"$software/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$software/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --expect-restored "$artifact_dir/milestone12-kms-before.json" \
   --output "$artifact_dir/milestone12-kms-after.json"
 capture_vt_state "$artifact_dir/milestone12-vt-after.json"

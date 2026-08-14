@@ -150,11 +150,14 @@ deterministic JSON-lines records for:
 Report and mirror paths use staged publication so unpresented frames do not
 appear as accepted evidence. The report's parent directory must already exist
 and its target path must not exist; mirror directories may be created, but the
-mirror target itself must not be a symbolic link. `gw_drm_probe` is a read-only helper
-for discovery and before/active/after KMS snapshots:
+mirror target itself must not be a symbolic link. `gw_drm_probe` does not issue
+modesets, but it opens a DRM primary node and may therefore acquire DRM master
+implicitly when no master exists. It requires the same exact hardware opt-in as
+other hardware-capable commands while collecting discovery and
+before/active/after KMS snapshots:
 
 ```sh
-./build-drm/tools/gw_drm_probe \
+GW_ALLOW_HARDWARE_TESTS=1 ./build-drm/tools/gw_drm_probe \
   --device /dev/dri/card0 --connector Virtual-1 \
   --require-mode 1024x768 --snapshot-state \
   --output /tmp/kms.json

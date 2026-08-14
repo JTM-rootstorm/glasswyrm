@@ -393,7 +393,8 @@ cleanup() {
   if [[ $services_quiesced == true && -s $qxl/kms-before.json &&
         -x $build/tools/gw_drm_probe ]]; then
     restoration_attempted=true
-    if "$build/tools/gw_drm_probe" --device "$drm_device" \
+    if GW_ALLOW_HARDWARE_TESTS=1 "$build/tools/gw_drm_probe" \
+        --device "$drm_device" \
         --connector "$connector" --require-mode 1024x768 \
         --expect-restored "$qxl/kms-before.json" \
         --output "$qxl/kms-cleanup.json" >/dev/null 2>&1; then
@@ -943,7 +944,8 @@ logind_socket_active_before=$(systemctl is-active "$logind_socket" 2>/dev/null |
 logind_enabled_before=$(systemctl is-enabled "$logind_unit" 2>/dev/null || true)
 logind_socket_enabled_before=$(systemctl is-enabled "$logind_socket" 2>/dev/null || true)
 getty_state_captured=true logind_state_captured=true
-"$build/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$build/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --snapshot-state --output "$qxl/kms-before.json"
 capture_vt_state "$qxl/vt-before.json"
 [[ $getty_active_before != active ]] || systemctl stop "$getty_unit"
@@ -1193,7 +1195,8 @@ systemctl unmask --runtime "$logind_unit" "$logind_socket"
 [[ $logind_active_before == active ]] || systemctl stop "$logind_unit"
 [[ $logind_socket_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_socket"
 [[ $logind_enabled_before != masked-runtime ]] || systemctl mask --runtime "$logind_unit"
-"$build/tools/gw_drm_probe" --device "$drm_device" --connector "$connector" \
+GW_ALLOW_HARDWARE_TESTS=1 "$build/tools/gw_drm_probe" \
+  --device "$drm_device" --connector "$connector" \
   --require-mode 1024x768 --expect-restored "$qxl/kms-before.json" \
   --output "$qxl/kms-after.json"
 capture_vt_state "$qxl/vt-after.json"
