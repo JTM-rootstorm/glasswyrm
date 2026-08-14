@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <limits.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace glasswyrm::input {
@@ -47,8 +48,28 @@ std::optional<DevicePathAllowlist> DevicePathAllowlist::create(
   std::sort(canonical.begin(), canonical.end());
   canonical.erase(std::unique(canonical.begin(), canonical.end()),
                   canonical.end());
+  std::vector<DeviceIdentity> identities;
+  identities.reserve(canonical.size());
+  for (const auto &path : canonical) {
+    const int fd = ::open(path.c_str(), O_PATH | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+      error = "inspect input device " + path + ": " + std::strerror(errno);
+      return std::nullopt;
+    }
+    struct stat status {};
+    const int inspected = ::fstat(fd, &status);
+    const int inspect_error = errno;
+    (void)::close(fd);
+    if (inspected != 0) {
+      error = "inspect input device " + path + ": " +
+              std::strerror(inspect_error);
+      return std::nullopt;
+    }
+    identities.push_back(
+        {status.st_dev, status.st_ino, status.st_rdev, status.st_mode});
+  }
   error.clear();
-  return DevicePathAllowlist(std::move(canonical));
+  return DevicePathAllowlist(std::move(canonical), std::move(identities));
 }
 
 int DevicePathAllowlist::open_restricted(
@@ -60,7 +81,8 @@ int DevicePathAllowlist::open_restricted(
   std::string ignored_error;
   const auto canonical = canonicalize(requested_path, ignored_error);
   if (!canonical) return -errno;
-  if (!std::binary_search(paths_.begin(), paths_.end(), *canonical))
+  const auto path = std::lower_bound(paths_.begin(), paths_.end(), *canonical);
+  if (path == paths_.end() || *path != *canonical)
     return -EACCES;
 
   int flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
@@ -71,7 +93,18 @@ int DevicePathAllowlist::open_restricted(
   flags |= O_NOFOLLOW;
 #endif
   const int fd = ::open(canonical->c_str(), flags);
-  return fd < 0 ? -errno : fd;
+  if (fd < 0) return -errno;
+  struct stat status {};
+  const auto &expected =
+      identities_[static_cast<std::size_t>(path - paths_.begin())];
+  if (::fstat(fd, &status) != 0 || status.st_dev != expected.device ||
+      status.st_ino != expected.inode ||
+      status.st_rdev != expected.special_device ||
+      (status.st_mode & S_IFMT) != (expected.mode & S_IFMT)) {
+    (void)::close(fd);
+    return -EACCES;
+  }
+  return fd;
 }
 
 void DevicePathAllowlist::close_restricted(const int fd) const noexcept {

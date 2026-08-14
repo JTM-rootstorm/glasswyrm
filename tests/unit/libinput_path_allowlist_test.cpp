@@ -39,6 +39,16 @@ int main() {
   access->close_restricted(fd);
   require(access->open_restricted(denied_template, O_RDONLY) == -EACCES,
           "canonical path outside exact allowlist is rejected");
+
+  const std::string original = std::string(allowed_template) + "-original";
+  require(::rename(allowed_template, original.c_str()) == 0,
+          "allowlisted object can be moved for replacement test");
+  const int replacement = ::open(allowed_template,
+                                 O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  require(replacement >= 0, "replacement input path created");
+  (void)::close(replacement);
+  require(access->open_restricted(allowed_template, O_RDONLY) == -EACCES,
+          "replacement object at an allowlisted path is rejected");
   require(access->open_restricted("/definitely/missing/input", O_RDONLY) < 0,
           "unresolvable library path is rejected");
 
@@ -46,6 +56,7 @@ int main() {
   require(!DevicePathAllowlist::create(empty, error).has_value(),
           "empty startup allowlist is rejected");
   (void)::unlink(alias.c_str());
+  (void)::unlink(original.c_str());
   (void)::unlink(allowed_template);
   (void)::unlink(denied_template);
 }

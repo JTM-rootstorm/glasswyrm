@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <vector>
 
 namespace glasswyrm::input {
@@ -21,10 +22,19 @@ class DevicePathAllowlist {
   }
 
  private:
-  explicit DevicePathAllowlist(std::vector<std::string> paths)
-      : paths_(std::move(paths)) {}
+  struct DeviceIdentity {
+    dev_t device{};
+    ino_t inode{};
+    dev_t special_device{};
+    mode_t mode{};
+  };
+
+  DevicePathAllowlist(std::vector<std::string> paths,
+                      std::vector<DeviceIdentity> identities)
+      : paths_(std::move(paths)), identities_(std::move(identities)) {}
 
   std::vector<std::string> paths_;
+  std::vector<DeviceIdentity> identities_;
 };
 
 }  // namespace glasswyrm::input
