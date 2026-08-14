@@ -76,6 +76,19 @@ int main() {
     gw::test::require(result.output.size() == 32 && extent_width == 12,
                       "QueryTextExtents fixed advance");
 
+    auto empty_odd_extents =
+        header(order, x11::CoreOpcode::QueryTextExtents, 1, 2);
+    empty_odd_extents.write_u32(base + 1);
+    result = dispatch_request(
+        state, context,
+        finish(std::move(empty_odd_extents),
+               x11::CoreOpcode::QueryTextExtents, 1));
+    gw::test::require(
+        result.output.size() == 32 && result.output[0] == 0 &&
+            result.output[1] ==
+                static_cast<std::uint8_t>(x11::CoreErrorCode::BadLength),
+        "QueryTextExtents rejects an odd-length flag without a character");
+
     auto list = header(order, x11::CoreOpcode::ListFonts, 0, 4);
     list.write_u16(1); list.write_u16(5);
     list.write_bytes(std::span(reinterpret_cast<const std::uint8_t*>("fixed"), 5));

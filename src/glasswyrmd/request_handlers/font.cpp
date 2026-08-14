@@ -91,8 +91,10 @@ DispatchResult query_text_extents(ServerState& state,
   const auto bytes_after_font = request.bytes.size() - 8U;
   if ((bytes_after_font & 1U) != 0)
     return error(context, request, x11::CoreErrorCode::BadLength);
+  if (request.data > 1 || (request.data != 0 && bytes_after_font < 2U))
+    return error(context, request, x11::CoreErrorCode::BadLength);
   const std::size_t characters = bytes_after_font / 2U - (request.data ? 1U : 0U);
-  if (request.data > 1 || characters * 2U + (request.data ? 2U : 0U) != bytes_after_font)
+  if (characters * 2U + (request.data ? 2U : 0U) != bytes_after_font)
     return error(context, request, x11::CoreErrorCode::BadLength);
   for (std::size_t index = 0; index < characters; ++index) {
     std::uint8_t byte1{}, byte2{}; (void)reader.read_u8(byte1); (void)reader.read_u8(byte2);
