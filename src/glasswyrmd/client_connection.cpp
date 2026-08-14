@@ -232,6 +232,7 @@ void ClientConnection::process_input(
                                       extensions_, peer_uid_};
         auto result_packet =
             dispatch_request(server_state_, context, request_framer_->request());
+        budget.record_semantic_work(result_packet.semantic_work_bytes);
         if (trace_) {
           trace_->request(identifier_, request_sequence_,
                           request_framer_->request().opcode,

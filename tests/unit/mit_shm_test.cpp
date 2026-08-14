@@ -307,6 +307,8 @@ void test_images_and_cleanup(const x11::ByteOrder order) {
           "SHM PutImage crops source pixels");
   require(result.drawable_damage.size() == 1,
           "SHM PutImage reports drawable damage");
+  require(result.semantic_work_bytes == 16,
+          "SHM PutImage reports semantic image bytes");
 
   result = dispatch_request(
       state, context, get_request(order, window.xid, read_only_segment, 128));
@@ -321,6 +323,8 @@ void test_images_and_cleanup(const x11::ByteOrder order) {
               u32(result.output, order, 12) == 16 && bytes[128] == 0x08 &&
               bytes[129] == 0x07 && bytes[130] == 0x06 && bytes[131] == 0,
           "SHM GetImage returns XRGB bytes and exact size");
+  require(result.semantic_work_bytes == 16,
+          "SHM GetImage reports copied image bytes");
 
   result = dispatch_request(
       state, context,

@@ -8,8 +8,9 @@
 #include "protocol/x11/event.hpp"
 #include "core/geometry/rectangle.hpp"
 
-#include <cstdint>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -202,6 +203,7 @@ struct DeferredVrrMutation {
 enum class DispatchKind { Immediate, DeferredLifecycle, CloseClient };
 struct DispatchResult {
   std::vector<std::uint8_t> output;
+  std::size_t semantic_work_bytes{0};
   DispatchKind kind{DispatchKind::Immediate};
   std::uint32_t deferred_window{0};
   std::optional<gw::protocol::x11::ConfigureWindowRequest> deferred_configure;

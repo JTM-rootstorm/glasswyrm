@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -21,23 +22,41 @@ class ExtensionRegistry;
 
 inline constexpr std::size_t kMaximumRequestsPerClientTurn = 64;
 inline constexpr std::size_t kMaximumRequestBytesPerClientTurn = 256U * 1024U;
+// Permit one maximum-sized MIT-SHM image while bounding aggregate raster and
+// copy work before the reactor services another client.
+inline constexpr std::size_t kMaximumSemanticWorkBytesPerClientTurn =
+    64U * 1024U * 1024U;
 
 class RequestWorkBudget {
  public:
   [[nodiscard]] bool available() const noexcept {
     return requests_ < kMaximumRequestsPerClientTurn &&
-           bytes_ < kMaximumRequestBytesPerClientTurn;
+           bytes_ < kMaximumRequestBytesPerClientTurn &&
+           semantic_work_bytes_ < kMaximumSemanticWorkBytesPerClientTurn;
   }
   void record(std::size_t bytes) noexcept {
     ++requests_;
-    bytes_ += bytes;
+    bytes_ = saturating_add(bytes_, bytes);
+  }
+  void record_semantic_work(std::size_t bytes) noexcept {
+    semantic_work_bytes_ = saturating_add(semantic_work_bytes_, bytes);
   }
   [[nodiscard]] std::size_t requests() const noexcept { return requests_; }
   [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
+  [[nodiscard]] std::size_t semantic_work_bytes() const noexcept {
+    return semantic_work_bytes_;
+  }
 
  private:
+  static constexpr std::size_t saturating_add(const std::size_t left,
+                                              const std::size_t right) {
+    return right > std::numeric_limits<std::size_t>::max() - left
+               ? std::numeric_limits<std::size_t>::max()
+               : left + right;
+  }
   std::size_t requests_{0};
   std::size_t bytes_{0};
+  std::size_t semantic_work_bytes_{0};
 };
 
 class ClientConnection {

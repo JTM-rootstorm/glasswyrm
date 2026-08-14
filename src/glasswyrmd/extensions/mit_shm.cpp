@@ -112,7 +112,14 @@ DispatchResult detach(ServerState& state, const DispatchContext& context,
              : bad_segment(context, request, xid);
 }
 
-std::optional<std::vector<std::uint8_t>> crop_source(
+struct ShmSourceCrop {
+  std::size_t stride{};
+  std::size_t first_byte{};
+  std::size_t row_bytes{};
+  std::size_t payload_size{};
+};
+
+std::optional<ShmSourceCrop> validate_source_crop(
     const ShmSegmentResource& segment, const std::uint32_t offset,
     const std::uint16_t total_width, const std::uint16_t total_height,
     const std::uint16_t source_x, const std::uint16_t source_y,
@@ -135,26 +142,18 @@ std::optional<std::vector<std::uint8_t>> crop_source(
       static_cast<std::uint32_t>(source_x) + width > total_width ||
       static_cast<std::uint32_t>(source_y) + height > total_height)
     return std::nullopt;
-  std::vector<std::uint8_t> payload(*payload_size);
-  const auto source = segment.mapping->bytes();
   const auto row_bytes = static_cast<std::size_t>(width) * 4U;
-  for (std::size_t row = 0; row < height; ++row) {
-    const auto source_offset = static_cast<std::size_t>(offset) +
-                               (static_cast<std::size_t>(source_y) + row) *
-                                   *stride +
-                               static_cast<std::size_t>(source_x) * 4U;
-    std::copy_n(source.begin() + static_cast<std::ptrdiff_t>(source_offset),
-                row_bytes,
-                payload.begin() + static_cast<std::ptrdiff_t>(row * row_bytes));
-  }
-  return payload;
+  const auto first_byte = static_cast<std::size_t>(offset) +
+                          static_cast<std::size_t>(source_y) * *stride +
+                          static_cast<std::size_t>(source_x) * 4U;
+  return ShmSourceCrop{*stride, first_byte, row_bytes, *payload_size};
 }
 
 x11::FramedRequest core_put_request(
     const DispatchContext& context, const std::uint32_t drawable,
     const std::uint32_t gc, const std::uint16_t width,
     const std::uint16_t height, const std::int16_t x, const std::int16_t y,
-    const std::span<const std::uint8_t> payload) {
+    const ShmSegmentResource& segment, const ShmSourceCrop& crop) {
   x11::ByteWriter writer(context.byte_order);
   writer.write_u8(static_cast<std::uint8_t>(x11::CoreOpcode::PutImage));
   writer.write_u8(kZPixmap);
@@ -168,12 +167,19 @@ x11::FramedRequest core_put_request(
   writer.write_u8(0);
   writer.write_u8(24);
   writer.write_u16(0);
-  writer.write_bytes(payload);
+  auto bytes = std::move(writer).take();
+  bytes.reserve(bytes.size() + crop.payload_size);
+  const auto source = segment.mapping->bytes();
+  for (std::size_t row = 0; row < height; ++row) {
+    const auto source_offset = crop.first_byte + row * crop.stride;
+    const auto source_row = source.subspan(source_offset, crop.row_bytes);
+    bytes.insert(bytes.end(), source_row.begin(), source_row.end());
+  }
   x11::FramedRequest result;
   result.opcode = static_cast<std::uint8_t>(x11::CoreOpcode::PutImage);
   result.data = kZPixmap;
-  result.length_units = static_cast<std::uint32_t>(writer.size() / 4U);
-  result.bytes = std::move(writer).take();
+  result.length_units = static_cast<std::uint32_t>(bytes.size() / 4U);
+  result.bytes = std::move(bytes);
   return result;
 }
 
@@ -220,15 +226,18 @@ DispatchResult put_image(ServerState& state, const DispatchContext& context,
     return error(context, request, x11::CoreErrorCode::BadMatch, depth);
   const auto* segment = state.resources().find_shm_segment(shmseg);
   if (!segment) return bad_segment(context, request, shmseg);
-  const auto payload = crop_source(*segment, offset, total_width, total_height,
-                                   source_x, source_y, width, height);
-  if (!payload)
+  const auto crop = validate_source_crop(*segment, offset, total_width,
+                                         total_height, source_x, source_y,
+                                         width, height);
+  if (!crop)
     return error(context, request, x11::CoreErrorCode::BadValue, offset);
   auto result = request_handlers::put_image(
       state, context,
       core_put_request(context, drawable, gc, width, height,
                        static_cast<std::int16_t>(destination_x),
-                       static_cast<std::int16_t>(destination_y), *payload));
+                       static_cast<std::int16_t>(destination_y), *segment,
+                       *crop));
+  result.semantic_work_bytes = crop->payload_size;
   if (!result.output.empty()) {
     correct_extension_error_metadata(result.output, context.byte_order);
     return result;
@@ -291,7 +300,9 @@ DispatchResult get_image(ServerState& state, const DispatchContext& context,
   x11::ReplyBuilder reply(context.byte_order, context.sequence, 24);
   reply.write_u32(window ? state.screen().root_visual : 0);
   reply.write_u32(static_cast<std::uint32_t>(*size));
-  return {std::move(reply).finish()};
+  DispatchResult result{std::move(reply).finish()};
+  result.semantic_work_bytes = *size;
+  return result;
 }
 
 DispatchResult dispatch_mit_shm(ServerState& state,
