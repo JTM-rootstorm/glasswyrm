@@ -61,6 +61,35 @@ int main() {
     gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
                       std::ranges::equal(before_rectangle_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
                       "PolyFillRectangle rejects excessive primitive counts atomically");
+    x11::ByteWriter large_pixmap(order); large_pixmap.write_u8(53); large_pixmap.write_u8(24); large_pixmap.write_u16(4);
+    large_pixmap.write_u32(base+19); large_pixmap.write_u32(state.screen().root_window);
+    large_pixmap.write_u16(2049); large_pixmap.write_u16(2048);
+    result=dispatch_request(state,context,finish(std::move(large_pixmap),x11::CoreOpcode::CreatePixmap,24));
+    gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+19),
+                      "large raster-work target");
+    x11::ByteWriter excessive_rectangle_area(order); excessive_rectangle_area.write_u8(70); excessive_rectangle_area.write_u8(0); excessive_rectangle_area.write_u16(7);
+    excessive_rectangle_area.write_u32(base+19); excessive_rectangle_area.write_u32(base+2);
+    excessive_rectangle_area.write_u16(0); excessive_rectangle_area.write_u16(0);
+    excessive_rectangle_area.write_u16(2049); excessive_rectangle_area.write_u16(1024);
+    excessive_rectangle_area.write_u16(0); excessive_rectangle_area.write_u16(1024);
+    excessive_rectangle_area.write_u16(2049); excessive_rectangle_area.write_u16(1024);
+    result=dispatch_request(state,context,finish(std::move(excessive_rectangle_area),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(0,0)==PixelStorage::kOpaqueBlack&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(2048,2047)==PixelStorage::kOpaqueBlack,
+                      "PolyFillRectangle rejects excessive total clipped pixel work atomically");
+    x11::ByteWriter excessive_coalesced_area(order); excessive_coalesced_area.write_u8(70); excessive_coalesced_area.write_u8(0); excessive_coalesced_area.write_u16(4101);
+    excessive_coalesced_area.write_u32(base+19); excessive_coalesced_area.write_u32(base+2);
+    for (std::uint16_t coordinate=0; coordinate<2049; ++coordinate) {
+      excessive_coalesced_area.write_u16(coordinate);
+      excessive_coalesced_area.write_u16(std::min<std::uint16_t>(coordinate,2047));
+      excessive_coalesced_area.write_u16(1); excessive_coalesced_area.write_u16(1);
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_coalesced_area),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(0,0)==PixelStorage::kOpaqueBlack&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(2048,2047)==PixelStorage::kOpaqueBlack,
+                      "PolyFillRectangle bounds coalesced raster work atomically");
     x11::ByteWriter geometry(order); geometry.write_u8(14); geometry.write_u8(0); geometry.write_u16(2); geometry.write_u32(base+1);
     result=dispatch_request(state,context,finish(std::move(geometry),x11::CoreOpcode::GetGeometry,0));
     gw::test::require(result.output.size()==32&&result.output[1]==24,"GetGeometry pixmap");
@@ -143,6 +172,40 @@ int main() {
     gw::test::require(state.resources().find_window(base+4)->storage->at(1,1)==0xffabcdefU,
                       "unmapped child no longer clips parent drawing");
 
+    WindowCreateSpec clip_budget_parent; clip_budget_parent.xid=base+20;
+    clip_budget_parent.parent=state.screen().root_window; clip_budget_parent.width=1025;
+    clip_budget_parent.height=1024; clip_budget_parent.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,clip_budget_parent)==CreateWindowStatus::Success,
+                      "child clip budget parent");
+    x11::ByteWriter initial_budget_fill(order); initial_budget_fill.write_u8(70); initial_budget_fill.write_u8(0); initial_budget_fill.write_u16(5);
+    initial_budget_fill.write_u32(base+20); initial_budget_fill.write_u32(base+2);
+    initial_budget_fill.write_u16(0); initial_budget_fill.write_u16(0);
+    initial_budget_fill.write_u16(1025); initial_budget_fill.write_u16(1024);
+    result=dispatch_request(state,context,finish(std::move(initial_budget_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&state.resources().find_window(base+20)->storage,
+                      "child clip budget target storage");
+    const auto before_child_clip_limit = std::vector<std::uint32_t>(
+        state.resources().find_window(base+20)->storage->pixels().begin(),
+        state.resources().find_window(base+20)->storage->pixels().end());
+    for (const auto child_id : {base+21,base+22}) {
+      WindowCreateSpec overlapping_child; overlapping_child.xid=child_id;
+      overlapping_child.parent=base+20; overlapping_child.width=1025;
+      overlapping_child.height=1024; overlapping_child.window_class=WindowClass::InputOutput;
+      gw::test::require(state.resources().create_window(1,base,mask,overlapping_child)==CreateWindowStatus::Success,
+                        "overlapping child clip budget child");
+      state.resources().find_window(child_id)->map_requested=true;
+      state.resources().find_window(child_id)->map_state=MapState::Viewable;
+    }
+    state.resources().find_gc(base+2)->foreground=0x00123456U;
+    x11::ByteWriter excessive_child_clip(order); excessive_child_clip.write_u8(70); excessive_child_clip.write_u8(0); excessive_child_clip.write_u16(5);
+    excessive_child_clip.write_u32(base+20); excessive_child_clip.write_u32(base+2);
+    excessive_child_clip.write_u16(0); excessive_child_clip.write_u16(0);
+    excessive_child_clip.write_u16(1025); excessive_child_clip.write_u16(1024);
+    result=dispatch_request(state,context,finish(std::move(excessive_child_clip),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_child_clip_limit,state.resources().find_window(base+20)->storage->pixels()),
+                      "overlapping child save and restore work is bounded atomically");
+
     x11::ByteWriter line_gc(order); line_gc.write_u8(56); line_gc.write_u8(0); line_gc.write_u16(7);
     line_gc.write_u32(base+2); line_gc.write_u32((1U<<4U)|(1U<<5U)|(1U<<6U)|(1U<<7U));
     line_gc.write_u32(0); line_gc.write_u32(0); line_gc.write_u32(1); line_gc.write_u32(0);
@@ -211,6 +274,17 @@ int main() {
     gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
                       std::ranges::equal(before_polygon_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
                       "FillPoly rejects excessive primitive counts atomically");
+    x11::ByteWriter excessive_polygon_pixels(order); excessive_polygon_pixels.write_u8(69); excessive_polygon_pixels.write_u8(0); excessive_polygon_pixels.write_u16(7);
+    excessive_polygon_pixels.write_u32(base+19); excessive_polygon_pixels.write_u32(base+2);
+    excessive_polygon_pixels.write_u8(2); excessive_polygon_pixels.write_u8(0); excessive_polygon_pixels.write_u16(0);
+    excessive_polygon_pixels.write_u16(0); excessive_polygon_pixels.write_u16(0);
+    excessive_polygon_pixels.write_u16(2049); excessive_polygon_pixels.write_u16(0);
+    excessive_polygon_pixels.write_u16(0); excessive_polygon_pixels.write_u16(2048);
+    result=dispatch_request(state,context,finish(std::move(excessive_polygon_pixels),x11::CoreOpcode::FillPoly,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(0,0)==PixelStorage::kOpaqueBlack&&
+                      state.resources().find_pixmap(base+19)->pixels()->at(2048,2047)==PixelStorage::kOpaqueBlack,
+                      "FillPoly rejects excessive conservative pixel work atomically");
     x11::ByteWriter ellipse(order); ellipse.write_u8(71); ellipse.write_u8(0); ellipse.write_u16(6);
     ellipse.write_u32(base+1); ellipse.write_u32(base+2); ellipse.write_u16(0); ellipse.write_u16(0);
     ellipse.write_u16(2); ellipse.write_u16(2); ellipse.write_u16(0); ellipse.write_u16(360*64);

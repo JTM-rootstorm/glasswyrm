@@ -58,18 +58,43 @@ bool polygon_work_fits(const PixelStorage& destination,
                        const std::span<const RasterPoint> points) {
   if (points.size() > kMaximumRasterPrimitivesPerRequest || points.empty())
     return points.empty();
+  auto minimum_x = points.front().x;
+  auto maximum_x = points.front().x;
   auto minimum_y = points.front().y;
   auto maximum_y = points.front().y;
   for (const auto point : points) {
+    minimum_x = std::min(minimum_x, point.x);
+    maximum_x = std::max(maximum_x, point.x);
     minimum_y = std::min(minimum_y, point.y);
     maximum_y = std::max(maximum_y, point.y);
   }
+  const auto first_x = std::max<std::int32_t>(minimum_x, 0);
+  const auto last_x = std::min<std::int32_t>(
+      maximum_x, static_cast<std::int32_t>(destination.width()) - 1);
   const auto first_y = std::max<std::int32_t>(minimum_y, 0);
   const auto last_y = std::min<std::int32_t>(
       maximum_y, static_cast<std::int32_t>(destination.height()));
-  if (last_y <= first_y) return true;
+  if (last_x < first_x || last_y <= first_y) return true;
   const auto scanlines = static_cast<std::uint64_t>(last_y - first_y);
-  return scanlines * points.size() <= kMaximumRasterWorkPerRequest;
+  const auto span_width = static_cast<std::uint64_t>(last_x - first_x) + 1U;
+  std::uint64_t total = 0;
+  return add_raster_work(total, scanlines * points.size()) &&
+         add_raster_work(total, scanlines * span_width);
+}
+
+bool rectangle_work_fits(
+    const PixelStorage& destination,
+    const std::span<const geometry::Rectangle> rectangles) {
+  std::uint64_t total = 0;
+  for (const auto rectangle : rectangles) {
+    const auto clipped = geometry::intersect(
+        rectangle, {0, 0, destination.width(), destination.height()});
+    if (clipped &&
+        !add_raster_work(
+            total, static_cast<std::uint64_t>(clipped->width) * clipped->height))
+      return false;
+  }
+  return true;
 }
 }  // namespace
 
@@ -368,17 +393,21 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   const bool valid = state.resources().find_pixmap(drawable) || supported_window_drawable(state.resources(), drawable);
   if (!valid) return error(context, request, known_drawable(state.resources(), drawable)
       ? x11::CoreErrorCode::BadMatch : x11::CoreErrorCode::BadDrawable, drawable);
-  struct Fill { geometry::Rectangle rectangle; }; std::vector<Fill> fills;
+  std::vector<geometry::Rectangle> fills;
   fills.reserve((request.bytes.size() - 12U) / 8U);
-  while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
+  while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}); }
   if (fills.size() > kMaximumRasterPrimitivesPerRequest)
     return error(context, request, x11::CoreErrorCode::BadAlloc);
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (!rectangle_work_fits(*storage, fills))
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
+  geometry::Region damage({0, 0, storage->width(), storage->height()});
+  for (const auto fill : fills) damage.add(fill);
+  if (!rectangle_work_fits(*storage, damage.rectangles()))
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   DispatchResult result;
-  geometry::Region damage({0, 0, storage->width(), storage->height()});
-  for (const auto& fill : fills) damage.add(fill.rectangle);
   if (supported_window_drawable(state.resources(), drawable))
     result.drawable_damage.reserve(damage.rectangles().size());
   for (const auto& rectangle : damage.rectangles()) {

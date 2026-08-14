@@ -7,12 +7,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 namespace glasswyrm::server::request_handlers {
+namespace {
+constexpr std::uint64_t kMaximumChildClipPixelOperations =
+    4U * 1024U * 1024U;
+}
+
 std::vector<geometry::Rectangle> rectangle_difference(
     const geometry::Rectangle rectangle, const geometry::Rectangle cutter) {
   const auto overlap = geometry::intersect(rectangle, cutter);
@@ -85,6 +91,24 @@ ClipByChildrenGuard::ClipByChildrenGuard(const ResourceTable& resources, const s
   if (gc.subwindow_mode != 0) return;
   const auto* window = resources.find_window(drawable);
   if (!window) return;
+  std::uint64_t pixel_operations = 0;
+  for (const auto child_id : window->children) {
+    const auto* child = resources.find_window(child_id);
+    if (!child || child->window_class != WindowClass::InputOutput ||
+        child->map_state != MapState::Viewable)
+      continue;
+    const auto clipped = geometry::intersect(
+        {child->x, child->y,
+         static_cast<std::uint32_t>(child->width) + child->border_width * 2U,
+         static_cast<std::uint32_t>(child->height) + child->border_width * 2U},
+        {0, 0, storage.width(), storage.height()});
+    if (!clipped) continue;
+    const auto pixels = static_cast<std::uint64_t>(clipped->width) *
+                        clipped->height;
+    if (pixels > (kMaximumChildClipPixelOperations - pixel_operations) / 2U)
+      throw std::bad_alloc{};
+    pixel_operations += pixels * 2U;
+  }
   for (const auto child_id : window->children) {
     const auto* child = resources.find_window(child_id);
     if (!child || child->window_class != WindowClass::InputOutput ||
