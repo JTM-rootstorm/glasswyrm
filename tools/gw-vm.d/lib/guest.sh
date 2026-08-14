@@ -115,12 +115,17 @@ push_source() {
   rsync -a --delete \
     --filter='P /.glasswyrm-vm-source' \
     --filter='- /.git/' \
+    --filter='- /.codex/' \
     --filter='- /Plans/' \
     --filter='- /artifacts/' \
     --filter='- /build/' \
     --filter='- /build-*/' \
     --filter='- /builddir/' \
     --filter='- /_build/' \
+    --filter='- /m14' \
+    --filter='- /m14-export' \
+    --filter='- **/__pycache__/' \
+    --filter='- **/*.pyc' \
     --filter='- /tools/gw-vm.d/config.toml' \
     -e "ssh -p $SSH_PORT -o BatchMode=yes -o ConnectTimeout=10" \
     "$LOCAL_SOURCE_PATH_ABS/" "$SSH_TARGET:$GUEST_SOURCE_PATH/" || return

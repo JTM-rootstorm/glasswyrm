@@ -115,7 +115,7 @@ EOF
 
 doctor() {
   local failed=0 tool path
-  for tool in bash ssh rsync virsh python3; do
+  for tool in bash git ssh rsync virsh python3; do
     if command_exists "$tool"; then
       printf '[ok] %s\n' "$tool"
     else

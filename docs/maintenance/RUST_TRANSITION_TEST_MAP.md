@@ -144,8 +144,10 @@ the relevant VM runbook. QXL can prove real kernel/libdrm paths, restoration,
 and absence of VRR capability; it cannot prove physical VRR engagement.
 
 `./tools/gw-vm rust-transition-software-test` is the current transition gate
-for locked Rust workspace format, check, test, and Clippy validation. It does
-not run the Meson suite, the three-process restart oracle, install checks, or
+for locked Rust workspace format, check, test, and Clippy validation. It
+requires a clean committed checkout, synchronizes that source itself, and
+records the tested commit, UTC timestamp, and guest tool versions. It does not
+run the Meson suite, the three-process restart oracle, install checks, or
 packaging acceptance; those remain separate gates.
 
 Run VM gates from already coherent, locally validated source. Do not use the VM

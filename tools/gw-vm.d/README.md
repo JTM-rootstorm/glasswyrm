@@ -107,11 +107,14 @@ unrelated directory.
 It refuses a non-empty destination that lacks the ownership marker.
 
 `rust-transition-software-test` is a fixed, non-hardware scenario for an
-already booted guest populated by `push-source`. It requires the source
-ownership marker and an existing guest Rust toolchain, then runs workspace
-format, check, test, and clippy gates with the lockfile enforced. It neither
-installs dependencies nor accesses DRM or virtual terminals. Its log and JSON
-summary are written beneath the configured host artifact directory.
+already booted guest. It requires a clean committed host checkout, records the
+current commit, synchronizes the owned source destination itself, and verifies
+that the host commit did not change before or during the guest run. It then
+runs workspace format, check, test, and clippy gates with the lockfile enforced
+using the guest's existing Rust toolchain. It neither installs dependencies nor
+accesses DRM or virtual terminals. Its host-side JSON summary binds the result
+to the tested commit, UTC timestamp, and guest tool versions; the accompanying
+log preserves complete command output.
 
 `narrow-test gwm` checks the Portage pretend output for unexpected rebuilds of
 `x11-base/glasswyrmd` and `x11-base/gwcomp`. Use `--allow-abi-rebuild` only when

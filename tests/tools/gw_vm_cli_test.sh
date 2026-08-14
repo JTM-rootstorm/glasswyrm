@@ -762,8 +762,10 @@ if [[ $script == *'rust-transition-stage=complete'* ]]; then
   fi
   printf '%s\n' \
     'rust-transition-stage=toolchain' \
-    'rustc 1.96.1' \
-    'cargo 1.96.1' \
+    'rust-transition-tool-rustc=rustc 1.95.0 (test)' \
+    'rust-transition-tool-cargo=cargo 1.95.0 (test)' \
+    'rust-transition-tool-rustfmt=rustfmt 1.8.0-stable (test)' \
+    'rust-transition-tool-clippy=clippy 0.1.95 (test)' \
     'rust-transition-stage=fmt' \
     'rust-transition-stage=check' \
     'rust-transition-stage=test' \
@@ -971,6 +973,7 @@ done
 
 run_allow_failure "$work_dir/doctor.out" env GLASSWYRM_VM_CONFIG="$no_domain_config" "$gw_vm" doctor
 assert_contains "$work_dir/doctor.out" 'GLASSWYRM_VM_NAME'
+assert_contains "$work_dir/doctor.out" '[ok] git'
 
 run_failure "$work_dir/doctor-qxl-low.out" \
   env GW_VM_TEST_QXL_LOW=1 "$gw_vm" doctor
@@ -1144,9 +1147,14 @@ run_success "$work_dir/push-source.out" "$gw_vm" push-source
 assert_contains "$command_log" '.glasswyrm-vm-source'
 assert_contains "$command_log" "<$source_dir/>"
 assert_contains "$command_log" '<--filter=- /.git/>'
+assert_contains "$command_log" '<--filter=- /.codex/>'
 assert_contains "$command_log" '<--filter=- /Plans/>'
 assert_contains "$command_log" '<--filter=- /artifacts/>'
 assert_contains "$command_log" '<--filter=- /build-*/>'
+assert_contains "$command_log" '<--filter=- /m14>'
+assert_contains "$command_log" '<--filter=- /m14-export>'
+assert_contains "$command_log" '<--filter=- **/__pycache__/>'
+assert_contains "$command_log" '<--filter=- **/*.pyc>'
 assert_contains "$command_log" '<--filter=- /tools/gw-vm.d/config.toml>'
 
 : >"$command_log"
@@ -1171,10 +1179,10 @@ assert_not_contains "$command_log" 'rsync'
 rm -f "$guest_source_dir"
 
 : >"$command_log"
-run_success "$work_dir/rust-transition-push-source.out" "$gw_vm" push-source
 run_success "$work_dir/rust-transition.out" "$gw_vm" rust-transition-software-test
 assert_contains "$work_dir/rust-transition.out" 'rust-transition-stage=complete'
 assert_contains "$work_dir/rust-transition.out" 'Rust transition VM software test passed.'
+assert_before "$command_log" 'rsync' 'rust-transition-stage=complete'
 assert_contains "$command_log" 'marker=$source_dir/.glasswyrm-vm-source'
 assert_contains "$command_log" 'cargo fmt --all -- --check'
 assert_contains "$command_log" 'cargo check --workspace --all-targets --locked'
@@ -1191,6 +1199,37 @@ assert_contains "$artifact_dir/rust-transition-software-test.json" \
 assert_contains "$artifact_dir/rust-transition-software-test.json" '"passed": true'
 assert_contains "$artifact_dir/rust-transition-software-test.json" \
   '"hardware_authorized": false'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"tested_commit": "86dab3c000000000000000000000000000000000"'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"timestamp_utc":'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"rustc": "rustc 1.95.0 (test)"'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"cargo": "cargo 1.95.0 (test)"'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"rustfmt": "rustfmt 1.8.0-stable (test)"'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"clippy": "clippy 0.1.95 (test)"'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-dirty-source.out" \
+  env GW_VM_TEST_GIT_DIRTY=1 "$gw_vm" rust-transition-software-test
+assert_contains "$work_dir/rust-transition-dirty-source.out" \
+  'requires committed source outside local operator material'
+assert_not_contains "$command_log" 'rsync'
+assert_not_contains "$command_log" 'rust-transition-stage=complete'
+
+: >"$command_log"
+run_failure "$work_dir/rust-transition-head-drift.out" \
+  env GW_VM_TEST_HEAD_DRIFT_AFTER=2 "$gw_vm" rust-transition-software-test
+assert_contains "$work_dir/rust-transition-head-drift.out" \
+  'Rust transition source commit changed during acceptance'
+assert_contains "$command_log" 'rsync'
+assert_not_contains "$command_log" 'rust-transition-stage=complete'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"passed": false'
+assert_contains "$artifact_dir/rust-transition-software-test.json" '"exit_status": 22'
+assert_contains "$artifact_dir/rust-transition-software-test.json" \
+  '"tested_commit": "86dab3c000000000000000000000000000000000"'
 
 : >"$command_log"
 run_failure "$work_dir/rust-transition-extra-arg.out" \
