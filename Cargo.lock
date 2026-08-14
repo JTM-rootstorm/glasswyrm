@@ -27,6 +27,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gw-ipc-capi"
+version = "0.1.0"
+
+[[package]]
+name = "gw-platform-linux"
+version = "0.2.0"
+dependencies = [
+ "gw-sys",
+]
+
+[[package]]
+name = "gw-sys"
+version = "0.2.0"
+
+[[package]]
 name = "gw-test-support"
 version = "0.1.0"
 

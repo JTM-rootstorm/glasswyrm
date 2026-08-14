@@ -1,0 +1,12 @@
+[package]
+name = "gw-platform-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+gw-sys = { path = "../gw-sys" }
+
+[lints]
+workspace = true
