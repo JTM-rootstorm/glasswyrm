@@ -8,6 +8,7 @@ mod signals;
 
 use glasswyrm_core::resource_id::{ResourceBase, first_available_resource_base};
 use listener::OwnedListener;
+use request_loop::ServerState;
 use std::collections::HashSet;
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,7 @@ pub fn run(options: Options) -> io::Result<()> {
     eprintln!("glasswyrmd: listening on {}", socket_path.display());
 
     let resource_bases = Arc::new(Mutex::new(HashSet::new()));
+    let server_state = Arc::new(Mutex::new(ServerState::default()));
     let mut next_client_identifier = 1_u64;
     while !signals::stop_requested() {
         for _ in 0..MAXIMUM_ACCEPTS_PER_TURN {
@@ -38,6 +40,7 @@ pub fn run(options: Options) -> io::Result<()> {
                         stream,
                         identifier,
                         Arc::clone(&resource_bases),
+                        Arc::clone(&server_state),
                         MAXIMUM_ACTIVE_CLIENTS,
                         SETUP_TIMEOUT,
                     ) {
@@ -81,6 +84,7 @@ fn start_client(
     stream: std::os::unix::net::UnixStream,
     identifier: u64,
     resource_bases: Arc<Mutex<HashSet<ResourceBase>>>,
+    server_state: Arc<Mutex<ServerState>>,
     maximum_active_clients: usize,
     setup_timeout: Duration,
 ) -> Result<(), ClientStartError> {
@@ -95,7 +99,7 @@ fn start_client(
         })?;
     thread::Builder::new()
         .name(format!("glasswyrmd-client-{identifier}"))
-        .spawn(move || client::serve(stream, identifier, lease, setup_timeout))
+        .spawn(move || client::serve(stream, identifier, lease, setup_timeout, server_state))
         .map(|_| ())
         .map_err(ClientStartError::Worker)
 }
@@ -168,6 +172,10 @@ mod tests {
         }
     }
 
+    fn server_state() -> Arc<Mutex<ServerState>> {
+        Arc::new(Mutex::new(ServerState::default()))
+    }
+
     #[test]
     fn client_admission_is_bounded_and_reuses_released_slots() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
@@ -199,12 +207,27 @@ mod tests {
     fn stalled_setup_client_cannot_exceed_limit_or_stop_later_admission() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
         let (first_server, first_client) = UnixStream::pair().unwrap();
-        start_client(first_server, 1, Arc::clone(&in_use), 1, SETUP_TIMEOUT).unwrap();
+        start_client(
+            first_server,
+            1,
+            Arc::clone(&in_use),
+            server_state(),
+            1,
+            SETUP_TIMEOUT,
+        )
+        .unwrap();
         wait_for_active_clients(&in_use, 1);
 
         let (second_server, mut second_client) = UnixStream::pair().unwrap();
         assert!(matches!(
-            start_client(second_server, 2, Arc::clone(&in_use), 1, SETUP_TIMEOUT),
+            start_client(
+                second_server,
+                2,
+                Arc::clone(&in_use),
+                server_state(),
+                1,
+                SETUP_TIMEOUT,
+            ),
             Err(ClientStartError::ClientLimit)
         ));
         second_client.set_nonblocking(true).unwrap();
@@ -227,7 +250,15 @@ mod tests {
         wait_for_active_clients(&in_use, 0);
 
         let (third_server, third_client) = UnixStream::pair().unwrap();
-        start_client(third_server, 3, Arc::clone(&in_use), 1, SETUP_TIMEOUT).unwrap();
+        start_client(
+            third_server,
+            3,
+            Arc::clone(&in_use),
+            server_state(),
+            1,
+            SETUP_TIMEOUT,
+        )
+        .unwrap();
         wait_for_active_clients(&in_use, 1);
         drop(third_client);
         wait_for_active_clients(&in_use, 0);
@@ -237,7 +268,15 @@ mod tests {
     fn stalled_setup_releases_its_slot_at_the_injected_deadline() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
         let (server, client) = UnixStream::pair().unwrap();
-        start_client(server, 1, Arc::clone(&in_use), 1, Duration::ZERO).unwrap();
+        start_client(
+            server,
+            1,
+            Arc::clone(&in_use),
+            server_state(),
+            1,
+            Duration::ZERO,
+        )
+        .unwrap();
 
         wait_for_active_clients(&in_use, 0);
         drop(client);
@@ -247,6 +286,7 @@ mod tests {
             replacement_server,
             2,
             Arc::clone(&in_use),
+            server_state(),
             1,
             Duration::ZERO,
         )

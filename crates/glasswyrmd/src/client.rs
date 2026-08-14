@@ -1,5 +1,5 @@
 use crate::ResourceBaseLease;
-use crate::request_loop::{RequestLoop, RequestWorkBudget};
+use crate::request_loop::{RequestLoop, RequestWorkBudget, ServerState};
 use glasswyrm_x11::{
     ByteOrder, ParseStatus, SetupDecision, SetupParser, SetupReplyConfig, encode_setup_failure,
     encode_setup_success, evaluate_setup_request,
@@ -7,6 +7,7 @@ use glasswyrm_x11::{
 use std::io::{Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,7 @@ pub(crate) fn serve(
     identifier: u64,
     resource_base: ResourceBaseLease,
     setup_timeout: Duration,
+    server_state: Arc<Mutex<ServerState>>,
 ) {
     let mut parser = SetupParser::default();
     let mut input = [0_u8; 4096];
@@ -57,6 +59,7 @@ pub(crate) fn serve(
                             SetupReplyConfig::default().screen.maximum_request_length,
                             SetupReplyConfig::default().screen.root_window,
                             reply,
+                            server_state,
                         );
                         let pipelined = &input[result.consumed..count];
                         serve_established(&mut stream, identifier, &mut request_loop, pipelined);

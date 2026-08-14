@@ -1,14 +1,35 @@
+use glasswyrm_core::atom::{AtomTable, InternAtomStatus};
 use glasswyrm_x11::{
-    ByteOrder, CoreError, CoreErrorCode, InitialCoreDispatch, RequestFrameStatus, RequestFramer,
-    dispatch_initial_core_request, encode_core_error,
+    ByteOrder, CoreDispatchState, CoreError, CoreErrorCode, InitialCoreDispatch, InternAtomOutcome,
+    RequestFrameStatus, RequestFramer, dispatch_core_request, encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
 
 pub(crate) const MAXIMUM_REQUESTS_PER_TURN: usize = 64;
 pub(crate) const MAXIMUM_REQUEST_BYTES_PER_TURN: usize = 256 * 1024;
 pub(crate) const MAXIMUM_QUEUED_OUTPUT: usize = 1024 * 1024;
+
+#[derive(Debug, Default)]
+pub(crate) struct ServerState {
+    atoms: AtomTable,
+}
+
+impl CoreDispatchState for ServerState {
+    fn intern_atom(&mut self, name: &[u8], only_if_exists: bool) -> InternAtomOutcome {
+        let result = self.atoms.intern(name, only_if_exists);
+        match result.status {
+            InternAtomStatus::Success => InternAtomOutcome::Success(result.atom),
+            InternAtomStatus::Exhausted => InternAtomOutcome::Exhausted,
+        }
+    }
+
+    fn atom_name(&self, atom: u32) -> Option<&[u8]> {
+        self.atoms.name(atom)
+    }
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct RequestWorkBudget {
@@ -100,6 +121,7 @@ pub(crate) struct RequestLoop {
     pending_input: Vec<u8>,
     output: OutputQueue,
     state: SessionState,
+    server_state: Arc<Mutex<ServerState>>,
 }
 
 impl RequestLoop {
@@ -108,6 +130,7 @@ impl RequestLoop {
         maximum_request_length: u16,
         focused_window: u32,
         setup_reply: Vec<u8>,
+        server_state: Arc<Mutex<ServerState>>,
     ) -> Self {
         let mut output = OutputQueue::default();
         if !setup_reply.is_empty() {
@@ -123,6 +146,7 @@ impl RequestLoop {
             pending_input: Vec::new(),
             output,
             state: SessionState::Established,
+            server_state,
         }
     }
 
@@ -162,12 +186,19 @@ impl RequestLoop {
                     let request_size = self.framer.request().bytes.len();
                     budget.record(request_size);
                     completed += 1;
-                    let packet = dispatch_initial_core_request(
-                        self.order,
-                        self.request_sequence,
-                        self.focused_window,
-                        self.framer.request(),
-                    );
+                    let packet = {
+                        let mut state = self
+                            .server_state
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        dispatch_core_request(
+                            self.order,
+                            self.request_sequence,
+                            self.focused_window,
+                            &mut *state,
+                            self.framer.request(),
+                        )
+                    };
                     if let InitialCoreDispatch::Packet(bytes) = packet
                         && !self.output.enqueue(bytes)
                     {
@@ -263,8 +294,41 @@ mod tests {
         bytes
     }
 
+    fn intern_atom_request(order: ByteOrder, only_if_exists: bool, name: &[u8]) -> Vec<u8> {
+        let padded_name_length = (name.len() + 3) & !3;
+        let mut bytes = vec![CoreOpcode::InternAtom as u8, u8::from(only_if_exists), 0, 0];
+        bytes.extend_from_slice(&match order {
+            ByteOrder::LittleEndian => (name.len() as u16).to_le_bytes(),
+            ByteOrder::BigEndian => (name.len() as u16).to_be_bytes(),
+        });
+        bytes.extend_from_slice(&[0, 0]);
+        bytes.extend_from_slice(name);
+        bytes.resize(8 + padded_name_length, 0);
+        let units = (bytes.len() / 4) as u16;
+        bytes[2..4].copy_from_slice(&match order {
+            ByteOrder::LittleEndian => units.to_le_bytes(),
+            ByteOrder::BigEndian => units.to_be_bytes(),
+        });
+        bytes
+    }
+
+    fn get_atom_name_request(order: ByteOrder, atom: u32) -> Vec<u8> {
+        let mut bytes = request(order, CoreOpcode::GetAtomName as u8, 2);
+        bytes[4..8].copy_from_slice(&match order {
+            ByteOrder::LittleEndian => atom.to_le_bytes(),
+            ByteOrder::BigEndian => atom.to_be_bytes(),
+        });
+        bytes
+    }
+
     fn session(order: ByteOrder) -> RequestLoop {
-        RequestLoop::new(order, u16::MAX, 1, Vec::new())
+        RequestLoop::new(
+            order,
+            u16::MAX,
+            1,
+            Vec::new(),
+            Arc::new(Mutex::new(ServerState::default())),
+        )
     }
 
     fn packets(loop_: &RequestLoop) -> Vec<&[u8]> {
@@ -281,6 +345,87 @@ mod tests {
             ByteOrder::LittleEndian => u16::from_le_bytes([packet[2], packet[3]]),
             ByteOrder::BigEndian => u16::from_be_bytes([packet[2], packet[3]]),
         }
+    }
+
+    fn u32_at(order: ByteOrder, packet: &[u8], offset: usize) -> u32 {
+        match order {
+            ByteOrder::LittleEndian => u32::from_le_bytes(
+                packet[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte field"),
+            ),
+            ByteOrder::BigEndian => u32::from_be_bytes(
+                packet[offset..offset + 4]
+                    .try_into()
+                    .expect("four-byte field"),
+            ),
+        }
+    }
+
+    #[test]
+    fn atom_state_is_shared_across_clients_and_preserves_wire_bytes() {
+        let shared = Arc::new(Mutex::new(ServerState::default()));
+        let mut little = RequestLoop::new(
+            ByteOrder::LittleEndian,
+            u16::MAX,
+            1,
+            Vec::new(),
+            Arc::clone(&shared),
+        );
+        let mut big = RequestLoop::new(ByteOrder::BigEndian, u16::MAX, 1, Vec::new(), shared);
+        let name = b"GW_\xff_ATOM";
+
+        assert_eq!(
+            little.feed(
+                &intern_atom_request(ByteOrder::LittleEndian, false, name),
+                &mut RequestWorkBudget::default(),
+            ),
+            1
+        );
+        assert_eq!(u32_at(ByteOrder::LittleEndian, packets(&little)[0], 8), 69);
+
+        assert_eq!(
+            big.feed(
+                &intern_atom_request(ByteOrder::BigEndian, true, name),
+                &mut RequestWorkBudget::default(),
+            ),
+            1
+        );
+        assert_eq!(u32_at(ByteOrder::BigEndian, packets(&big)[0], 8), 69);
+
+        assert_eq!(
+            big.feed(
+                &get_atom_name_request(ByteOrder::BigEndian, 69),
+                &mut RequestWorkBudget::default(),
+            ),
+            1
+        );
+        let reply = packets(&big)[1];
+        assert_eq!(&reply[32..32 + name.len()], name);
+    }
+
+    #[test]
+    fn atom_exhaustion_is_reported_as_bad_alloc_without_mutation() {
+        let state = ServerState {
+            atoms: AtomTable::new(68),
+        };
+        let mut loop_ = RequestLoop::new(
+            ByteOrder::LittleEndian,
+            u16::MAX,
+            1,
+            Vec::new(),
+            Arc::new(Mutex::new(state)),
+        );
+        let request = intern_atom_request(ByteOrder::LittleEndian, false, b"too-many");
+        assert_eq!(loop_.feed(&request, &mut RequestWorkBudget::default()), 1);
+        assert_eq!(packets(&loop_)[0][1], CoreErrorCode::BadAlloc as u8);
+
+        let only_if_exists = intern_atom_request(ByteOrder::LittleEndian, true, b"too-many");
+        assert_eq!(
+            loop_.feed(&only_if_exists, &mut RequestWorkBudget::default()),
+            1
+        );
+        assert_eq!(u32_at(ByteOrder::LittleEndian, packets(&loop_)[1], 8), 0);
     }
 
     #[test]
@@ -356,7 +501,13 @@ mod tests {
         assert_eq!(zero_packets[0][1], CoreErrorCode::BadLength as u8);
         assert_eq!(zero_packets[0][10], CoreOpcode::GetInputFocus as u8);
 
-        let mut oversized = RequestLoop::new(order, 2, 1, Vec::new());
+        let mut oversized = RequestLoop::new(
+            order,
+            2,
+            1,
+            Vec::new(),
+            Arc::new(Mutex::new(ServerState::default())),
+        );
         assert_eq!(
             oversized.feed(
                 &request(order, CoreOpcode::NoOperation as u8, 3),
