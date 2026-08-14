@@ -5,11 +5,13 @@
 #include "glasswyrmd/raster_ops.hpp"
 #include "helpers/test_support.hpp"
 
+#include <algorithm>
 #include <array>
 
 int main() {
   using glasswyrm::geometry::Rectangle;
   using glasswyrm::server::PixelStorage;
+  using glasswyrm::server::RasterPoint;
   auto bitmap = glasswyrm::server::BitmapStorage::create(9, 3);
   gw::test::require(bitmap.has_value(), "create depth-one storage");
   gw::test::require(bitmap->byte_size() == 27U, "unpacked bitmap size");
@@ -95,6 +97,39 @@ int main() {
   glasswyrm::server::draw_segments(*primitives, segments, 0x0000ff00U);
   gw::test::require(primitives->at(2, 11) == 0xff00ff00U,
                     "independent segment endpoint");
+
+  auto clipped_line = PixelStorage::create(8, 6);
+  gw::test::require(clipped_line.has_value(), "create clipped line target");
+  glasswyrm::server::draw_line(*clipped_line, {-3, -1}, {7, 4},
+                               0x00ffffffU);
+  constexpr std::array<RasterPoint, 8> expected_clipped_line{{
+      {0, 1}, {1, 1}, {2, 2}, {3, 2}, {4, 3}, {5, 3}, {6, 4}, {7, 4}}};
+  for (std::uint32_t y = 0; y < clipped_line->height(); ++y)
+    for (std::uint32_t x = 0; x < clipped_line->width(); ++x) {
+      const bool expected = std::ranges::any_of(
+          expected_clipped_line, [x, y](const RasterPoint point) {
+            return point.x == static_cast<std::int32_t>(x) &&
+                   point.y == static_cast<std::int32_t>(y);
+          });
+      gw::test::require(
+          clipped_line->at(x, y) ==
+              (expected ? 0xffffffffU : 0xff000000U),
+          "partially offscreen line preserves legacy Bresenham phase");
+    }
+  glasswyrm::server::draw_line(*clipped_line, {-32768, -32768}, {-1, -1},
+                               0x00ff0000U);
+  for (std::uint32_t y = 0; y < clipped_line->height(); ++y)
+    for (std::uint32_t x = 0; x < clipped_line->width(); ++x) {
+      const bool expected = std::ranges::any_of(
+          expected_clipped_line, [x, y](const RasterPoint point) {
+            return point.x == static_cast<std::int32_t>(x) &&
+                   point.y == static_cast<std::int32_t>(y);
+          });
+      gw::test::require(
+          clipped_line->at(x, y) ==
+              (expected ? 0xffffffffU : 0xff000000U),
+          "fully offscreen line leaves the target unchanged");
+    }
   const std::array<glasswyrm::server::RasterPoint, 3> triangle{{
       {2, 4}, {8, 4}, {5, 9}}};
   glasswyrm::server::fill_convex_polygon(*primitives, triangle,
