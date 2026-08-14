@@ -5,7 +5,7 @@ use std::io::{self, Read};
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::fs::FileExt;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gw_ipc::{
     ApplicationValidator, HandshakeConfig, NegotiatedPeer, ServerHandshakeResponse, Transport,
@@ -17,20 +17,20 @@ use gw_types::{
     SnapshotDomain, SnapshotId,
 };
 use gw_wire::compositor::{
-    AlphaSemantics, BufferAttach, BufferRelease, BufferReleaseReason, DamageRectangle,
-    FrameAcknowledged, FrameResult, OutputUpsert, PixelFormat as WirePixelFormat, SurfaceUpsert,
-    SynchronizationMode, decode_buffer_attach, decode_buffer_detach, decode_frame_commit,
-    decode_output_remove, decode_output_upsert, decode_surface_damage, decode_surface_remove,
-    decode_surface_upsert, encode_buffer_release, encode_frame_acknowledged,
+    AlphaSemantics, BufferAttach, BufferDetach, BufferRelease, BufferReleaseReason,
+    DamageRectangle, FrameAcknowledged, FrameResult, OutputUpsert, PixelFormat as WirePixelFormat,
+    SurfaceDamage, SurfaceUpsert, SynchronizationMode, decode_buffer_attach, decode_buffer_detach,
+    decode_frame_commit, decode_output_remove, decode_output_upsert, decode_surface_damage,
+    decode_surface_remove, decode_surface_upsert, encode_buffer_release, encode_frame_acknowledged,
 };
 use gw_wire::output::{
     OutputConfigurationResult, SurfaceOutputState, decode_output_configuration_commit,
     decode_output_state_query, decode_surface_output_state,
 };
 use gw_wire::vrr::{
-    PresentationTiming, SurfaceVrrState, VRR_REASON_SIMULATED_HEADLESS, VrrDecision,
-    decode_output_vrr_policy_upsert, decode_surface_vrr_state, encode_output_vrr_state_upsert,
-    encode_presentation_timing,
+    OutputVrrPolicyUpsert, PresentationTiming, SurfaceVrrState, VRR_REASON_SIMULATED_HEADLESS,
+    VrrDecision, decode_output_vrr_policy_upsert, decode_surface_vrr_state,
+    encode_output_vrr_state_upsert, encode_presentation_timing,
 };
 use gw_wire::{
     Envelope, Pong, SnapshotBegin, SnapshotEnd, SurfacePolicyUpsert, decode_ping,
@@ -58,9 +58,107 @@ const MAXIMUM_TOTAL_BUFFER_BYTES: u64 = 512 * 1024 * 1024;
 const MAXIMUM_BUFFERS: usize = 4096;
 const MAXIMUM_SURFACES: usize = 4096;
 const MAXIMUM_OUTPUTS: usize = 8;
+const MAXIMUM_SNAPSHOT_ITEMS: u32 = 1024;
+const MAXIMUM_PENDING_RELEASES: usize = MAXIMUM_BUFFERS * 2;
+const AWAITING_HELLO_TIMEOUT: Duration = Duration::from_secs(5);
+const INITIAL_FRAME_TIMEOUT: Duration = Duration::from_secs(10);
+const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
 const VRR_REASON_POLICY_OFF: u64 = 1 << 10;
 const VRR_REASON_NO_CANDIDATE: u64 = 1 << 11;
 const VRR_REASON_MANUAL_ALWAYS_ELIGIBLE: u64 = 1 << 32;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PeerTimeouts {
+    awaiting_hello: Duration,
+    initial_frame: Duration,
+    snapshot: Duration,
+}
+
+impl Default for PeerTimeouts {
+    fn default() -> Self {
+        Self {
+            awaiting_hello: AWAITING_HELLO_TIMEOUT,
+            initial_frame: INITIAL_FRAME_TIMEOUT,
+            snapshot: SNAPSHOT_TIMEOUT,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExpiredDeadline {
+    AwaitingHello,
+    InitialFrame,
+    Snapshot,
+}
+
+impl fmt::Display for ExpiredDeadline {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::AwaitingHello => "awaiting Hello",
+            Self::InitialFrame => "awaiting initial accepted frame",
+            Self::Snapshot => "awaiting snapshot completion",
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PeerLiveness {
+    timeouts: PeerTimeouts,
+    // These are absolute monotonic deadlines. Partial records and other
+    // successful traffic must not extend exclusive ownership of the endpoint.
+    awaiting_hello_deadline: Option<Instant>,
+    initial_frame_deadline: Option<Instant>,
+    snapshot_deadline: Option<Instant>,
+}
+
+impl PeerLiveness {
+    fn awaiting_hello(now: Instant, timeouts: PeerTimeouts) -> Self {
+        Self {
+            timeouts,
+            awaiting_hello_deadline: Some(deadline_after(now, timeouts.awaiting_hello)),
+            initial_frame_deadline: None,
+            snapshot_deadline: None,
+        }
+    }
+
+    fn handshake_accepted(&mut self, now: Instant) {
+        self.awaiting_hello_deadline = None;
+        self.initial_frame_deadline = Some(deadline_after(now, self.timeouts.initial_frame));
+    }
+
+    fn dispatched(&mut self, now: Instant, accepted_frame: bool, snapshot_active: bool) {
+        if snapshot_active && self.snapshot_deadline.is_none() {
+            self.snapshot_deadline = Some(deadline_after(now, self.timeouts.snapshot));
+        } else if !snapshot_active {
+            self.snapshot_deadline = None;
+        }
+        if accepted_frame {
+            self.initial_frame_deadline = None;
+        }
+    }
+
+    fn expired(&self, now: Instant) -> Option<ExpiredDeadline> {
+        if self
+            .awaiting_hello_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return Some(ExpiredDeadline::AwaitingHello);
+        }
+        if self
+            .snapshot_deadline
+            .is_some_and(|deadline| now >= deadline)
+        {
+            return Some(ExpiredDeadline::Snapshot);
+        }
+        self.initial_frame_deadline
+            .is_some_and(|deadline| now >= deadline)
+            .then_some(ExpiredDeadline::InitialFrame)
+    }
+}
+
+fn deadline_after(now: Instant, duration: Duration) -> Instant {
+    now.checked_add(duration).unwrap_or(now)
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -124,13 +222,52 @@ struct PeerState {
     configuration_generation: u64,
 }
 
+impl PeerState {
+    fn contains_current_surface(&self, surface_id: u64) -> bool {
+        self.snapshot.as_ref().map_or_else(
+            || self.surfaces.contains_key(&surface_id),
+            |snapshot| snapshot.surfaces.contains_key(&surface_id),
+        )
+    }
+}
+
 struct SnapshotTransaction {
     begin: SnapshotBegin,
-    outputs: Vec<OutputUpsert>,
+    outputs: BTreeMap<u64, OutputUpsert>,
     surfaces: BTreeMap<u64, SurfaceUpsert>,
     policies: BTreeMap<u64, SurfacePolicyUpsert>,
     memberships: BTreeMap<u64, SurfaceOutputState>,
     surface_vrr: BTreeMap<u64, SurfaceVrrState>,
+    output_vrr_policies: BTreeMap<u64, OutputVrrPolicyUpsert>,
+    buffer_ids: BTreeSet<u64>,
+    buffer_storage: u64,
+    mutations: Vec<SnapshotMutation>,
+}
+
+enum SnapshotMutation {
+    SurfaceBuffersRemove(u64),
+    BufferAttach(BufferRecord),
+    BufferDetach(BufferDetach),
+}
+
+impl SnapshotTransaction {
+    fn new(begin: SnapshotBegin) -> Result<Self, RuntimeError> {
+        if begin.expected_item_count > MAXIMUM_SNAPSHOT_ITEMS {
+            return Err(RuntimeError::Wire("snapshot item limit exceeded"));
+        }
+        Ok(Self {
+            begin,
+            outputs: BTreeMap::new(),
+            surfaces: BTreeMap::new(),
+            policies: BTreeMap::new(),
+            memberships: BTreeMap::new(),
+            surface_vrr: BTreeMap::new(),
+            output_vrr_policies: BTreeMap::new(),
+            buffer_ids: BTreeSet::new(),
+            buffer_storage: 0,
+            mutations: Vec::new(),
+        })
+    }
 }
 
 struct RuntimeState {
@@ -138,7 +275,7 @@ struct RuntimeState {
     snapshot_id: u64,
     frame_ordinal: u64,
     accepted_frames: u64,
-    dumper: FrameDumper,
+    dumper: Option<FrameDumper>,
     manifest: Option<SceneManifest>,
     vrr_report: Option<VrrReport>,
 }
@@ -149,16 +286,18 @@ struct Connection {
     validator: Option<ApplicationValidator>,
     peer: PeerState,
     next_sequence: u64,
+    liveness: PeerLiveness,
 }
 
 impl Connection {
-    fn new(fd: OwnedFd) -> Result<Self, RuntimeError> {
+    fn new(fd: OwnedFd, now: Instant, timeouts: PeerTimeouts) -> Result<Self, RuntimeError> {
         Ok(Self {
             transport: Transport::from_owned_fd(fd, TransportLimits::default())?,
             negotiated: None,
             validator: None,
             peer: PeerState::default(),
             next_sequence: 2,
+            liveness: PeerLiveness::awaiting_hello(now, timeouts),
         })
     }
 
@@ -187,9 +326,10 @@ impl Connection {
                     Role::Compositor,
                     peer.role,
                     peer.capabilities,
-                    1024,
+                    MAXIMUM_SNAPSHOT_ITEMS as usize,
                 ));
                 self.negotiated = Some(peer);
+                self.liveness.handshake_accepted(Instant::now());
                 Ok(HandshakeProgress::Accepted)
             }
             ServerHandshakeResponse::Rejected { record, .. } => {
@@ -207,6 +347,9 @@ impl Connection {
         let mut bytes = 0;
         let accepted_before = state.accepted_frames;
         while messages < MAXIMUM_MESSAGES_PER_TURN && bytes < MAXIMUM_PAYLOAD_BYTES_PER_TURN {
+            if let Some(expired) = self.liveness.expired(Instant::now()) {
+                return ProcessProgress::Expired(expired);
+            }
             let mut received = match self.transport.receive() {
                 Ok(record) => record,
                 Err(error) if would_block(&error) => break,
@@ -233,6 +376,7 @@ impl Connection {
                 return ProcessProgress::Disconnected;
             }
             let envelope = received.envelope;
+            let accepted_before_message = state.accepted_frames;
             let result = self.dispatch(
                 &envelope,
                 &received.payload,
@@ -242,21 +386,26 @@ impl Connection {
             );
             match result {
                 Ok(()) => {
-                    if envelope.message_type == MessageType::FRAME_COMMIT
-                        && let Err(error) = self.flush_releases()
-                    {
+                    let release_point = matches!(
+                        envelope.message_type,
+                        MessageType::FRAME_COMMIT | MessageType::SNAPSHOT_ABORT
+                    );
+                    if release_point && let Err(error) = self.flush_releases() {
                         eprintln!("gwcomp: buffer release send failed: {error}");
                         return ProcessProgress::Disconnected;
                     }
+                    self.liveness.dispatched(
+                        Instant::now(),
+                        state.accepted_frames != accepted_before_message,
+                        self.peer.snapshot.is_some(),
+                    );
                 }
                 Err(error) => {
                     eprintln!(
                         "gwcomp: rejected contract type={:#06x}: {error}",
                         envelope.message_type.get()
                     );
-                    if envelope.message_type == MessageType::FRAME_COMMIT {
-                        return ProcessProgress::Disconnected;
-                    }
+                    return ProcessProgress::Disconnected;
                 }
             }
         }
@@ -290,18 +439,10 @@ impl Connection {
             MessageType::SNAPSHOT_BEGIN => {
                 let begin = decode_snapshot_begin(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SnapshotBegin"))?;
-                self.peer.snapshot = Some(SnapshotTransaction {
-                    begin,
-                    outputs: Vec::new(),
-                    surfaces: BTreeMap::new(),
-                    policies: BTreeMap::new(),
-                    memberships: BTreeMap::new(),
-                    surface_vrr: BTreeMap::new(),
-                });
-                self.peer.scene_changed = true;
+                self.peer.snapshot = Some(SnapshotTransaction::new(begin)?);
                 Ok(())
             }
-            MessageType::SNAPSHOT_END => self.finish_snapshot(payload),
+            MessageType::SNAPSHOT_END => self.finish_snapshot(payload, state),
             MessageType::SNAPSHOT_ABORT => {
                 let abort = decode_snapshot_abort(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SnapshotAbort"))?;
@@ -311,7 +452,8 @@ impl Connection {
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.begin.snapshot_id == abort.snapshot_id)
                 {
-                    self.peer.snapshot = None;
+                    let snapshot = self.peer.snapshot.take().expect("snapshot was checked");
+                    self.abort_snapshot(snapshot)?;
                 }
                 Ok(())
             }
@@ -319,10 +461,12 @@ impl Connection {
                 let value = decode_output_upsert(payload)
                     .map_err(|_| RuntimeError::Wire("invalid OutputUpsert"))?;
                 if let Some(snapshot) = self.peer.snapshot.as_mut() {
-                    if snapshot.outputs.len() == MAXIMUM_OUTPUTS {
+                    if !snapshot.outputs.contains_key(&value.output_id)
+                        && snapshot.outputs.len() == MAXIMUM_OUTPUTS
+                    {
                         return Err(RuntimeError::Wire("snapshot has too many outputs"));
                     }
-                    snapshot.outputs.push(value);
+                    snapshot.outputs.insert(value.output_id, value);
                 } else {
                     if !self.peer.outputs.contains_key(&value.output_id)
                         && self.peer.outputs.len() == MAXIMUM_OUTPUTS
@@ -330,15 +474,20 @@ impl Connection {
                         return Err(RuntimeError::Wire("scene has too many outputs"));
                     }
                     self.peer.outputs.insert(value.output_id, value);
+                    self.peer.scene_changed = true;
                 }
-                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::OUTPUT_REMOVE => {
                 let value = decode_output_remove(payload)
                     .map_err(|_| RuntimeError::Wire("invalid OutputRemove"))?;
-                self.peer.outputs.remove(&value.output_id);
-                self.peer.scene_changed = true;
+                if let Some(snapshot) = self.peer.snapshot.as_mut() {
+                    snapshot.outputs.remove(&value.output_id);
+                    snapshot.output_vrr_policies.remove(&value.output_id);
+                } else {
+                    self.peer.outputs.remove(&value.output_id);
+                    self.peer.scene_changed = true;
+                }
                 Ok(())
             }
             MessageType::SURFACE_UPSERT => {
@@ -358,82 +507,108 @@ impl Connection {
                         return Err(RuntimeError::Wire("scene has too many surfaces"));
                     }
                     self.peer.surfaces.insert(value.surface_id, value);
+                    self.peer.scene_changed = true;
                 }
-                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_OUTPUT_STATE => {
                 let value = decode_surface_output_state(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceOutputState"))?;
+                if !self.peer.contains_current_surface(value.surface_id) {
+                    return Err(RuntimeError::Wire(
+                        "surface membership references an unknown surface",
+                    ));
+                }
                 if let Some(snapshot) = self.peer.snapshot.as_mut() {
                     snapshot.memberships.insert(value.surface_id, value);
                 } else {
                     self.peer.memberships.insert(value.surface_id, value);
+                    self.peer.scene_changed = true;
                 }
-                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_REMOVE => {
                 let value = decode_surface_remove(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceRemove"))?;
-                self.remove_surface(value.surface_id, BufferReleaseReason::SurfaceRemoved);
-                self.peer.scene_changed = true;
+                if let Some(snapshot) = self.peer.snapshot.as_mut() {
+                    snapshot.surfaces.remove(&value.surface_id);
+                    snapshot.policies.remove(&value.surface_id);
+                    snapshot.memberships.remove(&value.surface_id);
+                    snapshot.surface_vrr.remove(&value.surface_id);
+                    stage_snapshot_mutation(
+                        snapshot,
+                        SnapshotMutation::SurfaceBuffersRemove(value.surface_id),
+                    )?;
+                } else {
+                    self.remove_surface(value.surface_id, BufferReleaseReason::SurfaceRemoved)?;
+                    self.peer.scene_changed = true;
+                }
                 Ok(())
             }
             MessageType::BUFFER_ATTACH => self.attach_buffer(payload, fds),
             MessageType::BUFFER_DETACH => {
                 let value = decode_buffer_detach(payload)
                     .map_err(|_| RuntimeError::Wire("invalid BufferDetach"))?;
-                if self.peer.surface_buffers.get(&value.surface_id) == Some(&value.buffer_id) {
-                    self.peer.surface_buffers.remove(&value.surface_id);
+                if let Some(snapshot) = self.peer.snapshot.as_mut() {
+                    stage_snapshot_mutation(snapshot, SnapshotMutation::BufferDetach(value))?;
+                } else {
+                    self.detach_buffer(value);
                 }
                 Ok(())
             }
             MessageType::SURFACE_DAMAGE => {
                 let damage = decode_surface_damage(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceDamage"))?;
-                let known_surface =
-                    self.peer.surfaces.contains_key(&damage.surface_id)
-                        || self.peer.snapshot.as_ref().is_some_and(|snapshot| {
-                            snapshot.surfaces.contains_key(&damage.surface_id)
-                        });
-                if !known_surface {
+                if !self.peer.contains_current_surface(damage.surface_id) {
                     return Err(RuntimeError::Wire("damage references an unknown surface"));
                 }
-                let accumulated = self
-                    .peer
-                    .damaged_surfaces
-                    .entry(damage.surface_id)
-                    .or_default();
-                if damage.rectangles.len()
-                    > DamageRegion::MAXIMUM_RECTANGLES.saturating_sub(accumulated.len())
-                {
-                    accumulated.clear();
-                    self.peer.scene_changed = true;
+                if self.peer.snapshot.is_some() {
+                    // A committed complete snapshot forces full scene damage, so retaining
+                    // per-item damage here would only grow transaction memory.
                 } else {
-                    accumulated.extend(damage.rectangles);
+                    self.apply_surface_damage(damage);
                 }
                 Ok(())
             }
             MessageType::OUTPUT_VRR_POLICY_UPSERT => {
                 let policy = decode_output_vrr_policy_upsert(payload)
                     .map_err(|_| RuntimeError::Wire("invalid OutputVrrPolicyUpsert"))?;
-                if let Some(output) = state.inventory.outputs.get_mut(&policy.output_id) {
-                    output.vrr_policy = policy;
-                    output.vrr_state.requested_mode = policy.mode;
+                if !state.inventory.outputs.contains_key(&policy.output_id) {
+                    return Err(RuntimeError::Wire(
+                        "output VRR policy references an unknown output",
+                    ));
                 }
-                self.peer.scene_changed = true;
+                if let Some(snapshot) = self.peer.snapshot.as_mut() {
+                    if !snapshot.output_vrr_policies.contains_key(&policy.output_id)
+                        && snapshot.output_vrr_policies.len() == MAXIMUM_OUTPUTS
+                    {
+                        return Err(RuntimeError::Wire(
+                            "snapshot has too many output VRR policies",
+                        ));
+                    }
+                    snapshot
+                        .output_vrr_policies
+                        .insert(policy.output_id, policy);
+                } else {
+                    Self::apply_output_vrr_policy(policy, state)?;
+                    self.peer.scene_changed = true;
+                }
                 Ok(())
             }
             MessageType::SURFACE_VRR_STATE => {
                 let value = decode_surface_vrr_state(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceVrrState"))?;
+                if !self.peer.contains_current_surface(value.surface_id) {
+                    return Err(RuntimeError::Wire(
+                        "surface VRR state references an unknown surface",
+                    ));
+                }
                 if let Some(snapshot) = self.peer.snapshot.as_mut() {
                     snapshot.surface_vrr.insert(value.surface_id, value);
                 } else {
                     self.peer.surface_vrr.insert(value.surface_id, value);
+                    self.peer.scene_changed = true;
                 }
-                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::OUTPUT_CONFIGURATION_COMMIT => {
@@ -443,19 +618,28 @@ impl Connection {
             MessageType::SURFACE_POLICY_UPSERT => {
                 let value = decode_surface_policy_upsert(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfacePolicyUpsert"))?;
+                if !self.peer.contains_current_surface(value.surface_id) {
+                    return Err(RuntimeError::Wire(
+                        "surface policy references an unknown surface",
+                    ));
+                }
                 if let Some(snapshot) = self.peer.snapshot.as_mut() {
                     snapshot.policies.insert(value.surface_id, value);
                 } else {
                     self.peer.policies.insert(value.surface_id, value);
+                    self.peer.scene_changed = true;
                 }
-                self.peer.scene_changed = true;
                 Ok(())
             }
             _ => Err(RuntimeError::Wire("unsupported compositor message")),
         }
     }
 
-    fn finish_snapshot(&mut self, payload: &[u8]) -> Result<(), RuntimeError> {
+    fn finish_snapshot(
+        &mut self,
+        payload: &[u8],
+        state: &mut RuntimeState,
+    ) -> Result<(), RuntimeError> {
         let end =
             decode_snapshot_end(payload).map_err(|_| RuntimeError::Wire("invalid SnapshotEnd"))?;
         let snapshot = self
@@ -469,7 +653,18 @@ impl Connection {
             return Err(RuntimeError::Wire("snapshot identity mismatch"));
         }
         if snapshot.begin.domain == SnapshotDomain::CompleteSession {
+            self.validate_snapshot_buffers(&snapshot)?;
             let retained: BTreeSet<_> = snapshot.surfaces.keys().copied().collect();
+            let removed_buffers: Vec<_> = self
+                .peer
+                .buffers
+                .values()
+                .filter(|buffer| !retained.contains(&buffer.surface_id))
+                .map(|buffer| buffer.id)
+                .collect();
+            for buffer_id in removed_buffers {
+                self.release_buffer(buffer_id, BufferReleaseReason::SurfaceRemoved)?;
+            }
             let removed: Vec<_> = self
                 .peer
                 .surfaces
@@ -478,21 +673,125 @@ impl Connection {
                 .copied()
                 .collect();
             for surface_id in removed {
-                self.remove_surface(surface_id, BufferReleaseReason::SurfaceRemoved);
+                self.remove_surface(surface_id, BufferReleaseReason::SurfaceRemoved)?;
             }
-            self.peer.outputs = snapshot
-                .outputs
-                .into_iter()
-                .map(|output| (output.output_id, output))
-                .collect();
+            self.peer.outputs = snapshot.outputs;
             self.peer.surfaces = snapshot.surfaces;
             self.peer.policies = snapshot.policies;
             self.peer.memberships = snapshot.memberships;
             self.peer.surface_vrr = snapshot.surface_vrr;
             self.peer.configuration_generation = snapshot.begin.generation.get();
+            for policy in snapshot.output_vrr_policies.into_values() {
+                Self::apply_output_vrr_policy(policy, state)?;
+            }
+            for mutation in snapshot.mutations {
+                match mutation {
+                    SnapshotMutation::SurfaceBuffersRemove(surface_id) => {
+                        self.remove_surface_buffers(
+                            surface_id,
+                            BufferReleaseReason::SurfaceRemoved,
+                        )?;
+                    }
+                    SnapshotMutation::BufferAttach(record) => {
+                        self.apply_buffer_record(record)?;
+                    }
+                    SnapshotMutation::BufferDetach(detachment) => {
+                        self.detach_buffer(detachment);
+                    }
+                }
+            }
+            self.peer.scene_changed = true;
         } else if snapshot.begin.domain == SnapshotDomain::Outputs {
             self.peer.snapshot = Some(snapshot);
         }
+        Ok(())
+    }
+
+    fn validate_snapshot_buffers(
+        &self,
+        snapshot: &SnapshotTransaction,
+    ) -> Result<(), RuntimeError> {
+        let retained: BTreeSet<_> = snapshot.surfaces.keys().copied().collect();
+        let mut projected: BTreeMap<u64, (u64, u64)> = self
+            .peer
+            .buffers
+            .values()
+            .filter(|buffer| retained.contains(&buffer.surface_id))
+            .map(|buffer| {
+                (
+                    buffer.id,
+                    (buffer.surface_id, buffer.attachment.storage_size),
+                )
+            })
+            .collect();
+        let mut surface_buffers: BTreeMap<_, _> = self
+            .peer
+            .surface_buffers
+            .iter()
+            .filter(|(surface_id, buffer_id)| {
+                retained.contains(surface_id) && projected.contains_key(buffer_id)
+            })
+            .map(|(&surface_id, &buffer_id)| (surface_id, buffer_id))
+            .collect();
+        for mutation in &snapshot.mutations {
+            match mutation {
+                SnapshotMutation::SurfaceBuffersRemove(surface_id) => {
+                    surface_buffers.remove(surface_id);
+                    projected.retain(|_, (owner, _)| owner != surface_id);
+                }
+                SnapshotMutation::BufferAttach(record) => {
+                    if let Some(previous) = surface_buffers.insert(record.surface_id, record.id) {
+                        projected.remove(&previous);
+                    }
+                    projected.insert(
+                        record.id,
+                        (record.surface_id, record.attachment.storage_size),
+                    );
+                }
+                SnapshotMutation::BufferDetach(detachment) => {
+                    if surface_buffers.get(&detachment.surface_id) == Some(&detachment.buffer_id) {
+                        surface_buffers.remove(&detachment.surface_id);
+                    }
+                }
+            }
+        }
+        if projected.len() > MAXIMUM_BUFFERS {
+            return Err(RuntimeError::Wire("snapshot has too many live buffers"));
+        }
+        let storage = projected
+            .values()
+            .try_fold(0_u64, |total, (_, size)| total.checked_add(*size));
+        if storage.is_none_or(|total| total > MAXIMUM_TOTAL_BUFFER_BYTES) {
+            return Err(RuntimeError::Wire(
+                "snapshot live buffer storage limit exceeded",
+            ));
+        }
+        Ok(())
+    }
+
+    fn abort_snapshot(&mut self, snapshot: SnapshotTransaction) -> Result<(), RuntimeError> {
+        for mutation in snapshot.mutations {
+            if let SnapshotMutation::BufferAttach(record) = mutation {
+                self.queue_release(record.id, BufferReleaseReason::Invalid)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_output_vrr_policy(
+        policy: OutputVrrPolicyUpsert,
+        state: &mut RuntimeState,
+    ) -> Result<(), RuntimeError> {
+        let output =
+            state
+                .inventory
+                .outputs
+                .get_mut(&policy.output_id)
+                .ok_or(RuntimeError::Wire(
+                    "output VRR policy references an unknown output",
+                ))?;
+        output.vrr_policy = policy;
+        output.vrr_state.requested_mode = policy.mode;
         Ok(())
     }
 
@@ -503,22 +802,34 @@ impl Connection {
     ) -> Result<(), RuntimeError> {
         let attachment = decode_buffer_attach(payload)
             .map_err(|_| RuntimeError::Wire("invalid BufferAttach"))?;
+        let snapshot_buffer = self.peer.snapshot.as_ref();
+        let duplicate_buffer = self.peer.buffers.contains_key(&attachment.buffer_id)
+            || snapshot_buffer
+                .is_some_and(|snapshot| snapshot.buffer_ids.contains(&attachment.buffer_id));
+        let buffer_limit_reached = snapshot_buffer.map_or_else(
+            || self.peer.buffers.len() == MAXIMUM_BUFFERS,
+            |snapshot| snapshot.buffer_ids.len() == MAXIMUM_BUFFERS,
+        );
         if fds.is_empty()
             || attachment.storage_size > MAXIMUM_BUFFER_BYTES
             || attachment.stride % 4 != 0
-            || self.peer.buffers.contains_key(&attachment.buffer_id)
-            || self.peer.buffers.len() == MAXIMUM_BUFFERS
+            || duplicate_buffer
+            || buffer_limit_reached
         {
             return Err(RuntimeError::Wire("buffer descriptor or size invalid"));
         }
-        let accounted = self
-            .peer
-            .buffers
-            .values()
-            .try_fold(0_u64, |total, buffer| {
-                total.checked_add(buffer.attachment.storage_size)
-            })
-            .and_then(|total| total.checked_add(attachment.storage_size));
+        let accounted = snapshot_buffer.map_or_else(
+            || {
+                self.peer
+                    .buffers
+                    .values()
+                    .try_fold(0_u64, |total, buffer| {
+                        total.checked_add(buffer.attachment.storage_size)
+                    })
+                    .and_then(|total| total.checked_add(attachment.storage_size))
+            },
+            |snapshot| snapshot.buffer_storage.checked_add(attachment.storage_size),
+        );
         if accounted.is_none_or(|total| total > MAXIMUM_TOTAL_BUFFER_BYTES) {
             return Err(RuntimeError::Wire("active buffer storage limit exceeded"));
         }
@@ -546,30 +857,39 @@ impl Connection {
         } else {
             None
         };
-        if let Some(previous) = self
-            .peer
-            .surface_buffers
-            .get(&attachment.surface_id)
-            .copied()
-        {
-            self.release_buffer(previous, BufferReleaseReason::Replaced);
+        let record = BufferRecord {
+            id: attachment.buffer_id,
+            surface_id: attachment.surface_id,
+            attachment,
+            storage,
+            synchronization,
+            buffer: None,
+        };
+        if let Some(snapshot) = self.peer.snapshot.as_mut() {
+            snapshot.buffer_ids.insert(record.id);
+            snapshot.buffer_storage = accounted.expect("buffer storage was checked");
+            stage_snapshot_mutation(snapshot, SnapshotMutation::BufferAttach(record))
+        } else {
+            self.apply_buffer_record(record)
+        }
+    }
+
+    fn apply_buffer_record(&mut self, record: BufferRecord) -> Result<(), RuntimeError> {
+        if let Some(previous) = self.peer.surface_buffers.get(&record.surface_id).copied() {
+            self.release_buffer(previous, BufferReleaseReason::Replaced)?;
         }
         self.peer
             .surface_buffers
-            .insert(attachment.surface_id, attachment.buffer_id);
-        self.peer.mutated_buffers.insert(attachment.surface_id);
-        self.peer.buffers.insert(
-            attachment.buffer_id,
-            BufferRecord {
-                id: attachment.buffer_id,
-                surface_id: attachment.surface_id,
-                attachment,
-                storage,
-                synchronization,
-                buffer: None,
-            },
-        );
+            .insert(record.surface_id, record.id);
+        self.peer.mutated_buffers.insert(record.surface_id);
+        self.peer.buffers.insert(record.id, record);
         Ok(())
+    }
+
+    fn detach_buffer(&mut self, detachment: BufferDetach) {
+        if self.peer.surface_buffers.get(&detachment.surface_id) == Some(&detachment.buffer_id) {
+            self.peer.surface_buffers.remove(&detachment.surface_id);
+        }
     }
 
     fn refresh_buffers(&mut self) -> Result<(), RuntimeError> {
@@ -607,56 +927,46 @@ impl Connection {
                 }
             }
             let attachment = &record.attachment;
-            let required = u64::from(attachment.height.saturating_sub(1))
-                * u64::from(attachment.stride)
-                + u64::from(attachment.width) * 4;
-            let size =
-                usize::try_from(required).map_err(|_| RuntimeError::Wire("buffer is too large"))?;
-            let mut bytes = vec![0_u8; size];
-            record
-                .storage
-                .read_exact_at(&mut bytes, attachment.byte_offset)?;
-            let stride_pixels = attachment.stride / 4;
-            let word_count =
-                usize::try_from(u64::from(stride_pixels) * u64::from(attachment.height))
-                    .map_err(|_| RuntimeError::Wire("buffer word count overflow"))?;
-            let mut pixels = vec![0_u32; word_count];
-            for y in 0..attachment.height as usize {
-                let source_row = &bytes[y * attachment.stride as usize..];
-                for x in 0..attachment.width as usize {
-                    let offset = x * 4;
-                    pixels[y * stride_pixels as usize + x] = u32::from_ne_bytes(
-                        source_row[offset..offset + 4]
-                            .try_into()
-                            .expect("four bytes"),
-                    );
-                }
-            }
-            let format = match (attachment.pixel_format, attachment.alpha_semantics) {
-                (WirePixelFormat::Xrgb8888, AlphaSemantics::Opaque) => PixelFormat::Xrgb8888,
-                (WirePixelFormat::Argb8888, AlphaSemantics::Premultiplied) => {
-                    PixelFormat::Argb8888Premultiplied
-                }
-                _ => return Err(RuntimeError::Wire("unsupported buffer format")),
-            };
-            record.buffer = Some(SurfaceBuffer {
-                width: attachment.width,
-                height: attachment.height,
-                stride_pixels,
-                format,
-                pixels,
-            });
+            record.buffer = Some(read_surface_buffer(&record.storage, attachment)?);
         }
         Ok(())
     }
 
-    fn remove_surface(&mut self, surface_id: u64, reason: BufferReleaseReason) {
+    fn apply_surface_damage(&mut self, damage: SurfaceDamage) {
+        let accumulated = self
+            .peer
+            .damaged_surfaces
+            .entry(damage.surface_id)
+            .or_default();
+        if damage.rectangles.len()
+            > DamageRegion::MAXIMUM_RECTANGLES.saturating_sub(accumulated.len())
+        {
+            accumulated.clear();
+            self.peer.scene_changed = true;
+        } else {
+            accumulated.extend(damage.rectangles);
+        }
+    }
+
+    fn remove_surface(
+        &mut self,
+        surface_id: u64,
+        reason: BufferReleaseReason,
+    ) -> Result<(), RuntimeError> {
         self.peer.surfaces.remove(&surface_id);
         self.peer.policies.remove(&surface_id);
         self.peer.memberships.remove(&surface_id);
         self.peer.surface_vrr.remove(&surface_id);
         self.peer.damaged_surfaces.remove(&surface_id);
         self.peer.mutated_buffers.remove(&surface_id);
+        self.remove_surface_buffers(surface_id, reason)
+    }
+
+    fn remove_surface_buffers(
+        &mut self,
+        surface_id: u64,
+        reason: BufferReleaseReason,
+    ) -> Result<(), RuntimeError> {
         self.peer.surface_buffers.remove(&surface_id);
         let buffer_ids: Vec<_> = self
             .peer
@@ -666,17 +976,34 @@ impl Connection {
             .map(|buffer| buffer.id)
             .collect();
         for buffer_id in buffer_ids {
-            self.release_buffer(buffer_id, reason);
+            self.release_buffer(buffer_id, reason)?;
         }
+        Ok(())
     }
-    fn release_buffer(&mut self, buffer_id: u64, reason: BufferReleaseReason) {
+    fn release_buffer(
+        &mut self,
+        buffer_id: u64,
+        reason: BufferReleaseReason,
+    ) -> Result<(), RuntimeError> {
         if let Some(buffer) = self.peer.buffers.remove(&buffer_id) {
-            self.peer.surface_buffers.remove(&buffer.surface_id);
-            self.peer.releases.push(BufferRelease {
-                buffer_id: buffer.id,
-                reason,
-            });
+            if self.peer.surface_buffers.get(&buffer.surface_id) == Some(&buffer.id) {
+                self.peer.surface_buffers.remove(&buffer.surface_id);
+            }
+            self.queue_release(buffer.id, reason)?;
         }
+        Ok(())
+    }
+
+    fn queue_release(
+        &mut self,
+        buffer_id: u64,
+        reason: BufferReleaseReason,
+    ) -> Result<(), RuntimeError> {
+        if self.peer.releases.len() >= MAXIMUM_PENDING_RELEASES {
+            return Err(RuntimeError::Wire("pending buffer release limit exceeded"));
+        }
+        self.peer.releases.push(BufferRelease { buffer_id, reason });
+        Ok(())
     }
 
     fn publish_inventory(
@@ -755,12 +1082,17 @@ impl Connection {
             .snapshot
             .take()
             .ok_or(RuntimeError::Wire("output commit lacks completed snapshot"))?;
+        let outputs: Vec<_> = snapshot.outputs.into_values().collect();
         let accepted = commit.base_generation == state.inventory.generation
             && state
                 .inventory
-                .apply_configuration(&snapshot.outputs, commit.primary_output_id);
+                .apply_configuration(&outputs, commit.primary_output_id);
         let result = if accepted {
+            for policy in snapshot.output_vrr_policies.into_values() {
+                Self::apply_output_vrr_policy(policy, state)?;
+            }
             self.peer.configuration_generation = state.inventory.generation;
+            self.peer.scene_changed = true;
             OutputConfigurationResult::Accepted
         } else if commit.base_generation != state.inventory.generation {
             OutputConfigurationResult::StaleGeneration
@@ -922,12 +1254,14 @@ impl Connection {
             eprintln!("gwcomp: software renderer rejected scene: {error:?}");
             RuntimeError::Wire("software scene rendering rejected frame")
         })?;
-        state.dumper.dump(
-            &rendered.frames,
-            ordinal,
-            commit.commit_id,
-            commit.producer_generation,
-        )?;
+        if let Some(dumper) = state.dumper.as_mut() {
+            dumper.dump(
+                &rendered.frames,
+                ordinal,
+                commit.commit_id,
+                commit.producer_generation,
+            )?;
+        }
         if let Some(manifest) = &state.manifest
             && protocol_server
         {
@@ -1331,11 +1665,130 @@ enum HandshakeProgress {
 enum ProcessProgress {
     Live { accepted: u64 },
     Disconnected,
+    Expired(ExpiredDeadline),
+}
+
+fn stage_snapshot_mutation(
+    snapshot: &mut SnapshotTransaction,
+    mutation: SnapshotMutation,
+) -> Result<(), RuntimeError> {
+    if snapshot.mutations.len() >= MAXIMUM_SNAPSHOT_ITEMS as usize {
+        return Err(RuntimeError::Wire("snapshot mutation limit exceeded"));
+    }
+    snapshot.mutations.push(mutation);
+    Ok(())
+}
+
+#[cfg(test)]
+fn required_buffer_bytes(attachment: &BufferAttach) -> Result<usize, RuntimeError> {
+    let required = u64::from(attachment.height.saturating_sub(1))
+        .checked_mul(u64::from(attachment.stride))
+        .and_then(|padding| padding.checked_add(u64::from(attachment.width) * 4))
+        .ok_or(RuntimeError::Wire("buffer byte count overflow"))?;
+    usize::try_from(required).map_err(|_| RuntimeError::Wire("buffer is too large"))
+}
+
+fn try_zeroed_bytes(size: usize) -> Result<Vec<u8>, RuntimeError> {
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(size)
+        .map_err(|_| RuntimeError::Wire("buffer byte allocation failed"))?;
+    bytes.resize(size, 0);
+    Ok(bytes)
+}
+
+#[cfg(test)]
+fn decode_surface_buffer(
+    attachment: &BufferAttach,
+    bytes: &[u8],
+) -> Result<SurfaceBuffer, RuntimeError> {
+    let required = required_buffer_bytes(attachment)?;
+    if bytes.len() < required {
+        return Err(RuntimeError::Wire("buffer contents are truncated"));
+    }
+    let mut buffer = allocate_surface_buffer(attachment)?;
+    let width_bytes = usize::try_from(u64::from(attachment.width) * 4)
+        .map_err(|_| RuntimeError::Wire("buffer row byte count overflow"))?;
+    let stride = attachment.stride as usize;
+    for y in 0..attachment.height as usize {
+        let row_start = y
+            .checked_mul(stride)
+            .ok_or(RuntimeError::Wire("buffer row offset overflow"))?;
+        decode_pixel_row(&mut buffer, y, &bytes[row_start..row_start + width_bytes]);
+    }
+    Ok(buffer)
+}
+
+fn read_surface_buffer(
+    storage: &File,
+    attachment: &BufferAttach,
+) -> Result<SurfaceBuffer, RuntimeError> {
+    let mut buffer = allocate_surface_buffer(attachment)?;
+    let width_bytes = usize::try_from(u64::from(attachment.width) * 4)
+        .map_err(|_| RuntimeError::Wire("buffer row byte count overflow"))?;
+    let mut row = try_zeroed_bytes(width_bytes)?;
+    for y in 0..attachment.height {
+        let row_offset = u64::from(y)
+            .checked_mul(u64::from(attachment.stride))
+            .and_then(|offset| attachment.byte_offset.checked_add(offset))
+            .ok_or(RuntimeError::Wire("buffer row offset overflow"))?;
+        storage.read_exact_at(&mut row, row_offset)?;
+        decode_pixel_row(&mut buffer, y as usize, &row);
+    }
+    Ok(buffer)
+}
+
+fn allocate_surface_buffer(attachment: &BufferAttach) -> Result<SurfaceBuffer, RuntimeError> {
+    let word_count = usize::try_from(
+        u64::from(attachment.width)
+            .checked_mul(u64::from(attachment.height))
+            .ok_or(RuntimeError::Wire("buffer word count overflow"))?,
+    )
+    .map_err(|_| RuntimeError::Wire("buffer word count overflow"))?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(word_count)
+        .map_err(|_| RuntimeError::Wire("buffer pixel allocation failed"))?;
+    pixels.resize(word_count, 0_u32);
+    let format = match (attachment.pixel_format, attachment.alpha_semantics) {
+        (WirePixelFormat::Xrgb8888, AlphaSemantics::Opaque) => PixelFormat::Xrgb8888,
+        (WirePixelFormat::Argb8888, AlphaSemantics::Premultiplied) => {
+            PixelFormat::Argb8888Premultiplied
+        }
+        _ => return Err(RuntimeError::Wire("unsupported buffer format")),
+    };
+    Ok(SurfaceBuffer {
+        width: attachment.width,
+        height: attachment.height,
+        stride_pixels: attachment.width,
+        format,
+        pixels,
+    })
+}
+
+fn decode_pixel_row(buffer: &mut SurfaceBuffer, y: usize, source_row: &[u8]) {
+    let width = buffer.width as usize;
+    for x in 0..width {
+        let offset = x * 4;
+        buffer.pixels[y * width + x] = u32::from_ne_bytes(
+            source_row[offset..offset + 4]
+                .try_into()
+                .expect("four bytes"),
+        );
+    }
 }
 
 pub fn run(options: &Options) -> Result<(), RuntimeError> {
     install_signal_handlers()?;
-    let dumper = FrameDumper::prepare(&options.dump_dir)?;
+    run_with_timeouts(options, PeerTimeouts::default())
+}
+
+fn run_with_timeouts(options: &Options, timeouts: PeerTimeouts) -> Result<(), RuntimeError> {
+    let dumper = options
+        .dump_dir
+        .as_deref()
+        .map(FrameDumper::prepare)
+        .transpose()?;
     let manifest = options
         .scene_manifest
         .as_deref()
@@ -1380,11 +1833,14 @@ pub fn run(options: &Options) -> Result<(), RuntimeError> {
         if connection.is_none()
             && let Some(fd) = listener.accept()?
         {
-            connection = Some(Connection::new(fd)?);
+            connection = Some(Connection::new(fd, Instant::now(), timeouts)?);
         }
         let mut disconnected = false;
         if let Some(active) = connection.as_mut() {
-            if active.negotiated.is_none() {
+            if let Some(expired) = active.liveness.expired(Instant::now()) {
+                eprintln!("gwcomp: closing peer after {expired} deadline expired");
+                disconnected = true;
+            } else if active.negotiated.is_none() {
                 match active.handshake(&config, ConnectionId::new(connection_id), explicit_outputs)
                 {
                     Ok(HandshakeProgress::Waiting) => {}
@@ -1406,6 +1862,10 @@ pub fn run(options: &Options) -> Result<(), RuntimeError> {
                         }
                     }
                     ProcessProgress::Disconnected => disconnected = true,
+                    ProcessProgress::Expired(expired) => {
+                        eprintln!("gwcomp: closing peer after {expired} deadline expired");
+                        disconnected = true;
+                    }
                 }
                 if options
                     .max_frames
@@ -1690,6 +2150,35 @@ fn would_block(error: &TransportError) -> bool {
 mod tests {
     use super::*;
 
+    fn buffer_attachment(width: u32, height: u32, stride: u32) -> BufferAttach {
+        BufferAttach {
+            buffer_id: 1,
+            surface_id: 2,
+            width,
+            height,
+            stride,
+            byte_offset: 0,
+            storage_size: u64::from(height.saturating_sub(1)) * u64::from(stride)
+                + u64::from(width) * 4,
+            pixel_format: WirePixelFormat::Xrgb8888,
+            modifier: 0,
+            alpha_semantics: AlphaSemantics::Opaque,
+            color: gw_wire::compositor::SdrColorMetadata::default(),
+            synchronization: SynchronizationMode::None,
+            flags: 0,
+        }
+    }
+
+    fn snapshot_begin(expected_item_count: u32) -> SnapshotBegin {
+        SnapshotBegin {
+            snapshot_id: SnapshotId::new(1),
+            domain: SnapshotDomain::CompleteSession,
+            flags: 0,
+            generation: Generation::new(1),
+            expected_item_count,
+        }
+    }
+
     fn damage_scene(client_buffer_scale: u32) -> Scene {
         let output_id = 11;
         let surface_id = 41;
@@ -1785,5 +2274,139 @@ mod tests {
         scene.surface_outputs.clear();
 
         assert_eq!(presentation_state_generation(&scene, &BTreeMap::new()), 7);
+    }
+
+    #[test]
+    fn padded_stride_import_keeps_only_visible_pixels() {
+        let attachment = buffer_attachment(2, 2, 12);
+        let bytes = [
+            1, 0, 0, 0, 2, 0, 0, 0, 99, 99, 99, 99, 3, 0, 0, 0, 4, 0, 0, 0,
+        ];
+
+        let buffer = decode_surface_buffer(&attachment, &bytes).unwrap();
+
+        assert_eq!(buffer.stride_pixels, 2);
+        assert_eq!(buffer.pixels, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn single_row_import_does_not_allocate_from_padded_stride() {
+        let attachment = buffer_attachment(1, 1, u32::MAX - 3);
+
+        let buffer = decode_surface_buffer(&attachment, &[7, 0, 0, 0]).unwrap();
+
+        assert_eq!(required_buffer_bytes(&attachment).unwrap(), 4);
+        assert_eq!(buffer.stride_pixels, 1);
+        assert_eq!(buffer.pixels, vec![7]);
+    }
+
+    #[test]
+    fn snapshot_expected_item_count_is_bounded_before_staging() {
+        assert!(SnapshotTransaction::new(snapshot_begin(MAXIMUM_SNAPSHOT_ITEMS)).is_ok());
+        assert!(SnapshotTransaction::new(snapshot_begin(MAXIMUM_SNAPSHOT_ITEMS + 1)).is_err());
+    }
+
+    #[test]
+    fn snapshot_mutation_queue_is_bounded() {
+        let mut snapshot =
+            SnapshotTransaction::new(snapshot_begin(MAXIMUM_SNAPSHOT_ITEMS)).unwrap();
+        for item in 0..MAXIMUM_SNAPSHOT_ITEMS {
+            stage_snapshot_mutation(
+                &mut snapshot,
+                SnapshotMutation::SurfaceBuffersRemove(u64::from(item)),
+            )
+            .unwrap();
+        }
+
+        assert!(
+            stage_snapshot_mutation(
+                &mut snapshot,
+                SnapshotMutation::SurfaceBuffersRemove(u64::MAX)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn pending_release_queue_is_bounded() {
+        let (transport, _peer) = Transport::pair(TransportLimits::default()).unwrap();
+        let mut connection = Connection {
+            transport,
+            negotiated: None,
+            validator: None,
+            peer: PeerState::default(),
+            next_sequence: 2,
+            liveness: PeerLiveness::awaiting_hello(Instant::now(), PeerTimeouts::default()),
+        };
+        connection.peer.releases.resize(
+            MAXIMUM_PENDING_RELEASES,
+            BufferRelease {
+                buffer_id: 1,
+                reason: BufferReleaseReason::Invalid,
+            },
+        );
+
+        assert!(
+            connection
+                .queue_release(2, BufferReleaseReason::Invalid)
+                .is_err()
+        );
+    }
+
+    fn peer_timeouts() -> PeerTimeouts {
+        PeerTimeouts {
+            awaiting_hello: Duration::from_millis(10),
+            initial_frame: Duration::from_millis(20),
+            snapshot: Duration::from_millis(30),
+        }
+    }
+
+    #[test]
+    fn awaiting_hello_and_initial_frame_deadlines_are_absolute() {
+        let started = Instant::now();
+        let mut liveness = PeerLiveness::awaiting_hello(started, peer_timeouts());
+        assert_eq!(
+            liveness.expired(started + Duration::from_millis(10)),
+            Some(ExpiredDeadline::AwaitingHello)
+        );
+
+        let established = started + Duration::from_millis(2);
+        liveness.handshake_accepted(established);
+        liveness.dispatched(established + Duration::from_millis(19), false, false);
+        assert_eq!(
+            liveness.expired(established + Duration::from_millis(20)),
+            Some(ExpiredDeadline::InitialFrame),
+            "uncommitted traffic must not refresh the initial frame deadline"
+        );
+        liveness.dispatched(established + Duration::from_millis(19), true, false);
+        assert_eq!(
+            liveness.expired(established + Duration::from_secs(60)),
+            None
+        );
+    }
+
+    #[test]
+    fn snapshot_deadline_is_not_refreshed_by_snapshot_items() {
+        let started = Instant::now();
+        let mut liveness = PeerLiveness::awaiting_hello(started, peer_timeouts());
+        liveness.handshake_accepted(started);
+        liveness.dispatched(started, true, false);
+
+        let begin = started + Duration::from_millis(5);
+        liveness.dispatched(begin, false, true);
+        liveness.dispatched(begin + Duration::from_millis(29), false, true);
+        assert_eq!(
+            liveness.expired(begin + Duration::from_millis(30)),
+            Some(ExpiredDeadline::Snapshot)
+        );
+
+        liveness.dispatched(begin + Duration::from_millis(20), false, false);
+        assert_eq!(liveness.expired(begin + Duration::from_secs(1)), None);
+        liveness.dispatched(begin + Duration::from_secs(2), false, true);
+        assert_eq!(
+            liveness.expired(begin + Duration::from_secs(2) + Duration::from_millis(30)),
+            Some(ExpiredDeadline::Snapshot),
+            "a later snapshot receives a fresh absolute deadline"
+        );
     }
 }

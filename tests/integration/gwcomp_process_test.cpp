@@ -2,7 +2,9 @@
 
 #include <poll.h>
 #include <signal.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -112,6 +114,27 @@ void require_valid_connection(const std::string& socket) {
           "valid producer connects after rejected isolated peer");
 }
 
+void require_idle_pre_handshake_peer_expires(const std::string& socket) {
+  const int descriptor = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+  require(descriptor >= 0, "create idle pre-handshake socket");
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  require(socket.size() < sizeof(address.sun_path),
+          "idle pre-handshake socket path fits");
+  std::memcpy(address.sun_path, socket.c_str(), socket.size() + 1);
+  require(::connect(descriptor, reinterpret_cast<sockaddr*>(&address),
+                    sizeof(address)) == 0,
+          "connect idle pre-handshake peer");
+  pollfd pending{descriptor, POLLIN | POLLHUP | POLLERR, 0};
+  int ready = -1;
+  do {
+    ready = ::poll(&pending, 1, 7000);
+  } while (ready < 0 && errno == EINTR);
+  require(ready == 1 && (pending.revents & (POLLHUP | POLLERR)) != 0,
+          "idle pre-handshake peer is closed at the absolute deadline");
+  (void)::close(descriptor);
+}
+
 void require_role_specific_rejected(const std::string& socket) {
   gwipc_connection* connection = nullptr;
   (void)connect_as(socket, GWIPC_ROLE_PROTOCOL_SERVER,
@@ -158,6 +181,36 @@ void require_partial_output_model_rejected(const std::string& socket) {
   gwipc_connection_destroy(connection);
 }
 
+void require_no_dump_listener(const char* executable, const std::string& root) {
+  const auto socket = root + "/no-dump.sock";
+  const pid_t child = ::fork();
+  require(child >= 0, "fork no-dump gwcomp");
+  if (child == 0) {
+    ::execl(executable, executable, "--ipc-socket", socket.c_str(), nullptr);
+    _exit(127);
+  }
+
+  struct stat status {};
+  bool ready = false;
+  for (int attempt = 0; attempt < 200; ++attempt) {
+    if (::lstat(socket.c_str(), &status) == 0 && S_ISSOCK(status.st_mode)) {
+      ready = true;
+      break;
+    }
+    int child_status = 0;
+    require(::waitpid(child, &child_status, WNOHANG) == 0,
+            "no-dump gwcomp remains alive while creating listener");
+    (void)::usleep(10'000);
+  }
+  require(ready, "gwcomp accepts an ordinary no-dump runtime");
+  require(::kill(child, SIGTERM) == 0, "signal no-dump gwcomp");
+  int child_status = 0;
+  require(::waitpid(child, &child_status, 0) == child,
+          "wait for no-dump gwcomp");
+  require(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0,
+          "no-dump gwcomp stops cleanly");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -177,13 +230,13 @@ int main(int argc, char** argv) {
   const auto missing = command(executable, "--once");
   require(WIFEXITED(missing.status) && WEXITSTATUS(missing.status) == 2,
           "missing required paths exits with command-line failure");
-  require(missing.output.find("--ipc-socket and --dump-dir are required") !=
-              std::string::npos,
+  require(missing.output.find("--ipc-socket is required") != std::string::npos,
           "missing required paths has a useful diagnostic");
 
   char temporary[] = "/tmp/gwcomp-process-test-XXXXXX";
   require(::mkdtemp(temporary) != nullptr, "create temporary directory");
   const std::string root = temporary;
+  require_no_dump_listener(executable, root);
   const std::string socket = root + "/gwcomp.sock";
   const std::string dumps = root + "/dumps";
   const pid_t child = ::fork();
@@ -211,6 +264,8 @@ int main(int argc, char** argv) {
   require(std::filesystem::is_directory(dumps),
           "gwcomp prepares its dump directory");
 
+  require_idle_pre_handshake_peer_expires(socket);
+  require_valid_connection(socket);
   require_rejected(socket, GWIPC_ROLE_DIAGNOSTIC_TOOL, kRequiredCapabilities,
                    GWIPC_STATUS_ROLE_REJECTED,
                    "wrong-role peer is rejected");

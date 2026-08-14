@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-pub const USAGE: &str = "Usage: gwcomp [--backend headless] --ipc-socket PATH\n  headless: --dump-dir PATH [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n            [--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ]...\n  renderer: [--renderer software|auto]\n  evidence: [--scene-manifest PATH] [--vrr-report PATH]\n  common: [--once] [--max-frames N] [--help] [--version]\n";
+pub const USAGE: &str = "Usage: gwcomp [--backend headless] --ipc-socket PATH\n  headless: [--dump-dir PATH] [--headless-output NAME[:WIDTHxHEIGHT[@MILLIHZ]]]...\n            [--headless-vrr NAME=MIN-MILLIHZ-MAX-MILLIHZ]...\n  renderer: [--renderer software|auto]\n  evidence: [--scene-manifest PATH] [--vrr-report PATH]\n  common: [--once] [--max-frames N] [--help] [--version]\n";
 
 const MAXIMUM_OUTPUTS: usize = 8;
 const MAXIMUM_EXTENT: u32 = 4096;
@@ -26,7 +26,7 @@ pub struct HeadlessVrr {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
     pub ipc_socket: PathBuf,
-    pub dump_dir: PathBuf,
+    pub dump_dir: Option<PathBuf>,
     pub outputs: Vec<HeadlessOutput>,
     pub vrr: Vec<HeadlessVrr>,
     pub scene_manifest: Option<PathBuf>,
@@ -137,8 +137,7 @@ pub fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Pars
             _ => return Err(format!("unknown option: {argument}")),
         }
     }
-    let ipc_socket = socket.ok_or_else(|| "--ipc-socket and --dump-dir are required".to_owned())?;
-    let dump_dir = dump.ok_or_else(|| "--ipc-socket and --dump-dir are required".to_owned())?;
+    let ipc_socket = socket.ok_or_else(|| "--ipc-socket is required".to_owned())?;
     if outputs.is_empty() {
         outputs.push(HeadlessOutput {
             name: "HEADLESS-1".into(),
@@ -172,7 +171,7 @@ pub fn parse_options(arguments: impl IntoIterator<Item = String>) -> Result<Pars
     }
     Ok(ParseOutcome::Run(Options {
         ipc_socket,
-        dump_dir,
+        dump_dir: dump,
         outputs,
         vrr,
         scene_manifest,
@@ -353,5 +352,31 @@ mod tests {
             ]);
         }
         assert!(parse_options(arguments).is_err());
+    }
+
+    #[test]
+    fn dump_output_is_explicit_and_frame_stop_remains_optional() {
+        let ParseOutcome::Run(options) =
+            parse_options(["gwcomp", "--ipc-socket", "s"].map(str::to_owned)).unwrap()
+        else {
+            panic!("expected run")
+        };
+        assert_eq!(options.dump_dir, None);
+        assert_eq!(options.max_frames, None);
+
+        let ParseOutcome::Run(options) = parse_options(
+            [
+                "gwcomp",
+                "--ipc-socket",
+                "s",
+                "--max-frames",
+                "18446744073709551615",
+            ]
+            .map(str::to_owned),
+        )
+        .unwrap() else {
+            panic!("expected run")
+        };
+        assert_eq!(options.max_frames, Some(u64::MAX));
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -7,6 +7,7 @@ use std::path::Path;
 use gw_wire::vrr::{OutputVrrCapabilityUpsert, OutputVrrStateUpsert, PresentationTiming};
 
 const O_NOFOLLOW: i32 = 0o400_000;
+const MAXIMUM_INTERVALS_PER_OUTPUT: usize = 4096;
 
 #[derive(Default)]
 struct Summary {
@@ -19,6 +20,7 @@ struct Summary {
 pub struct VrrReport {
     file: File,
     summaries: BTreeMap<u64, Summary>,
+    exhausted_outputs: BTreeSet<u64>,
     finished: bool,
 }
 
@@ -44,6 +46,7 @@ impl VrrReport {
         Ok(Self {
             file,
             summaries: BTreeMap::new(),
+            exhausted_outputs: BTreeSet::new(),
             finished: false,
         })
     }
@@ -66,6 +69,19 @@ impl VrrReport {
         timing: &PresentationTiming,
         nominal_interval_nanoseconds: u64,
     ) -> io::Result<()> {
+        if self
+            .summaries
+            .get(&state.output_id)
+            .is_some_and(|summary| summary.intervals.len() >= MAXIMUM_INTERVALS_PER_OUTPUT)
+        {
+            if self.exhausted_outputs.insert(state.output_id) {
+                eprintln!(
+                    "gwcomp: VRR timing report disabled for output {} after 4096 samples",
+                    state.output_id
+                );
+            }
+            return Ok(());
+        }
         self.append(format!(
             "{{\"record\":\"decision\",\"commit_id\":{},\"generation\":{},\"output_id\":{},\"policy_mode\":{},\"candidate_window_id\":{},\"candidate_surface_id\":{},\"desired_enabled\":{},\"effective_enabled\":{},\"reason_mask\":{},\"reason_names\":{},\"session_active\":{},\"transition_serial\":{},\"simulated\":true}}\n",
             state.last_commit_id,
@@ -204,6 +220,62 @@ mod tests {
         first.finish().unwrap();
         let contents = fs::read_to_string(&path).unwrap();
         assert!(contents.contains("\"record\":\"restore\""));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn interval_retention_is_bounded_per_output() {
+        let path = path();
+        let mut report = VrrReport::create(&path).unwrap();
+        report.summaries.insert(
+            7,
+            Summary {
+                samples: MAXIMUM_INTERVALS_PER_OUTPUT as u64,
+                enabled: MAXIMUM_INTERVALS_PER_OUTPUT as u64,
+                disabled: 0,
+                intervals: vec![16_666_666; MAXIMUM_INTERVALS_PER_OUTPUT],
+            },
+        );
+        let state = OutputVrrStateUpsert {
+            output_id: 7,
+            requested_mode: gw_wire::vrr::VrrPolicyMode::Focused,
+            decision: gw_wire::vrr::VrrDecision::Enabled,
+            desired_enabled: true,
+            effective_enabled: true,
+            property_readback_valid: true,
+            session_active: true,
+            candidate_window_id: 1,
+            candidate_surface_id: 2,
+            reason_flags: 0,
+            state_generation: 1,
+            transition_serial: 1,
+            last_commit_id: 1,
+            last_presented_generation: 1,
+            last_flip_sequence: 1,
+            flags: 0,
+            last_flip_timestamp_nanoseconds: 16_666_666,
+            last_interval_nanoseconds: 16_666_666,
+        };
+        let timing = PresentationTiming {
+            output_id: 7,
+            commit_id: 1,
+            presented_generation: 1,
+            flip_sequence: 1,
+            flags: 0,
+            kernel_timestamp_nanoseconds: 16_666_666,
+            interval_nanoseconds: 16_666_666,
+            effective_vrr_enabled: true,
+            timestamp_available: true,
+        };
+
+        let bytes_before = report.file.metadata().unwrap().len();
+        report.presentation(&state, &timing, 16_666_666).unwrap();
+        report.presentation(&state, &timing, 16_666_666).unwrap();
+        assert_eq!(report.summaries[&7].intervals.len(), 4096);
+        assert!(report.exhausted_outputs.contains(&7));
+        assert_eq!(report.file.metadata().unwrap().len(), bytes_before);
+
+        drop(report);
         fs::remove_file(path).unwrap();
     }
 }
