@@ -3,7 +3,9 @@
 `glasswyrmd` owns cursor resources. A cursor image contains a bounded
 premultiplied ARGB image, dimensions, hotspot, colors, and canonical kind.
 Extent is limited to 64x64, each client may own at most 256 cursors, and total
-cursor storage is limited to 4 MiB.
+cursor storage is limited to 4 MiB. The storage charge follows each shared
+image after `FreeCursor` and is released only after the final server reference
+from a window, grab, or in-flight publication is gone.
 
 The core subset implements `CreateCursor` from depth-1 source/mask pixmaps,
 `CreateGlyphCursor`, `FreeCursor`, `RecolorCursor`, cursor-class

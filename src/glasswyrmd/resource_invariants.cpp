@@ -17,6 +17,7 @@ std::size_t window_property_bytes(const WindowResource& window) noexcept {
 }  // namespace
 
 bool ResourceTable::invariants_hold() const noexcept {
+  reap_released_cursor_images();
   const auto* root = find_window(screen_.root_window);
   if (root == nullptr || root->parent != 0 || !find(screen_.root_window) ||
       find(screen_.root_window)->owner.has_value() || !root_default_cursor_) {
@@ -66,10 +67,8 @@ bool ResourceTable::invariants_hold() const noexcept {
         if (resource.type != ResourceType::Pixmap || !valid_storage)
           return false;
       }
-      if (const auto* cursor = std::get_if<CursorResource>(&resource.payload)) {
+      if (const auto* cursor = std::get_if<CursorResource>(&resource.payload))
         if (!cursor->image) return false;
-        calculated_cursor_bytes += cursor->image->byte_size();
-      }
       if (const auto* segment =
               std::get_if<ShmSegmentResource>(&resource.payload)) {
         if (!segment->mapping || segment->size == 0 || segment->shmid < 0)
@@ -137,6 +136,11 @@ bool ResourceTable::invariants_hold() const noexcept {
         return false;
       }
     }
+  }
+  for (const auto& allocation : cursor_allocations_) {
+    const auto image = allocation.image.lock();
+    if (!image || allocation.bytes != image->byte_size()) return false;
+    calculated_cursor_bytes += allocation.bytes;
   }
   if (calculated_property_bytes != total_property_bytes_) {
     return false;

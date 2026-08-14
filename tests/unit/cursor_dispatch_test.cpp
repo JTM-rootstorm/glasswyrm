@@ -88,6 +88,113 @@ int main() {
   constexpr std::uint32_t base = 0x00400000U;
   constexpr std::uint32_t other_base = 0x00800000U;
   constexpr std::uint32_t mask = 0x001fffffU;
+  {
+    std::string error;
+    const auto quota_image = glasswyrm::input::make_glyph_cursor(
+        {glasswyrm::input::CursorFontIdentity::Cursor,
+         glasswyrm::input::CursorFontIdentity::Cursor,
+         glasswyrm::input::kCursorGlyphLeftPointer,
+         static_cast<std::uint16_t>(
+             glasswyrm::input::kCursorGlyphLeftPointer + 1U),
+         {},
+         {0xffff, 0xffff, 0xffff}},
+        error);
+    require(quota_image && quota_image->byte_size() > 0,
+            "cursor quota fixture has retained image bytes");
+    ResourceLimits limits;
+    limits.maximum_total_cursor_bytes = quota_image->byte_size();
+    ResourceTable resources(kScreenModel, limits);
+    WindowCreateSpec retained_window;
+    retained_window.xid = other_base + 1U;
+    retained_window.parent = resources.screen().root_window;
+    retained_window.width = 20;
+    retained_window.height = 20;
+    retained_window.window_class = WindowClass::InputOutput;
+    auto second_retained_window = retained_window;
+    second_retained_window.xid = other_base + 2U;
+    require(resources.create_window(2, other_base, mask, retained_window) ==
+                    CreateWindowStatus::Success &&
+                resources.create_window(2, other_base, mask,
+                                        second_retained_window) ==
+                    CreateWindowStatus::Success,
+            "create cross-client retained-cursor windows");
+
+    for (std::uint32_t iteration = 0; iteration < 8; ++iteration) {
+      const auto xid = base + 100U + iteration;
+      const auto next_xid = base + 200U + iteration;
+      auto image = glasswyrm::input::make_glyph_cursor(
+          {glasswyrm::input::CursorFontIdentity::Cursor,
+           glasswyrm::input::CursorFontIdentity::Cursor,
+           glasswyrm::input::kCursorGlyphLeftPointer,
+           static_cast<std::uint16_t>(
+               glasswyrm::input::kCursorGlyphLeftPointer + 1U),
+           {},
+           {0xffff, 0xffff, 0xffff}},
+          error);
+      require(resources.create_cursor(1, base, mask, xid, image) ==
+                  CreateCursorStatus::Success,
+              "create cursor within retained-image quota");
+      auto* window = resources.find_window(retained_window.xid);
+      window->attributes.cursor = xid;
+      window->attributes.cursor_inherit = false;
+      window->attributes.cursor_image = resources.find_cursor(xid)->image;
+      auto* second_window =
+          resources.find_window(second_retained_window.xid);
+      second_window->attributes.cursor = xid;
+      second_window->attributes.cursor_inherit = false;
+      second_window->attributes.cursor_image =
+          resources.find_cursor(xid)->image;
+      image.reset();
+      require(resources.free_cursor(xid) == FreeCursorStatus::Success &&
+                  resources.total_cursor_bytes() == quota_image->byte_size() &&
+                  resources.create_cursor(1, base, mask, next_xid,
+                                          quota_image) ==
+                      CreateCursorStatus::BadAlloc,
+              "FreeCursor keeps window-retained image bytes charged");
+      window = resources.find_window(retained_window.xid);
+      window->attributes.cursor_inherit = true;
+      window->attributes.cursor_image.reset();
+      require(resources.total_cursor_bytes() == quota_image->byte_size(),
+              "cursor quota remains until every window releases the image");
+      second_window = resources.find_window(second_retained_window.xid);
+      second_window->attributes.cursor_inherit = true;
+      second_window->attributes.cursor_image.reset();
+      require(resources.total_cursor_bytes() == 0 &&
+                  resources.invariants_hold(),
+              "cursor quota releases after the final retained reference");
+    }
+
+    const auto cleanup_xid = base + 300U;
+    auto cleanup_image = glasswyrm::input::make_glyph_cursor(
+        {glasswyrm::input::CursorFontIdentity::Cursor,
+         glasswyrm::input::CursorFontIdentity::Cursor,
+         glasswyrm::input::kCursorGlyphXterm,
+         static_cast<std::uint16_t>(
+             glasswyrm::input::kCursorGlyphXterm + 1U),
+         {},
+         {0xffff, 0xffff, 0xffff}},
+        error);
+    require(resources.create_cursor(1, base, mask, cleanup_xid,
+                                    cleanup_image) ==
+                CreateCursorStatus::Success,
+            "create cursor for owner cleanup regression");
+    auto* window = resources.find_window(retained_window.xid);
+    window->attributes.cursor = cleanup_xid;
+    window->attributes.cursor_inherit = false;
+    window->attributes.cursor_image = resources.find_cursor(cleanup_xid)->image;
+    cleanup_image.reset();
+    const auto cleanup = resources.cleanup_client(1);
+    require(cleanup.resources_destroyed == 1 &&
+                !resources.find_cursor(cleanup_xid) &&
+                resources.total_cursor_bytes() == quota_image->byte_size() &&
+                resources.invariants_hold(),
+            "client cleanup preserves quota for a cross-client cursor user");
+    require(resources.destroy_window(retained_window.xid) ==
+                    DestroyWindowStatus::Success &&
+                resources.total_cursor_bytes() == 0 &&
+                resources.invariants_hold(),
+            "destroying the final cursor window releases retained quota");
+  }
   for (const auto order : {x11::ByteOrder::LittleEndian,
                            x11::ByteOrder::BigEndian}) {
     ServerState state;

@@ -356,6 +356,7 @@ class ResourceTable {
     return canonical_drawable_bytes_;
   }
   [[nodiscard]] std::size_t total_cursor_bytes() const noexcept {
+    reap_released_cursor_images();
     return total_cursor_bytes_;
   }
   [[nodiscard]] bool invariants_hold() const noexcept;
@@ -367,7 +368,13 @@ class ResourceTable {
   std::size_t remove_damage_for_drawable(std::uint32_t drawable);
   std::size_t remove_pictures_for_drawable(std::uint32_t drawable);
   void recompute_canonical_drawable_bytes() noexcept;
+  void reap_released_cursor_images() const noexcept;
   void recompute_map_states_from(std::uint32_t xid, bool parent_viewable);
+
+  struct CursorAllocation {
+    std::weak_ptr<const input::CursorImage> image;
+    std::size_t bytes{0};
+  };
 
   ScreenModel screen_;
   ResourceLimits limits_;
@@ -377,7 +384,8 @@ class ResourceTable {
   std::size_t total_windows_{0};
   std::size_t total_property_bytes_{0};
   std::size_t canonical_drawable_bytes_{0};
-  std::size_t total_cursor_bytes_{0};
+  mutable std::size_t total_cursor_bytes_{0};
+  mutable std::vector<CursorAllocation> cursor_allocations_;
   std::shared_ptr<const input::CursorImage> root_default_cursor_;
 };
 
