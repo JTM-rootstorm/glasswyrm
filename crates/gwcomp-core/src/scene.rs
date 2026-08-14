@@ -72,6 +72,7 @@ impl SceneOutput {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SceneSurface {
     pub surface_id: u64,
+    pub output_id: u64,
     pub logical: Rectangle,
     pub stacking: i32,
     pub visible: bool,
@@ -147,9 +148,30 @@ impl Scene {
         if self.outputs.is_empty() || self.outputs.len() > crate::MAXIMUM_OUTPUTS {
             return Err(SceneError::OutputLimit);
         }
+        let mut total_pixels = 0_u64;
         for (&id, output) in &self.outputs {
             if id == 0 || id != output.output_id || (output.enabled && output.mapping().is_none()) {
                 return Err(SceneError::InvalidOutput);
+            }
+            if output.enabled {
+                let pixels = u64::from(output.physical_width) * u64::from(output.physical_height);
+                if pixels > crate::MAXIMUM_TOTAL_OUTPUT_PIXELS.saturating_sub(total_pixels) {
+                    return Err(SceneError::PhysicalLimitExceeded);
+                }
+                total_pixels += pixels;
+            }
+        }
+        let enabled: Vec<_> = self
+            .outputs
+            .values()
+            .filter(|output| output.enabled)
+            .collect();
+        for (index, left) in enabled.iter().enumerate() {
+            if enabled[index + 1..]
+                .iter()
+                .any(|right| left.logical.intersection(right.logical).is_some())
+            {
+                return Err(SceneError::OverlappingOutputs);
             }
         }
         for (&id, surface) in &self.surfaces {
@@ -166,25 +188,64 @@ impl Scene {
             {
                 return Err(SceneError::InvalidSurface);
             }
+            let Some(assigned_output) = self
+                .outputs
+                .get(&surface.output_id)
+                .filter(|output| output.enabled)
+            else {
+                return Err(SceneError::InvalidMembership);
+            };
+            let membership = self.surface_outputs.get(&id);
+            if surface.presentation == SurfacePresentation::MetadataOnly {
+                if membership.is_some() {
+                    return Err(SceneError::InvalidMembership);
+                }
+                continue;
+            }
             let Some(membership) = self.surface_outputs.get(&id) else {
                 return Err(SceneError::InvalidMembership);
             };
-            if membership.layout_generation != self.configuration_generation
+            let expected_memberships = self.geometric_memberships(surface);
+            if membership.primary_output_id != surface.output_id
+                || membership.layout_generation != self.configuration_generation
+                || membership.preferred_scale != assigned_output.scale
                 || membership.client_buffer_scale != surface.client_buffer_scale
-                || !membership
-                    .output_ids
-                    .contains(&membership.primary_output_id)
-                || membership.output_ids.iter().any(|output_id| {
-                    !self
-                        .outputs
-                        .get(output_id)
-                        .is_some_and(|output| output.enabled)
-                })
+                || membership.output_ids != expected_memberships
+                || (!membership.output_ids.is_empty()
+                    && !membership
+                        .output_ids
+                        .contains(&membership.primary_output_id))
             {
                 return Err(SceneError::InvalidMembership);
             }
         }
+        if self
+            .surface_outputs
+            .keys()
+            .any(|surface_id| !self.surfaces.contains_key(surface_id))
+        {
+            return Err(SceneError::UnknownSurface);
+        }
         Ok(())
+    }
+
+    fn geometric_memberships(&self, surface: &SceneSurface) -> Vec<u64> {
+        if !surface.visible {
+            return Vec::new();
+        }
+        let mut memberships: Vec<_> = self
+            .outputs
+            .values()
+            .filter(|output| {
+                output.enabled && surface.logical.intersection(output.logical).is_some()
+            })
+            .map(|output| output.output_id)
+            .collect();
+        memberships.sort_by_key(|output_id| {
+            let output = &self.outputs[output_id];
+            (output.logical.y, output.logical.x, *output_id)
+        });
+        memberships
     }
 }
 
@@ -195,4 +256,7 @@ pub enum SceneError {
     InvalidOutput,
     InvalidSurface,
     InvalidMembership,
+    UnknownSurface,
+    OverlappingOutputs,
+    PhysicalLimitExceeded,
 }

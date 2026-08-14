@@ -34,6 +34,7 @@ fn surface(id: u64, logical: Rectangle, client_scale: u32, pixels: Vec<u32>) -> 
     let height = logical.height * client_scale;
     SceneSurface {
         surface_id: id,
+        output_id: 1,
         logical,
         stacking: 0,
         visible: true,
