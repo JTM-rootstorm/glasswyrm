@@ -100,6 +100,18 @@ configure_geometry(gw::test::X11RequestBuilder &wire, std::uint32_t window,
   return wire.raw(static_cast<std::uint8_t>(x11::CoreOpcode::ConfigureWindow),
                   0, body);
 }
+std::vector<std::uint8_t>
+grab_keyboard(gw::test::X11RequestBuilder &wire, std::uint32_t window,
+              x11::ByteOrder order) {
+  std::vector<std::uint8_t> body;
+  put32(body, window, order);
+  put32(body, 0, order);
+  body.push_back(1);
+  body.push_back(1);
+  put16(body, 0, order);
+  return wire.raw(static_cast<std::uint8_t>(x11::CoreOpcode::GrabKeyboard), 0,
+                  body);
+}
 struct Session {
   gw::test::X11FakeClient client;
   gw::test::X11RequestBuilder wire;
@@ -257,6 +269,39 @@ void exercise(const std::string &socket, x11::ByteOrder order) {
                         gw::test::read_wire_u16(reply.data() + 16, order) == 1,
                     "destroyed top-level window leaves committed root tree");
 }
+
+void exercise_disconnect_grab_cleanup(const std::string &socket,
+                                      const x11::ByteOrder order,
+                                      const bool coordinated) {
+  {
+    Session owner(socket, order);
+    if (coordinated) {
+      owner.client.send_all(
+          owner.wire.create_window(owner.base + 1, 1, 0, 0, 64, 64));
+      owner.sync();
+    }
+    owner.client.send_all(grab_keyboard(owner.wire, 1, order));
+    const auto reply = owner.reply();
+    gw::test::require(reply[0] == 1 && reply[1] == 0,
+                      "client acquires keyboard grab before disconnect");
+  }
+
+  Session successor(socket, order);
+  bool acquired = false;
+  for (int attempt = 0; attempt < 100 && !acquired; ++attempt) {
+    successor.client.send_all(grab_keyboard(successor.wire, 1, order));
+    const auto reply = successor.reply();
+    acquired = reply[0] == 1 && reply[1] == 0;
+    if (!acquired)
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  gw::test::require(acquired,
+                    coordinated
+                        ? "coordinated disconnect cleanup releases the active "
+                          "keyboard grab"
+                        : "direct disconnect cleanup releases the active "
+                          "keyboard grab");
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -283,6 +328,14 @@ int main(int argc, char **argv) {
                     "integrated X socket becomes ready");
   exercise(x_socket, x11::ByteOrder::LittleEndian);
   exercise(x_socket, x11::ByteOrder::BigEndian);
+  exercise_disconnect_grab_cleanup(x_socket, x11::ByteOrder::LittleEndian,
+                                   false);
+  exercise_disconnect_grab_cleanup(x_socket, x11::ByteOrder::BigEndian,
+                                   false);
+  exercise_disconnect_grab_cleanup(x_socket, x11::ByteOrder::LittleEndian,
+                                   true);
+  exercise_disconnect_grab_cleanup(x_socket, x11::ByteOrder::BigEndian,
+                                   true);
   stop(server);
   stop(wm);
   stop(comp);

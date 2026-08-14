@@ -213,6 +213,7 @@ bool ServerRuntime::commit_lifecycle(const LifecycleSnapshot& snapshot) {
              mutation->second.cleanup) {
     auto staged = server_.state_;
     (void)staged.selections().clear_client(mutation->second.cleanup->owner);
+    (void)staged.grabs().cleanup_client(mutation->second.cleanup->owner);
     (void)staged.composite().remove_client(mutation->second.cleanup->owner);
     staged.vrr().clear_client(mutation->second.cleanup->owner);
     (void)staged.resources().commit_client_cleanup(*mutation->second.cleanup);
@@ -616,6 +617,7 @@ void ServerRuntime::cancel_client_lifecycle(
   server_.state_.vrr().clear_client(client);
   auto plan = server_.state_.resources().prepare_client_cleanup(client);
   if (!plan.affects_policy) {
+    (void)server_.state_.grabs().cleanup_client(client);
     (void)server_.state_.resources().commit_client_cleanup(plan);
     server_.state_.vrr().prune_windows(server_.state_.resources());
     server_.pending_resource_bases_.erase(resource_base);
