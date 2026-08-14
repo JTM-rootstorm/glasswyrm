@@ -4,6 +4,9 @@ use gw_wire::OutputKind;
 use gw_wire::compositor::Transform;
 
 use crate::OutputSnapshot;
+use crate::control_format::{
+    push_output_vrr_json, push_output_vrr_text, push_window_vrr_json, push_window_vrr_text,
+};
 
 #[must_use]
 pub fn format_outputs(snapshot: &OutputSnapshot, json: bool) -> String {
@@ -14,17 +17,64 @@ pub fn format_outputs(snapshot: &OutputSnapshot, json: bool) -> String {
     }
 }
 
+#[must_use]
+pub fn format_windows(snapshot: &OutputSnapshot, json: bool) -> String {
+    if json {
+        let mut output = format!(
+            "{{\"layout_generation\":{},\"windows\":",
+            snapshot.generation
+        );
+        push_windows_json(&mut output, snapshot);
+        output.push_str("}\n");
+        output
+    } else {
+        let mut output = format_header_text(snapshot);
+        push_windows_text(&mut output, snapshot);
+        output
+    }
+}
+
+#[must_use]
+pub fn format_all(snapshot: &OutputSnapshot, json: bool) -> String {
+    if json {
+        let mut output = format!(
+            "{{\"layout_generation\":{},\"root_width\":{},\"root_height\":{},\"primary_output_id\":\"{}\",\"outputs\":",
+            snapshot.generation,
+            snapshot.root_width,
+            snapshot.root_height,
+            output_id(snapshot.primary_output_id)
+        );
+        push_outputs_json(&mut output, snapshot);
+        output.push_str(",\"windows\":");
+        push_windows_json(&mut output, snapshot);
+        output.push_str("}\n");
+        output
+    } else {
+        let mut output = format_header_text(snapshot);
+        push_outputs_text(&mut output, snapshot);
+        push_windows_text(&mut output, snapshot);
+        output
+    }
+}
+
 fn format_outputs_json(snapshot: &OutputSnapshot) -> String {
     let mut output = String::new();
     write!(
         output,
-        "{{\"layout_generation\":{},\"root_width\":{},\"root_height\":{},\"primary_output_id\":\"{}\",\"outputs\":[",
+        "{{\"layout_generation\":{},\"root_width\":{},\"root_height\":{},\"primary_output_id\":\"{}\",\"outputs\":",
         snapshot.generation,
         snapshot.root_width,
         snapshot.root_height,
         output_id(snapshot.primary_output_id)
     )
     .expect("writing into a String cannot fail");
+    push_outputs_json(&mut output, snapshot);
+    output.push_str("}\n");
+    output
+}
+
+fn push_outputs_json(output: &mut String, snapshot: &OutputSnapshot) {
+    output.push('[');
     for (index, (id, state)) in snapshot.outputs.iter().enumerate() {
         if index != 0 {
             output.push(',');
@@ -77,29 +127,38 @@ fn format_outputs_json(snapshot: &OutputSnapshot) -> String {
             )
             .expect("writing into a String cannot fail");
         }
-        output.push_str("]}");
+        output.push(']');
+        if snapshot.vrr_queried {
+            push_output_vrr_json(output, snapshot, *id);
+        }
+        output.push('}');
     }
-    output.push_str("]}\n");
-    output
+    output.push(']');
 }
 
 fn format_outputs_text(snapshot: &OutputSnapshot) -> String {
-    let mut output = String::new();
-    writeln!(
-        output,
-        "layout generation={} root={}x{} primary={}",
+    let mut output = format_header_text(snapshot);
+    push_outputs_text(&mut output, snapshot);
+    output
+}
+
+fn format_header_text(snapshot: &OutputSnapshot) -> String {
+    format!(
+        "layout generation={} root={}x{} primary={}\n",
         snapshot.generation,
         snapshot.root_width,
         snapshot.root_height,
         output_id(snapshot.primary_output_id)
     )
-    .expect("writing into a String cannot fail");
+}
+
+fn push_outputs_text(output: &mut String, snapshot: &OutputSnapshot) {
     for (id, state) in &snapshot.outputs {
         let metadata = snapshot.descriptors.get(id);
         let name = metadata.map_or("unknown", |value| value.name.as_str());
         let kind = metadata.map_or("unknown", |value| kind_name(value.kind));
         let capabilities = metadata.map_or(0, |value| value.capability_flags);
-        writeln!(
+        write!(
             output,
             "output {} name={} kind={} enabled={} connected={} primary={} physical={}x{}@{} logical={},{} {}x{} scale={}/{} transform={} capabilities={}",
             output_id(*id),
@@ -121,6 +180,10 @@ fn format_outputs_text(snapshot: &OutputSnapshot) -> String {
             capabilities,
         )
         .expect("writing into a String cannot fail");
+        if snapshot.vrr_queried {
+            push_output_vrr_text(output, snapshot, *id);
+        }
+        output.push('\n');
         for mode in snapshot.modes.iter().filter(|mode| mode.output_id == *id) {
             writeln!(
                 output,
@@ -135,7 +198,94 @@ fn format_outputs_text(snapshot: &OutputSnapshot) -> String {
             .expect("writing into a String cannot fail");
         }
     }
-    output
+}
+
+fn push_windows_json(output: &mut String, snapshot: &OutputSnapshot) {
+    output.push('[');
+    for (index, (&window_id, window)) in snapshot.windows.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        write!(
+            output,
+            "{{\"window_id\":{},\"logical_x\":{},\"logical_y\":{},\"logical_width\":{},\"logical_height\":{},\"primary_output_id\":\"{}\",\"output_ids\":[",
+            window_id,
+            window.logical_x,
+            window.logical_y,
+            window.logical_width,
+            window.logical_height,
+            output_id(window.primary_output_id),
+        )
+        .expect("writing into a String cannot fail");
+        for (index, output_value) in window.output_ids.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            write!(output, "\"{}\"", output_id(*output_value))
+                .expect("writing into a String cannot fail");
+        }
+        write!(
+            output,
+            "],\"preferred_scale_numerator\":{},\"preferred_scale_denominator\":{},\"client_buffer_scale\":{},\"scale_mode\":{},\"visible\":{},\"focused\":{},\"fullscreen\":{}",
+            window.preferred_scale_numerator,
+            window.preferred_scale_denominator,
+            window.client_buffer_scale,
+            json_string(match window.scale_mode {
+                gw_wire::SurfaceScaleMode::ScaledPixmap => "scaled-pixmap",
+                gw_wire::SurfaceScaleMode::Legacy => "legacy",
+            }),
+            boolean(window.visible),
+            boolean(window.focused),
+            boolean(window.fullscreen),
+        )
+        .expect("writing into a String cannot fail");
+        if snapshot.vrr_queried {
+            push_window_vrr_json(output, snapshot, window_id);
+        }
+        output.push('}');
+    }
+    output.push(']');
+}
+
+fn push_windows_text(output: &mut String, snapshot: &OutputSnapshot) {
+    for (&window_id, window) in &snapshot.windows {
+        write!(
+            output,
+            "window {} logical={},{} {}x{} primary={} outputs=",
+            window_id,
+            window.logical_x,
+            window.logical_y,
+            window.logical_width,
+            window.logical_height,
+            output_id(window.primary_output_id),
+        )
+        .expect("writing into a String cannot fail");
+        for (index, output_value) in window.output_ids.iter().enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            output.push_str(&output_id(*output_value));
+        }
+        write!(
+            output,
+            " preferred-scale={}/{} client-buffer-scale={} mode={} visible={} focused={} fullscreen={}",
+            window.preferred_scale_numerator,
+            window.preferred_scale_denominator,
+            window.client_buffer_scale,
+            match window.scale_mode {
+                gw_wire::SurfaceScaleMode::ScaledPixmap => "scaled-pixmap",
+                gw_wire::SurfaceScaleMode::Legacy => "legacy",
+            },
+            boolean(window.visible),
+            boolean(window.focused),
+            boolean(window.fullscreen),
+        )
+        .expect("writing into a String cannot fail");
+        if snapshot.vrr_queried {
+            push_window_vrr_text(output, snapshot, window_id);
+        }
+        output.push('\n');
+    }
 }
 
 fn output_id(value: u64) -> String {

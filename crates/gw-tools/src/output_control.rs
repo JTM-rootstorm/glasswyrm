@@ -31,6 +31,12 @@ const OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_BACKOFF: Duration = Duration::from_millis(10);
 
 pub(crate) const INVENTORY_QUERY_FLAGS: u32 = OUTPUT_QUERY_FLAGS;
+pub(crate) const WINDOW_QUERY_FLAGS: u32 = OUTPUT_QUERY_WINDOWS;
+pub(crate) const ALL_QUERY_FLAGS: u32 = OUTPUT_QUERY_FLAGS | OUTPUT_QUERY_WINDOWS;
+pub(crate) const VRR_DIAGNOSTIC_QUERY_FLAGS: u32 =
+    (OUTPUT_QUERY_FLAGS & !(1 << 1)) | OUTPUT_QUERY_WINDOWS | OUTPUT_QUERY_VRR;
+pub(crate) const ALL_VRR_DIAGNOSTIC_QUERY_FLAGS: u32 =
+    OUTPUT_QUERY_FLAGS | OUTPUT_QUERY_WINDOWS | OUTPUT_QUERY_VRR;
 pub(crate) const VRR_CONFIGURATION_QUERY_FLAGS: u32 =
     OUTPUT_QUERY_FLAGS | OUTPUT_QUERY_WINDOWS | OUTPUT_QUERY_VRR;
 
@@ -343,6 +349,77 @@ fn validate_snapshot(snapshot: &OutputSnapshot) -> Result<(), ControlError> {
         if *policy != state.requested_mode {
             return Err(ControlError::detail(
                 "VRR policy and effective state disagree on requested mode",
+            ));
+        }
+    }
+    for output_id in snapshot.vrr_capabilities.keys() {
+        if !snapshot.outputs.contains_key(output_id) {
+            return Err(ControlError::detail(
+                "VRR capability references an unknown output",
+            ));
+        }
+    }
+    for output_id in snapshot.vrr_policies.keys() {
+        if !snapshot.outputs.contains_key(output_id) {
+            return Err(ControlError::detail(
+                "VRR policy references an unknown output",
+            ));
+        }
+    }
+    for output_id in snapshot.vrr_outputs.keys() {
+        if !snapshot.outputs.contains_key(output_id) {
+            return Err(ControlError::detail(
+                "VRR effective state references an unknown output",
+            ));
+        }
+    }
+    for output_id in snapshot.vrr_timings.keys() {
+        if !snapshot.outputs.contains_key(output_id) {
+            return Err(ControlError::detail(
+                "VRR timing references an unknown output",
+            ));
+        }
+    }
+    for (&window_id, window) in &snapshot.windows {
+        let Some(state) = snapshot.vrr_windows.get(&window_id) else {
+            return Err(ControlError::detail(
+                "VRR snapshot omits queried window state",
+            ));
+        };
+        if state.surface_id != window.surface_id || !snapshot.outputs.contains_key(&state.output_id)
+        {
+            return Err(ControlError::detail(
+                "VRR window state does not match the queried scene",
+            ));
+        }
+    }
+    for (&window_id, state) in &snapshot.vrr_windows {
+        if snapshot
+            .windows
+            .get(&window_id)
+            .is_none_or(|window| window.surface_id != state.surface_id)
+            || !snapshot.outputs.contains_key(&state.output_id)
+        {
+            return Err(ControlError::detail(
+                "VRR window state does not match the queried scene",
+            ));
+        }
+    }
+    for (&output_id, state) in &snapshot.vrr_outputs {
+        if state.candidate_window_id == 0 && state.candidate_surface_id == 0 {
+            continue;
+        }
+        if state.candidate_window_id == 0
+            || state.candidate_surface_id == 0
+            || !snapshot
+                .vrr_windows
+                .get(&state.candidate_window_id)
+                .is_some_and(|window| {
+                    window.surface_id == state.candidate_surface_id && window.output_id == output_id
+                })
+        {
+            return Err(ControlError::detail(
+                "VRR candidate does not match the queried window state",
             ));
         }
     }

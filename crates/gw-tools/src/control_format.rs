@@ -71,7 +71,7 @@ pub fn format_acknowledgement(
 }
 
 #[must_use]
-pub fn format_vrr(snapshot: &OutputSnapshot, selector: &str, json: bool) -> String {
+pub fn format_vrr(snapshot: &OutputSnapshot, selector: Option<&str>, json: bool) -> String {
     if json {
         format_vrr_json(snapshot, selector)
     } else {
@@ -79,11 +79,131 @@ pub fn format_vrr(snapshot: &OutputSnapshot, selector: &str, json: bool) -> Stri
     }
 }
 
-fn format_vrr_json(snapshot: &OutputSnapshot, selector: &str) -> String {
+pub(crate) fn push_output_vrr_json(output: &mut String, snapshot: &OutputSnapshot, output_id: u64) {
+    let Some(capability) = snapshot.vrr_capabilities.get(&output_id) else {
+        output.push_str(",\"vrr\":null");
+        return;
+    };
+    let Some(policy) = snapshot.vrr_policies.get(&output_id) else {
+        output.push_str(",\"vrr\":null");
+        return;
+    };
+    let Some(state) = snapshot.vrr_outputs.get(&output_id) else {
+        output.push_str(",\"vrr\":null");
+        return;
+    };
+    write!(
+        output,
+        ",\"vrr\":{{\"policy\":\"{}\",\"property_present\":{},\"hardware_capable\":{},\"kms_controllable\":{},\"simulated\":{},\"range_millihertz\":",
+        policy_name(*policy),
+        capability.connector_property_present,
+        capability.hardware_capable,
+        capability.kms_controllable,
+        capability.simulated,
+    )
+    .expect("writing into a String cannot fail");
+    if capability.range_available {
+        write!(
+            output,
+            "[{},{}]",
+            capability.minimum_refresh_millihertz, capability.maximum_refresh_millihertz
+        )
+        .expect("writing into a String cannot fail");
+    } else {
+        output.push_str("null");
+    }
+    write!(
+        output,
+        ",\"decision\":\"{}\",\"desired_enabled\":{},\"effective_enabled\":{},\"candidate_window\":{},\"transition_serial\":{},\"flip_timestamp_monotonic_ns\":{},\"interval_ns\":{},\"reasons\":",
+        decision_name(state.decision),
+        state.desired_enabled,
+        state.effective_enabled,
+        state.candidate_window_id,
+        state.transition_serial,
+        state.last_flip_timestamp_nanoseconds,
+        state.last_interval_nanoseconds,
+    )
+    .expect("writing into a String cannot fail");
+    push_reasons_json(output, state.reason_flags);
+    if let Some(timing) = snapshot.vrr_timings.get(&output_id) {
+        write!(
+            output,
+            ",\"latest_timing_interval_ns\":{}",
+            timing.interval_nanoseconds
+        )
+        .expect("writing into a String cannot fail");
+    }
+    output.push('}');
+}
+
+pub(crate) fn push_output_vrr_text(output: &mut String, snapshot: &OutputSnapshot, output_id: u64) {
+    let Some(capability) = snapshot.vrr_capabilities.get(&output_id) else {
+        output.push_str(" vrr=unavailable");
+        return;
+    };
+    let Some(policy) = snapshot.vrr_policies.get(&output_id) else {
+        output.push_str(" vrr=unavailable");
+        return;
+    };
+    let Some(state) = snapshot.vrr_outputs.get(&output_id) else {
+        output.push_str(" vrr=unavailable");
+        return;
+    };
+    write!(
+        output,
+        " vrr-policy={} vrr-capable={} vrr-controllable={} vrr-decision={} vrr-effective={} vrr-reasons=",
+        policy_name(*policy),
+        capability.hardware_capable,
+        capability.kms_controllable,
+        decision_name(state.decision),
+        state.effective_enabled,
+    )
+    .expect("writing into a String cannot fail");
+    push_reasons_text(output, state.reason_flags);
+}
+
+pub(crate) fn push_window_vrr_json(output: &mut String, snapshot: &OutputSnapshot, window_id: u32) {
+    let Some(state) = snapshot.vrr_windows.get(&window_id) else {
+        output.push_str(",\"vrr\":null");
+        return;
+    };
+    write!(
+        output,
+        ",\"vrr\":{{\"preference\":\"{}\",\"policy_eligible\":{},\"selected\":{},\"borderless_fullscreen\":{},\"exclusive_output_membership\":{},\"policy_generation\":{},\"reasons\":",
+        preference_name(state.preference),
+        state.policy_eligible,
+        state.policy_selected,
+        state.borderless_fullscreen,
+        state.exclusive_output_membership,
+        state.policy_generation,
+    )
+    .expect("writing into a String cannot fail");
+    push_reasons_json(output, state.reason_flags);
+    output.push('}');
+}
+
+pub(crate) fn push_window_vrr_text(output: &mut String, snapshot: &OutputSnapshot, window_id: u32) {
+    let Some(state) = snapshot.vrr_windows.get(&window_id) else {
+        output.push_str(" vrr=unavailable");
+        return;
+    };
+    write!(
+        output,
+        " vrr-preference={} vrr-eligible={} vrr-selected={} vrr-borderless={} vrr-reasons=",
+        preference_name(state.preference),
+        state.policy_eligible,
+        state.policy_selected,
+        state.borderless_fullscreen,
+    )
+    .expect("writing into a String cannot fail");
+    push_reasons_text(output, state.reason_flags);
+}
+
+fn format_vrr_json(snapshot: &OutputSnapshot, selector: Option<&str>) -> String {
     let mut output = String::from("{\"vrr\":[");
     let mut first = true;
     for (&output_id, capability) in &snapshot.vrr_capabilities {
-        if !output_matches(snapshot, output_id, selector) {
+        if selector.is_some_and(|selector| !output_matches(snapshot, output_id, selector)) {
             continue;
         }
         if !first {
@@ -152,7 +272,7 @@ fn format_vrr_json(snapshot: &OutputSnapshot, selector: &str) -> String {
     output.push_str("],\"windows\":[");
     first = true;
     for (&window_id, window) in &snapshot.vrr_windows {
-        if !output_matches(snapshot, window.output_id, selector) {
+        if selector.is_some_and(|selector| !output_matches(snapshot, window.output_id, selector)) {
             continue;
         }
         if !first {
@@ -181,10 +301,10 @@ fn format_vrr_json(snapshot: &OutputSnapshot, selector: &str) -> String {
     output
 }
 
-fn format_vrr_text(snapshot: &OutputSnapshot, selector: &str) -> String {
+fn format_vrr_text(snapshot: &OutputSnapshot, selector: Option<&str>) -> String {
     let mut output = String::new();
     for (&output_id, capability) in &snapshot.vrr_capabilities {
-        if !output_matches(snapshot, output_id, selector) {
+        if selector.is_some_and(|selector| !output_matches(snapshot, output_id, selector)) {
             continue;
         }
         let name = snapshot
@@ -246,7 +366,7 @@ fn format_vrr_text(snapshot: &OutputSnapshot, selector: &str) -> String {
         output.push('\n');
     }
     for (&window_id, window) in &snapshot.vrr_windows {
-        if !output_matches(snapshot, window.output_id, selector) {
+        if selector.is_some_and(|selector| !output_matches(snapshot, window.output_id, selector)) {
             continue;
         }
         write!(

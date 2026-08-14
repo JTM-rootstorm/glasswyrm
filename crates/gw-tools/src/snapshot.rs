@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use gw_types::{MessageFlags, MessageType, Sequence, SnapshotDomain};
-use gw_wire::compositor::{OutputUpsert, decode_output_upsert};
+use gw_wire::compositor::{OutputUpsert, decode_output_upsert, decode_surface_upsert};
 use gw_wire::vrr::{
     OutputVrrCapabilityUpsert, OutputVrrStateUpsert, PresentationTiming, SurfaceVrrState,
     VrrPolicyMode, decode_output_vrr_capability_upsert, decode_output_vrr_policy_upsert,
     decode_output_vrr_state_upsert, decode_presentation_timing, decode_surface_vrr_state,
 };
 use gw_wire::{
-    OutputConfigurationResult, OutputDescriptorUpsert, OutputModeUpsert,
+    OutputConfigurationResult, OutputDescriptorUpsert, OutputModeUpsert, SurfaceScaleMode,
     decode_output_configuration_acknowledged, decode_output_descriptor_upsert,
     decode_output_mode_upsert, decode_snapshot_begin, decode_snapshot_end,
     decode_surface_output_state, decode_surface_policy_upsert,
@@ -31,12 +31,54 @@ pub struct OutputSnapshot {
     pub descriptors: BTreeMap<u64, OutputDescriptorUpsert>,
     pub modes: Vec<OutputModeUpsert>,
     pub outputs: BTreeMap<u64, OutputUpsert>,
+    pub windows: BTreeMap<u32, WindowSnapshot>,
     pub vrr_capabilities: BTreeMap<u64, OutputVrrCapabilityUpsert>,
     pub vrr_policies: BTreeMap<u64, VrrPolicyMode>,
     pub vrr_outputs: BTreeMap<u64, OutputVrrStateUpsert>,
     pub vrr_windows: BTreeMap<u32, SurfaceVrrState>,
     pub vrr_timings: BTreeMap<u64, PresentationTiming>,
     pub vrr_queried: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowSnapshot {
+    pub surface_id: u64,
+    pub window_id: u32,
+    pub logical_x: i32,
+    pub logical_y: i32,
+    pub logical_width: u32,
+    pub logical_height: u32,
+    pub primary_output_id: u64,
+    pub output_ids: Vec<u64>,
+    pub preferred_scale_numerator: u32,
+    pub preferred_scale_denominator: u32,
+    pub client_buffer_scale: u32,
+    pub scale_mode: SurfaceScaleMode,
+    pub visible: bool,
+    pub focused: bool,
+    pub fullscreen: bool,
+}
+
+impl WindowSnapshot {
+    fn new(surface_id: u64, window_id: u32) -> Self {
+        Self {
+            surface_id,
+            window_id,
+            logical_x: 0,
+            logical_y: 0,
+            logical_width: 0,
+            logical_height: 0,
+            primary_output_id: 0,
+            output_ids: Vec::new(),
+            preferred_scale_numerator: 1,
+            preferred_scale_denominator: 1,
+            client_buffer_scale: 1,
+            scale_mode: SurfaceScaleMode::Legacy,
+            visible: false,
+            focused: false,
+            fullscreen: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +267,19 @@ impl SnapshotDecoder {
                 "control server exceeded its output snapshot count",
             ));
         }
+        if matches!(
+            record.envelope.message_type,
+            MessageType::OUTPUT_VRR_CAPABILITY_UPSERT
+                | MessageType::OUTPUT_VRR_POLICY_UPSERT
+                | MessageType::OUTPUT_VRR_STATE_UPSERT
+                | MessageType::SURFACE_VRR_STATE
+                | MessageType::PRESENTATION_TIMING
+        ) && !self.snapshot.vrr_queried
+        {
+            return Err(SnapshotError::new(
+                "control server sent unrequested VRR state",
+            ));
+        }
         match record.envelope.message_type {
             MessageType::OUTPUT_DESCRIPTOR_UPSERT => {
                 let value = decode_output_descriptor_upsert(&record.payload).map_err(|_| {
@@ -262,19 +317,63 @@ impl SnapshotDecoder {
                 }
             }
             MessageType::SURFACE_UPSERT => {
-                gw_wire::compositor::decode_surface_upsert(&record.payload).map_err(|_| {
+                let value = decode_surface_upsert(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed window record")
                 })?;
+                if value.x11_window_id == 0 {
+                    return Err(SnapshotError::new(
+                        "window snapshot contains an invalid surface",
+                    ));
+                }
+                let window = self
+                    .snapshot
+                    .windows
+                    .entry(value.x11_window_id)
+                    .or_insert_with(|| WindowSnapshot::new(value.surface_id, value.x11_window_id));
+                window.surface_id = value.surface_id;
+                window.logical_x = value.logical_x;
+                window.logical_y = value.logical_y;
+                window.logical_width = value.logical_width;
+                window.logical_height = value.logical_height;
+                window.primary_output_id = value.output_id;
+                window.visible = value.visible;
             }
             MessageType::SURFACE_POLICY_UPSERT => {
-                decode_surface_policy_upsert(&record.payload).map_err(|_| {
+                let value = decode_surface_policy_upsert(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed window record")
                 })?;
+                if value.x11_window_id == 0 {
+                    return Err(SnapshotError::new(
+                        "window snapshot contains invalid policy state",
+                    ));
+                }
+                let window = self
+                    .snapshot
+                    .windows
+                    .entry(value.x11_window_id)
+                    .or_insert_with(|| WindowSnapshot::new(value.surface_id, value.x11_window_id));
+                window.surface_id = value.surface_id;
+                window.focused = value.focused;
+                window.fullscreen = value.applied_state == gw_wire::PolicyAppliedState::Fullscreen;
             }
             MessageType::SURFACE_OUTPUT_STATE => {
-                decode_surface_output_state(&record.payload).map_err(|_| {
+                let value = decode_surface_output_state(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed window record")
                 })?;
+                let window = self
+                    .snapshot
+                    .windows
+                    .values_mut()
+                    .find(|window| window.surface_id == value.surface_id)
+                    .ok_or_else(|| {
+                        SnapshotError::new("window membership precedes its surface record")
+                    })?;
+                window.primary_output_id = value.primary_output_id;
+                window.output_ids = value.output_ids;
+                window.preferred_scale_numerator = value.preferred_scale_numerator;
+                window.preferred_scale_denominator = value.preferred_scale_denominator;
+                window.client_buffer_scale = value.client_buffer_scale;
+                window.scale_mode = value.scale_mode;
             }
             MessageType::OUTPUT_VRR_CAPABILITY_UPSERT => {
                 let value = decode_output_vrr_capability_upsert(&record.payload).map_err(|_| {

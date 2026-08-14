@@ -184,7 +184,7 @@ fn set(socket: PathBuf, selector: String, edit: OutputEdit, json: bool) -> ExitC
             };
             if json {
                 let acknowledgement = gw_tools::format_acknowledgement(&acknowledgement, true);
-                let state = gw_tools::format_vrr(&applied, &selector, true);
+                let state = gw_tools::format_vrr(&applied, Some(&selector), true);
                 println!(
                     "{{\"acknowledgement\":{},\"state\":{}}}",
                     acknowledgement.trim_end(),
@@ -194,7 +194,7 @@ fn set(socket: PathBuf, selector: String, edit: OutputEdit, json: bool) -> ExitC
                 print!(
                     "{}{}",
                     gw_tools::format_acknowledgement(&acknowledgement, false),
-                    gw_tools::format_vrr(&applied, &selector, false)
+                    gw_tools::format_vrr(&applied, Some(&selector), false)
                 );
             }
         } else {
