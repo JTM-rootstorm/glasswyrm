@@ -6,13 +6,14 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import resource
+import selectors
 import signal
 import shutil
 import stat
 import struct
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
@@ -75,6 +76,10 @@ PATH_WAIT_ATTEMPTS = 200
 CLIENT_RESULT_WAIT_ATTEMPTS = 1200
 COMMAND_TIMEOUT_SECONDS = 120
 COMMAND_TAIL_BYTES = 2048
+MAX_COMMAND_CAPTURE_BYTES = 4 * 1024 * 1024
+CAPTURE_TRUNCATION_MARKER = (
+    b"\n[glasswyrm capture truncated; final diagnostic tail follows]\n"
+)
 QUERY_ATTEMPTS = 3
 CLEANUP_QUERY_ATTEMPTS = 5
 QUERY_SLOW_NS = 1_000_000_000
@@ -98,11 +103,55 @@ class CommandResult:
     elapsed_ns: int
     output_path: Path | None
     bounded_tail: str
+    capture_truncated: bool = False
 
     @property
     def succeeded(self) -> bool:
-        return (not self.timed_out and self.signal is None and
+        return (not self.timed_out and not self.capture_truncated and
+                self.signal is None and
                 self.exit_status == 0)
+
+
+def _disable_command_core_dumps() -> None:
+    """Prevent captured command failures from publishing a core artifact."""
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+class _BoundedCapture:
+    """Retain a bounded head and diagnostic tail while counting all bytes."""
+
+    def __init__(self) -> None:
+        self.total_bytes = 0
+        self.head = bytearray()
+        self.tail = bytearray()
+        self.truncated = False
+
+    def append(self, data: bytes) -> None:
+        self.total_bytes += len(data)
+        if (not self.truncated and
+                len(self.head) + len(data) <= MAX_COMMAND_CAPTURE_BYTES):
+            self.head.extend(data)
+            return
+        if not self.truncated:
+            combined = bytes(self.head) + data
+            head_limit = (MAX_COMMAND_CAPTURE_BYTES -
+                          len(CAPTURE_TRUNCATION_MARKER) - COMMAND_TAIL_BYTES)
+            self.head = bytearray(combined[:head_limit])
+            self.tail = bytearray(combined[-COMMAND_TAIL_BYTES:])
+            self.truncated = True
+            return
+        self.tail = (self.tail + data)[-COMMAND_TAIL_BYTES:]
+
+    def retained(self) -> bytes:
+        if not self.truncated:
+            return bytes(self.head)
+        return bytes(self.head) + CAPTURE_TRUNCATION_MARKER + bytes(self.tail)
+
+    def diagnostic_tail(self) -> bytes:
+        if self.truncated:
+            tail_limit = COMMAND_TAIL_BYTES - len(CAPTURE_TRUNCATION_MARKER)
+            return CAPTURE_TRUNCATION_MARKER + bytes(self.tail[-tail_limit:])
+        return bytes(self.head[-COMMAND_TAIL_BYTES:])
 
 
 def _control_group_has_live_scope(contents: str) -> bool:
@@ -173,47 +222,76 @@ class FixedLiveRunner:
         if not argv or argv[0] not in allowed:
             raise HarnessError("live runner rejected a non-fixed executable")
         started = time.monotonic_ns()
-        stream = output.open("a+b") if output else tempfile.TemporaryFile()
-        stderr = tempfile.TemporaryFile()
-        stdout_start = stream.tell()
+        stdout_capture = _BoundedCapture()
+        stderr_capture = _BoundedCapture()
+        timed_out = False
+        process = subprocess.Popen(
+            argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, start_new_session=True,
+            preexec_fn=_disable_command_core_dumps,
+        )
+        if process.stdout is None or process.stderr is None:
+            process.kill()
+            raise HarnessError("live runner could not capture command output")
+        selector = selectors.DefaultSelector()
+        streams = (
+            (process.stdout, stdout_capture),
+            (process.stderr, stderr_capture),
+        )
+        for stream, capture in streams:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, capture)
+        deadline = time.monotonic() + COMMAND_TIMEOUT_SECONDS
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if not timed_out:
+                    timed_out = True
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                elif time.monotonic() >= deadline + 1.0:
+                    for key in list(selector.get_map().values()):
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                    break
+                remaining = 0.1
+            events = selector.select(min(max(remaining, 0.0), 0.1))
+            for key, _ in events:
+                stream = key.fileobj
+                try:
+                    data = os.read(stream.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if data:
+                    key.data.append(data)
+                    continue
+                selector.unregister(stream)
+                stream.close()
+        selector.close()
+        returncode = process.wait()
+        if output is not None:
+            with output.open("ab") as stream:
+                stream.write(stdout_capture.retained())
+        tails = [capture.diagnostic_tail() for capture in
+                 (stdout_capture, stderr_capture) if capture.total_bytes]
+        tail = b"\n".join(tails)[-COMMAND_TAIL_BYTES:].decode(
+            "utf-8", errors="replace",
+        )
         exit_status: int | None = None
         terminating_signal: int | None = None
-        timed_out = False
-        try:
-            try:
-                result = subprocess.run(
-                    argv, check=False, stdin=subprocess.DEVNULL,
-                    stdout=stream, stderr=stderr,
-                    timeout=COMMAND_TIMEOUT_SECONDS,
-                )
-                if result.returncode < 0:
-                    terminating_signal = -result.returncode
-                else:
-                    exit_status = result.returncode
-            except subprocess.TimeoutExpired:
-                timed_out = True
-            stream.flush()
-            stderr.flush()
-            stdout_bytes = stream.tell() - stdout_start
-            stderr_bytes = stderr.tell()
-            tails: list[bytes] = []
-            if stdout_bytes:
-                stream.seek(max(stdout_start, stream.tell() - COMMAND_TAIL_BYTES))
-                tails.append(stream.read(COMMAND_TAIL_BYTES))
-            if stderr_bytes:
-                stderr.seek(max(0, stderr_bytes - COMMAND_TAIL_BYTES))
-                tails.append(stderr.read(COMMAND_TAIL_BYTES))
-            tail = b"\n".join(tails)[-COMMAND_TAIL_BYTES:].decode(
-                "utf-8", errors="replace",
-            )
-            return CommandResult(
-                exit_status, terminating_signal, timed_out,
-                stdout_bytes, stderr_bytes,
-                time.monotonic_ns() - started, output, tail,
-            )
-        finally:
-            stream.close()
-            stderr.close()
+        if not timed_out:
+            if returncode < 0:
+                terminating_signal = -returncode
+            else:
+                exit_status = returncode
+        return CommandResult(
+            exit_status, terminating_signal, timed_out,
+            stdout_capture.total_bytes, stderr_capture.total_bytes,
+            time.monotonic_ns() - started, output, tail,
+            stdout_capture.truncated or stderr_capture.truncated,
+        )
 
     def command_result(self, argv: list[str],
                        output: Path | None = None) -> CommandResult:
@@ -381,6 +459,8 @@ class FixedLiveRunner:
     def _query_failure(result: CommandResult) -> tuple[str, bool] | None:
         if result.timed_out:
             return "gwinfo query exceeded its command deadline", False
+        if result.capture_truncated:
+            return "gwinfo query exceeded its output capture limit", False
         if result.signal is not None:
             return f"gwinfo query terminated by signal {result.signal}", False
         if result.exit_status != 0:
@@ -663,7 +743,10 @@ class FixedLiveRunner:
         unit_name = name.removesuffix(".service")
         unit_log = self.artifacts / f"{unit_name}.log"
         argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={unit_name}",
-                "--collect", "--quiet", "--property=Type=exec"]
+                "--collect", "--quiet", "--property=Type=exec",
+                "--property=LimitCORE=0"]
+        if executable == "gwcomp":
+            argv.append("--setenv=GW_ALLOW_HARDWARE_TESTS=1")
         for value in properties or []:
             argv.append(f"--property={value}")
         argv += [f"--property=StandardOutput=append:{unit_log}",

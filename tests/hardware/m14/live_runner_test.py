@@ -19,8 +19,9 @@ import live_runner as live_runner_module  # noqa: E402
 from common import HarnessError  # noqa: E402
 from evidence import sealed_vrr_records  # noqa: E402
 from live_runner import (  # noqa: E402
-    CLEANUP_QUERY_ATTEMPTS, CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES,
-    COMMAND_DIAGNOSTIC_SCHEMA, FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS,
+    CAPTURE_TRUNCATION_MARKER, CLEANUP_QUERY_ATTEMPTS,
+    CLIENT_RESULT_WAIT_ATTEMPTS, COMMAND_TAIL_BYTES, COMMAND_DIAGNOSTIC_SCHEMA,
+    FIXED_BINARIES, LIVE_MANAGED_UNITS, LIVE_UNITS, MAX_COMMAND_CAPTURE_BYTES,
     QUERY_ATTEMPTS, QUERY_DIAGNOSTIC_SCHEMA, CommandResult, FixedLiveRunner,
 )
 
@@ -139,7 +140,8 @@ def query_result(output: Path | None, *, status: int | None = 0,
                  terminating_signal: int | None = None,
                  timed_out: bool = False, stdout_bytes: int | None = None,
                  stderr_bytes: int = 0, elapsed_ns: int = 10,
-                 tail: str = "") -> CommandResult:
+                 tail: str = "", capture_truncated: bool = False
+                 ) -> CommandResult:
     if stdout_bytes is None:
         stdout_bytes = output.stat().st_size if output and output.exists() else 0
     return CommandResult(
@@ -151,6 +153,7 @@ def query_result(output: Path | None, *, status: int | None = 0,
         elapsed_ns=elapsed_ns,
         output_path=output,
         bounded_tail=tail,
+        capture_truncated=capture_truncated,
     )
 
 
@@ -307,6 +310,8 @@ def test_snapshot_command_failures_are_typed(root: Path) -> None:
          "exited with status 2: permission denied"),
         ("timeout", query_result(None, status=None, timed_out=True),
          "exceeded its command deadline"),
+        ("capture", query_result(None, capture_truncated=True),
+         "exceeded its output capture limit"),
         ("signal", query_result(None, status=None, terminating_signal=9),
          "terminated by signal 9"),
     )
@@ -322,7 +327,7 @@ def test_snapshot_command_failures_are_typed(root: Path) -> None:
             return CommandResult(
                 result.exit_status, result.signal, result.timed_out,
                 result.stdout_bytes, result.stderr_bytes, result.elapsed_ns,
-                output, result.bounded_tail,
+                output, result.bounded_tail, result.capture_truncated,
             )
 
         runner = make_runner(case_root, execute, validate_runtime=True)
@@ -494,6 +499,9 @@ def test_start_unit_contract(root: Path) -> None:
     assert "--no-block" not in argv
     assert "--collect" in argv
     assert "--property=KillMode=mixed" in argv
+    assert not any("LimitFSIZE=" in argument for argument in argv)
+    assert "--property=LimitCORE=0" in argv
+    assert "--setenv=GW_ALLOW_HARDWARE_TESTS=1" not in argv
     assert f"--property=StandardOutput=append:{log}" in argv
     assert f"--property=StandardError=append:{log}" in argv
     assert output == log
@@ -501,6 +509,82 @@ def test_start_unit_contract(root: Path) -> None:
     assert argv[separator + 1:] == [
         str(FIXED_BINARIES["gwm"]), "--ipc-socket", "/run/test.sock",
     ]
+
+    runner.start_unit(
+        LIVE_UNITS["gwcomp"], "gwcomp", ["--backend", "drm"],
+    )
+    compositor_argv, _ = calls[1]
+    assert "--setenv=GW_ALLOW_HARDWARE_TESTS=1" in compositor_argv
+
+
+def test_execute_caps_output_during_execution(root: Path) -> None:
+    executable = Path(sys.executable)
+    assert executable.is_file()
+    FIXED_BINARIES["capture-limit-test"] = executable
+    output = root / "bounded.log"
+    emitted_bytes = MAX_COMMAND_CAPTURE_BYTES + 64 * 1024
+    script = (
+        "import os,sys; data=b'x'*int(sys.argv[1]); "
+        "os.write(1,data); os.write(2,data)"
+    )
+    try:
+        result = FixedLiveRunner._execute(
+            [str(executable), "-c", script, str(emitted_bytes)], output,
+        )
+    finally:
+        FIXED_BINARIES.pop("capture-limit-test")
+    assert not result.succeeded
+    assert result.exit_status == 0
+    assert result.capture_truncated
+    assert result.stdout_bytes == emitted_bytes
+    assert result.stderr_bytes == emitted_bytes
+    assert output.stat().st_size == MAX_COMMAND_CAPTURE_BYTES
+    assert CAPTURE_TRUNCATION_MARKER in output.read_bytes()
+    assert 0 < len(result.bounded_tail.encode("utf-8")) <= COMMAND_TAIL_BYTES
+    assert "capture truncated" in result.bounded_tail
+
+
+def test_execute_does_not_limit_command_artifacts(root: Path) -> None:
+    executable = Path(sys.executable)
+    FIXED_BINARIES["artifact-limit-test"] = executable
+    output = root / "command.log"
+    artifact = root / "large-report.ppm"
+    artifact_bytes = MAX_COMMAND_CAPTURE_BYTES + 64 * 1024
+    script = (
+        "import pathlib,sys; "
+        "pathlib.Path(sys.argv[1]).write_bytes(b'p'*int(sys.argv[2])); "
+        "print('ok')"
+    )
+    try:
+        result = FixedLiveRunner._execute(
+            [str(executable), "-c", script, str(artifact),
+             str(artifact_bytes)], output,
+        )
+    finally:
+        FIXED_BINARIES.pop("artifact-limit-test")
+    assert result.succeeded
+    assert not result.capture_truncated
+    assert output.read_bytes() == b"ok\n"
+    assert artifact.stat().st_size == artifact_bytes
+
+
+def test_execute_timeout_does_not_block_on_capture(root: Path) -> None:
+    executable = Path(sys.executable)
+    FIXED_BINARIES["capture-timeout-test"] = executable
+    previous_timeout = live_runner_module.COMMAND_TIMEOUT_SECONDS
+    live_runner_module.COMMAND_TIMEOUT_SECONDS = 0.05
+    started = live_runner_module.time.monotonic()
+    try:
+        result = FixedLiveRunner._execute(
+            [str(executable), "-c", "import time; time.sleep(5)"],
+            root / "timeout.log",
+        )
+    finally:
+        live_runner_module.COMMAND_TIMEOUT_SECONDS = previous_timeout
+        FIXED_BINARIES.pop("capture-timeout-test")
+    assert result.timed_out
+    assert not result.succeeded
+    assert live_runner_module.time.monotonic() - started < 2.0
 
 
 def test_detached_invocation_keeps_kernel_console_preflight(root: Path) -> None:
@@ -1129,6 +1213,18 @@ def main() -> int:
         contract = root / "contract"
         contract.mkdir()
         test_start_unit_contract(contract)
+
+        capture_limit = root / "capture-limit"
+        capture_limit.mkdir()
+        test_execute_caps_output_during_execution(capture_limit)
+
+        artifact_limit = root / "artifact-limit"
+        artifact_limit.mkdir()
+        test_execute_does_not_limit_command_artifacts(artifact_limit)
+
+        capture_timeout = root / "capture-timeout"
+        capture_timeout.mkdir()
+        test_execute_timeout_does_not_block_on_capture(capture_timeout)
 
         detached = root / "detached"
         detached.mkdir()
