@@ -213,6 +213,32 @@ it cannot be the sole readiness proof.
 Add another topology only when it isolates a specific migration boundary. Do
 not build a permanent combinatorial legacy/Rust matrix.
 
+### Retained Rust `gwcomp` checkpoint
+
+Run the active headless-compositor replacement checkpoint with:
+
+```sh
+cargo xtask test mixed gwcomp
+```
+
+The gate builds the Rust `gwcomp` binary when no candidate directory is
+supplied, then invokes the retained legacy-built process probes against that
+candidate. It covers listener and peer lifecycle, metadata scene handling,
+M13 output inventory, the canonical M4 frame golden, and the accepted headless
+scenario matrix. The golden and scenario probes use the retained legacy M4
+producer, preserving the oracle inputs while changing only the compositor
+process under test.
+
+Use `--legacy-build PATH` to select the configured Meson build containing the
+probe executables and producer. Use `--rust-bin-dir PATH` to test an already
+built Rust candidate without rebuilding it. `cargo xtask test mixed all` also
+includes this checkpoint.
+
+The M14 cadence/runtime selector is intentionally not part of this narrow
+mixed gate yet because its Rust-candidate differential is not green. Add that
+probe as a separate invocation once its behavior is fixed; do not weaken or
+regenerate the accepted cadence evidence to admit the replacement.
+
 ## Required failure artifacts
 
 A Tier 3 or higher failure should retain a bounded bundle containing:

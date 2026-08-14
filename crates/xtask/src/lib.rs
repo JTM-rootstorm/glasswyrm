@@ -14,7 +14,7 @@ Usage:
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test software-acceptance
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test headless gwcomp
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test checkpoint gwcomp
-  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|tools|all
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|gwcomp|tools|all
   cargo xtask test hardware-vrr -- HARNESS_ARGS...
 
 The legacy Meson build defaults to ./build. Set GW_LEGACY_BUILD_DIR or pass
@@ -50,6 +50,7 @@ pub enum TestTier {
     CheckpointGwcomp,
     MixedLegacyRestart,
     MixedGwm,
+    MixedGwcomp,
     MixedTools,
     MixedAll,
     HardwareVrr(Vec<String>),
@@ -203,16 +204,19 @@ fn parse_test(arguments: &mut impl Iterator<Item = String>) -> Result<TestTier, 
         }
         "mixed" => {
             let component = arguments.next().ok_or_else(|| {
-                "test mixed requires legacy-restart, gwm, tools, or all".to_owned()
+                "test mixed requires legacy-restart, gwm, gwcomp, tools, or all".to_owned()
             })?;
             ensure_finished(arguments)?;
             match component.as_str() {
                 "legacy-restart" => TestTier::MixedLegacyRestart,
                 "gwm" => TestTier::MixedGwm,
+                "gwcomp" => TestTier::MixedGwcomp,
                 "tools" => TestTier::MixedTools,
                 "all" => TestTier::MixedAll,
                 _ => {
-                    return Err("test mixed requires legacy-restart, gwm, tools, or all".to_owned());
+                    return Err(
+                        "test mixed requires legacy-restart, gwm, gwcomp, tools, or all".to_owned(),
+                    );
                 }
             }
         }
@@ -308,6 +312,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         invocation
     };
     let rust_gwm = || rust_bin_dir.join("gwm");
+    let rust_gwcomp = || rust_bin_dir.join("gwcomp");
     let rust_gwinfo = || rust_bin_dir.join("gwinfo");
     let rust_gwout = || rust_bin_dir.join("gwout");
     let legacy = |path: &str| legacy_build.join(path);
@@ -361,9 +366,51 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         ));
         invocations
     };
+    let rust_gwcomp_gate = || {
+        let mut invocations = Vec::new();
+        if build_default_rust_binaries {
+            invocations.push(cargo(&[
+                "build", "--locked", "-p", "gwcomp", "--bin", "gwcomp",
+            ]));
+        }
+        let candidate = || [rust_gwcomp().into_os_string()];
+        invocations.extend([
+            Invocation::new(
+                legacy("tests/manifest/graphics/headless/gwcomp_process_test").into_os_string(),
+                candidate(),
+            ),
+            Invocation::new(
+                legacy("tests/manifest/graphics/headless/gwcomp_metadata_process_test")
+                    .into_os_string(),
+                candidate(),
+            ),
+            Invocation::new(
+                legacy("tests/manifest/graphics/headless/gwcomp_output_inventory_process_test")
+                    .into_os_string(),
+                candidate(),
+            ),
+            Invocation::new(
+                legacy("tests/manifest/graphics/headless/gwcomp_golden_test").into_os_string(),
+                [
+                    rust_gwcomp().into_os_string(),
+                    legacy("src/gwcomp_m4_producer").into_os_string(),
+                ],
+            ),
+            Invocation::new(
+                legacy("tests/manifest/graphics/headless/gwcomp_scenario_matrix_test")
+                    .into_os_string(),
+                [
+                    rust_gwcomp().into_os_string(),
+                    legacy("src/gwcomp_m4_producer").into_os_string(),
+                ],
+            ),
+        ]);
+        invocations
+    };
     let mixed_all = || {
         let mut invocations = vec![legacy_restart()];
         invocations.extend(rust_gwm_gate());
+        invocations.extend(rust_gwcomp_gate());
         invocations.extend(rust_tools_gate());
         invocations
     };
@@ -406,6 +453,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         ],
         Task::Test(TestTier::MixedLegacyRestart) => vec![legacy_restart()],
         Task::Test(TestTier::MixedGwm) => rust_gwm_gate(),
+        Task::Test(TestTier::MixedGwcomp) => rust_gwcomp_gate(),
         Task::Test(TestTier::MixedTools) => rust_tools_gate(),
         Task::Test(TestTier::MixedAll) => mixed_all(),
         Task::Test(TestTier::HardwareVrr(arguments)) => {
@@ -495,6 +543,7 @@ mod tests {
                 TestTier::MixedLegacyRestart,
             ),
             (vec!["test", "mixed", "gwm"], TestTier::MixedGwm),
+            (vec!["test", "mixed", "gwcomp"], TestTier::MixedGwcomp),
             (vec!["test", "mixed", "tools"], TestTier::MixedTools),
             (vec!["test", "mixed", "all"], TestTier::MixedAll),
         ];
@@ -549,7 +598,7 @@ mod tests {
         )
         .unwrap();
         let invocations = plan(&cli, &context()).unwrap();
-        assert_eq!(invocations.len(), 12);
+        assert_eq!(invocations.len(), 18);
         assert_eq!(strings(&invocations[0]), ["fmt", "--all", "--", "--check"]);
         assert_eq!(
             strings(&invocations[1]),
@@ -571,7 +620,7 @@ mod tests {
         assert_eq!(invocations[4].program, "cargo");
         assert!(strings(&invocations[4]).contains(&"legacy-output-restart".to_owned()));
         assert_eq!(
-            invocations[11].program,
+            invocations[17].program,
             "/workspace/tests/tools/output_tools_test.sh"
         );
     }
@@ -680,6 +729,64 @@ mod tests {
                 "rust-env/gwout"
             ]
         );
+    }
+
+    #[test]
+    fn mixed_gwcomp_plan_runs_retained_legacy_probes_against_rust_candidate() {
+        let cli = Cli::parse(
+            [
+                "--legacy-build",
+                "legacy-out",
+                "--rust-bin-dir",
+                "rust-out",
+                "test",
+                "mixed",
+                "gwcomp",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap();
+        let invocations = plan(&cli, &context()).unwrap();
+        assert_eq!(invocations.len(), 5);
+        assert_eq!(
+            invocations[0].program,
+            "legacy-out/tests/manifest/graphics/headless/gwcomp_process_test"
+        );
+        assert_eq!(strings(&invocations[0]), ["rust-out/gwcomp"]);
+        assert_eq!(
+            invocations[1].program,
+            "legacy-out/tests/manifest/graphics/headless/gwcomp_metadata_process_test"
+        );
+        assert_eq!(strings(&invocations[1]), ["rust-out/gwcomp"]);
+        assert_eq!(
+            invocations[2].program,
+            "legacy-out/tests/manifest/graphics/headless/gwcomp_output_inventory_process_test"
+        );
+        assert_eq!(strings(&invocations[2]), ["rust-out/gwcomp"]);
+        assert_eq!(
+            invocations[3].program,
+            "legacy-out/tests/manifest/graphics/headless/gwcomp_golden_test"
+        );
+        assert_eq!(
+            strings(&invocations[3]),
+            ["rust-out/gwcomp", "legacy-out/src/gwcomp_m4_producer"]
+        );
+        assert_eq!(
+            invocations[4].program,
+            "legacy-out/tests/manifest/graphics/headless/gwcomp_scenario_matrix_test"
+        );
+        assert_eq!(
+            strings(&invocations[4]),
+            ["rust-out/gwcomp", "legacy-out/src/gwcomp_m4_producer"]
+        );
+        assert!(invocations.iter().all(|invocation| {
+            invocation.remove_hardware_authorization
+                && !invocation
+                    .args
+                    .iter()
+                    .any(|argument| argument.to_string_lossy().contains("m14"))
+        }));
     }
 
     #[test]
