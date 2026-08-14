@@ -3,8 +3,10 @@
 #include "tests/helpers/test_support.hpp"
 
 #include <csignal>
+#include <fcntl.h>
 #include <poll.h>
 #include <string>
+#include <sys/ioctl.h>
 
 namespace {
 
@@ -13,6 +15,19 @@ short ready(const int fd) {
   gw::test::require(::poll(&descriptor, 1, 100) == 1,
                     "signal pipe becomes readable");
   return descriptor.revents;
+}
+
+void fill_signal_pipe(
+    const glasswyrm::compositor::SignalRuntime& runtime, const int signal) {
+  const int capacity = ::fcntl(runtime.poll_fd(), F_SETPIPE_SZ, 4096);
+  gw::test::require(capacity >= 4096, "set a bounded signal pipe capacity");
+  for (int byte = 0; byte < capacity; ++byte) {
+    gw::test::require(::raise(signal) == 0, "fill the signal pipe");
+  }
+  int pending_bytes = 0;
+  gw::test::require(::ioctl(runtime.poll_fd(), FIONREAD, &pending_bytes) == 0 &&
+                        pending_bytes == capacity,
+                    "signal pipe reaches its byte capacity");
 }
 
 }  // namespace
@@ -35,6 +50,25 @@ int main() {
                       "signal tags survive async-safe delivery");
     gw::test::require(runtime.drain().stop == false,
                       "signal pipe drains completely");
+
+    fill_signal_pipe(runtime, SIGUSR1);
+    gw::test::require(::raise(SIGUSR2) == 0 && ::raise(SIGTERM) == 0,
+                      "deliver acquire and stop after signal pipe saturation");
+    const auto saturated_release = runtime.drain();
+    gw::test::require(saturated_release.stop &&
+                          saturated_release.virtual_terminal_release &&
+                          saturated_release.virtual_terminal_acquire,
+                      "full signal pipe preserves pending acquire and stop");
+
+    fill_signal_pipe(runtime, SIGTERM);
+    gw::test::require(::raise(SIGUSR1) == 0,
+                      "deliver release after signal pipe saturation");
+    const auto saturated_stop = runtime.drain();
+    gw::test::require(saturated_stop.stop &&
+                          saturated_stop.virtual_terminal_release,
+                      "full signal pipe preserves pending release");
+    gw::test::require(!runtime.drain().stop,
+                      "saturated signal pipe drains completely");
 
     SignalRuntime competing;
     gw::test::require(!competing.install(false, error),

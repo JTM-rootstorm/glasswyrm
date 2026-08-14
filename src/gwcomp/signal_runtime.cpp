@@ -1,5 +1,6 @@
 #include "gwcomp/signal_runtime.hpp"
 
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
@@ -12,18 +13,28 @@ namespace {
 
 volatile std::sig_atomic_t signal_pipe_fd = -1;
 
-constexpr unsigned char signal_tag(const int signal) noexcept {
-  if (signal == SIGUSR1) return 'R';
-  if (signal == SIGUSR2) return 'A';
-  return 'S';
+constexpr unsigned int kStopPending = 1U << 0U;
+constexpr unsigned int kReleasePending = 1U << 1U;
+constexpr unsigned int kAcquirePending = 1U << 2U;
+
+std::atomic<unsigned int> pending_signal_events{};
+static_assert(decltype(pending_signal_events)::is_always_lock_free,
+              "signal event state must remain async-signal-safe");
+
+constexpr unsigned int signal_event(const int signal) noexcept {
+  if (signal == SIGUSR1) return kReleasePending;
+  if (signal == SIGUSR2) return kAcquirePending;
+  return kStopPending;
 }
 
 void signal_handler(const int signal) noexcept {
   const int saved_errno = errno;
+  pending_signal_events.fetch_or(signal_event(signal),
+                                 std::memory_order_relaxed);
   const int fd = signal_pipe_fd;
   if (fd >= 0) {
-    const unsigned char tag = signal_tag(signal);
-    const auto written = ::write(fd, &tag, sizeof(tag));
+    constexpr unsigned char wake = 1;
+    const auto written = ::write(fd, &wake, sizeof(wake));
     static_cast<void>(written);
   }
   errno = saved_errno;
@@ -65,6 +76,7 @@ bool SignalRuntime::install(const bool virtual_terminal_events,
     restore();
     return false;
   }
+  pending_signal_events.store(0, std::memory_order_relaxed);
   signal_pipe_fd = pipe_[1];
   if (!install_handler(SIGINT, actions_->interrupt)) {
     error = std::string("cannot install SIGINT handler: ") +
@@ -100,21 +112,18 @@ bool SignalRuntime::install(const bool virtual_terminal_events,
 }
 
 SignalEvents SignalRuntime::drain() noexcept {
-  SignalEvents events;
-  unsigned char tags[32];
+  unsigned char wakeups[32];
   for (;;) {
-    const auto count = ::read(pipe_[0], tags, sizeof(tags));
+    const auto count = ::read(pipe_[0], wakeups, sizeof(wakeups));
     if (count <= 0) break;
-    for (ssize_t index = 0; index < count; ++index) {
-      switch (tags[index]) {
-        case 'S': events.stop = true; break;
-        case 'R': events.virtual_terminal_release = true; break;
-        case 'A': events.virtual_terminal_acquire = true; break;
-        default: break;
-      }
-    }
   }
-  return events;
+  const auto pending =
+      pending_signal_events.exchange(0, std::memory_order_relaxed);
+  return {
+      .stop = (pending & kStopPending) != 0,
+      .virtual_terminal_release = (pending & kReleasePending) != 0,
+      .virtual_terminal_acquire = (pending & kAcquirePending) != 0,
+  };
 }
 
 void SignalRuntime::restore() noexcept {
@@ -133,6 +142,7 @@ void SignalRuntime::restore() noexcept {
   release_installed_ = false;
   terminate_installed_ = false;
   interrupt_installed_ = false;
+  pending_signal_events.store(0, std::memory_order_relaxed);
   if (pipe_[0] >= 0) (void)::close(pipe_[0]);
   if (pipe_[1] >= 0) (void)::close(pipe_[1]);
   pipe_[0] = -1;
