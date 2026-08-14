@@ -51,7 +51,7 @@ impl ControlError {
 
 impl fmt::Display for ControlError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&crate::format::visible_text(&self.0))
     }
 }
 
@@ -519,5 +519,11 @@ mod tests {
                 .required_peer_capabilities
                 .contains(Capabilities::OUTPUT_CONTROL)
         );
+    }
+
+    #[test]
+    fn errors_make_peer_control_characters_visible() {
+        let error = ControlError::detail("peer said no\n\u{1b}[2J\u{7f}");
+        assert_eq!(error.to_string(), "peer said no\\x0a\\x1b[2J\\x7f");
     }
 }

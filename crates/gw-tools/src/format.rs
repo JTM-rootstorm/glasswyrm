@@ -158,11 +158,12 @@ fn push_outputs_text(output: &mut String, snapshot: &OutputSnapshot) {
         let name = metadata.map_or("unknown", |value| value.name.as_str());
         let kind = metadata.map_or("unknown", |value| kind_name(value.kind));
         let capabilities = metadata.map_or(0, |value| value.capability_flags);
+        write!(output, "output {} name=", output_id(*id))
+            .expect("writing into a String cannot fail");
+        push_visible_text(output, name);
         write!(
             output,
-            "output {} name={} kind={} enabled={} connected={} primary={} physical={}x{}@{} logical={},{} {}x{} scale={}/{} transform={} capabilities={}",
-            output_id(*id),
-            name,
+            " kind={} enabled={} connected={} primary={} physical={}x{}@{} logical={},{} {}x{} scale={}/{} transform={} capabilities={}",
             kind,
             boolean(state.enabled),
             boolean(capabilities & 1 != 0),
@@ -339,6 +340,23 @@ fn json_string(value: &str) -> String {
     output
 }
 
+pub(crate) fn visible_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    push_visible_text(&mut output, value);
+    output
+}
+
+fn push_visible_text(output: &mut String, value: &str) {
+    for character in value.chars() {
+        if character <= '\u{1f}' || character == '\u{7f}' {
+            write!(output, "\\x{:02x}", character as u32)
+                .expect("writing into a String cannot fail");
+        } else {
+            output.push(character);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -421,5 +439,31 @@ mod tests {
     #[test]
     fn json_escaping_matches_the_legacy_formatter() {
         assert_eq!(json_string("a\n\"\\\u{1}"), "\"a\\n\\\"\\\\\\u0001\"");
+    }
+
+    #[test]
+    fn text_makes_terminal_control_characters_visible() {
+        let mut value = snapshot();
+        value.descriptors.get_mut(&11).unwrap().name = "LEFT\n\u{1b}[2J\u{7f}".to_owned();
+
+        let text = format_outputs(&value, false);
+        assert!(text.contains("name=LEFT\\x0a\\x1b[2J\\x7f kind=headless"));
+        assert!(!text.contains("\n\u{1b}"));
+
+        assert!(format_outputs(&value, true).contains("\\n\\u001b[2J\u{7f}"));
+    }
+
+    #[test]
+    fn every_c0_character_and_delete_is_escaped() {
+        let controls: String = (0..=0x1f)
+            .chain(std::iter::once(0x7f))
+            .map(|value| char::from_u32(value).unwrap())
+            .collect();
+        let visible = visible_text(&controls);
+
+        assert!(visible.chars().all(|character| !character.is_control()));
+        assert!(visible.contains("\\x00"));
+        assert!(visible.contains("\\x1b"));
+        assert!(visible.ends_with("\\x7f"));
     }
 }

@@ -4,6 +4,7 @@ use gw_wire::OutputConfigurationAcknowledged;
 use gw_wire::vrr::{VrrDecision, VrrPolicyMode, VrrWindowPreference};
 
 use crate::OutputSnapshot;
+use crate::format::visible_text;
 
 const REASONS: [&str; 33] = [
     "output-disabled",
@@ -316,9 +317,11 @@ fn format_vrr_text(snapshot: &OutputSnapshot, selector: Option<&str>) -> String 
             .get(&output_id)
             .copied()
             .unwrap_or(VrrPolicyMode::Off);
+        write!(output, "0x{output_id:016x} ").expect("writing into a String cannot fail");
+        output.push_str(&visible_text(name));
         write!(
             output,
-            "0x{output_id:016x} {name} policy={} property_present={} hardware={} controllable={} simulated={} range=",
+            " policy={} property_present={} hardware={} controllable={} simulated={} range=",
             policy_name(policy),
             u8::from(capability.connector_property_present),
             u8::from(capability.hardware_capable),
@@ -490,8 +493,11 @@ fn json_string(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
-    use gw_wire::OutputConfigurationResult;
+    use gw_wire::vrr::OutputVrrCapabilityUpsert;
+    use gw_wire::{OutputConfigurationResult, OutputDescriptorUpsert, OutputKind};
 
     #[test]
     fn acknowledgement_json_matches_the_legacy_schema() {
@@ -509,5 +515,50 @@ mod tests {
             format_acknowledgement(&value, true),
             "{\"request_id\":2,\"result\":1,\"applied_generation\":3,\"primary_output_id\":\"000000000000000b\",\"root_width\":1280,\"root_height\":480,\"enabled_output_count\":2}\n"
         );
+    }
+
+    #[test]
+    fn vrr_text_makes_terminal_control_characters_visible_without_changing_json() {
+        let snapshot = OutputSnapshot {
+            descriptors: BTreeMap::from([(
+                11,
+                OutputDescriptorUpsert {
+                    output_id: 11,
+                    kind: OutputKind::Headless,
+                    capability_flags: 0,
+                    name: "LEFT\n\u{1b}[2J\u{7f}".to_owned(),
+                    physical_width_millimeters: 0,
+                    physical_height_millimeters: 0,
+                    supported_transform_mask: 1,
+                    minimum_scale_numerator: 1,
+                    minimum_scale_denominator: 1,
+                    maximum_scale_numerator: 1,
+                    maximum_scale_denominator: 1,
+                    maximum_scale_denominator_value: 1,
+                    maximum_physical_width: 640,
+                    maximum_physical_height: 480,
+                },
+            )]),
+            vrr_capabilities: BTreeMap::from([(
+                11,
+                OutputVrrCapabilityUpsert {
+                    output_id: 11,
+                    connector_property_present: false,
+                    hardware_capable: false,
+                    kms_controllable: false,
+                    simulated: true,
+                    range_available: false,
+                    atomic_required: false,
+                    minimum_refresh_millihertz: 0,
+                    maximum_refresh_millihertz: 0,
+                    reason_flags: 0,
+                    flags: 0,
+                },
+            )]),
+            ..OutputSnapshot::default()
+        };
+
+        assert!(format_vrr(&snapshot, None, false).contains("LEFT\\x0a\\x1b[2J\\x7f"));
+        assert!(format_vrr(&snapshot, None, true).contains("LEFT\\n\\u001b[2J\u{7f}"));
     }
 }

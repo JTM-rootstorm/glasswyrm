@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use gw_types::{MessageFlags, MessageType, Sequence, SnapshotDomain};
@@ -20,6 +20,11 @@ pub(crate) const OUTPUT_QUERY_FLAGS: u32 = (1 << 0) | (1 << 1) | (1 << 2);
 pub(crate) const OUTPUT_QUERY_WINDOWS: u32 = 1 << 3;
 pub(crate) const OUTPUT_QUERY_VRR: u32 = 1 << 4;
 const MAXIMUM_SNAPSHOT_ITEMS: u32 = u16::MAX as u32;
+const OUTPUT_QUERY_DESCRIPTORS: u32 = 1 << 0;
+const OUTPUT_QUERY_MODES: u32 = 1 << 1;
+const OUTPUT_QUERY_LAYOUT: u32 = 1 << 2;
+const MAXIMUM_MODES_PER_OUTPUT: usize = 128;
+const MAXIMUM_TOTAL_MODES: usize = gw_wire::MAXIMUM_MANAGED_OUTPUTS * MAXIMUM_MODES_PER_OUTPUT;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OutputSnapshot {
@@ -108,12 +113,15 @@ impl std::error::Error for SnapshotError {}
 pub(crate) struct SnapshotDecoder {
     request_id: u64,
     request_sequence: Sequence,
+    query_flags: u32,
     snapshot_id: u64,
     expected_items: u32,
     actual_items: u32,
     reading: bool,
     ended: bool,
     acknowledged: bool,
+    mode_ids: BTreeSet<u64>,
+    mode_counts: BTreeMap<u64, usize>,
     snapshot: OutputSnapshot,
 }
 
@@ -122,12 +130,15 @@ impl SnapshotDecoder {
         Self {
             request_id,
             request_sequence,
+            query_flags,
             snapshot_id: 0,
             expected_items: 0,
             actual_items: 0,
             reading: false,
             ended: false,
             acknowledged: false,
+            mode_ids: BTreeSet::new(),
+            mode_counts: BTreeMap::new(),
             snapshot: OutputSnapshot {
                 vrr_queried: query_flags & OUTPUT_QUERY_VRR != 0,
                 ..OutputSnapshot::default()
@@ -246,6 +257,7 @@ impl SnapshotDecoder {
         self.snapshot.root_width = acknowledgement.root_logical_width;
         self.snapshot.root_height = acknowledgement.root_logical_height;
         self.snapshot.enabled_output_count = acknowledgement.enabled_output_count;
+        self.validate_relationships()?;
         self.acknowledged = true;
         Ok(ConsumeOutcome::Complete)
     }
@@ -285,36 +297,55 @@ impl SnapshotDecoder {
                 let value = decode_output_descriptor_upsert(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed output record")
                 })?;
-                if self
-                    .snapshot
-                    .descriptors
-                    .insert(value.output_id, value)
-                    .is_some()
-                {
+                if self.snapshot.descriptors.contains_key(&value.output_id) {
                     return Err(SnapshotError::new(
                         "output snapshot contains a duplicate descriptor",
                     ));
                 }
+                if self.snapshot.descriptors.len() == gw_wire::MAXIMUM_MANAGED_OUTPUTS {
+                    return Err(SnapshotError::new(
+                        "output snapshot contains more than eight outputs",
+                    ));
+                }
+                self.snapshot.descriptors.insert(value.output_id, value);
             }
             MessageType::OUTPUT_MODE_UPSERT => {
                 let value = decode_output_mode_upsert(&record.payload)
                     .map_err(|_| SnapshotError::new("output snapshot contains an invalid mode"))?;
+                if !self.mode_ids.insert(value.mode_id) {
+                    return Err(SnapshotError::new(
+                        "output snapshot contains a duplicate mode ID",
+                    ));
+                }
+                if self.snapshot.modes.len() == MAXIMUM_TOTAL_MODES {
+                    return Err(SnapshotError::new(
+                        "output snapshot contains too many modes",
+                    ));
+                }
+                let count = self.mode_counts.entry(value.output_id).or_default();
+                if *count == MAXIMUM_MODES_PER_OUTPUT {
+                    return Err(SnapshotError::new(
+                        "output snapshot contains more than 128 modes for one output",
+                    ));
+                }
+                *count += 1;
                 self.snapshot.modes.push(value);
             }
             MessageType::OUTPUT_UPSERT => {
                 let value = decode_output_upsert(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed output record")
                 })?;
-                if self
-                    .snapshot
-                    .outputs
-                    .insert(value.output_id, value)
-                    .is_some()
-                {
+                if self.snapshot.outputs.contains_key(&value.output_id) {
                     return Err(SnapshotError::new(
                         "output snapshot contains duplicate layout state",
                     ));
                 }
+                if self.snapshot.outputs.len() == gw_wire::MAXIMUM_MANAGED_OUTPUTS {
+                    return Err(SnapshotError::new(
+                        "output snapshot contains more than eight outputs",
+                    ));
+                }
+                self.snapshot.outputs.insert(value.output_id, value);
             }
             MessageType::SURFACE_UPSERT => {
                 let value = decode_surface_upsert(&record.payload).map_err(|_| {
@@ -458,15 +489,108 @@ impl SnapshotDecoder {
         }
         Ok(ConsumeOutcome::Pending)
     }
+
+    fn validate_relationships(&self) -> Result<(), SnapshotError> {
+        let descriptors_queried = self.query_flags & OUTPUT_QUERY_DESCRIPTORS != 0;
+        let modes_queried = self.query_flags & OUTPUT_QUERY_MODES != 0;
+        let layout_queried = self.query_flags & OUTPUT_QUERY_LAYOUT != 0;
+
+        if descriptors_queried {
+            let mut names = BTreeSet::new();
+            if self
+                .snapshot
+                .descriptors
+                .values()
+                .any(|descriptor| !names.insert(descriptor.name.as_str()))
+            {
+                return Err(SnapshotError::new(
+                    "output snapshot contains duplicate output names",
+                ));
+            }
+        }
+        if descriptors_queried
+            && layout_queried
+            && self
+                .snapshot
+                .descriptors
+                .keys()
+                .ne(self.snapshot.outputs.keys())
+        {
+            return Err(SnapshotError::new(
+                "output snapshot descriptor and layout sets disagree",
+            ));
+        }
+        if modes_queried
+            && self.snapshot.modes.iter().any(|mode| {
+                (descriptors_queried && !self.snapshot.descriptors.contains_key(&mode.output_id))
+                    || (layout_queried && !self.snapshot.outputs.contains_key(&mode.output_id))
+            })
+        {
+            return Err(SnapshotError::new(
+                "output snapshot mode references an unknown output",
+            ));
+        }
+        if layout_queried {
+            let enabled_count = self
+                .snapshot
+                .outputs
+                .values()
+                .filter(|output| output.enabled)
+                .count();
+            if self.snapshot.outputs.is_empty()
+                || enabled_count != self.snapshot.enabled_output_count as usize
+                || !self
+                    .snapshot
+                    .outputs
+                    .get(&self.snapshot.primary_output_id)
+                    .is_some_and(|output| output.enabled)
+            {
+                return Err(SnapshotError::new(
+                    "output snapshot acknowledgement does not match its layout",
+                ));
+            }
+        }
+        if layout_queried
+            && self.snapshot.windows.values().any(|window| {
+                !self
+                    .snapshot
+                    .outputs
+                    .contains_key(&window.primary_output_id)
+                    || window
+                        .output_ids
+                        .iter()
+                        .any(|output_id| !self.snapshot.outputs.contains_key(output_id))
+            })
+        {
+            return Err(SnapshotError::new(
+                "window snapshot references an unknown output",
+            ));
+        }
+        let mut surface_ids = BTreeSet::new();
+        if self
+            .snapshot
+            .windows
+            .values()
+            .any(|window| !surface_ids.insert(window.surface_id))
+        {
+            return Err(SnapshotError::new(
+                "window snapshot contains duplicate surface identities",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use gw_ipc::ReceivedRecord;
     use gw_types::{Generation, SnapshotId};
+    use gw_wire::compositor::{OutputUpsert, SdrColorMetadata, Transform, encode_output_upsert};
     use gw_wire::{
-        Envelope, OutputConfigurationAcknowledged, SnapshotBegin,
-        encode_output_configuration_acknowledged, encode_snapshot_begin,
+        Envelope, OutputConfigurationAcknowledged, OutputDescriptorUpsert, OutputKind,
+        OutputModeUpsert, SnapshotBegin, SnapshotEnd, encode_output_configuration_acknowledged,
+        encode_output_descriptor_upsert, encode_output_mode_upsert, encode_snapshot_begin,
+        encode_snapshot_end,
     };
 
     use super::*;
@@ -506,6 +630,86 @@ mod tests {
                 enabled_output_count: 1,
             }),
         )
+    }
+
+    fn begin(expected_item_count: u32) -> ReceivedRecord {
+        record(
+            MessageType::SNAPSHOT_BEGIN,
+            2,
+            MessageFlags::default(),
+            0,
+            encode_snapshot_begin(SnapshotBegin {
+                snapshot_id: SnapshotId::new(91),
+                domain: SnapshotDomain::Outputs,
+                flags: 0,
+                generation: Generation::new(1),
+                expected_item_count,
+            }),
+        )
+    }
+
+    fn end(actual_item_count: u32) -> ReceivedRecord {
+        record(
+            MessageType::SNAPSHOT_END,
+            2,
+            MessageFlags::default(),
+            0,
+            encode_snapshot_end(SnapshotEnd {
+                snapshot_id: SnapshotId::new(91),
+                generation: Generation::new(1),
+                actual_item_count,
+            }),
+        )
+    }
+
+    fn descriptor(output_id: u64, name: String) -> OutputDescriptorUpsert {
+        OutputDescriptorUpsert {
+            output_id,
+            kind: OutputKind::Headless,
+            capability_flags: 0x2b,
+            name,
+            physical_width_millimeters: 0,
+            physical_height_millimeters: 0,
+            supported_transform_mask: 1,
+            minimum_scale_numerator: 1,
+            minimum_scale_denominator: 1,
+            maximum_scale_numerator: 4,
+            maximum_scale_denominator: 1,
+            maximum_scale_denominator_value: 120,
+            maximum_physical_width: 4096,
+            maximum_physical_height: 4096,
+        }
+    }
+
+    fn mode(output_id: u64, mode_id: u64) -> OutputModeUpsert {
+        OutputModeUpsert {
+            output_id,
+            mode_id,
+            physical_width: 640,
+            physical_height: 480,
+            refresh_millihertz: 60_000,
+            preferred: true,
+            current: true,
+            flags: 0,
+        }
+    }
+
+    fn output(output_id: u64) -> OutputUpsert {
+        OutputUpsert {
+            output_id,
+            enabled: true,
+            logical_x: 0,
+            logical_y: 0,
+            logical_width: 640,
+            logical_height: 480,
+            physical_pixel_width: 640,
+            physical_pixel_height: 480,
+            refresh_millihertz: 60_000,
+            scale_numerator: 1,
+            scale_denominator: 1,
+            transform: Transform::Normal,
+            color: SdrColorMetadata::default(),
+        }
     }
 
     #[test]
@@ -550,6 +754,138 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "control server rejected the output query"
+        );
+    }
+
+    #[test]
+    fn ninth_output_is_rejected_before_snapshot_allocation_can_grow() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_DESCRIPTORS);
+        decoder.consume(&begin(9)).unwrap();
+        for output_id in 1..=8 {
+            let payload = encode_output_descriptor_upsert(&descriptor(
+                output_id,
+                format!("OUTPUT-{output_id}"),
+            ))
+            .unwrap();
+            decoder
+                .consume(&record(
+                    MessageType::OUTPUT_DESCRIPTOR_UPSERT,
+                    output_id + 2,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    payload,
+                ))
+                .unwrap();
+        }
+        let payload =
+            encode_output_descriptor_upsert(&descriptor(9, "OUTPUT-9".to_owned())).unwrap();
+        assert_eq!(
+            decoder
+                .consume(&record(
+                    MessageType::OUTPUT_DESCRIPTOR_UPSERT,
+                    11,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    payload,
+                ))
+                .unwrap_err()
+                .to_string(),
+            "output snapshot contains more than eight outputs"
+        );
+    }
+
+    #[test]
+    fn hundred_twenty_ninth_mode_for_one_output_is_rejected() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_MODES);
+        decoder.consume(&begin(129)).unwrap();
+        for mode_id in 1..=128 {
+            decoder
+                .consume(&record(
+                    MessageType::OUTPUT_MODE_UPSERT,
+                    mode_id + 2,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    encode_output_mode_upsert(&mode(11, mode_id)),
+                ))
+                .unwrap();
+        }
+        assert_eq!(
+            decoder
+                .consume(&record(
+                    MessageType::OUTPUT_MODE_UPSERT,
+                    131,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    encode_output_mode_upsert(&mode(11, 129)),
+                ))
+                .unwrap_err()
+                .to_string(),
+            "output snapshot contains more than 128 modes for one output"
+        );
+    }
+
+    #[test]
+    fn duplicate_mode_ids_are_rejected_across_outputs() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_MODES);
+        decoder.consume(&begin(2)).unwrap();
+        decoder
+            .consume(&record(
+                MessageType::OUTPUT_MODE_UPSERT,
+                3,
+                MessageFlags::SNAPSHOT_ITEM,
+                0,
+                encode_output_mode_upsert(&mode(11, 21)),
+            ))
+            .unwrap();
+        assert_eq!(
+            decoder
+                .consume(&record(
+                    MessageType::OUTPUT_MODE_UPSERT,
+                    4,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    encode_output_mode_upsert(&mode(12, 21)),
+                ))
+                .unwrap_err()
+                .to_string(),
+            "output snapshot contains a duplicate mode ID"
+        );
+    }
+
+    #[test]
+    fn non_vrr_queries_validate_inventory_relationships() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_FLAGS);
+        decoder.consume(&begin(3)).unwrap();
+        let descriptor_payload =
+            encode_output_descriptor_upsert(&descriptor(11, "LEFT".to_owned())).unwrap();
+        for (message_type, payload) in [
+            (MessageType::OUTPUT_DESCRIPTOR_UPSERT, descriptor_payload),
+            (
+                MessageType::OUTPUT_MODE_UPSERT,
+                encode_output_mode_upsert(&mode(12, 21)),
+            ),
+            (
+                MessageType::OUTPUT_UPSERT,
+                encode_output_upsert(&output(11)),
+            ),
+        ] {
+            decoder
+                .consume(&record(
+                    message_type,
+                    3,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    payload,
+                ))
+                .unwrap();
+        }
+        decoder.consume(&end(3)).unwrap();
+        assert_eq!(
+            decoder
+                .consume(&acknowledgement(OutputConfigurationResult::Accepted))
+                .unwrap_err()
+                .to_string(),
+            "output snapshot mode references an unknown output"
         );
     }
 }

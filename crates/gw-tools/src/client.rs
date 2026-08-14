@@ -30,7 +30,7 @@ impl QueryError {
 
 impl fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&crate::format::visible_text(&self.0))
     }
 }
 
@@ -215,5 +215,11 @@ mod tests {
                 .contains(Capabilities::OUTPUT_CONTROL)
         );
         assert_eq!(config.limits, TransportLimits::new(4096, 0).unwrap());
+    }
+
+    #[test]
+    fn errors_make_peer_control_characters_visible() {
+        let error = QueryError::detail("peer said no\n\u{1b}[2J\u{7f}");
+        assert_eq!(error.to_string(), "peer said no\\x0a\\x1b[2J\\x7f");
     }
 }
