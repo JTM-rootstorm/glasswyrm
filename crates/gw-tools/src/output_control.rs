@@ -456,6 +456,11 @@ fn send_until(
     deadline: Instant,
 ) -> Result<(), ControlError> {
     loop {
+        if Instant::now() >= deadline {
+            return Err(ControlError::detail(
+                "timed out sending an output control request",
+            ));
+        }
         match transport.send(envelope, payload, &[]) {
             Ok(()) => return Ok(()),
             Err(TransportError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -472,6 +477,9 @@ fn receive_until(
     timeout_action: &'static str,
 ) -> Result<gw_ipc::ReceivedRecord, ControlError> {
     loop {
+        if Instant::now() >= deadline {
+            return Err(ControlError::detail(format!("timed out {timeout_action}")));
+        }
         match transport.receive() {
             Ok(record) => return Ok(record),
             Err(TransportError::Io(error)) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -525,5 +533,17 @@ mod tests {
     fn errors_make_peer_control_characters_visible() {
         let error = ControlError::detail("peer said no\n\u{1b}[2J\u{7f}");
         assert_eq!(error.to_string(), "peer said no\\x0a\\x1b[2J\\x7f");
+    }
+
+    #[test]
+    fn a_ready_record_does_not_bypass_an_expired_receive_deadline() {
+        let limits = TransportLimits::new(4096, 0).unwrap();
+        let (receiver, sender) = Transport::pair(limits).unwrap();
+        let envelope = Envelope::request(MessageType::PING, Sequence::new(1), 0);
+        sender.send(&envelope, &[], &[]).unwrap();
+
+        let error =
+            receive_until(&receiver, Instant::now(), "receiving a test record").unwrap_err();
+        assert_eq!(error.to_string(), "timed out receiving a test record");
     }
 }

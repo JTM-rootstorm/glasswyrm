@@ -25,6 +25,7 @@ const OUTPUT_QUERY_MODES: u32 = 1 << 1;
 const OUTPUT_QUERY_LAYOUT: u32 = 1 << 2;
 const MAXIMUM_MODES_PER_OUTPUT: usize = 128;
 const MAXIMUM_TOTAL_MODES: usize = gw_wire::MAXIMUM_MANAGED_OUTPUTS * MAXIMUM_MODES_PER_OUTPUT;
+const MAXIMUM_WINDOWS: usize = 4096;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OutputSnapshot {
@@ -122,6 +123,7 @@ pub(crate) struct SnapshotDecoder {
     acknowledged: bool,
     mode_ids: BTreeSet<u64>,
     mode_counts: BTreeMap<u64, usize>,
+    surface_windows: BTreeMap<u64, u32>,
     snapshot: OutputSnapshot,
 }
 
@@ -139,6 +141,7 @@ impl SnapshotDecoder {
             acknowledged: false,
             mode_ids: BTreeSet::new(),
             mode_counts: BTreeMap::new(),
+            surface_windows: BTreeMap::new(),
             snapshot: OutputSnapshot {
                 vrr_queried: query_flags & OUTPUT_QUERY_VRR != 0,
                 ..OutputSnapshot::default()
@@ -356,12 +359,7 @@ impl SnapshotDecoder {
                         "window snapshot contains an invalid surface",
                     ));
                 }
-                let window = self
-                    .snapshot
-                    .windows
-                    .entry(value.x11_window_id)
-                    .or_insert_with(|| WindowSnapshot::new(value.surface_id, value.x11_window_id));
-                window.surface_id = value.surface_id;
+                let window = self.window_for_record(value.surface_id, value.x11_window_id)?;
                 window.logical_x = value.logical_x;
                 window.logical_y = value.logical_y;
                 window.logical_width = value.logical_width;
@@ -378,12 +376,7 @@ impl SnapshotDecoder {
                         "window snapshot contains invalid policy state",
                     ));
                 }
-                let window = self
-                    .snapshot
-                    .windows
-                    .entry(value.x11_window_id)
-                    .or_insert_with(|| WindowSnapshot::new(value.surface_id, value.x11_window_id));
-                window.surface_id = value.surface_id;
+                let window = self.window_for_record(value.surface_id, value.x11_window_id)?;
                 window.focused = value.focused;
                 window.fullscreen = value.applied_state == gw_wire::PolicyAppliedState::Fullscreen;
             }
@@ -391,14 +384,16 @@ impl SnapshotDecoder {
                 let value = decode_surface_output_state(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed window record")
                 })?;
-                let window = self
-                    .snapshot
-                    .windows
-                    .values_mut()
-                    .find(|window| window.surface_id == value.surface_id)
+                let window_id = self
+                    .surface_windows
+                    .get(&value.surface_id)
+                    .copied()
                     .ok_or_else(|| {
                         SnapshotError::new("window membership precedes its surface record")
                     })?;
+                let window = self.snapshot.windows.get_mut(&window_id).ok_or_else(|| {
+                    SnapshotError::new("window membership precedes its surface record")
+                })?;
                 window.primary_output_id = value.primary_output_id;
                 window.output_ids = value.output_ids;
                 window.preferred_scale_numerator = value.preferred_scale_numerator;
@@ -455,16 +450,17 @@ impl SnapshotDecoder {
                 let value = decode_surface_vrr_state(&record.payload).map_err(|_| {
                     SnapshotError::new("control server sent a malformed VRR record")
                 })?;
-                if self
-                    .snapshot
-                    .vrr_windows
-                    .insert(value.window_id, value)
-                    .is_some()
-                {
+                if self.snapshot.vrr_windows.contains_key(&value.window_id) {
                     return Err(SnapshotError::new(
                         "VRR snapshot contains duplicate window state",
                     ));
                 }
+                if self.snapshot.vrr_windows.len() == MAXIMUM_WINDOWS {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains more than 4096 window states",
+                    ));
+                }
+                self.snapshot.vrr_windows.insert(value.window_id, value);
             }
             MessageType::PRESENTATION_TIMING => {
                 let value = decode_presentation_timing(&record.payload).map_err(|_| {
@@ -488,6 +484,42 @@ impl SnapshotDecoder {
             }
         }
         Ok(ConsumeOutcome::Pending)
+    }
+
+    fn window_for_record(
+        &mut self,
+        surface_id: u64,
+        window_id: u32,
+    ) -> Result<&mut WindowSnapshot, SnapshotError> {
+        if self
+            .surface_windows
+            .get(&surface_id)
+            .is_some_and(|&existing| existing != window_id)
+            || self
+                .snapshot
+                .windows
+                .get(&window_id)
+                .is_some_and(|existing| existing.surface_id != surface_id)
+        {
+            return Err(SnapshotError::new(
+                "window snapshot contains conflicting surface identities",
+            ));
+        }
+        if !self.snapshot.windows.contains_key(&window_id) {
+            if self.snapshot.windows.len() == MAXIMUM_WINDOWS {
+                return Err(SnapshotError::new(
+                    "window snapshot contains more than 4096 windows",
+                ));
+            }
+            self.snapshot
+                .windows
+                .insert(window_id, WindowSnapshot::new(surface_id, window_id));
+            self.surface_windows.insert(surface_id, window_id);
+        }
+        self.snapshot
+            .windows
+            .get_mut(&window_id)
+            .ok_or_else(|| SnapshotError::new("window snapshot contains invalid surface state"))
     }
 
     fn validate_relationships(&self) -> Result<(), SnapshotError> {
@@ -585,7 +617,11 @@ impl SnapshotDecoder {
 mod tests {
     use gw_ipc::ReceivedRecord;
     use gw_types::{Generation, SnapshotId};
-    use gw_wire::compositor::{OutputUpsert, SdrColorMetadata, Transform, encode_output_upsert};
+    use gw_wire::compositor::{
+        OPACITY_ONE, OutputUpsert, SdrColorMetadata, SurfaceUpsert, Transform, TriState,
+        encode_output_upsert, encode_surface_upsert,
+    };
+    use gw_wire::vrr::{SurfaceVrrState, VrrWindowPreference, encode_surface_vrr_state};
     use gw_wire::{
         Envelope, OutputConfigurationAcknowledged, OutputDescriptorUpsert, OutputKind,
         OutputModeUpsert, SnapshotBegin, SnapshotEnd, encode_output_configuration_acknowledged,
@@ -712,6 +748,52 @@ mod tests {
         }
     }
 
+    fn surface(surface_id: u64, window_id: u32) -> SurfaceUpsert {
+        SurfaceUpsert {
+            surface_id,
+            x11_window_id: window_id,
+            parent_surface_id: 0,
+            output_id: 11,
+            logical_x: 0,
+            logical_y: 0,
+            logical_width: 1,
+            logical_height: 1,
+            stacking: 0,
+            visible: true,
+            clipping: false,
+            clip_x: 0,
+            clip_y: 0,
+            clip_width: 0,
+            clip_height: 0,
+            transform: Transform::Normal,
+            opacity: OPACITY_ONE,
+            scale_numerator: 1,
+            scale_denominator: 1,
+            color: SdrColorMetadata::default(),
+            presentation_flags: 0,
+            fullscreen_eligible: TriState::Unknown,
+            direct_scanout_eligible: TriState::Unknown,
+        }
+    }
+
+    fn surface_vrr_state(surface_id: u64, window_id: u32) -> SurfaceVrrState {
+        SurfaceVrrState {
+            surface_id,
+            window_id,
+            output_id: 11,
+            preference: VrrWindowPreference::Default,
+            policy_selected: false,
+            policy_eligible: false,
+            focused: false,
+            fullscreen: false,
+            borderless_fullscreen: false,
+            exclusive_output_membership: false,
+            reason_flags: 0,
+            policy_generation: 1,
+            flags: 0,
+        }
+    }
+
     #[test]
     fn busy_is_typed_only_before_snapshot_framing() {
         let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_FLAGS);
@@ -791,6 +873,100 @@ mod tests {
                 .unwrap_err()
                 .to_string(),
             "output snapshot contains more than eight outputs"
+        );
+    }
+
+    #[test]
+    fn four_thousand_ninety_seventh_window_is_rejected() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_WINDOWS);
+        decoder.consume(&begin(4097)).unwrap();
+        for window_id in 1..=4096 {
+            decoder
+                .consume(&record(
+                    MessageType::SURFACE_UPSERT,
+                    u64::from(window_id) + 2,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    encode_surface_upsert(&surface(u64::from(window_id), window_id)),
+                ))
+                .unwrap();
+        }
+        assert_eq!(decoder.snapshot.windows.len(), 4096);
+        assert_eq!(decoder.surface_windows.len(), 4096);
+
+        let error = decoder
+            .consume(&record(
+                MessageType::SURFACE_UPSERT,
+                4099,
+                MessageFlags::SNAPSHOT_ITEM,
+                0,
+                encode_surface_upsert(&surface(4097, 4097)),
+            ))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "window snapshot contains more than 4096 windows"
+        );
+    }
+
+    #[test]
+    fn surface_identity_cannot_be_reassigned_between_windows() {
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_WINDOWS);
+        decoder.consume(&begin(2)).unwrap();
+        decoder
+            .consume(&record(
+                MessageType::SURFACE_UPSERT,
+                3,
+                MessageFlags::SNAPSHOT_ITEM,
+                0,
+                encode_surface_upsert(&surface(1, 1)),
+            ))
+            .unwrap();
+
+        let error = decoder
+            .consume(&record(
+                MessageType::SURFACE_UPSERT,
+                4,
+                MessageFlags::SNAPSHOT_ITEM,
+                0,
+                encode_surface_upsert(&surface(1, 2)),
+            ))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "window snapshot contains conflicting surface identities"
+        );
+    }
+
+    #[test]
+    fn four_thousand_ninety_seventh_vrr_window_state_is_rejected() {
+        let flags = OUTPUT_QUERY_WINDOWS | OUTPUT_QUERY_VRR;
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), flags);
+        decoder.consume(&begin(4097)).unwrap();
+        for window_id in 1..=4096 {
+            decoder
+                .consume(&record(
+                    MessageType::SURFACE_VRR_STATE,
+                    u64::from(window_id) + 2,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    0,
+                    encode_surface_vrr_state(&surface_vrr_state(u64::from(window_id), window_id)),
+                ))
+                .unwrap();
+        }
+
+        let error = decoder
+            .consume(&record(
+                MessageType::SURFACE_VRR_STATE,
+                4099,
+                MessageFlags::SNAPSHOT_ITEM,
+                0,
+                encode_surface_vrr_state(&surface_vrr_state(4097, 4097)),
+            ))
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "VRR snapshot contains more than 4096 window states"
         );
     }
 
