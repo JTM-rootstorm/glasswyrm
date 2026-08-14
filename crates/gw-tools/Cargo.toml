@@ -1,0 +1,19 @@
+[package]
+name = "gw-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Glasswyrm command-line control and diagnostic tools"
+
+[[bin]]
+name = "gwinfo"
+path = "src/bin/gwinfo.rs"
+
+[dependencies]
+gw-ipc = { path = "../gw-ipc" }
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+
+[lints]
+workspace = true

@@ -6,6 +6,7 @@ members = [
   "crates/gw-wire",
   "crates/gwcomp-core",
   "crates/gw-ipc",
+  "crates/gw-tools",
   "crates/gwm",
   "crates/gwm-core",
   "crates/xtask",
