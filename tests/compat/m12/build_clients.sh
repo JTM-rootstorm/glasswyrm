@@ -10,6 +10,47 @@ archive=$1 source=$2 build=$3 prefix=$4
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 manifest=$here/clients.toml
 signature=$archive.sig
+marker_name=.glasswyrm-m12-client-build-root
+marker_value=glasswyrm-m12-client-build-root-v1
+
+command -v realpath >/dev/null || {
+  printf '%s\n' 'Missing required tool: realpath' >&2
+  exit 1
+}
+if [[ $source != /* || $build != /* || $prefix != /* ]]; then
+  printf '%s\n' 'Client build directories must be absolute paths.' >&2
+  exit 2
+fi
+source_canonical=$(realpath -m -- "$source")
+build_canonical=$(realpath -m -- "$build")
+prefix_canonical=$(realpath -m -- "$prefix")
+client_root=$(dirname -- "$source_canonical")
+root_canonical=$(realpath -e -- "$client_root") || {
+  printf 'Client build root does not exist: %s\n' "$client_root" >&2
+  exit 2
+}
+if [[ $root_canonical == / || $client_root != "$root_canonical" ||
+      -L $client_root ||
+      $source != "$source_canonical" || $build != "$build_canonical" ||
+      $prefix != "$prefix_canonical" ||
+      $source_canonical != "$root_canonical/source" ||
+      $build_canonical != "$root_canonical/build" ||
+      $prefix_canonical != "$root_canonical/install" ]]; then
+  printf '%s\n' \
+    'Client build directories must be canonical source/build/install children.' >&2
+  exit 2
+fi
+for directory in "$source" "$build" "$prefix"; do
+  if [[ -L $directory ]]; then
+    printf 'Refusing symlink client build directory: %s\n' "$directory" >&2
+    exit 2
+  fi
+done
+marker=$root_canonical/$marker_name
+if [[ ! -f $marker || -L $marker || $(<"$marker") != "$marker_value" ]]; then
+  printf 'Client build root marker is missing or invalid: %s\n' "$marker" >&2
+  exit 2
+fi
 for tool in cmake ninja pkg-config cc; do
   command -v "$tool" >/dev/null || { printf 'Missing required tool: %s\n' "$tool" >&2; exit 1; }
 done

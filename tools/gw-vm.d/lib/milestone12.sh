@@ -388,6 +388,8 @@ trap cleanup EXIT
 
 rm -rf "$artifact_dir" "$clients" "$dumps" "$scenes" "$renderer" "$control"
 mkdir -p "$artifact_dir" "$clients" "$dumps" "$scenes" "$renderer" "$control"
+printf '%s\n' glasswyrm-m12-client-build-root-v1 \
+  >"$clients/.glasswyrm-m12-client-build-root"
 chmod 0700 "$artifact_dir" "$control"
 
 failure_stage=dependencies

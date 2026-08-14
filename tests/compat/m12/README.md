@@ -35,13 +35,20 @@ Repository tools:
 Typical build shape:
 
 ```sh
+install -d -m 0755 /var/tmp/glasswyrm-m12-clients
+printf '%s\n' glasswyrm-m12-client-build-root-v1 \
+  >/var/tmp/glasswyrm-m12-clients/.glasswyrm-m12-client-build-root
 tests/compat/m12/acquire_sdl.sh /var/tmp/glasswyrm-m12-clients/download
 tests/compat/m12/build_clients.sh \
   /var/tmp/glasswyrm-m12-clients/download/SDL2-2.32.10.tar.gz \
   /var/tmp/glasswyrm-m12-clients/source \
   /var/tmp/glasswyrm-m12-clients/build \
-  /var/tmp/glasswyrm-m12-clients/prefix
+  /var/tmp/glasswyrm-m12-clients/install
 ```
+
+The build helper deletes and recreates only the canonical `source`, `build`,
+and `install` children of a root bearing that exact marker. It rejects relative,
+broad, and symlinked cleanup targets.
 
 The runtime harness starts Glasswyrm before invoking `run_workloads.py`. The
 `no-shm` profile is valid only against a server explicitly launched with

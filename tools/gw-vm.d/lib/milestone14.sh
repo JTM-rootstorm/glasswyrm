@@ -496,6 +496,9 @@ for forbidden in x11-base/xorg-server x11-base/xwayland x11-base/xwayland-run \
 done
 
 failure_stage=sdl-acquisition
+install -d -m 0755 "$clients"
+printf '%s\n' glasswyrm-m12-client-build-root-v1 \
+  >"$clients/.glasswyrm-m12-client-build-root"
 "$source_dir/tests/compat/m12/acquire_sdl.sh" "$clients/download"
 sdl_archive=$clients/download/SDL2-2.32.10.tar.gz
 [[ $(sha256sum "$sdl_archive" | awk '{print $1}') == \

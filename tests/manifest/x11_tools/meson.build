@@ -254,6 +254,17 @@ test(
   suite: test_contract_suites,
 )
 
+m12_client_build_safety_test = find_program(
+  tests_source_dir / 'compat/m12/build_clients_safety_test.sh',
+)
+test(
+  'm12-client-build-cleanup-safety',
+  m12_client_build_safety_test,
+  args: [meson.project_source_root()],
+  timeout: 10,
+  suite: test_contract_suites,
+)
+
 m12_frame_evidence_test = find_program(tests_source_dir / 'compat/m12/frame_evidence_test.py')
 test(
   'm12-frame-evidence',
