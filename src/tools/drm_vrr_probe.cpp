@@ -407,6 +407,7 @@ int run_drm_vrr_probe(drm::DrmApi& drm_api, drm::KmsApi& kms,
   }
   std::uint64_t token{1};
   std::uint64_t transition{1};
+  bool page_flip_completion_unproven{};
   auto run_phase = [&](const std::string_view phase, const bool enabled,
                        const std::uint32_t count,
                        const std::uint32_t warmup) -> bool {
@@ -448,12 +449,23 @@ int run_drm_vrr_probe(drm::DrmApi& drm_api, drm::KmsApi& kms,
             report_error);
         return false;
       }
+      page_flip_completion_unproven = true;
       platform.submitted(token, selected.pipeline.crtc, enabled, ordinal);
       pollfd descriptor{device->poll_fd(), POLLIN, 0};
       const int ready = ::poll(&descriptor, 1,
                                static_cast<int>(options.event_timeout_milliseconds));
-      if (ready != 1) { error = "probe page-flip event timed out"; return false; }
+      if (ready != 1) {
+        device->abandon_page_flip(cookie);
+        error = ready == 0 ? "probe page-flip event timed out"
+                           : "probe page-flip event wait failed: " +
+                                 std::string(std::strerror(errno));
+        return false;
+      }
       auto event = device->service_events(descriptor.revents);
+      if (cookie->completed)
+        page_flip_completion_unproven = false;
+      else
+        device->abandon_page_flip(cookie);
       std::uint64_t dequeued{};
       if (!platform.monotonic_nanoseconds(dequeued, error)) return false;
       if (event.kind != drm::DrmEventKind::PageFlip || event.token != token ||
@@ -494,7 +506,12 @@ int run_drm_vrr_probe(drm::DrmApi& drm_api, drm::KmsApi& kms,
 
   std::string restore_error;
   bool restored = true;
-  if (display_taken)
+  if (page_flip_completion_unproven) {
+    restored = false;
+    restore_error =
+        "saved KMS state not restored because page-flip completion was not "
+        "observed";
+  } else if (display_taken)
     restored = drm::restore_saved_state(kms, device->borrowed_kms_fd(), saved,
                                         restore_error);
   else
@@ -502,6 +519,17 @@ int run_drm_vrr_probe(drm::DrmApi& drm_api, drm::KmsApi& kms,
                                        restore_error);
   if (!report.append(restore_record(options, restored, restore_error),
                      restore_error)) restored = false;
+  if (page_flip_completion_unproven) {
+    // The kernel still owns the nonblocking commit's raw event cookie and may
+    // still scan out either probe buffer. Closing the DRM fd is the only safe
+    // bounded cleanup here: do not race it with rollback, framebuffer/blob
+    // destruction, or an explicit master transition.
+    buffers.abandon();
+    blob.abandon();
+    if (error.empty()) error = restore_error;
+    errors << error << '\n';
+    return 1;
+  }
   std::string release_error;
   if (!buffers.release(release_error)) restored = false;
   blob.reset();

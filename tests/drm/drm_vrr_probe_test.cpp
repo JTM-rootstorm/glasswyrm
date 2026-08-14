@@ -5,6 +5,7 @@
 #include "tests/helpers/fake_kms.hpp"
 #include "tests/helpers/test_support.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -91,6 +92,7 @@ class Platform final : public DrmVrrProbePlatform {
   }
   void submitted(std::uint64_t token, std::uint32_t crtc, bool enabled,
                  std::uint32_t) override {
+    if (!queue_completions_) return;
     timestamp_ += enabled ? 14'286'000 : 8'333'000;
     api_.queue_page_flip(token, wrong_crtc_ ? crtc + 1 : crtc, 0,
                          timestamp_, timestamps_);
@@ -100,6 +102,7 @@ class Platform final : public DrmVrrProbePlatform {
   bool timestamps_{true};
   bool wrong_crtc_{};
   bool fail_next_submission_{};
+  bool queue_completions_{true};
  private:
   FakeDrmApi& api_;
   FakeKmsApi* kms_{};
@@ -227,6 +230,42 @@ void degraded_and_failed_runs_restore(const TemporaryDirectory& directory) {
   }
 }
 
+void unresolved_flip_skips_unsafe_rollback(
+    const TemporaryDirectory& directory) {
+  FakeDrmApi drm({"/dev/dri/card0", DeviceOpenStatus::Success, snapshot(), {}});
+  FakeKmsApi kms;
+  configure(kms);
+  kms.master = false;
+  Platform platform(drm);
+  platform.queue_completions_ = false;
+  auto probe_options = options(directory.file("flip-timeout.jsonl"));
+  probe_options.event_timeout_milliseconds = 1;
+  std::ostringstream error;
+
+  gw::test::require(
+      run_drm_vrr_probe(drm, kms, platform, probe_options, error) == 1 &&
+          error.str().find("page-flip event timed out") != std::string::npos,
+      "unresolved fake page flip fails the bounded probe");
+  const auto report = read(probe_options.output_path);
+  gw::test::require(
+      report.find("\"record\":\"restore\"") != std::string::npos &&
+          report.find("\"kms_state_equal\":false") != std::string::npos &&
+          report.find("page-flip completion was not observed") !=
+              std::string::npos,
+      "unresolved flip records that saved-state restoration was unsafe");
+  gw::test::require(
+      kms.atomic_commits.size() == 4 &&
+          std::ranges::find(kms.calls, "set_master") != kms.calls.end() &&
+          std::ranges::none_of(kms.calls, [](const std::string& call) {
+            return call == "drop_master" || call.starts_with("rmfb:") ||
+                   call.starts_with("unmap:") ||
+                   call.starts_with("destroy_dumb:") ||
+                   call.starts_with("destroy_blob:");
+          }) &&
+          drm.close_count() == 1,
+      "unresolved flip closes the DRM fd without racing rollback or resources");
+}
+
 void parser_contract() {
   DrmVrrProbeOptions parsed;
   std::ostringstream output, error;
@@ -252,5 +291,6 @@ int main() {
   successful_probe(directory);
   rejected_controllability_restores(directory);
   degraded_and_failed_runs_restore(directory);
+  unresolved_flip_skips_unsafe_rollback(directory);
   return 0;
 }
