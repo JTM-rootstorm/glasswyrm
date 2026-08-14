@@ -3,6 +3,9 @@
 #include "protocol/x11/core.hpp"
 #include "helpers/test_support.hpp"
 
+#include <algorithm>
+#include <vector>
+
 namespace x11 = gw::protocol::x11;
 using namespace glasswyrm::server;
 
@@ -45,6 +48,19 @@ int main() {
     x11::ByteWriter fill(order); fill.write_u8(70); fill.write_u8(0); fill.write_u16(5); fill.write_u32(base+1); fill.write_u32(base+2); fill.write_u16(0); fill.write_u16(0); fill.write_u16(2); fill.write_u16(2);
     result=dispatch_request(state,context,finish(std::move(fill),x11::CoreOpcode::PolyFillRectangle,0));
     gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(1,1)==0xff112233U,"PolyFillRectangle");
+    const auto before_rectangle_limit = std::vector<std::uint32_t>(
+        state.resources().find_pixmap(base+1)->pixels()->pixels().begin(),
+        state.resources().find_pixmap(base+1)->pixels()->pixels().end());
+    x11::ByteWriter excessive_rectangles(order); excessive_rectangles.write_u8(70); excessive_rectangles.write_u8(0); excessive_rectangles.write_u16(0);
+    excessive_rectangles.write_u32(base+1); excessive_rectangles.write_u32(base+2);
+    for (std::size_t index=0; index<4097; ++index) {
+      excessive_rectangles.write_u16(0); excessive_rectangles.write_u16(0);
+      excessive_rectangles.write_u16(1); excessive_rectangles.write_u16(1);
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_rectangles),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_rectangle_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
+                      "PolyFillRectangle rejects excessive primitive counts atomically");
     x11::ByteWriter geometry(order); geometry.write_u8(14); geometry.write_u8(0); geometry.write_u16(2); geometry.write_u32(base+1);
     result=dispatch_request(state,context,finish(std::move(geometry),x11::CoreOpcode::GetGeometry,0));
     gw::test::require(result.output.size()==32&&result.output[1]==24,"GetGeometry pixmap");
@@ -145,21 +161,75 @@ int main() {
     result=dispatch_request(state,context,finish(std::move(line),x11::CoreOpcode::PolyLine,1));
     gw::test::require(result.output.empty()&&state.resources().find_pixmap(base+1)->pixels()->at(1,1)!=0xff000000U,
                       "PolyLine CoordModePrevious");
+    const auto before_line_limit = std::vector<std::uint32_t>(
+        state.resources().find_pixmap(base+1)->pixels()->pixels().begin(),
+        state.resources().find_pixmap(base+1)->pixels()->pixels().end());
+    x11::ByteWriter excessive_line(order); excessive_line.write_u8(65); excessive_line.write_u8(0); excessive_line.write_u16(0);
+    excessive_line.write_u32(base+1); excessive_line.write_u32(base+2);
+    for (std::size_t index=0; index<66; ++index) {
+      const auto coordinate = static_cast<std::uint16_t>(index % 2 == 0 ? -32768 : 32767);
+      excessive_line.write_u16(coordinate); excessive_line.write_u16(coordinate);
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_line),x11::CoreOpcode::PolyLine,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_line_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
+                      "PolyLine rejects excessive raster work atomically");
     x11::ByteWriter segments(order); segments.write_u8(66); segments.write_u8(0); segments.write_u16(5);
     segments.write_u32(base+1); segments.write_u32(base+2);
     segments.write_u16(0); segments.write_u16(1); segments.write_u16(1); segments.write_u16(0);
     result=dispatch_request(state,context,finish(std::move(segments),x11::CoreOpcode::PolySegment,0));
     gw::test::require(result.output.empty(),"PolySegment");
+    const auto before_segment_limit = std::vector<std::uint32_t>(
+        state.resources().find_pixmap(base+1)->pixels()->pixels().begin(),
+        state.resources().find_pixmap(base+1)->pixels()->pixels().end());
+    x11::ByteWriter excessive_segments(order); excessive_segments.write_u8(66); excessive_segments.write_u8(0); excessive_segments.write_u16(0);
+    excessive_segments.write_u32(base+1); excessive_segments.write_u32(base+2);
+    for (std::size_t index=0; index<65; ++index) {
+      excessive_segments.write_u16(static_cast<std::uint16_t>(-32768));
+      excessive_segments.write_u16(static_cast<std::uint16_t>(-32768));
+      excessive_segments.write_u16(32767); excessive_segments.write_u16(32767);
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_segments),x11::CoreOpcode::PolySegment,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_segment_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
+                      "PolySegment rejects excessive raster work atomically");
     x11::ByteWriter polygon(order); polygon.write_u8(69); polygon.write_u8(0); polygon.write_u16(7);
     polygon.write_u32(base+1); polygon.write_u32(base+2); polygon.write_u8(2); polygon.write_u8(0); polygon.write_u16(0);
     polygon.write_u16(0); polygon.write_u16(0); polygon.write_u16(2); polygon.write_u16(0); polygon.write_u16(0); polygon.write_u16(2);
     result=dispatch_request(state,context,finish(std::move(polygon),x11::CoreOpcode::FillPoly,0));
     gw::test::require(result.output.empty(),"FillPoly convex origin");
+    const auto before_polygon_limit = std::vector<std::uint32_t>(
+        state.resources().find_pixmap(base+1)->pixels()->pixels().begin(),
+        state.resources().find_pixmap(base+1)->pixels()->pixels().end());
+    x11::ByteWriter excessive_polygon(order); excessive_polygon.write_u8(69); excessive_polygon.write_u8(0); excessive_polygon.write_u16(0);
+    excessive_polygon.write_u32(base+1); excessive_polygon.write_u32(base+2); excessive_polygon.write_u8(2); excessive_polygon.write_u8(0); excessive_polygon.write_u16(0);
+    for (std::size_t index=0; index<4097; ++index) {
+      excessive_polygon.write_u16(static_cast<std::uint16_t>(index % 2));
+      excessive_polygon.write_u16(static_cast<std::uint16_t>(index % 2));
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_polygon),x11::CoreOpcode::FillPoly,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_polygon_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
+                      "FillPoly rejects excessive primitive counts atomically");
     x11::ByteWriter ellipse(order); ellipse.write_u8(71); ellipse.write_u8(0); ellipse.write_u16(6);
     ellipse.write_u32(base+1); ellipse.write_u32(base+2); ellipse.write_u16(0); ellipse.write_u16(0);
     ellipse.write_u16(2); ellipse.write_u16(2); ellipse.write_u16(0); ellipse.write_u16(360*64);
     result=dispatch_request(state,context,finish(std::move(ellipse),x11::CoreOpcode::PolyFillArc,0));
     gw::test::require(result.output.empty(),"PolyFillArc full ellipse");
+    const auto before_arc_limit = std::vector<std::uint32_t>(
+        state.resources().find_pixmap(base+1)->pixels()->pixels().begin(),
+        state.resources().find_pixmap(base+1)->pixels()->pixels().end());
+    x11::ByteWriter excessive_arcs(order); excessive_arcs.write_u8(71); excessive_arcs.write_u8(0); excessive_arcs.write_u16(0);
+    excessive_arcs.write_u32(base+1); excessive_arcs.write_u32(base+2);
+    for (std::size_t index=0; index<4097; ++index) {
+      excessive_arcs.write_u16(0); excessive_arcs.write_u16(0);
+      excessive_arcs.write_u16(1); excessive_arcs.write_u16(1);
+      excessive_arcs.write_u16(0); excessive_arcs.write_u16(360*64);
+    }
+    result=dispatch_request(state,context,finish(std::move(excessive_arcs),x11::CoreOpcode::PolyFillArc,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_arc_limit,state.resources().find_pixmap(base+1)->pixels()->pixels()),
+                      "PolyFillArc rejects excessive primitive counts atomically");
     x11::ByteWriter partial(order); partial.write_u8(71); partial.write_u8(0); partial.write_u16(6);
     partial.write_u32(base+1); partial.write_u32(base+2); partial.write_u16(0); partial.write_u16(0);
     partial.write_u16(2); partial.write_u16(2); partial.write_u16(0); partial.write_u16(90*64);

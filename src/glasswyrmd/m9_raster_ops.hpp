@@ -20,10 +20,15 @@ struct RasterSegment {
 struct RasterEllipse {
   std::int32_t x{};
   std::int32_t y{};
-  std::uint32_t width{};
-  std::uint32_t height{};
+  std::uint16_t width{};
+  std::uint16_t height{};
 };
 
+[[nodiscard]] std::uint64_t line_raster_work(
+    const PixelStorage& destination, RasterPoint first,
+    RasterPoint second) noexcept;
+[[nodiscard]] std::uint64_t ellipse_raster_work(
+    const PixelStorage& destination, RasterEllipse ellipse) noexcept;
 void draw_line(PixelStorage& destination, RasterPoint first,
                RasterPoint second, std::uint32_t foreground,
                std::uint32_t plane_mask = 0x00ffffffU) noexcept;

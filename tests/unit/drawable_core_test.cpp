@@ -102,6 +102,10 @@ int main() {
   gw::test::require(clipped_line.has_value(), "create clipped line target");
   glasswyrm::server::draw_line(*clipped_line, {-3, -1}, {7, 4},
                                0x00ffffffU);
+  gw::test::require(
+      glasswyrm::server::line_raster_work(*clipped_line, {-3, -1},
+                                          {7, 4}) == 11,
+      "line work reports the legacy Bresenham step count");
   constexpr std::array<RasterPoint, 8> expected_clipped_line{{
       {0, 1}, {1, 1}, {2, 2}, {3, 2}, {4, 3}, {5, 3}, {6, 4}, {7, 4}}};
   for (std::uint32_t y = 0; y < clipped_line->height(); ++y)
@@ -118,6 +122,10 @@ int main() {
     }
   glasswyrm::server::draw_line(*clipped_line, {-32768, -32768}, {-1, -1},
                                0x00ff0000U);
+  gw::test::require(
+      glasswyrm::server::line_raster_work(
+          *clipped_line, {-32768, -32768}, {-1, -1}) == 0,
+      "fully offscreen line reports no raster work");
   for (std::uint32_t y = 0; y < clipped_line->height(); ++y)
     for (std::uint32_t x = 0; x < clipped_line->width(); ++x) {
       const bool expected = std::ranges::any_of(
@@ -141,6 +149,14 @@ int main() {
                     "ellipse interior");
   gw::test::require(primitives->at(2, 2) != 0xff0000ffU,
                     "ellipse corner excluded");
+  auto maximum_ellipse = PixelStorage::create(2, 2);
+  gw::test::require(maximum_ellipse.has_value(),
+                    "create maximum ellipse target");
+  glasswyrm::server::fill_ellipse(*maximum_ellipse,
+                                  {-32767, -32767, 65535, 65535},
+                                  0x00ffffffU);
+  gw::test::require(maximum_ellipse->at(0, 0) == 0xffffffffU,
+                    "maximum ellipse uses overflow-free distance math");
 
   glasswyrm::geometry::Region region({0, 0, 10, 10});
   region.add({-2, -2, 4, 4});

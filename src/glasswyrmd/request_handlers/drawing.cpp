@@ -19,6 +19,60 @@
 namespace glasswyrm::server::request_handlers {
 namespace x11 = gw::protocol::x11;
 
+namespace {
+constexpr std::uint64_t kMaximumRasterWorkPerRequest = 4U * 1024U * 1024U;
+constexpr std::size_t kMaximumRasterPrimitivesPerRequest = 4096;
+
+bool add_raster_work(std::uint64_t& total, const std::uint64_t work) {
+  if (work > kMaximumRasterWorkPerRequest - total) return false;
+  total += work;
+  return true;
+}
+
+bool line_work_fits(const PixelStorage& destination,
+                    const std::span<const RasterPoint> points) {
+  std::uint64_t total = 0;
+  if (points.size() == 1)
+    return add_raster_work(
+        total, line_raster_work(destination, points.front(), points.front()));
+  for (std::size_t index = 1; index < points.size(); ++index)
+    if (!add_raster_work(
+            total, line_raster_work(destination, points[index - 1],
+                                    points[index])))
+      return false;
+  return true;
+}
+
+bool segment_work_fits(const PixelStorage& destination,
+                       const std::span<const RasterSegment> segments) {
+  std::uint64_t total = 0;
+  for (const auto segment : segments)
+    if (!add_raster_work(
+            total,
+            line_raster_work(destination, segment.first, segment.second)))
+      return false;
+  return true;
+}
+
+bool polygon_work_fits(const PixelStorage& destination,
+                       const std::span<const RasterPoint> points) {
+  if (points.size() > kMaximumRasterPrimitivesPerRequest || points.empty())
+    return points.empty();
+  auto minimum_y = points.front().y;
+  auto maximum_y = points.front().y;
+  for (const auto point : points) {
+    minimum_y = std::min(minimum_y, point.y);
+    maximum_y = std::max(maximum_y, point.y);
+  }
+  const auto first_y = std::max<std::int32_t>(minimum_y, 0);
+  const auto last_y = std::min<std::int32_t>(
+      maximum_y, static_cast<std::int32_t>(destination.height()));
+  if (last_y <= first_y) return true;
+  const auto scanlines = static_cast<std::uint64_t>(last_y - first_y);
+  return scanlines * points.size() <= kMaximumRasterWorkPerRequest;
+}
+}  // namespace
+
 void fill_opaque_stippled(PixelStorage& destination,
                           const geometry::Rectangle rectangle,
                           const GraphicsContextResource& gc) noexcept {
@@ -88,6 +142,8 @@ DispatchResult poly_line(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (!line_work_fits(*storage, points))
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   if (points.size() == 1) draw_line(*storage, points[0], points[0], gc->foreground, gc->plane_mask);
   else for (std::size_t index = 1; index < points.size(); ++index)
@@ -124,6 +180,8 @@ DispatchResult poly_segment(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (!segment_work_fits(*storage, segments))
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   draw_segments(*storage, segments, gc->foreground, gc->plane_mask);
   child_clip.restore(); DispatchResult result;
@@ -159,6 +217,8 @@ DispatchResult fill_poly(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (!polygon_work_fits(*storage, points))
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   fill_convex_polygon(*storage, points, gc->foreground, gc->plane_mask);
   child_clip.restore(); DispatchResult result;
@@ -195,6 +255,13 @@ DispatchResult poly_fill_arc(ServerState& state, const DispatchContext& context,
   }
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
+  if (ellipses.size() > kMaximumRasterPrimitivesPerRequest)
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
+  std::uint64_t raster_work = 0;
+  for (const auto ellipse : ellipses)
+    if (!add_raster_work(raster_work,
+                         ellipse_raster_work(*storage, ellipse)))
+      return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
   geometry::Region damage({0, 0, storage->width(), storage->height()});
   for (const auto ellipse : ellipses) {
@@ -304,6 +371,8 @@ DispatchResult poly_fill_rectangle(ServerState& state, const DispatchContext& co
   struct Fill { geometry::Rectangle rectangle; }; std::vector<Fill> fills;
   fills.reserve((request.bytes.size() - 12U) / 8U);
   while (reader.remaining() != 0) { std::uint16_t x{}, y{}, w{}, h{}; (void)reader.read_u16(x); (void)reader.read_u16(y); (void)reader.read_u16(w); (void)reader.read_u16(h); fills.push_back({{static_cast<std::int16_t>(x), static_cast<std::int16_t>(y), w, h}}); }
+  if (fills.size() > kMaximumRasterPrimitivesPerRequest)
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   auto* storage = mutable_storage(state.resources(), drawable);
   if (!storage) return error(context, request, x11::CoreErrorCode::BadAlloc);
   ClipByChildrenGuard child_clip(state.resources(), drawable, *gc, *storage);
