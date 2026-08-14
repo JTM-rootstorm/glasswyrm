@@ -16,6 +16,10 @@ import validate_frame_sets
 
 
 REQUIRED_BASE = "d3440d3b8df1533410a9a2c4be46f2eea0cfb88d"
+MAX_ARCHIVE_MEMBERS = 128
+MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_FILE_BYTES = MAX_ARCHIVE_TOTAL_BYTES + 16 * 1024 * 1024
 SOURCE_MAP = {
     "output-inventory.json": "milestone13-output-inventory.json",
     "layout-before.json": "milestone13-layout-before.json",
@@ -68,15 +72,38 @@ def verify_summary(path: pathlib.Path) -> dict:
 
 
 def extract_evidence(archive: pathlib.Path, directory: pathlib.Path) -> None:
+    if archive.stat().st_size > MAX_ARCHIVE_FILE_BYTES:
+        raise ValueError("evidence archive file is too large")
     with tarfile.open(archive, "r:") as source:
-        members = source.getmembers()
+        members: list[tarfile.TarInfo] = []
+        for member in source:
+            if len(members) >= MAX_ARCHIVE_MEMBERS:
+                raise ValueError("evidence archive has too many members")
+            members.append(member)
+        names: set[str] = set()
+        total_bytes = 0
         for member in members:
             name = pathlib.PurePosixPath(member.name.removeprefix("./"))
             if (name.is_absolute() or ".." in name.parts
-                    or len(name.parts) != 1 or not member.isfile()):
+                    or len(name.parts) != 1 or not member.isfile()
+                    or name.name in names):
                 raise ValueError(f"unsafe evidence member: {member.name}")
-            member.name = name.name
-            source.extract(member, directory)
+            if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+                raise ValueError(f"oversized evidence member: {member.name}")
+            total_bytes += member.size
+            if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                raise ValueError("evidence archive is too large")
+            names.add(name.name)
+        for member in members:
+            name = pathlib.PurePosixPath(member.name.removeprefix("./"))
+            extracted = source.extractfile(member)
+            if extracted is None:
+                raise ValueError(f"unreadable evidence member: {member.name}")
+            payload = extracted.read(member.size + 1)
+            if len(payload) != member.size:
+                raise ValueError(f"evidence member size differs: {member.name}")
+            with (directory / name.name).open("xb") as output:
+                output.write(payload)
     sums = directory / "SHA256SUMS"
     if not sums.is_file():
         raise ValueError("evidence archive has no SHA256SUMS")

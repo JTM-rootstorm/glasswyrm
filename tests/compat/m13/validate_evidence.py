@@ -15,6 +15,10 @@ import validate_frame_sets
 
 
 GWIPC_OUTPUT_CONFIGURATION_ACCEPTED = 1
+MAX_ARCHIVE_MEMBERS = 128
+MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_FILE_BYTES = MAX_ARCHIVE_TOTAL_BYTES + 16 * 1024 * 1024
 REQUIRED_BASE = "d3440d3b8df1533410a9a2c4be46f2eea0cfb88d"
 REQUIRED_RESULTS = (
     "historical_default strict_software strict_gles sanitizer component_builds "
@@ -127,8 +131,17 @@ def read_ppm(path: pathlib.Path) -> tuple[int, int, bytes]:
 
 def extract_flat_archive(path: pathlib.Path, destination: pathlib.Path) -> set[str]:
     names: set[str] = set()
+    if path.stat().st_size > MAX_ARCHIVE_FILE_BYTES:
+        raise ValueError(f"{path.name} archive file is too large")
     with tarfile.open(path, "r:") as archive:
-        for member in archive.getmembers():
+        members: list[tarfile.TarInfo] = []
+        for member in archive:
+            if len(members) >= MAX_ARCHIVE_MEMBERS:
+                raise ValueError(f"{path.name} has too many members")
+            members.append(member)
+        total_bytes = 0
+        regular_members: list[tuple[tarfile.TarInfo, str]] = []
+        for member in members:
             stripped = member.name.removeprefix("./")
             if member.isdir() and stripped in {"", "."}:
                 continue
@@ -136,11 +149,22 @@ def extract_flat_archive(path: pathlib.Path, destination: pathlib.Path) -> set[s
             if (name.is_absolute() or ".." in name.parts or len(name.parts) != 1
                     or not member.isfile() or name.name in names):
                 raise ValueError(f"{path.name} has unsafe member {member.name!r}")
+            if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+                raise ValueError(f"{path.name} has oversized member {member.name!r}")
+            total_bytes += member.size
+            if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                raise ValueError(f"{path.name} is too large")
+            names.add(name.name)
+            regular_members.append((member, name.name))
+        for member, name in regular_members:
             source = archive.extractfile(member)
             if source is None:
                 raise ValueError(f"{path.name} member {member.name!r} is unreadable")
-            (destination / name.name).write_bytes(source.read())
-            names.add(name.name)
+            payload = source.read(member.size + 1)
+            if len(payload) != member.size:
+                raise ValueError(f"{path.name} member {member.name!r} size differs")
+            with (destination / name).open("xb") as output:
+                output.write(payload)
     return names
 
 

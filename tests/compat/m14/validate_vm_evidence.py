@@ -12,6 +12,10 @@ import tarfile
 
 
 REQUIRED_BASE = "6864ea631d61636289a21c7d2d6655a17be0c004"
+MAX_ARCHIVE_MEMBERS = 128
+MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_FILE_BYTES = MAX_ARCHIVE_TOTAL_BYTES + 16 * 1024 * 1024
 REQUIRED_RESULTS = (
     "historical_default strict_m14 strict_gles sanitizer component_builds "
     "api_consumers source_layout fake_drm_matrix simulated_headless_matrix "
@@ -143,13 +147,37 @@ def load_jsonl(path: pathlib.Path) -> list[dict]:
 
 
 def validate_archive(path: pathlib.Path, root: pathlib.Path) -> None:
+    if path.stat().st_size > MAX_ARCHIVE_FILE_BYTES:
+        raise ValueError("evidence archive file is too large")
     with tarfile.open(path, "r:") as archive:
-        members = archive.getmembers()
-        if any(member.isdir() or not member.isfile() or member.name.startswith("/")
-               or ".." in pathlib.PurePosixPath(member.name).parts for member in members):
-            raise ValueError("evidence archive contains an unsafe member")
-        payloads = {pathlib.PurePosixPath(member.name).name:
-                    archive.extractfile(member).read() for member in members}
+        members: list[tarfile.TarInfo] = []
+        for member in archive:
+            if len(members) >= MAX_ARCHIVE_MEMBERS:
+                raise ValueError("evidence archive has too many members")
+            members.append(member)
+        names: set[str] = set()
+        total_bytes = 0
+        for member in members:
+            name = pathlib.PurePosixPath(member.name.removeprefix("./"))
+            if (name.is_absolute() or ".." in name.parts or len(name.parts) != 1
+                    or not member.isfile() or name.name in names):
+                raise ValueError("evidence archive contains an unsafe member")
+            if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+                raise ValueError(f"evidence archive member is oversized: {member.name}")
+            total_bytes += member.size
+            if total_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                raise ValueError("evidence archive is too large")
+            names.add(name.name)
+        payloads: dict[str, bytes] = {}
+        for member in members:
+            name = pathlib.PurePosixPath(member.name.removeprefix("./")).name
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                raise ValueError(f"evidence archive member is unreadable: {member.name}")
+            payload = extracted.read(member.size + 1)
+            if len(payload) != member.size:
+                raise ValueError(f"evidence archive member size differs: {member.name}")
+            payloads[name] = payload
     expected = ARCHIVE_MEMBERS | {"SHA256SUMS"}
     if set(payloads) != expected:
         raise ValueError("evidence archive member inventory differs")

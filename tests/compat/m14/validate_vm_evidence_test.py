@@ -273,6 +273,19 @@ with tempfile.TemporaryDirectory() as temporary:
     assert accepted.returncode == 0, summary.read_text()
     assert json.loads(summary.read_text())["passed"] is True
 
+    archive_path = root / "milestone14-vm-vrr-evidence.tar"
+    saved_archive = archive_path.read_bytes()
+    with tarfile.open(archive_path, "w") as archive:
+        for index in range(validator.MAX_ARCHIVE_MEMBERS + 1):
+            member = tarfile.TarInfo(f"member-{index}")
+            member.size = 0
+            archive.addfile(member)
+    rejected = run(command)
+    assert rejected.returncode == 2
+    assert any("too many members" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    archive_path.write_bytes(saved_archive)
+
     capability = root / "milestone14-qxl-capability.json"
     saved = capability.read_text()
     write_json(capability, {"profile": "qxl-unsupported", "passed": True,

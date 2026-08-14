@@ -156,6 +156,21 @@ def main() -> int:
             output / "README.md"
         ).read_text():
             return 1
+        oversized_inventory = root / "too-many-members.tar"
+        with tarfile.open(oversized_inventory, "w") as archive:
+            for index in range(promoter.MAX_ARCHIVE_MEMBERS + 1):
+                member = tarfile.TarInfo(f"member-{index}")
+                member.size = 0
+                archive.addfile(member)
+        extraction = root / "oversized-extraction"
+        extraction.mkdir()
+        try:
+            promoter.extract_verified(oversized_inventory, extraction)
+        except ValueError as error:
+            if "too many members" not in str(error):
+                return 1
+        else:
+            return 1
         accepted["passed"] = False
         write_json(summary, accepted)
         try:

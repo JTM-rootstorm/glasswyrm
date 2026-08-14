@@ -218,6 +218,20 @@ with tempfile.TemporaryDirectory() as name:
     assert accepted["passed"] is True
     assert accepted["evidence_errors"] == []
 
+    evidence_archive = root / "milestone13-output-scaling-evidence.tar"
+    saved_evidence_archive = evidence_archive.read_bytes()
+    with tarfile.open(evidence_archive, "w") as archive:
+        for index in range(validator.MAX_ARCHIVE_MEMBERS + 1):
+            member = tarfile.TarInfo(f"member-{index}")
+            member.size = 0
+            archive.addfile(member)
+    rejected_run = subprocess.run(command, text=True, capture_output=True,
+                                  check=False)
+    assert rejected_run.returncode == 2
+    assert any("too many members" in error
+               for error in json.loads(summary.read_text())["evidence_errors"])
+    evidence_archive.write_bytes(saved_evidence_archive)
+
     gwout = root / "milestone13-gwout-result.json"
     gwout.write_text(json.dumps({"result": 0, "applied_generation": 4}) + "\n")
     rejected_run = subprocess.run(command, text=True, capture_output=True,

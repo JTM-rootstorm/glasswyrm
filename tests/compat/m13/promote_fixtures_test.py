@@ -177,6 +177,17 @@ with tempfile.TemporaryDirectory() as name:
         "legacy-spanning-left.ppm", "flipped.ppm"]
     assert not any(path.name.startswith("frame-0") for path in output.iterdir())
 
+    with tarfile.open(archive_path, "w") as archive:
+        for index in range(129):
+            member = tarfile.TarInfo(f"member-{index}")
+            member.size = 0
+            archive.addfile(member)
+    too_many = subprocess.run(command, check=False, text=True,
+                              capture_output=True)
+    assert too_many.returncode != 0
+    assert "too many members" in too_many.stdout
+    write_archive(evidence, archive_path)
+
     manifest_path = evidence / SOURCE_MAP["frame-sets.jsonl"]
     manifest = json.loads(manifest_path.read_text())
     raw_left = evidence / manifest["outputs"][0]["file"]
