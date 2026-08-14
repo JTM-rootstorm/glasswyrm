@@ -17,11 +17,11 @@ use gw_types::{
     SnapshotDomain, SnapshotId,
 };
 use gw_wire::compositor::{
-    AlphaSemantics, BufferAttach, BufferRelease, BufferReleaseReason, FrameAcknowledged,
-    FrameResult, OutputUpsert, PixelFormat as WirePixelFormat, SurfaceUpsert, SynchronizationMode,
-    decode_buffer_attach, decode_buffer_detach, decode_frame_commit, decode_output_remove,
-    decode_output_upsert, decode_surface_damage, decode_surface_remove, decode_surface_upsert,
-    encode_buffer_release, encode_frame_acknowledged,
+    AlphaSemantics, BufferAttach, BufferRelease, BufferReleaseReason, DamageRectangle,
+    FrameAcknowledged, FrameResult, OutputUpsert, PixelFormat as WirePixelFormat, SurfaceUpsert,
+    SynchronizationMode, decode_buffer_attach, decode_buffer_detach, decode_frame_commit,
+    decode_output_remove, decode_output_upsert, decode_surface_damage, decode_surface_remove,
+    decode_surface_upsert, encode_buffer_release, encode_frame_acknowledged,
 };
 use gw_wire::output::{
     OutputConfigurationResult, SurfaceOutputState, decode_output_configuration_commit,
@@ -38,9 +38,10 @@ use gw_wire::{
     decode_surface_policy_upsert, encode_pong, encode_snapshot_begin, encode_snapshot_end,
 };
 use gwcomp_core::{
-    PixelFormat, RationalScale, Rectangle, Scene, SceneOutput, SceneSurface, SoftwareFrameSet,
-    SoftwareRenderRequest, SurfaceBuffer, SurfaceOutputMembership, SurfacePresentation,
-    render_software_scene,
+    DamageFilterFootprint, DamageRegion, PixelFormat, RationalScale, Rectangle, Scene, SceneOutput,
+    SceneSurface, SoftwareFrameSet, SoftwareRenderRequest, SurfaceBuffer, SurfaceOutputMembership,
+    SurfacePresentation, map_logical_damage_to_native, render_software_scene,
+    select_sampling_filter,
 };
 
 use crate::Options;
@@ -115,9 +116,12 @@ struct PeerState {
     surface_vrr: BTreeMap<u64, SurfaceVrrState>,
     buffers: BTreeMap<u64, BufferRecord>,
     surface_buffers: BTreeMap<u64, u64>,
-    damaged_surfaces: BTreeSet<u64>,
+    damaged_surfaces: BTreeMap<u64, Vec<DamageRectangle>>,
+    mutated_buffers: BTreeSet<u64>,
+    scene_changed: bool,
     releases: Vec<BufferRelease>,
     previous: Option<SoftwareFrameSet>,
+    configuration_generation: u64,
 }
 
 struct SnapshotTransaction {
@@ -294,6 +298,7 @@ impl Connection {
                     memberships: BTreeMap::new(),
                     surface_vrr: BTreeMap::new(),
                 });
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SNAPSHOT_END => self.finish_snapshot(payload),
@@ -326,12 +331,14 @@ impl Connection {
                     }
                     self.peer.outputs.insert(value.output_id, value);
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::OUTPUT_REMOVE => {
                 let value = decode_output_remove(payload)
                     .map_err(|_| RuntimeError::Wire("invalid OutputRemove"))?;
                 self.peer.outputs.remove(&value.output_id);
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_UPSERT => {
@@ -352,6 +359,7 @@ impl Connection {
                     }
                     self.peer.surfaces.insert(value.surface_id, value);
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_OUTPUT_STATE => {
@@ -362,12 +370,14 @@ impl Connection {
                 } else {
                     self.peer.memberships.insert(value.surface_id, value);
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_REMOVE => {
                 let value = decode_surface_remove(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceRemove"))?;
                 self.remove_surface(value.surface_id, BufferReleaseReason::SurfaceRemoved);
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::BUFFER_ATTACH => self.attach_buffer(payload, fds),
@@ -382,7 +392,27 @@ impl Connection {
             MessageType::SURFACE_DAMAGE => {
                 let damage = decode_surface_damage(payload)
                     .map_err(|_| RuntimeError::Wire("invalid SurfaceDamage"))?;
-                self.peer.damaged_surfaces.insert(damage.surface_id);
+                let known_surface =
+                    self.peer.surfaces.contains_key(&damage.surface_id)
+                        || self.peer.snapshot.as_ref().is_some_and(|snapshot| {
+                            snapshot.surfaces.contains_key(&damage.surface_id)
+                        });
+                if !known_surface {
+                    return Err(RuntimeError::Wire("damage references an unknown surface"));
+                }
+                let accumulated = self
+                    .peer
+                    .damaged_surfaces
+                    .entry(damage.surface_id)
+                    .or_default();
+                if damage.rectangles.len()
+                    > DamageRegion::MAXIMUM_RECTANGLES.saturating_sub(accumulated.len())
+                {
+                    accumulated.clear();
+                    self.peer.scene_changed = true;
+                } else {
+                    accumulated.extend(damage.rectangles);
+                }
                 Ok(())
             }
             MessageType::OUTPUT_VRR_POLICY_UPSERT => {
@@ -392,6 +422,7 @@ impl Connection {
                     output.vrr_policy = policy;
                     output.vrr_state.requested_mode = policy.mode;
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::SURFACE_VRR_STATE => {
@@ -402,6 +433,7 @@ impl Connection {
                 } else {
                     self.peer.surface_vrr.insert(value.surface_id, value);
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             MessageType::OUTPUT_CONFIGURATION_COMMIT => {
@@ -416,6 +448,7 @@ impl Connection {
                 } else {
                     self.peer.policies.insert(value.surface_id, value);
                 }
+                self.peer.scene_changed = true;
                 Ok(())
             }
             _ => Err(RuntimeError::Wire("unsupported compositor message")),
@@ -456,6 +489,7 @@ impl Connection {
             self.peer.policies = snapshot.policies;
             self.peer.memberships = snapshot.memberships;
             self.peer.surface_vrr = snapshot.surface_vrr;
+            self.peer.configuration_generation = snapshot.begin.generation.get();
         } else if snapshot.begin.domain == SnapshotDomain::Outputs {
             self.peer.snapshot = Some(snapshot);
         }
@@ -523,6 +557,7 @@ impl Connection {
         self.peer
             .surface_buffers
             .insert(attachment.surface_id, attachment.buffer_id);
+        self.peer.mutated_buffers.insert(attachment.surface_id);
         self.peer.buffers.insert(
             attachment.buffer_id,
             BufferRecord {
@@ -547,7 +582,8 @@ impl Connection {
                     .buffers
                     .get(buffer_id)
                     .is_some_and(|buffer| {
-                        buffer.buffer.is_none() || self.peer.damaged_surfaces.contains(surface_id)
+                        buffer.buffer.is_none()
+                            || self.peer.damaged_surfaces.contains_key(surface_id)
                     })
                     .then_some(*buffer_id)
             })
@@ -618,7 +654,9 @@ impl Connection {
         self.peer.surfaces.remove(&surface_id);
         self.peer.policies.remove(&surface_id);
         self.peer.memberships.remove(&surface_id);
+        self.peer.surface_vrr.remove(&surface_id);
         self.peer.damaged_surfaces.remove(&surface_id);
+        self.peer.mutated_buffers.remove(&surface_id);
         self.peer.surface_buffers.remove(&surface_id);
         let buffer_ids: Vec<_> = self
             .peer
@@ -722,6 +760,7 @@ impl Connection {
                 .inventory
                 .apply_configuration(&snapshot.outputs, commit.primary_output_id);
         let result = if accepted {
+            self.peer.configuration_generation = state.inventory.generation;
             OutputConfigurationResult::Accepted
         } else if commit.base_generation != state.inventory.generation {
             OutputConfigurationResult::StaleGeneration
@@ -860,23 +899,16 @@ impl Connection {
             );
         }
 
-        let scene = self.build_scene(commit.producer_generation, &state.inventory)?;
-        let damage: BTreeMap<_, _> = scene
-            .outputs
-            .values()
-            .filter(|output| output.enabled)
-            .map(|output| {
-                (
-                    output.output_id,
-                    vec![Rectangle::new(
-                        0,
-                        0,
-                        output.physical_width,
-                        output.physical_height,
-                    )],
-                )
-            })
-            .collect();
+        let scene = self.build_scene(&state.inventory)?;
+        let force_full_damage = self.peer.previous.is_none()
+            || self.peer.scene_changed
+            || !self
+                .peer
+                .mutated_buffers
+                .iter()
+                .all(|surface_id| self.peer.damaged_surfaces.contains_key(surface_id));
+        let damage =
+            calculate_output_damage(&scene, &self.peer.damaged_surfaces, force_full_damage);
         let ordinal = state.frame_ordinal + 1;
         let rendered = render_software_scene(SoftwareRenderRequest {
             scene: &scene,
@@ -912,18 +944,15 @@ impl Connection {
         state.frame_ordinal = ordinal;
         state.accepted_frames += 1;
         self.peer.damaged_surfaces.clear();
+        self.peer.mutated_buffers.clear();
+        self.peer.scene_changed = false;
         self.peer.previous = Some(rendered.frames);
         if self
             .negotiated
             .as_ref()
             .is_some_and(|peer| peer.capabilities.contains(vrr_capabilities()))
         {
-            let policy_generation = self
-                .peer
-                .surface_vrr
-                .values()
-                .next()
-                .map_or(commit.producer_generation, |state| state.policy_generation);
+            let policy_generation = presentation_state_generation(&scene, &self.peer.surface_vrr);
             if self
                 .peer
                 .surface_vrr
@@ -1073,6 +1102,10 @@ impl Connection {
         commit: &gw_wire::compositor::FrameCommit,
         result: FrameResult,
     ) -> Result<(), RuntimeError> {
+        eprintln!(
+            "gwcomp: frame rejected commit={} generation={} result={result:?}",
+            commit.commit_id, commit.producer_generation
+        );
         let acknowledged = FrameAcknowledged {
             commit_id: commit.commit_id,
             output_id: commit.output_id,
@@ -1101,7 +1134,12 @@ impl Connection {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn build_scene(&self, generation: u64, inventory: &Inventory) -> Result<Scene, RuntimeError> {
+    fn build_scene(&self, inventory: &Inventory) -> Result<Scene, RuntimeError> {
+        let configuration_generation = if self.peer.configuration_generation == 0 {
+            inventory.generation
+        } else {
+            self.peer.configuration_generation
+        };
         let output_source: Vec<_> = if self.peer.outputs.is_empty() {
             inventory
                 .outputs
@@ -1121,7 +1159,7 @@ impl Connection {
         };
         let mut scene = Scene {
             primary_output_id: primary,
-            configuration_generation: generation,
+            configuration_generation,
             ..Scene::default()
         };
         for output in output_source {
@@ -1200,7 +1238,7 @@ impl Connection {
                         preferred_scale_denominator: scale.denominator,
                         client_buffer_scale: 1,
                         scale_mode: gw_wire::output::SurfaceScaleMode::Legacy,
-                        layout_generation: generation,
+                        layout_generation: configuration_generation,
                         flags: 0,
                     }
                 });
@@ -1249,7 +1287,7 @@ impl Connection {
                         denominator: membership.preferred_scale_denominator,
                     },
                     client_buffer_scale: client_scale,
-                    layout_generation: generation,
+                    layout_generation: configuration_generation,
                 },
             );
         }
@@ -1480,6 +1518,110 @@ fn valid_peer_profile(peer: &NegotiatedPeer) -> bool {
         _ => false,
     }
 }
+
+fn calculate_output_damage(
+    scene: &Scene,
+    surface_damage: &BTreeMap<u64, Vec<DamageRectangle>>,
+    force_full: bool,
+) -> BTreeMap<u64, Vec<Rectangle>> {
+    let mut regions: BTreeMap<u64, DamageRegion> = scene
+        .outputs
+        .values()
+        .filter(|output| output.enabled)
+        .map(|output| {
+            (
+                output.output_id,
+                DamageRegion::new(Rectangle::new(
+                    0,
+                    0,
+                    output.physical_width,
+                    output.physical_height,
+                )),
+            )
+        })
+        .collect();
+    if force_full {
+        for region in regions.values_mut() {
+            region.add_full_output();
+        }
+    } else {
+        for (&surface_id, rectangles) in surface_damage {
+            let Some(surface) = scene.surfaces.get(&surface_id) else {
+                continue;
+            };
+            if !surface.visible || surface.opacity == 0 {
+                continue;
+            }
+            let Some(membership) = scene.surface_outputs.get(&surface_id) else {
+                continue;
+            };
+            let local_bounds = Rectangle::new(0, 0, surface.logical.width, surface.logical.height);
+            for rectangle in rectangles {
+                let local =
+                    Rectangle::new(rectangle.x, rectangle.y, rectangle.width, rectangle.height);
+                let Some(mut clipped) = local.intersection(local_bounds) else {
+                    continue;
+                };
+                if let Some(clip) = surface.clip {
+                    let Some(intersection) = clipped.intersection(clip) else {
+                        continue;
+                    };
+                    clipped = intersection;
+                }
+                let Some(logical) = clipped.translate(surface.logical.x, surface.logical.y) else {
+                    continue;
+                };
+                for output_id in &membership.output_ids {
+                    let Some(output) = scene.outputs.get(output_id) else {
+                        continue;
+                    };
+                    let Some(mapping) = output.mapping() else {
+                        continue;
+                    };
+                    let footprint =
+                        match select_sampling_filter(output.scale, surface.client_buffer_scale) {
+                            gwcomp_core::SamplingFilter::Bilinear => {
+                                DamageFilterFootprint::Bilinear
+                            }
+                            gwcomp_core::SamplingFilter::Direct
+                            | gwcomp_core::SamplingFilter::Nearest => DamageFilterFootprint::Point,
+                        };
+                    let Some(native) = map_logical_damage_to_native(mapping, logical, footprint)
+                    else {
+                        continue;
+                    };
+                    if let Some(region) = regions.get_mut(output_id) {
+                        region.add(Rectangle::new(
+                            i32::try_from(native.x).unwrap_or(i32::MAX),
+                            i32::try_from(native.y).unwrap_or(i32::MAX),
+                            native.width,
+                            native.height,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    regions
+        .into_iter()
+        .filter_map(|(output_id, region)| {
+            (!region.is_empty()).then(|| (output_id, region.rectangles().to_vec()))
+        })
+        .collect()
+}
+
+fn presentation_state_generation(
+    scene: &Scene,
+    surface_vrr: &BTreeMap<u64, SurfaceVrrState>,
+) -> u64 {
+    surface_vrr
+        .values()
+        .next()
+        .map_or(scene.configuration_generation, |state| {
+            state.policy_generation
+        })
+}
+
 fn convert_transform(value: gw_wire::compositor::Transform) -> gwcomp_core::OutputTransform {
     match value {
         gw_wire::compositor::Transform::Normal => gwcomp_core::OutputTransform::Normal,
@@ -1542,4 +1684,106 @@ fn send_with_retry(
 }
 fn would_block(error: &TransportError) -> bool {
     matches!(error, TransportError::Io(error) if error.kind() == io::ErrorKind::WouldBlock)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn damage_scene(client_buffer_scale: u32) -> Scene {
+        let output_id = 11;
+        let surface_id = 41;
+        let mut scene = Scene {
+            primary_output_id: output_id,
+            configuration_generation: 1,
+            ..Scene::default()
+        };
+        scene.outputs.insert(
+            output_id,
+            SceneOutput {
+                output_id,
+                enabled: true,
+                logical: Rectangle::new(0, 0, 800, 600),
+                physical_width: 800,
+                physical_height: 600,
+                refresh_millihertz: 120_000,
+                scale: RationalScale::default(),
+                transform: gwcomp_core::OutputTransform::Normal,
+            },
+        );
+        scene.surfaces.insert(
+            surface_id,
+            SceneSurface {
+                surface_id,
+                output_id,
+                logical: Rectangle::new(20, 30, 200, 100),
+                stacking: 0,
+                visible: true,
+                clip: None,
+                opacity: u32::MAX,
+                client_buffer_scale,
+                presentation: SurfacePresentation::Ordinary,
+                buffer: SurfaceBuffer {
+                    width: 200 * client_buffer_scale,
+                    height: 100 * client_buffer_scale,
+                    stride_pixels: 200 * client_buffer_scale,
+                    format: PixelFormat::Xrgb8888,
+                    pixels: vec![
+                        0;
+                        (200 * client_buffer_scale * 100 * client_buffer_scale) as usize
+                    ],
+                },
+            },
+        );
+        scene.surface_outputs.insert(
+            surface_id,
+            SurfaceOutputMembership {
+                primary_output_id: output_id,
+                output_ids: vec![output_id],
+                preferred_scale: RationalScale::default(),
+                client_buffer_scale,
+                layout_generation: 1,
+            },
+        );
+        scene
+    }
+
+    #[test]
+    fn incremental_surface_damage_preserves_bounded_native_region() {
+        let scene = damage_scene(1);
+        let damage = BTreeMap::from([(
+            41,
+            vec![DamageRectangle {
+                x: 2,
+                y: 3,
+                width: 64,
+                height: 32,
+            }],
+        )]);
+
+        assert_eq!(
+            calculate_output_damage(&scene, &damage, false),
+            BTreeMap::from([(11, vec![Rectangle::new(22, 33, 64, 32)])])
+        );
+    }
+
+    #[test]
+    fn structural_change_forces_complete_output_damage() {
+        let scene = damage_scene(1);
+
+        assert_eq!(
+            calculate_output_damage(&scene, &BTreeMap::new(), true),
+            BTreeMap::from([(11, vec![Rectangle::new(0, 0, 800, 600)])])
+        );
+    }
+
+    #[test]
+    fn empty_scene_presentation_uses_layout_generation() {
+        let mut scene = damage_scene(1);
+        scene.configuration_generation = 7;
+        scene.surfaces.clear();
+        scene.surface_outputs.clear();
+
+        assert_eq!(presentation_state_generation(&scene, &BTreeMap::new()), 7);
+    }
 }
