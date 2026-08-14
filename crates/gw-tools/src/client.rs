@@ -79,7 +79,7 @@ pub fn query_outputs(socket_path: &Path) -> Result<OutputSnapshot, QueryError> {
         envelope.flags = MessageFlags::ACK_REQUIRED;
         send_until(&transport, &envelope, &payload, deadline)?;
 
-        let mut decoder = SnapshotDecoder::new(request_id, sequence);
+        let mut decoder = SnapshotDecoder::new(request_id, sequence, OUTPUT_QUERY_FLAGS);
         loop {
             let record = receive_until(
                 &transport,

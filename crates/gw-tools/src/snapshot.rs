@@ -3,14 +3,22 @@ use std::fmt;
 
 use gw_types::{MessageFlags, MessageType, Sequence, SnapshotDomain};
 use gw_wire::compositor::{OutputUpsert, decode_output_upsert};
+use gw_wire::vrr::{
+    OutputVrrCapabilityUpsert, OutputVrrStateUpsert, PresentationTiming, SurfaceVrrState,
+    VrrPolicyMode, decode_output_vrr_capability_upsert, decode_output_vrr_policy_upsert,
+    decode_output_vrr_state_upsert, decode_presentation_timing, decode_surface_vrr_state,
+};
 use gw_wire::{
     OutputConfigurationResult, OutputDescriptorUpsert, OutputModeUpsert,
     decode_output_configuration_acknowledged, decode_output_descriptor_upsert,
     decode_output_mode_upsert, decode_snapshot_begin, decode_snapshot_end,
+    decode_surface_output_state, decode_surface_policy_upsert,
 };
 
 // Query flags are part of the stable M13 output-control contract.
 pub(crate) const OUTPUT_QUERY_FLAGS: u32 = (1 << 0) | (1 << 1) | (1 << 2);
+pub(crate) const OUTPUT_QUERY_WINDOWS: u32 = 1 << 3;
+pub(crate) const OUTPUT_QUERY_VRR: u32 = 1 << 4;
 const MAXIMUM_SNAPSHOT_ITEMS: u32 = u16::MAX as u32;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,6 +31,12 @@ pub struct OutputSnapshot {
     pub descriptors: BTreeMap<u64, OutputDescriptorUpsert>,
     pub modes: Vec<OutputModeUpsert>,
     pub outputs: BTreeMap<u64, OutputUpsert>,
+    pub vrr_capabilities: BTreeMap<u64, OutputVrrCapabilityUpsert>,
+    pub vrr_policies: BTreeMap<u64, VrrPolicyMode>,
+    pub vrr_outputs: BTreeMap<u64, OutputVrrStateUpsert>,
+    pub vrr_windows: BTreeMap<u32, SurfaceVrrState>,
+    pub vrr_timings: BTreeMap<u64, PresentationTiming>,
+    pub vrr_queried: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,7 +76,7 @@ pub(crate) struct SnapshotDecoder {
 }
 
 impl SnapshotDecoder {
-    pub(crate) fn new(request_id: u64, request_sequence: Sequence) -> Self {
+    pub(crate) fn new(request_id: u64, request_sequence: Sequence, query_flags: u32) -> Self {
         Self {
             request_id,
             request_sequence,
@@ -72,7 +86,10 @@ impl SnapshotDecoder {
             reading: false,
             ended: false,
             acknowledged: false,
-            snapshot: OutputSnapshot::default(),
+            snapshot: OutputSnapshot {
+                vrr_queried: query_flags & OUTPUT_QUERY_VRR != 0,
+                ..OutputSnapshot::default()
+            },
         }
     }
 
@@ -244,6 +261,96 @@ impl SnapshotDecoder {
                     ));
                 }
             }
+            MessageType::SURFACE_UPSERT => {
+                gw_wire::compositor::decode_surface_upsert(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed window record")
+                })?;
+            }
+            MessageType::SURFACE_POLICY_UPSERT => {
+                decode_surface_policy_upsert(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed window record")
+                })?;
+            }
+            MessageType::SURFACE_OUTPUT_STATE => {
+                decode_surface_output_state(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed window record")
+                })?;
+            }
+            MessageType::OUTPUT_VRR_CAPABILITY_UPSERT => {
+                let value = decode_output_vrr_capability_upsert(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed VRR record")
+                })?;
+                if self
+                    .snapshot
+                    .vrr_capabilities
+                    .insert(value.output_id, value)
+                    .is_some()
+                {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains duplicate capability state",
+                    ));
+                }
+            }
+            MessageType::OUTPUT_VRR_POLICY_UPSERT => {
+                let value = decode_output_vrr_policy_upsert(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed VRR record")
+                })?;
+                if self
+                    .snapshot
+                    .vrr_policies
+                    .insert(value.output_id, value.mode)
+                    .is_some()
+                {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains duplicate output policy",
+                    ));
+                }
+            }
+            MessageType::OUTPUT_VRR_STATE_UPSERT => {
+                let value = decode_output_vrr_state_upsert(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed VRR record")
+                })?;
+                if self
+                    .snapshot
+                    .vrr_outputs
+                    .insert(value.output_id, value)
+                    .is_some()
+                {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains duplicate effective state",
+                    ));
+                }
+            }
+            MessageType::SURFACE_VRR_STATE => {
+                let value = decode_surface_vrr_state(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed VRR record")
+                })?;
+                if self
+                    .snapshot
+                    .vrr_windows
+                    .insert(value.window_id, value)
+                    .is_some()
+                {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains duplicate window state",
+                    ));
+                }
+            }
+            MessageType::PRESENTATION_TIMING => {
+                let value = decode_presentation_timing(&record.payload).map_err(|_| {
+                    SnapshotError::new("control server sent a malformed VRR record")
+                })?;
+                if self
+                    .snapshot
+                    .vrr_timings
+                    .insert(value.output_id, value)
+                    .is_some()
+                {
+                    return Err(SnapshotError::new(
+                        "VRR snapshot contains duplicate timing state",
+                    ));
+                }
+            }
             _ => {
                 return Err(SnapshotError::new(
                     "control server sent an unexpected snapshot item",
@@ -304,13 +411,13 @@ mod tests {
 
     #[test]
     fn busy_is_typed_only_before_snapshot_framing() {
-        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2));
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_FLAGS);
         assert_eq!(
             decoder.consume(&acknowledgement(OutputConfigurationResult::Busy)),
             Ok(ConsumeOutcome::Busy)
         );
 
-        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2));
+        let mut decoder = SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_FLAGS);
         let begin = record(
             MessageType::SNAPSHOT_BEGIN,
             2,
@@ -339,7 +446,7 @@ mod tests {
         let mut invalid = acknowledgement(OutputConfigurationResult::Busy);
         invalid.envelope.reply_to = Sequence::new(9);
         assert_eq!(
-            SnapshotDecoder::new(1, Sequence::new(2))
+            SnapshotDecoder::new(1, Sequence::new(2), OUTPUT_QUERY_FLAGS)
                 .consume(&invalid)
                 .unwrap_err()
                 .to_string(),

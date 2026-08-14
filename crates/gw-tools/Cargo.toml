@@ -10,6 +10,10 @@ description = "Glasswyrm command-line control and diagnostic tools"
 name = "gwinfo"
 path = "src/bin/gwinfo.rs"
 
+[[bin]]
+name = "gwout"
+path = "src/bin/gwout.rs"
+
 [dependencies]
 gw-ipc = { path = "../gw-ipc" }
 gw-types = { path = "../gw-types" }

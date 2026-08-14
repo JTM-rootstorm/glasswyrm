@@ -248,6 +248,7 @@ mod tests {
                 flags: 0,
             }],
             outputs: BTreeMap::from([(11, state)]),
+            ..OutputSnapshot::default()
         }
     }
 
