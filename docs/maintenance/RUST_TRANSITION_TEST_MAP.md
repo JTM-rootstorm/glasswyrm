@@ -8,10 +8,12 @@ Behavior/evidence anchor:
 
 ## Current baseline
 
-The configured full-feature legacy build exposes 286 Meson tests. Existing
-manifests give individual tests timeouts and a few M14 tests the
-`m14-runtime` suite, but there is no complete tier classification. File
-location alone is also not reliable: `tests/integration/` contains both
+The configured full-feature legacy build exposes 286 Meson tests. The Meson
+manifests classify ordinary tests into `tier1-unit`, `tier2-contract`, or
+`tier3-headless-process`; every software test also belongs to the aggregate
+`tier4-software` suite. Offline hardware harness selftests are additionally
+labeled `hardware-selftest`, while the existing M14 runtime labels remain.
+File location alone is not reliable: `tests/integration/` contains both
 component contracts and multi-process scenarios, while `tests/hardware/m14/`
 contains offline unit tests for the hardware harness rather than physical
 acceptance itself.
@@ -141,6 +143,11 @@ require real hardware. Preserve milestone prerequisites and resets specified by
 the relevant VM runbook. QXL can prove real kernel/libdrm paths, restoration,
 and absence of VRR capability; it cannot prove physical VRR engagement.
 
+`./tools/gw-vm rust-transition-software-test` is the current transition gate
+for locked Rust workspace format, check, test, and Clippy validation. It does
+not run the Meson suite, the three-process restart oracle, install checks, or
+packaging acceptance; those remain separate gates.
+
 Run VM gates from already coherent, locally validated source. Do not use the VM
 as the seconds-scale Rust inner loop.
 
@@ -170,19 +177,23 @@ does not authorize repeated physical runs after each edit.
 `tests/integration/output_configuration_process_test.cpp` is the first
 process-harness modernization target. It exercises the three processes, output
 configuration, compositor peer failure, restart/replay, VRR preservation,
-queued-work rejection, and later transaction success. It currently includes a
-fixed 100 ms sleep before interpreting post-disconnect behavior and has only
-the aggregate process output available on failure.
+queued-work rejection, and later transaction success. The legacy C++ oracle
+retains a fixed 100 ms sleep before interpreting post-disconnect behavior and
+has only the aggregate process output available on failure.
 
-The R3 replacement must:
+The first Rust harness is implemented in `crates/gw-transition-tests`. It runs
+the unchanged scenario against the legacy processes, observes protocol state
+instead of using the fixed sleep, and captures bounded per-process artifacts.
+It must remain green at transition checkpoints. Later Rust replacement
+topologies must:
 
-1. run unchanged expectations against the legacy binaries;
-2. replace fixed readiness assumptions with an observable socket/GWIPC state;
+1. retain the unchanged legacy expectations;
+2. use observable socket/GWIPC readiness;
 3. capture individual command lines, stdout/stderr, exit/signal status,
    monotonic event timing, relevant protocol/state snapshots, and fixture
    checksums in a failure bundle;
-4. add a focused unit regression for the prior harness interpretation; and
-5. run the identical scenario against each Rust replacement topology.
+4. retain focused regressions for harness interpretation; and
+5. run the identical scenario against each replacement topology.
 
 Other process fixtures containing `sleep_for`, `sleep`, or `time.sleep` should
 be reviewed during R3. A bounded delay can remain when the OS requires it, but
