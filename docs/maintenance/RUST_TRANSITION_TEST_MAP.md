@@ -225,19 +225,19 @@ The gate builds the Rust `gwcomp` binary when no candidate directory is
 supplied, then invokes the retained legacy-built process probes against that
 candidate. It covers listener and peer lifecycle, metadata scene handling,
 M13 output inventory, the canonical M4 frame golden, and the accepted headless
-scenario matrix. The golden and scenario probes use the retained legacy M4
-producer, preserving the oracle inputs while changing only the compositor
-process under test.
+scenario matrix. It also runs the accepted M14 headless VRR cadence/runtime
+client with the Rust compositor and retained legacy server, window manager,
+client, validator, and tools. The golden and scenario probes use the retained
+legacy M4 producer, preserving the oracle inputs while changing only the
+compositor process under test.
 
 Use `--legacy-build PATH` to select the configured Meson build containing the
 probe executables and producer. Use `--rust-bin-dir PATH` to test an already
 built Rust candidate without rebuilding it. `cargo xtask test mixed all` also
 includes this checkpoint.
 
-The M14 cadence/runtime selector is intentionally not part of this narrow
-mixed gate yet because its Rust-candidate differential is not green. Add that
-probe as a separate invocation once its behavior is fixed; do not weaken or
-regenerate the accepted cadence evidence to admit the replacement.
+The M14 invocation preserves the accepted fixture and validator unchanged. It
+is software-only and does not authorize DRM or physical hardware access.
 
 ## Required failure artifacts
 

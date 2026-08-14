@@ -404,6 +404,24 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
                     legacy("src/gwcomp_m4_producer").into_os_string(),
                 ],
             ),
+            Invocation::new(
+                context
+                    .workspace_root
+                    .join("tests/apps/m14_vrr_client_runtime_test.sh")
+                    .into_os_string(),
+                [
+                    legacy("src/gwm").into_os_string(),
+                    rust_gwcomp().into_os_string(),
+                    legacy("src/glasswyrmd").into_os_string(),
+                    legacy("tests/manifest/m14/m14_vrr_client").into_os_string(),
+                    context
+                        .workspace_root
+                        .join("tests/compat/m14/validate_client_state.py")
+                        .into_os_string(),
+                    legacy("tools/gwinfo").into_os_string(),
+                    legacy("tools/gwout").into_os_string(),
+                ],
+            ),
         ]);
         invocations
     };
@@ -598,7 +616,7 @@ mod tests {
         )
         .unwrap();
         let invocations = plan(&cli, &context()).unwrap();
-        assert_eq!(invocations.len(), 18);
+        assert_eq!(invocations.len(), 19);
         assert_eq!(strings(&invocations[0]), ["fmt", "--all", "--", "--check"]);
         assert_eq!(
             strings(&invocations[1]),
@@ -620,7 +638,7 @@ mod tests {
         assert_eq!(invocations[4].program, "cargo");
         assert!(strings(&invocations[4]).contains(&"legacy-output-restart".to_owned()));
         assert_eq!(
-            invocations[17].program,
+            invocations[18].program,
             "/workspace/tests/tools/output_tools_test.sh"
         );
     }
@@ -748,7 +766,7 @@ mod tests {
         )
         .unwrap();
         let invocations = plan(&cli, &context()).unwrap();
-        assert_eq!(invocations.len(), 5);
+        assert_eq!(invocations.len(), 6);
         assert_eq!(
             invocations[0].program,
             "legacy-out/tests/manifest/graphics/headless/gwcomp_process_test"
@@ -780,13 +798,27 @@ mod tests {
             strings(&invocations[4]),
             ["rust-out/gwcomp", "legacy-out/src/gwcomp_m4_producer"]
         );
-        assert!(invocations.iter().all(|invocation| {
-            invocation.remove_hardware_authorization
-                && !invocation
-                    .args
-                    .iter()
-                    .any(|argument| argument.to_string_lossy().contains("m14"))
-        }));
+        assert_eq!(
+            invocations[5].program,
+            "/workspace/tests/apps/m14_vrr_client_runtime_test.sh"
+        );
+        assert_eq!(
+            strings(&invocations[5]),
+            [
+                "legacy-out/src/gwm",
+                "rust-out/gwcomp",
+                "legacy-out/src/glasswyrmd",
+                "legacy-out/tests/manifest/m14/m14_vrr_client",
+                "/workspace/tests/compat/m14/validate_client_state.py",
+                "legacy-out/tools/gwinfo",
+                "legacy-out/tools/gwout"
+            ]
+        );
+        assert!(
+            invocations
+                .iter()
+                .all(|invocation| invocation.remove_hardware_authorization)
+        );
     }
 
     #[test]
