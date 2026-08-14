@@ -17,6 +17,7 @@ import sys
 SCHEMA = "glasswyrm.m14-build-provenance.v1"
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 FULL_EXPECTED_PATHS = {
+    "libgwipc": "src/libgwipc.so.0.9.0",
     "gwm": "src/gwm",
     "gwcomp": "src/gwcomp",
     "server": "src/glasswyrmd",

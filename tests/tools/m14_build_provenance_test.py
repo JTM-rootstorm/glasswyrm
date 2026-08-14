@@ -13,6 +13,7 @@ import tempfile
 
 
 ROLES = (
+    ("libgwipc", "src/libgwipc.so.0.9.0"),
     ("gwm", "src/gwm"),
     ("gwcomp", "src/gwcomp"),
     ("server", "src/glasswyrmd"),

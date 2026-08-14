@@ -101,8 +101,9 @@ def make_fixture(root: Path, restored: bool = True) -> tuple[Path, Path]:
         "tracked_source_clean": True,
         "binaries": [
             {"role": role, "path": path, "size": index + 1,
-             "sha256": f"{index + 1:064x}"}
+            "sha256": f"{index + 1:064x}"}
             for index, (role, path) in enumerate((
+                ("libgwipc", "src/libgwipc.so.0.9.0"),
                 ("gwm", "src/gwm"),
                 ("gwcomp", "src/gwcomp"),
                 ("server", "src/glasswyrmd"),

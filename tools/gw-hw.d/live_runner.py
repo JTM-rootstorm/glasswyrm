@@ -24,13 +24,19 @@ from common import (
     TTY_PATTERN, _read_json, _read_regular, _write_json,
     vrr_rejection_reasons,
 )
-from provenance import PROBE_BINARY, PROVENANCE_BINARIES
+from provenance import (
+    PROBE_BINARY, PROVENANCE_BINARIES, remove_staged_executables,
+)
 from evidence import drm_evidence_streams, sealed_vrr_records
 
 RUNTIME_ROOT = Path("/run/glasswyrm-m14-hardware")
+VERIFIED_BIN_ROOT = RUNTIME_ROOT / "verified-bin"
 LIVE_HARNESS_SCOPE = "glasswyrm-m14-harness.scope"
 FIXED_BINARIES = {
-    **PROVENANCE_BINARIES,
+    **{
+        role: path for role, path in PROVENANCE_BINARIES.items()
+        if role != "libgwipc"
+    },
     "nvidia-drm-vrr-probe": PROBE_BINARY,
     "systemctl": Path("/usr/bin/systemctl"),
     "systemd-run": Path("/usr/bin/systemd-run"),
@@ -184,10 +190,16 @@ class FixedLiveRunner:
                  verify_paths: bool = True, ready: Any = None,
                  state_reader: Any = None, validate_runtime: bool = True,
                  preflight_reader: Any = None,
-                 detached_invocation: bool = False) -> None:
+                 detached_invocation: bool = False,
+                 fixed_binaries: dict[str, Path] | None = None,
+                 staged_executable_dir: Path | None = None,
+                 staged_provenance_files: dict[str, Path] | None = None) -> None:
         self.config = config
         self.artifacts = artifacts
-        self.execute = execute or self._execute
+        self.fixed_binaries = dict(fixed_binaries or FIXED_BINARIES)
+        self.staged_executable_dir = staged_executable_dir
+        self.staged_provenance_files = dict(staged_provenance_files or {})
+        self.execute = execute or self._execute_fixed
         self.active_tty = active_tty
         self.verify_paths = verify_paths
         self.ready = ready or self._ready
@@ -216,9 +228,17 @@ class FixedLiveRunner:
         self._command_failure_count = 0
         self.record_full_steps = True
 
+    def _execute_fixed(
+            self, argv: list[str], output: Path | None = None) -> CommandResult:
+        return self._execute(argv, output, self.fixed_binaries)
+
     @staticmethod
-    def _execute(argv: list[str], output: Path | None = None) -> CommandResult:
-        allowed = {str(path) for path in FIXED_BINARIES.values()}
+    def _execute(
+            argv: list[str], output: Path | None = None,
+            fixed_binaries: dict[str, Path] | None = None) -> CommandResult:
+        allowed = {
+            str(path) for path in (fixed_binaries or FIXED_BINARIES).values()
+        }
         if not argv or argv[0] not in allowed:
             raise HarnessError("live runner rejected a non-fixed executable")
         started = time.monotonic_ns()
@@ -296,7 +316,7 @@ class FixedLiveRunner:
     def command_result(self, argv: list[str],
                        output: Path | None = None) -> CommandResult:
         """Run one fixed argv and normalize legacy injected test executors."""
-        allowed = {str(path) for path in FIXED_BINARIES.values()}
+        allowed = {str(path) for path in self.fixed_binaries.values()}
         if not argv or argv[0] not in allowed:
             raise HarnessError("live runner rejected a non-fixed executable")
         started = time.monotonic_ns()
@@ -615,7 +635,7 @@ class FixedLiveRunner:
         except OSError as error:
             raise HarnessError(f"cannot capture exact VT/KD state: {error}") from error
         getty_active = self.command_result(
-            [str(FIXED_BINARIES["systemctl"]), "is-active", self.getty_unit],
+            [str(self.fixed_binaries["systemctl"]), "is-active", self.getty_unit],
         ).succeeded
         return {"active_vt": active_vt, "kd_mode": kd_mode,
                 "getty_active": getty_active}
@@ -658,7 +678,7 @@ class FixedLiveRunner:
     def unit_state(self, name: str) -> tuple[str, str]:
         path = self.artifacts / ".systemd-unit-state.tmp"
         path.unlink(missing_ok=True)
-        argv = [str(FIXED_BINARIES["systemctl"]), "show",
+        argv = [str(self.fixed_binaries["systemctl"]), "show",
                 "--property=LoadState", "--property=ActiveState", name]
         try:
             if not self.command_result(argv, path).succeeded:
@@ -688,7 +708,7 @@ class FixedLiveRunner:
                 continue
             if (load_state == "loaded" and
                     active_state in {"inactive", "failed"}):
-                self.command([str(FIXED_BINARIES["systemctl"]),
+                self.command([str(self.fixed_binaries["systemctl"]),
                               "reset-failed", name])
                 for _ in range(20):
                     load_state, active_state = self.unit_state(name)
@@ -705,7 +725,7 @@ class FixedLiveRunner:
                 f"({load_state}/{active_state})")
 
     def stop_unit(self, name: str) -> None:
-        argv = [str(FIXED_BINARIES["systemctl"]), "stop", name]
+        argv = [str(self.fixed_binaries["systemctl"]), "stop", name]
         stop_result = self.command_result(argv)
         if self.verify_paths:
             reset_attempted = False
@@ -717,7 +737,7 @@ class FixedLiveRunner:
                         active_state in {"inactive", "failed"} and
                         not reset_attempted):
                     if not self.command_result([
-                            str(FIXED_BINARIES["systemctl"]),
+                            str(self.fixed_binaries["systemctl"]),
                             "reset-failed", name]).succeeded:
                         raise HarnessError(
                             f"fixed transient unit could not be reset: {name}")
@@ -742,7 +762,7 @@ class FixedLiveRunner:
                    properties: list[str] | None = None) -> None:
         unit_name = name.removesuffix(".service")
         unit_log = self.artifacts / f"{unit_name}.log"
-        argv = [str(FIXED_BINARIES["systemd-run"]), f"--unit={unit_name}",
+        argv = [str(self.fixed_binaries["systemd-run"]), f"--unit={unit_name}",
                 "--collect", "--quiet", "--property=Type=exec",
                 "--property=LimitCORE=0"]
         if executable == "gwcomp":
@@ -751,12 +771,12 @@ class FixedLiveRunner:
             argv.append(f"--property={value}")
         argv += [f"--property=StandardOutput=append:{unit_log}",
                  f"--property=StandardError=append:{unit_log}"]
-        argv += ["--", str(FIXED_BINARIES[executable]), *arguments]
+        argv += ["--", str(self.fixed_binaries[executable]), *arguments]
         self.command(argv, f"{unit_name}.log")
         self.managed_units.append(name)
 
     def set_policy(self, policy: str) -> None:
-        self.command([str(FIXED_BINARIES["gwout"]), "--socket",
+        self.command([str(self.fixed_binaries["gwout"]), "--socket",
                       str(RUNTIME_ROOT / "control.sock"), "set",
                       str(self.config["connector"]), "--vrr", policy, "--json"])
 
@@ -887,7 +907,7 @@ class FixedLiveRunner:
 
         self._bounded_json_query(
             "policy-cleanup", "coordinated client cleanup",
-            [str(FIXED_BINARIES["gwinfo"]), "--socket",
+            [str(self.fixed_binaries["gwinfo"]), "--socket",
              str(RUNTIME_ROOT / "control.sock"), "vrr", "--json"],
             self.artifacts / ".policy-cleanup.query.tmp",
             CLEANUP_QUERY_ATTEMPTS, validate,
@@ -1028,7 +1048,7 @@ class FixedLiveRunner:
              "preference": preference, "output_reasons": output_reasons,
              "window_reasons": window_reasons})
         if not self.validate_runtime:
-            self.command([str(FIXED_BINARIES["gwinfo"]), "--socket",
+            self.command([str(self.fixed_binaries["gwinfo"]), "--socket",
                           str(RUNTIME_ROOT / "control.sock"), "vrr",
                           str(self.config["connector"]), "--json"], name)
             return {}
@@ -1071,7 +1091,7 @@ class FixedLiveRunner:
 
         return self._bounded_json_query(
             name, name,
-            [str(FIXED_BINARIES["gwinfo"]), "--socket",
+            [str(self.fixed_binaries["gwinfo"]), "--socket",
              str(RUNTIME_ROOT / "control.sock"), "vrr",
              str(self.config["connector"]), "--json"],
             temporary, QUERY_ATTEMPTS, validate, path,
@@ -1110,7 +1130,7 @@ class FixedLiveRunner:
     def preflight(self) -> None:
         if self.verify_paths:
             require_live_harness_scope()
-            for path in FIXED_BINARIES.values():
+            for path in self.fixed_binaries.values():
                 if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
                     raise HarnessError(f"fixed executable is unavailable or unsafe: {path}")
         if not self.detached_invocation:
@@ -1125,7 +1145,7 @@ class FixedLiveRunner:
             if current != self.config["tty"]:
                 raise HarnessError("live run refused the wrong active VT")
         if self.command_result([
-                str(FIXED_BINARIES["systemctl"]), "is-active",
+                str(self.fixed_binaries["systemctl"]), "is-active",
                 "display-manager.service"]).succeeded:
             raise HarnessError("live run refused an active graphical display manager")
         if self.verify_paths:
@@ -1173,10 +1193,10 @@ class FixedLiveRunner:
         operations: list[list[str]] = []
         managed_units = list(reversed(self.managed_units))
         if self.before_state and self.before_state.get("active_vt"):
-            operations.append([str(FIXED_BINARIES["chvt"]),
+            operations.append([str(self.fixed_binaries["chvt"]),
                                str(self.before_state["active_vt"])])
         if self.getty_stopped:
-            operations.append([str(FIXED_BINARIES["systemctl"]),
+            operations.append([str(self.fixed_binaries["systemctl"]),
                                "start" if self.getty_was_active else "stop",
                                self.getty_unit])
         for unit in managed_units:
@@ -1192,7 +1212,7 @@ class FixedLiveRunner:
                 self.cleanup_errors.append(f"cleanup exception: {error}")
         if self.verify_paths:
             after = self.artifacts / "kms-after.json"
-            argv = [str(FIXED_BINARIES["drm-probe"]), "--device", str(self.config["drm_device"]),
+            argv = [str(self.fixed_binaries["drm-probe"]), "--device", str(self.config["drm_device"]),
                     "--connector", str(self.config["connector"]), "--require-mode",
                     str(self.config["mode"]).split("@", 1)[0], "--expect-restored",
                     str(self.artifacts / "kms-before.json"), "--output", str(after)]
@@ -1212,6 +1232,14 @@ class FixedLiveRunner:
                 path.unlink(missing_ok=True)
             except OSError as error:
                 self.cleanup_errors.append(f"runtime socket cleanup failed: {error}")
+        if self.staged_executable_dir is not None:
+            try:
+                remove_staged_executables(
+                    self.staged_executable_dir,
+                    self.staged_provenance_files)
+            except (HarnessError, OSError) as error:
+                self.cleanup_errors.append(
+                    f"verified executable cleanup failed: {error}")
         try:
             RUNTIME_ROOT.rmdir()
         except OSError as error:
@@ -1229,7 +1257,7 @@ class FixedLiveRunner:
         self.getty_was_active = bool(self.before_state["getty_active"])
         if self.verify_paths:
             self.command([
-                str(FIXED_BINARIES["drm-probe"]), "--device",
+                str(self.fixed_binaries["drm-probe"]), "--device",
                 str(self.config["drm_device"]), "--connector",
                 str(self.config["connector"]), "--require-mode",
                 str(self.config["mode"]).split("@", 1)[0],
@@ -1238,7 +1266,7 @@ class FixedLiveRunner:
             ])
         self.verify_live_console()
         self.command([
-            str(FIXED_BINARIES["systemctl"]), "stop", self.getty_unit,
+            str(self.fixed_binaries["systemctl"]), "stop", self.getty_unit,
         ])
         self.getty_stopped = True
         self._step(2)
@@ -1306,12 +1334,12 @@ class FixedLiveRunner:
     def stage_vt_cycle(self) -> None:
         self._step(19)
         self.command([
-            str(FIXED_BINARIES["chvt"]), self.alternate_tty,
+            str(self.fixed_binaries["chvt"]), self.alternate_tty,
         ])
         self.snapshot("milestone14-vt-inactive.json", "always-eligible", False)
         active_tty = TTY_PATTERN.fullmatch(
             str(self.config["tty"])).group(1)  # type: ignore[union-attr]
-        self.command([str(FIXED_BINARIES["chvt"]), active_tty])
+        self.command([str(self.fixed_binaries["chvt"]), active_tty])
         self._step(20)
         if self.validate_runtime:
             shutil.copyfile(
@@ -1325,7 +1353,7 @@ class FixedLiveRunner:
         gwm_socket = RUNTIME_ROOT / "gwm.sock"
         old_inode = gwm_socket.stat().st_ino if self.validate_runtime else 0
         self.command([
-            str(FIXED_BINARIES["systemctl"]), "restart", LIVE_UNITS["gwm"],
+            str(self.fixed_binaries["systemctl"]), "restart", LIVE_UNITS["gwm"],
         ])
         self.wait_replaced(gwm_socket, old_inode)
         self.snapshot("milestone14-restart-gwm.json", "always-eligible", True)

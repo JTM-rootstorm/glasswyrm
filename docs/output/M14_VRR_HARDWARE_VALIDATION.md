@@ -91,7 +91,8 @@ loss, or `SIGKILL` still requires the independent recovery route.
 
 The provenance option is deliberately opt-in. Its build-by-default target
 requires the source tree to remain at the configured `HEAD` with no tracked
-changes, then hashes every repository executable used by the physical runner.
+changes, then hashes every repository executable used by the physical runner
+and the exact `libgwipc.so.0.9.0` runtime payload loaded by those executables.
 Reconfigure the fixed build after changing commits so Meson records the new
 candidate `HEAD`.
 The doctor rejects a missing manifest, a different tested commit, an unexpected
@@ -99,6 +100,11 @@ binary set or path, and any size or SHA-256 mismatch before inspecting the
 selected hardware. The same validated manifest is archived as
 `milestone14-build-provenance.json`; archive validation binds its source commit
 to the reviewed configuration, doctor report, and final summary.
+
+After validation, the harness copies each payload from the same descriptor used
+for hashing into a private per-run mirror. Transient services execute only that
+mirror, including its fixed `libgwipc.so.0` alias, so replacing a mutable build
+pathname after validation cannot change the code that runs.
 
 The doctor currently requires the libdrm `modetest` executable at
 `/usr/bin/modetest` or `/bin/modetest` for exact mode and property discovery.

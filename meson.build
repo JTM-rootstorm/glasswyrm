@@ -326,6 +326,7 @@ if get_option('physical_validation_provenance')
   custom_target(
     'm14-physical-build-provenance',
     input: [
+      gwipc_library,
       gwm_program,
       gwcomp_program,
       glasswyrmd_program,
@@ -342,7 +343,7 @@ if get_option('physical_validation_provenance')
       '--git', git_program.full_path(),
       '--expected-commit', source_commit,
       '--output', '@OUTPUT@',
-      '--roles', 'gwm,gwcomp,server,gwout,gwinfo,client,drm-probe,drm-vrr-probe',
+      '--roles', 'libgwipc,gwm,gwcomp,server,gwout,gwinfo,client,drm-probe,drm-vrr-probe',
       '--binaries', '@INPUT@',
     ],
     build_by_default: true,

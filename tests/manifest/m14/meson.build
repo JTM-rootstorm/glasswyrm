@@ -18,6 +18,15 @@ test(
   timeout: 10,
   suite: test_hardware_selftest_suites,
 )
+m14_provenance_exec_test = find_program(
+  tests_source_dir / 'hardware/m14/provenance_exec_test.py',
+)
+test(
+  'm14-provenance-execution-binding',
+  m14_provenance_exec_test,
+  timeout: 10,
+  suite: test_hardware_selftest_suites,
+)
 
 m14_host_fixture_validator = find_program(
   tests_source_dir / 'compat/m14/validate_host_fixtures.py',

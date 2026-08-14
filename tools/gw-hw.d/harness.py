@@ -27,11 +27,12 @@ from evidence import (
 )
 from live_runner import (
     BUILD_ROOT, DIAGNOSTIC_STACK_STAGES, FIXED_BINARIES, LIVE_UNITS,
-    RUNTIME_ROOT, FixedLiveRunner,
+    RUNTIME_ROOT, VERIFIED_BIN_ROOT, FixedLiveRunner,
     _control_group_has_live_scope, require_live_harness_scope,
 )
 from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
 from probe_runner import run_nvidia_vrr_probe
+from provenance import remove_staged_executables, stage_build_provenance
 
 def dry_run(config_path: Path, required_base: str, tested_commit: str,
             fixture_dir: Path, artifact_dir: Path) -> int:
@@ -180,9 +181,32 @@ def milestone14(config_path: Path, required_base: str, tested_commit: str,
         validate_cli_identity(config, required_base, tested_commit)
         if doctor_config(config, None, artifact_dir) != 0:
             raise HarnessError("live doctor failed")
+        try:
+            staged_binaries = stage_build_provenance(
+                str(config["tested_commit"]), VERIFIED_BIN_ROOT)
+        except Exception:
+            RUNTIME_ROOT.rmdir()
+            raise
+        fixed_binaries = {
+            **FIXED_BINARIES,
+            **{
+                role: path for role, path in staged_binaries.items()
+                if role != "libgwipc"
+            },
+        }
         runner = FixedLiveRunner(
-            config, artifact_dir, detached_invocation=unattended)
-        runner.run_stage(stage)
+            config, artifact_dir, detached_invocation=unattended,
+            fixed_binaries=fixed_binaries,
+            staged_executable_dir=VERIFIED_BIN_ROOT,
+            staged_provenance_files=staged_binaries)
+        try:
+            runner.run_stage(stage)
+        except Exception:
+            if not runner.cleanup_attempted and VERIFIED_BIN_ROOT.exists():
+                remove_staged_executables(
+                    VERIFIED_BIN_ROOT, staged_binaries)
+                RUNTIME_ROOT.rmdir()
+            raise
         if stage == "full-acceptance":
             finalize_live(config, artifact_dir, runner)
         else:

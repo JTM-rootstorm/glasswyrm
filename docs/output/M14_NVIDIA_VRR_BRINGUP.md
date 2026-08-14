@@ -63,6 +63,11 @@ then compile the two named targets again. The generated manifest and executable
 must remain regular files; the wrapper rejects symlink substitution, a changed
 commit, or a hash mismatch.
 
+The wrapper copies the probe from the same descriptor used to verify its hash
+into a private per-run staging directory, then executes only that staged copy.
+Replacing the fixed-build pathname after verification therefore cannot change
+the probe that runs.
+
 From the reviewed active text VT, with the display manager and any competing
 DRM master stopped, run:
 

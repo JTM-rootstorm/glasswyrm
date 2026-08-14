@@ -15,13 +15,17 @@ from common import (
 from config_doctor import doctor_config, parse_config
 from live_runner import FIXED_BINARIES, FixedLiveRunner, require_live_harness_scope
 from nvidia_probe_analysis import analyze_probe, write_summary_exclusive
-from provenance import validate_probe_build_provenance
+from provenance import (
+    remove_staged_executables, stage_probe_build_provenance,
+)
 
 
 RAW_ARTIFACT = "milestone14-nvidia-vrr-probe.jsonl"
 SUMMARY_ARTIFACT = "milestone14-nvidia-vrr-probe-summary.json"
 RUN_ARTIFACT = "milestone14-nvidia-vrr-probe-run.json"
 FIXTURE_ARTIFACT = "nvidia-vrr-probe.jsonl"
+PROBE_RUNTIME_ROOT = Path("/run/glasswyrm-m14-nvidia-probe")
+PROBE_VERIFIED_BIN_ROOT = PROBE_RUNTIME_ROOT / "verified-bin"
 
 
 def _copy_regular_exclusive(source: Path, destination: Path) -> None:
@@ -83,8 +87,15 @@ def run_nvidia_vrr_probe(
                 validate_provenance=False) != 0:
             raise HarnessError("NVIDIA VRR probe doctor failed")
         if fixture_dir is None:
-            validate_probe_build_provenance(
-                str(config["tested_commit"]), artifact_dir)
+            _prepare_private_empty_directory(
+                PROBE_RUNTIME_ROOT, "NVIDIA VRR probe runtime directory")
+            try:
+                staged_binaries = stage_probe_build_provenance(
+                    str(config["tested_commit"]), PROBE_VERIFIED_BIN_ROOT,
+                    artifact_dir)
+            except Exception:
+                PROBE_RUNTIME_ROOT.rmdir()
+                raise
 
         report = artifact_dir / RAW_ARTIFACT
         stage = "probe"
@@ -96,24 +107,31 @@ def run_nvidia_vrr_probe(
                 "fixed_executable": "gw_drm_vrr_probe",
             }
         else:
-            runner = FixedLiveRunner(
-                config, artifact_dir, detached_invocation=True)
-            argv = [
-                str(FIXED_BINARIES["nvidia-drm-vrr-probe"]),
-                "--device", str(config["drm_device"]),
-                "--connector", str(config["connector"]),
-                "--mode", str(config["mode"]),
-                "--run-id", str(config["tested_commit"])[:32],
-                "--output", str(report),
-                "--target-hz", str(config["target_refresh_hz"]),
-                "--warmup", "10",
-                "--samples", "140",
-            ]
-            result = runner.command_result(argv)
-            command_evidence = runner._command_evidence(result)
-            if not result.succeeded:
-                runner._write_command_diagnostic(argv, result)
-                raise HarnessError("fixed NVIDIA VRR probe command failed")
+            fixed_binaries = {**FIXED_BINARIES, **staged_binaries}
+            try:
+                runner = FixedLiveRunner(
+                    config, artifact_dir, detached_invocation=True,
+                    fixed_binaries=fixed_binaries)
+                argv = [
+                    str(fixed_binaries["nvidia-drm-vrr-probe"]),
+                    "--device", str(config["drm_device"]),
+                    "--connector", str(config["connector"]),
+                    "--mode", str(config["mode"]),
+                    "--run-id", str(config["tested_commit"])[:32],
+                    "--output", str(report),
+                    "--target-hz", str(config["target_refresh_hz"]),
+                    "--warmup", "10",
+                    "--samples", "140",
+                ]
+                result = runner.command_result(argv)
+                command_evidence = runner._command_evidence(result)
+                if not result.succeeded:
+                    runner._write_command_diagnostic(argv, result)
+                    raise HarnessError("fixed NVIDIA VRR probe command failed")
+            finally:
+                remove_staged_executables(
+                    PROBE_VERIFIED_BIN_ROOT, staged_binaries)
+                PROBE_RUNTIME_ROOT.rmdir()
 
         stage = "analysis"
         summary = analyze_probe(report, config)
