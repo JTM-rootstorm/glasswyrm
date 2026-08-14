@@ -43,6 +43,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwm"
+version = "0.2.0"
+dependencies = [
+ "gw-ipc",
+ "gw-types",
+ "gw-wire",
+ "gwm-core",
+]
+
+[[package]]
 name = "gwm-core"
 version = "0.2.0"
 dependencies = [

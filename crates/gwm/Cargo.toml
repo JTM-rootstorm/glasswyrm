@@ -1,0 +1,24 @@
+[package]
+name = "gwm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Glasswyrm window-manager policy process"
+publish = false
+
+[dependencies]
+gw-ipc = { path = "../gw-ipc" }
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+gwm-core = { path = "../gwm-core" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gwm"
+path = "src/main.rs"
+
+[lints]
+workspace = true
