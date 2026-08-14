@@ -42,9 +42,52 @@ PassiveButtonGrabRequest passive_request(const GrabClientId client = 1) {
   return request;
 }
 
+void test_passive_grab_limits_and_reuse() {
+  GrabState grabs(GrabLimits{2, 3});
+  auto first = passive_request(1);
+  first.window = 10;
+  auto second = passive_request(1);
+  second.window = 11;
+  auto over_client_limit = passive_request(1);
+  over_client_limit.window = 12;
+  require(grabs.grab_button(first) == GrabStatus::Success &&
+              grabs.grab_button(second) == GrabStatus::Success &&
+              grabs.grab_button(over_client_limit) == GrabStatus::BadAccess &&
+              grabs.passive_button_count() == 2,
+          "passive grab per-client limit rejects before mutation");
+
+  second.event_mask = em::ButtonPress;
+  require(grabs.grab_button(second) == GrabStatus::Success &&
+              grabs.passive_button_count() == 2,
+          "an exact passive grab replacement remains available at quota");
+
+  auto third = passive_request(2);
+  third.window = 20;
+  auto over_total_limit = passive_request(2);
+  over_total_limit.window = 21;
+  require(grabs.grab_button(third) == GrabStatus::Success &&
+              grabs.grab_button(over_total_limit) == GrabStatus::BadAccess &&
+              grabs.passive_button_count() == 3,
+          "passive grab total limit rejects before mutation");
+
+  const auto client_cleanup = grabs.cleanup_client(1);
+  require(client_cleanup.passive_buttons_removed == 2 &&
+              grabs.grab_button(over_total_limit) == GrabStatus::Success &&
+              grabs.passive_button_count() == 2,
+          "client cleanup releases passive grab quota for reuse");
+  const auto window_cleanup = grabs.cleanup_window(third.window);
+  auto reused = passive_request(3);
+  reused.window = 30;
+  require(window_cleanup.passive_buttons_removed == 1 &&
+              grabs.grab_button(reused) == GrabStatus::Success &&
+              grabs.passive_button_count() == 2,
+          "window cleanup releases total passive grab quota for reuse");
+}
+
 }  // namespace
 
 int main() {
+  test_passive_grab_limits_and_reuse();
   GrabState grabs;
   require(grabs.begin_automatic_button_grab(1, 10, 1, 20) &&
               grabs.pointer_grab()->origin == PointerGrabOrigin::AutomaticButton &&

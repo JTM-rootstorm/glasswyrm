@@ -17,6 +17,14 @@ using GrabClientId = std::uint64_t;
 
 inline constexpr std::uint16_t kAnyModifier = 0x8000U;
 inline constexpr std::uint8_t kAnyButton = 0;
+inline constexpr std::size_t kMaximumPassiveButtonGrabsPerClient = 1024;
+inline constexpr std::size_t kMaximumPassiveButtonGrabs = 4096;
+
+struct GrabLimits {
+  std::size_t maximum_passive_buttons_per_client{
+      kMaximumPassiveButtonGrabsPerClient};
+  std::size_t maximum_passive_buttons{kMaximumPassiveButtonGrabs};
+};
 
 enum class GrabMode : std::uint8_t { Synchronous = 0, Asynchronous = 1 };
 
@@ -135,6 +143,8 @@ struct GrabCleanupResult {
 
 class GrabState {
  public:
+  explicit GrabState(GrabLimits limits = {}) : limits_(limits) {}
+
   [[nodiscard]] const std::optional<PointerGrab>& pointer_grab() const noexcept {
     return pointer_grab_;
   }
@@ -211,6 +221,7 @@ class GrabState {
   std::uint32_t last_pointer_grab_time_{0};
   std::uint32_t last_keyboard_grab_time_{0};
   std::uint64_t next_passive_serial_{1};
+  GrabLimits limits_;
 };
 
 }  // namespace glasswyrm::server

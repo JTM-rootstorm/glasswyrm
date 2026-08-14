@@ -215,6 +215,15 @@ GrabStatus GrabState::grab_button(const PassiveButtonGrabRequest& request) {
       return GrabStatus::Success;
     }
   }
+  if (passive_buttons_.size() >= limits_.maximum_passive_buttons)
+    return GrabStatus::BadAccess;
+  const auto client_count = std::ranges::count_if(
+      passive_buttons_, [&request](const PassiveButtonGrab& passive) {
+        return passive.request.client == request.client;
+      });
+  if (static_cast<std::size_t>(client_count) >=
+      limits_.maximum_passive_buttons_per_client)
+    return GrabStatus::BadAccess;
   passive_buttons_.push_back({request, next_passive_serial_++});
   return GrabStatus::Success;
 }
