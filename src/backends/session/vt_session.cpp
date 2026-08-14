@@ -15,6 +15,8 @@ DirectVirtualTerminalSession::~DirectVirtualTerminalSession() {
     (void)restore(ignored);
   } catch (...) {
   }
+  if (terminal_fd_ >= 0)
+    api_.close_terminal(std::exchange(terminal_fd_, -1));
 }
 
 void DirectVirtualTerminalSession::append_error(const std::string_view detail,
@@ -197,6 +199,10 @@ bool DirectVirtualTerminalSession::restore(std::string &error) {
   if (state_ == DirectSessionState::Empty ||
       state_ == DirectSessionState::Restored)
     return true;
+  if (state_ == DirectSessionState::Failed && terminal_fd_ < 0) {
+    error = "virtual-terminal restoration previously failed irrecoverably";
+    return false;
+  }
 
   bool success = true;
   std::string operation_error;
@@ -229,17 +235,19 @@ bool DirectVirtualTerminalSession::restore(std::string &error) {
       display_restored = false;
     }
     operation_error.clear();
-    if (display_restored &&
-        !display_.release_scanout_resources(operation_error)) {
-      append_error(operation_error.empty() ? "release scanout resources"
-                                           : operation_error,
-                   error);
-      success = false;
+    if (display_restored) {
+      if (!display_.release_scanout_resources(operation_error)) {
+        append_error(operation_error.empty() ? "release scanout resources"
+                                             : operation_error,
+                     error);
+        success = false;
+      }
     }
     operation_error.clear();
     if (!display_.drop_master(operation_error)) {
-      append_error(
-          operation_error.empty() ? "drop DRM master" : operation_error, error);
+      append_error(operation_error.empty() ? "drop DRM master"
+                                           : operation_error,
+                   error);
       success = false;
     } else {
       master_owned_ = false;
@@ -280,41 +288,65 @@ bool DirectVirtualTerminalSession::restore(std::string &error) {
       activated_ = false;
     }
   }
-  api_.close_terminal(std::exchange(terminal_fd_, -1));
-  state_ = DirectSessionState::Restored;
-  return success;
+  const bool activation_pending = activated_ && have_state_ &&
+                                  saved_state_.active != terminal_number_;
+  const bool restored = !master_owned_ && !graphics_mode_set_ &&
+                        !process_mode_set_ && !keyboard_mode_set_ &&
+                        !activation_pending;
+  if (restored) {
+    api_.close_terminal(std::exchange(terminal_fd_, -1));
+    state_ = success ? DirectSessionState::Restored
+                     : DirectSessionState::Failed;
+    return success;
+  }
+  state_ = DirectSessionState::Failed;
+  return false;
 }
 
 void DirectVirtualTerminalSession::unwind_failed_acquire(std::string &error) {
   if (master_owned_) {
     std::string cleanup_error;
-    if (!display_.drop_master(cleanup_error))
+    if (!display_.drop_master(cleanup_error)) {
       append_error(cleanup_error.empty() ? "cleanup DRM master" : cleanup_error,
                    error);
-    master_owned_ = false;
+    } else {
+      master_owned_ = false;
+    }
   }
   if (graphics_mode_set_ && have_kd_mode_) {
-    if (!api_.set_kd_mode(terminal_fd_, saved_kd_mode_))
+    if (!api_.set_kd_mode(terminal_fd_, saved_kd_mode_)) {
       append_api_error("cleanup KD mode", error);
-    graphics_mode_set_ = false;
+    } else {
+      graphics_mode_set_ = false;
+    }
   }
   if (process_mode_set_ && have_mode_) {
-    if (!api_.set_mode(terminal_fd_, saved_mode_))
+    if (!api_.set_mode(terminal_fd_, saved_mode_)) {
       append_api_error("cleanup VT mode", error);
-    process_mode_set_ = false;
+    } else {
+      process_mode_set_ = false;
+    }
   }
   if (keyboard_mode_set_ && have_keyboard_mode_) {
-    if (!api_.set_keyboard_mode(terminal_fd_, saved_keyboard_mode_))
+    if (!api_.set_keyboard_mode(terminal_fd_, saved_keyboard_mode_)) {
       append_api_error("cleanup keyboard mode", error);
-    keyboard_mode_set_ = false;
+    } else {
+      keyboard_mode_set_ = false;
+    }
   }
   if (activated_ && have_state_ && saved_state_.active != terminal_number_) {
     if (!api_.activate(terminal_fd_, saved_state_.active) ||
-        !api_.wait_until_active(terminal_fd_, saved_state_.active))
+        !api_.wait_until_active(terminal_fd_, saved_state_.active)) {
       append_api_error("cleanup previous virtual terminal", error);
-    activated_ = false;
+    } else {
+      activated_ = false;
+    }
   }
-  api_.close_terminal(std::exchange(terminal_fd_, -1));
+  const bool activation_pending = activated_ && have_state_ &&
+                                  saved_state_.active != terminal_number_;
+  if (!master_owned_ && !graphics_mode_set_ && !process_mode_set_ &&
+      !keyboard_mode_set_ && !activation_pending)
+    api_.close_terminal(std::exchange(terminal_fd_, -1));
   state_ = DirectSessionState::Failed;
 }
 

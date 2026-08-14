@@ -345,6 +345,11 @@ void scanout_cleanup_failure_is_fatal() {
                        "restore_kd:0", "restore_vt_mode",
                        "restore_keyboard:3", "close"},
                       "cleanup failure preserves remaining restore order");
+  gw::test::require(session.state() == DirectSessionState::Failed &&
+                        session.terminal_fd() < 0 &&
+                        !session.restore(error) &&
+                        error.find("irrecoverably") != std::string::npos,
+                    "non-retryable scanout cleanup is not reported as restored");
 }
 
 void keyboard_restore_failure_is_fatal() {
@@ -361,8 +366,20 @@ void keyboard_restore_failure_is_fatal() {
                             std::string::npos,
                     "keyboard restoration failure is fatal and reported");
   require_subsequence(log.values,
-                      {"restore_keyboard:3", "activate:2", "wait:2", "close"},
-                      "keyboard failure preserves remaining restore order");
+                      {"restore_keyboard:3", "activate:2", "wait:2"},
+                      "keyboard failure preserves later restore operations");
+  gw::test::require(session.state() == DirectSessionState::Failed &&
+                        session.terminal_fd() >= 0 &&
+                        std::find(log.values.begin(), log.values.end(),
+                                  "close") == log.values.end(),
+                    "keyboard restore failure retains the VT for retry");
+  log.fail_on.clear();
+  gw::test::require(session.restore(error) &&
+                        session.state() == DirectSessionState::Restored,
+                    "keyboard restoration can be retried");
+  require_subsequence(log.values,
+                      {"activate:2", "wait:2", "restore_keyboard:3", "close"},
+                      "retry restores the remaining keyboard state and closes");
 }
 
 } // namespace
