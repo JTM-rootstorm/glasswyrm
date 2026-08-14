@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 
 namespace gw::ipc {
 namespace {
@@ -45,6 +46,62 @@ bool is_live_socket(const std::string& path) noexcept {
          error == EALREADY;
 }
 
+bool trusted_directory_chain(const std::string& path) noexcept {
+  std::error_code filesystem_error;
+  const auto absolute = std::filesystem::absolute(path, filesystem_error)
+                            .lexically_normal();
+  if (filesystem_error || !absolute.is_absolute()) return false;
+  int current_fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+  if (current_fd < 0) return false;
+  struct stat current_status {};
+  if (::fstat(current_fd, &current_status) != 0) {
+    (void)::close(current_fd);
+    return false;
+  }
+  const uid_t effective_user = ::geteuid();
+  const uid_t filesystem_root_owner = current_status.st_uid;
+  for (const auto& component : absolute.relative_path()) {
+    const auto name = component.string();
+    const int next_fd = ::openat(current_fd, name.c_str(),
+                                 O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (next_fd < 0) {
+      (void)::close(current_fd);
+      return false;
+    }
+    struct stat next_status {};
+    if (::fstat(next_fd, &next_status) != 0) {
+      (void)::close(next_fd);
+      (void)::close(current_fd);
+      return false;
+    }
+    const bool trusted_owner = current_status.st_uid == filesystem_root_owner ||
+                               current_status.st_uid == effective_user;
+    const bool writable =
+        (current_status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+    const bool sticky_safe =
+        (current_status.st_mode & S_ISVTX) != 0 &&
+        (next_status.st_uid == filesystem_root_owner ||
+         next_status.st_uid == effective_user);
+    if (!trusted_owner || (writable && !sticky_safe)) {
+      (void)::close(next_fd);
+      (void)::close(current_fd);
+      return false;
+    }
+    (void)::close(current_fd);
+    current_fd = next_fd;
+    current_status = next_status;
+  }
+  const bool final_owner = current_status.st_uid == filesystem_root_owner ||
+                           current_status.st_uid == effective_user;
+  const bool final_writable =
+      (current_status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+  const bool safe = final_owner &&
+                    (!final_writable ||
+                     (current_status.st_mode & S_ISVTX) != 0);
+  (void)::close(current_fd);
+  return safe;
+}
+
 }  // namespace
 
 gwipc_status prepare_endpoint_path(const std::string& path,
@@ -53,12 +110,8 @@ gwipc_status prepare_endpoint_path(const std::string& path,
   socklen_t length = 0;
   if (!make_address(path, address, length)) return GWIPC_STATUS_INVALID_ARGUMENT;
 
-  struct stat parent_status {};
-  if (::lstat(parent_path(path).c_str(), &parent_status) < 0) {
-    system_errno = errno;
-    return GWIPC_STATUS_SYSTEM_ERROR;
-  }
-  if (!S_ISDIR(parent_status.st_mode)) return GWIPC_STATUS_INVALID_ARGUMENT;
+  if (!trusted_directory_chain(parent_path(path)))
+    return GWIPC_STATUS_INVALID_ARGUMENT;
 
   struct stat status {};
   if (::lstat(path.c_str(), &status) < 0) {

@@ -91,6 +91,29 @@ int main() {
   require(::unlink(path.c_str()) == 0 && ::unlink(target.c_str()) == 0,
           "cannot remove symlink fixture");
 
+  require(::chmod(temporary, 0777) == 0,
+          "cannot make endpoint parent unsafe");
+  require(gwipc_listener_create(&listener_options, &listener) ==
+                  GWIPC_STATUS_INVALID_ARGUMENT &&
+              listener == nullptr,
+          "writable endpoint parent was accepted");
+  require(::chmod(temporary, 0700) == 0,
+          "cannot restore private endpoint parent mode");
+
+  const std::string nested = directory + "/nested";
+  require(::mkdir(nested.c_str(), 0700) == 0,
+          "cannot create nested endpoint parent");
+  require(::chmod(temporary, 0777) == 0,
+          "cannot make endpoint ancestor unsafe");
+  const std::string nested_path = nested + "/gwipc.sock";
+  auto nested_options = options(nested_path.c_str());
+  require(gwipc_listener_create(&nested_options, &listener) ==
+                  GWIPC_STATUS_INVALID_ARGUMENT &&
+              listener == nullptr,
+          "private endpoint below a writable ancestor was accepted");
+  require(::chmod(temporary, 0700) == 0 && ::rmdir(nested.c_str()) == 0,
+          "cannot clean nested endpoint parent");
+
   make_stale_socket(path);
   require(gwipc_listener_create(&listener_options, &listener) == GWIPC_STATUS_OK,
           "owned stale socket was not recovered");
