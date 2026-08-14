@@ -7,18 +7,139 @@
 #include "backends/drm/pipeline_selector.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <charconv>
+#include <cstring>
 #include <filesystem>
-#include <fstream>
+#include <fcntl.h>
 #include <iomanip>
 #include <sstream>
 #include <set>
 #include <string_view>
+#include <sys/stat.h>
 #include <tuple>
+#include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace glasswyrm::tools {
 namespace {
+
+constexpr std::uint64_t kMaximumSnapshotBytes = 4U * 1024U * 1024U;
+
+class UniqueFd {
+ public:
+  explicit UniqueFd(const int descriptor = -1) : descriptor_(descriptor) {}
+  ~UniqueFd() {
+    if (descriptor_ >= 0) (void)::close(descriptor_);
+  }
+
+  UniqueFd(const UniqueFd&) = delete;
+  UniqueFd& operator=(const UniqueFd&) = delete;
+
+  UniqueFd(UniqueFd&& other) noexcept
+      : descriptor_(std::exchange(other.descriptor_, -1)) {}
+  UniqueFd& operator=(UniqueFd&& other) noexcept {
+    if (this == &other) return *this;
+    if (descriptor_ >= 0) (void)::close(descriptor_);
+    descriptor_ = std::exchange(other.descriptor_, -1);
+    return *this;
+  }
+
+  [[nodiscard]] int get() const { return descriptor_; }
+
+ private:
+  int descriptor_;
+};
+
+struct OpenParent {
+  UniqueFd descriptor;
+  std::string filename;
+};
+
+bool trusted_directory_owner(const uid_t owner, const uid_t root_owner) {
+  return owner == root_owner || owner == ::geteuid();
+}
+
+std::optional<OpenParent> open_private_parent(
+    const std::string& path, std::string& reason) {
+  std::error_code filesystem_error;
+  const auto absolute = std::filesystem::absolute(path, filesystem_error)
+                            .lexically_normal();
+  if (filesystem_error || !absolute.is_absolute() ||
+      absolute.filename().empty() || absolute.filename() == "." ||
+      absolute.filename() == "..") {
+    reason = "path must name a file";
+    return std::nullopt;
+  }
+
+  UniqueFd current(::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC));
+  if (current.get() < 0) {
+    reason = std::strerror(errno);
+    return std::nullopt;
+  }
+  struct stat current_status {};
+  if (::fstat(current.get(), &current_status) != 0) {
+    reason = std::strerror(errno);
+    return std::nullopt;
+  }
+  const uid_t root_owner = current_status.st_uid;
+
+  const auto parent = absolute.parent_path();
+  for (const auto& component : parent.relative_path()) {
+    const auto name = component.string();
+    UniqueFd next(::openat(current.get(), name.c_str(),
+                           O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
+    if (next.get() < 0) {
+      reason = "directory chain must contain only real directories";
+      return std::nullopt;
+    }
+    struct stat next_status {};
+    if (::fstat(next.get(), &next_status) != 0) {
+      reason = std::strerror(errno);
+      return std::nullopt;
+    }
+    const bool writable =
+        (current_status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+    const bool sticky_safe =
+        (current_status.st_mode & S_ISVTX) != 0 &&
+        trusted_directory_owner(next_status.st_uid, root_owner);
+    if (!trusted_directory_owner(current_status.st_uid, root_owner) ||
+        (writable && !sticky_safe)) {
+      reason = "directory chain has an unsafe writable or unowned ancestor";
+      return std::nullopt;
+    }
+    current = std::move(next);
+    current_status = next_status;
+  }
+
+  if (current_status.st_uid != ::geteuid() ||
+      (current_status.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+    reason = "parent must be owned by the current user and not group/world "
+             "writable";
+    return std::nullopt;
+  }
+  return OpenParent{std::move(current), absolute.filename().string()};
+}
+
+bool safe_regular_file(const struct stat& status) {
+  return S_ISREG(status.st_mode) && status.st_nlink == 1 &&
+         status.st_uid == ::geteuid() && status.st_size >= 0 &&
+         (status.st_mode & (S_IWGRP | S_IWOTH)) == 0;
+}
+
+bool same_file(const struct stat& left, const struct stat& right) {
+  return left.st_dev == right.st_dev && left.st_ino == right.st_ino;
+}
+
+void unlink_if_identity(const OpenParent& parent,
+                        const struct stat& expected) noexcept {
+  struct stat current {};
+  if (::fstatat(parent.descriptor.get(), parent.filename.c_str(), &current,
+                AT_SYMLINK_NOFOLLOW) == 0 &&
+      same_file(current, expected))
+    (void)::unlinkat(parent.descriptor.get(), parent.filename.c_str(), 0);
+}
 
 void usage(std::ostream& output) {
   output << "Usage: gw_drm_probe --device PATH|auto [--connector NAME]\n"
@@ -316,18 +437,110 @@ std::string snapshot_json(const drm::DeviceSnapshot& snapshot,
   return output.str();
 }
 
-bool read_file(const std::string& path, std::string& contents) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input) return false;
-  contents.assign(std::istreambuf_iterator<char>(input),
-                  std::istreambuf_iterator<char>());
-  return input.good() || input.eof();
+bool read_file(const std::string& path, std::string& contents,
+               std::string& reason) {
+  auto parent = open_private_parent(path, reason);
+  if (!parent) return false;
+  UniqueFd input(::openat(parent->descriptor.get(), parent->filename.c_str(),
+                          O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK));
+  if (input.get() < 0) {
+    reason = std::strerror(errno);
+    return false;
+  }
+  struct stat initial {};
+  if (::fstat(input.get(), &initial) != 0 || !safe_regular_file(initial) ||
+      static_cast<std::uint64_t>(initial.st_size) > kMaximumSnapshotBytes) {
+    reason = "baseline is unsafe or too large";
+    return false;
+  }
+
+  contents.resize(static_cast<std::size_t>(initial.st_size));
+  std::size_t offset = 0;
+  while (offset < contents.size()) {
+    const auto count =
+        ::read(input.get(), contents.data() + offset, contents.size() - offset);
+    if (count < 0) {
+      if (errno == EINTR) continue;
+      reason = std::strerror(errno);
+      return false;
+    }
+    if (count == 0) {
+      reason = "baseline changed while it was read";
+      return false;
+    }
+    offset += static_cast<std::size_t>(count);
+  }
+  char extra = 0;
+  while (true) {
+    const auto count = ::read(input.get(), &extra, 1);
+    if (count < 0 && errno == EINTR) continue;
+    if (count != 0) {
+      reason = count < 0 ? std::strerror(errno)
+                         : "baseline changed while it was read";
+      return false;
+    }
+    break;
+  }
+  struct stat final_status {};
+  if (::fstat(input.get(), &final_status) != 0 ||
+      !safe_regular_file(final_status) || !same_file(initial, final_status) ||
+      final_status.st_size != initial.st_size) {
+    reason = "baseline changed while it was read";
+    return false;
+  }
+  return true;
 }
 
-bool write_file(const std::string& path, const std::string_view contents) {
-  std::ofstream output(path, std::ios::binary | std::ios::trunc);
-  output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-  return output.good();
+bool write_all(const int descriptor, std::string_view contents,
+               std::string& reason) {
+  while (!contents.empty()) {
+    const auto count = ::write(descriptor, contents.data(), contents.size());
+    if (count < 0) {
+      if (errno == EINTR) continue;
+      reason = std::strerror(errno);
+      return false;
+    }
+    contents.remove_prefix(static_cast<std::size_t>(count));
+  }
+  return true;
+}
+
+bool write_file(const std::string& path, const std::string_view contents,
+                std::string& reason) {
+  if (contents.size() > kMaximumSnapshotBytes) {
+    reason = "snapshot is too large";
+    return false;
+  }
+  auto parent = open_private_parent(path, reason);
+  if (!parent) return false;
+  UniqueFd output(::openat(parent->descriptor.get(), parent->filename.c_str(),
+                           O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC |
+                               O_NOFOLLOW,
+                           0600));
+  if (output.get() < 0) {
+    reason = std::strerror(errno);
+    return false;
+  }
+  struct stat status {};
+  const bool inspected = ::fstat(output.get(), &status) == 0;
+  if (!inspected || !safe_regular_file(status)) {
+    reason = "output is not a private regular file";
+    if (inspected) unlink_if_identity(*parent, status);
+    return false;
+  }
+  if (!write_all(output.get(), contents, reason)) {
+    unlink_if_identity(*parent, status);
+    return false;
+  }
+  struct stat final_status {};
+  if (::fstat(output.get(), &final_status) != 0 ||
+      !safe_regular_file(final_status) || !same_file(status, final_status) ||
+      static_cast<std::uint64_t>(final_status.st_size) != contents.size()) {
+    reason = "output changed while it was written";
+    unlink_if_identity(*parent, status);
+    return false;
+  }
+  return true;
 }
 
 bool device_qualifies(const drm::DeviceSnapshot& snapshot,
@@ -529,14 +742,18 @@ int run_drm_probe(drm::DrmApi& api, const DrmProbeOptions& options,
 
   const auto json = snapshot_json(snapshot, selected);
   std::string baseline;
+  std::string filesystem_error;
   if (options.expected_restored_path) {
-    if (!read_file(*options.expected_restored_path, baseline)) {
-      error << "gw_drm_probe: cannot read restoration baseline\n";
+    if (!read_file(*options.expected_restored_path, baseline,
+                   filesystem_error)) {
+      error << "gw_drm_probe: cannot read restoration baseline: "
+            << filesystem_error << '\n';
       return 1;
     }
   }
-  if (!write_file(options.output_path, json)) {
-    error << "gw_drm_probe: cannot write output snapshot\n";
+  if (!write_file(options.output_path, json, filesystem_error)) {
+    error << "gw_drm_probe: cannot write output snapshot: "
+          << filesystem_error << '\n';
     return 1;
   }
   if (options.expected_restored_path && baseline != json) {

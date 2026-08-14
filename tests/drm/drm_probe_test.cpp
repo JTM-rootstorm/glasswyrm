@@ -220,9 +220,11 @@ void test_deterministic_snapshot(const TemporaryDirectory& directory) {
   auto options = explicit_options(directory.file("snapshot.json"));
   options.snapshot_state = true;
   std::ostringstream error;
-  gw::test::require(glasswyrm::tools::run_drm_probe(api, options, error) == 0 &&
-                        error.str().empty(),
-                    "capture explicit read-only DRM snapshot");
+  const auto status = glasswyrm::tools::run_drm_probe(api, options, error);
+  gw::test::require(status == 0,
+                    "capture explicit read-only DRM snapshot: " +
+                        error.str());
+  gw::test::require(error.str().empty(), "snapshot reports no error");
   gw::test::require(read_file(options.output_path) == kExpectedJson,
                     "DRM snapshot JSON is exact and deterministic");
   gw::test::require(api.close_count() == 1 && !api.open(),
@@ -348,6 +350,109 @@ void test_restoration(const TemporaryDirectory& directory) {
   }
 }
 
+void test_artifact_path_security(const TemporaryDirectory& directory) {
+  const auto write_text = [](const std::filesystem::path& path,
+                             const std::string_view contents) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    gw::test::require(output.good(), "write DRM probe security fixture");
+  };
+  const auto require_probe_failure = [](FakeDrmApi& api,
+                                        const DrmProbeOptions& options,
+                                        const std::string_view expected) {
+    std::ostringstream error;
+    gw::test::require(
+        glasswyrm::tools::run_drm_probe(api, options, error) == 1 &&
+            error.str().find(expected) != std::string::npos,
+        expected);
+  };
+
+  {
+    const auto victim = directory.file("output-symlink-victim.json");
+    const auto output = directory.file("output-symlink.json");
+    write_text(victim, "preserve\n");
+    std::filesystem::create_symlink(victim, output);
+    auto api = fake_api();
+    const auto options = explicit_options(output);
+    require_probe_failure(api, options, "cannot write output snapshot");
+    gw::test::require(read_file(victim) == "preserve\n",
+                      "output symlink victim remains unchanged");
+  }
+  {
+    const auto victim = directory.file("output-hardlink-victim.json");
+    const auto output = directory.file("output-hardlink.json");
+    write_text(victim, "preserve\n");
+    std::filesystem::create_hard_link(victim, output);
+    auto api = fake_api();
+    const auto options = explicit_options(output);
+    require_probe_failure(api, options, "cannot write output snapshot");
+    gw::test::require(read_file(victim) == "preserve\n",
+                      "output hardlink victim remains unchanged");
+  }
+  {
+    const auto real_parent = directory.file("real-parent");
+    const auto linked_parent = directory.file("linked-parent");
+    std::filesystem::create_directory(real_parent);
+    std::filesystem::create_directory_symlink(real_parent, linked_parent);
+    auto api = fake_api();
+    const auto options = explicit_options(linked_parent / "snapshot.json");
+    require_probe_failure(api, options, "cannot write output snapshot");
+    gw::test::require(!std::filesystem::exists(real_parent / "snapshot.json"),
+                      "output parent symlink is not traversed");
+  }
+  {
+    const auto original = directory.file("baseline-hardlink-original.json");
+    const auto baseline = directory.file("baseline-hardlink.json");
+    write_text(original, kExpectedJson);
+    std::filesystem::create_hard_link(original, baseline);
+    auto api = fake_api();
+    auto options = explicit_options(directory.file("hardlink-result.json"));
+    options.expected_restored_path = baseline.string();
+    require_probe_failure(api, options, "cannot read restoration baseline");
+    gw::test::require(!std::filesystem::exists(options.output_path),
+                      "hardlinked baseline is rejected before output");
+  }
+  {
+    const auto original = directory.file("baseline-symlink-original.json");
+    const auto baseline = directory.file("baseline-symlink.json");
+    write_text(original, kExpectedJson);
+    std::filesystem::create_symlink(original, baseline);
+    auto api = fake_api();
+    auto options = explicit_options(directory.file("symlink-result.json"));
+    options.expected_restored_path = baseline.string();
+    require_probe_failure(api, options, "cannot read restoration baseline");
+    gw::test::require(!std::filesystem::exists(options.output_path),
+                      "symlinked baseline is rejected before output");
+  }
+  {
+    const auto baseline = directory.file("oversized-baseline.json");
+    std::ofstream output(baseline, std::ios::binary | std::ios::trunc);
+    output.seekp(4U * 1024U * 1024U);
+    output.put('x');
+    output.close();
+    gw::test::require(output.good(), "write oversized restoration baseline");
+    auto api = fake_api();
+    auto options = explicit_options(directory.file("oversized-result.json"));
+    options.expected_restored_path = baseline.string();
+    require_probe_failure(api, options, "cannot read restoration baseline");
+    gw::test::require(!std::filesystem::exists(options.output_path),
+                      "oversized baseline is rejected before output");
+  }
+  {
+    const auto unsafe_parent = directory.file("unsafe-parent");
+    std::filesystem::create_directory(unsafe_parent);
+    std::filesystem::permissions(
+        unsafe_parent, std::filesystem::perms::owner_all |
+                           std::filesystem::perms::group_all |
+                           std::filesystem::perms::others_all);
+    auto api = fake_api();
+    const auto options = explicit_options(unsafe_parent / "snapshot.json");
+    require_probe_failure(api, options, "cannot write output snapshot");
+    gw::test::require(!std::filesystem::exists(options.output_path),
+                      "output in writable parent is rejected");
+  }
+}
+
 void test_deterministic_auto_scan(const TemporaryDirectory& directory) {
   auto api = fake_api();
   auto options = explicit_options(directory.file("auto.json"));
@@ -369,6 +474,7 @@ int main() {
   test_deterministic_snapshot(directory);
   test_rejections(directory);
   test_restoration(directory);
+  test_artifact_path_security(directory);
   test_deterministic_auto_scan(directory);
   return 0;
 }
