@@ -35,6 +35,9 @@ pub const F_GET_SEALS: c_int = 1034;
 pub const FD_CLOEXEC: c_int = 1;
 pub const O_NONBLOCK: c_int = 0o4_000;
 
+pub const S_IFMT: c_uint = 0o170_000;
+pub const S_IFREG: c_uint = 0o100_000;
+
 pub const F_SEAL_SEAL: c_int = 0x0001;
 pub const F_SEAL_SHRINK: c_int = 0x0002;
 pub const F_SEAL_GROW: c_int = 0x0004;
@@ -91,6 +94,27 @@ pub struct timespec {
 pub struct itimerspec {
     pub it_interval: timespec,
     pub it_value: timespec,
+}
+
+/// Linux x86_64 `struct stat` representation.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct stat {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: c_uint,
+    pub st_uid: c_uint,
+    pub st_gid: c_uint,
+    pub __pad0: c_int,
+    pub st_rdev: u64,
+    pub st_size: off_t,
+    pub st_blksize: i64,
+    pub st_blocks: i64,
+    pub st_atim: timespec,
+    pub st_mtim: timespec,
+    pub st_ctim: timespec,
+    pub __glibc_reserved: [i64; 3],
 }
 
 /// glibc's Linux x86_64 `sigset_t` representation.
@@ -154,6 +178,7 @@ unsafe extern "C" {
     pub fn connect(socket: c_int, address: *const c_void, address_len: socklen_t) -> c_int;
     pub fn eventfd(initial: c_uint, flags: c_int) -> c_int;
     pub fn fcntl(fd: c_int, command: c_int, ...) -> c_int;
+    pub fn fstat(fd: c_int, status: *mut stat) -> c_int;
     pub fn ftruncate(fd: c_int, length: off_t) -> c_int;
     pub fn getegid() -> u32;
     pub fn geteuid() -> u32;
@@ -198,3 +223,6 @@ unsafe extern "C" {
 
 const _: () = assert!(core::mem::size_of::<sigset_t>() == 128);
 const _: () = assert!(core::mem::size_of::<signalfd_siginfo>() == 128);
+const _: () = assert!(core::mem::size_of::<stat>() == 144);
+const _: () = assert!(core::mem::offset_of!(stat, st_mode) == 24);
+const _: () = assert!(core::mem::offset_of!(stat, st_size) == 48);

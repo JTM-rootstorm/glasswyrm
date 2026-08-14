@@ -4,9 +4,9 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use gw_platform_linux::{
-    EventFd, HardenedFd, MapAccess, Memfd, PollInterest, PollTarget, SealSet, Signal, SignalFd,
-    SignalTokenError, TimerFd, UnixSocket, UnixSocketType, descriptor_flags, peer_credentials,
-    poll,
+    EventFd, HardenedFd, MapAccess, Mapping, Memfd, PollInterest, PollTarget, SealSet, Signal,
+    SignalFd, SignalTokenError, TimerFd, UnixSocket, UnixSocketType, descriptor_flags,
+    peer_credentials, poll,
 };
 
 const EPERM: i32 = 1;
@@ -43,14 +43,121 @@ fn memfd_mapping_round_trips_and_applies_seals() {
     };
     {
         let mut mapping = memfd.map(4096, MapAccess::ReadWrite).unwrap();
-        mapping.as_mut_slice().unwrap()[..4].copy_from_slice(b"wyrm");
-        assert_eq!(&mapping.as_slice()[..4], b"wyrm");
+        assert_eq!(mapping.len(), 4096);
+        assert!(!mapping.is_empty());
+        mapping.write(0, b"wyrm").unwrap();
+        let mut bytes = [0_u8; 4];
+        mapping.read(0, &mut bytes).unwrap();
+        assert_eq!(&bytes, b"wyrm");
     }
     let seals = SealSet::SHRINK | SealSet::GROW | SealSet::WRITE | SealSet::SEAL;
     memfd.add_seals(seals).unwrap();
     assert!(memfd.seals().unwrap().contains(seals));
-    let mapping = memfd.map(4096, MapAccess::ReadOnly).unwrap();
-    assert_eq!(&mapping.as_slice()[..4], b"wyrm");
+    let mut mapping = memfd.map(4096, MapAccess::ReadOnly).unwrap();
+    let mut bytes = [0_u8; 4];
+    mapping.read(0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"wyrm");
+    let error = mapping
+        .write(0, b"no")
+        .expect_err("a read-only mapping must reject writes");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(error.to_string(), "mapping is read-only");
+    let error = memfd
+        .map(4096, MapAccess::ReadWrite)
+        .expect_err("a write-sealed object must reject writable mappings");
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(error.raw_os_error(), Some(EPERM));
+}
+
+#[test]
+fn mapping_rejects_unsealed_nonregular_and_invalid_ranges() {
+    let Some(memfd) = skip_sandbox_eperm("memfd_create", Memfd::create("gw-map-ranges", 8192))
+    else {
+        return;
+    };
+
+    assert_mapping_error(
+        Mapping::map(memfd.as_fd(), 0, 0, MapAccess::ReadOnly),
+        "mapping length must be nonzero",
+    );
+    assert_mapping_error(
+        Mapping::map(memfd.as_fd(), 1, i64::MAX as u64 + 1, MapAccess::ReadOnly),
+        "mapping offset exceeds off_t",
+    );
+    assert_mapping_error(
+        Mapping::map(
+            memfd.as_fd(),
+            usize::MAX,
+            i64::MAX as u64,
+            MapAccess::ReadOnly,
+        ),
+        "mapping range overflowed",
+    );
+    assert_mapping_error(
+        Mapping::map(
+            memfd.as_fd(),
+            isize::MAX as usize + 1,
+            0,
+            MapAccess::ReadOnly,
+        ),
+        "mapping length exceeds the addressable pointer range",
+    );
+    assert_mapping_error(
+        Mapping::map(memfd.as_fd(), 1, 0, MapAccess::ReadOnly),
+        "mapping descriptor lacks required shrink and grow seals",
+    );
+
+    memfd.add_seals(SealSet::SHRINK | SealSet::GROW).unwrap();
+    assert_mapping_error(
+        Mapping::map(memfd.as_fd(), 8193, 0, MapAccess::ReadOnly),
+        "mapping range exceeds backing object",
+    );
+    assert_mapping_error(
+        Mapping::map(memfd.as_fd(), 4097, 4096, MapAccess::ReadOnly),
+        "mapping range exceeds backing object",
+    );
+    Mapping::map(memfd.as_fd(), 4096, 4096, MapAccess::ReadOnly)
+        .expect("an exactly bounded page-aligned range must map");
+
+    let (stream, _peer) = UnixStream::pair().unwrap();
+    assert_mapping_error(
+        Mapping::map(stream.as_fd(), 1, 0, MapAccess::ReadOnly),
+        "mapping descriptor is not a regular object",
+    );
+}
+
+#[test]
+fn mapping_remains_valid_after_its_descriptor_closes_and_cannot_be_truncated() {
+    let Some(memfd) = skip_sandbox_eperm("memfd_create", Memfd::create("gw-map-owner", 4096))
+    else {
+        return;
+    };
+    let duplicate = memfd.as_fd().try_clone_to_owned().unwrap();
+    let mut mapping = memfd.map(4096, MapAccess::ReadWrite).unwrap();
+    mapping.write(0, b"safe").unwrap();
+
+    let duplicate = std::fs::File::from(duplicate);
+    let truncate_error = duplicate
+        .set_len(0)
+        .expect_err("size seals must prevent a duplicate descriptor from truncating");
+    assert_eq!(truncate_error.raw_os_error(), Some(EPERM));
+    drop(duplicate);
+    drop(memfd);
+
+    let mut bytes = [0_u8; 4];
+    mapping.read(0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"safe");
+    assert_mapping_error(
+        mapping.read(4094, &mut [0_u8; 4]),
+        "mapping range is out of bounds",
+    );
+    assert_mapping_error(mapping.write(usize::MAX, b"x"), "mapping range overflowed");
+}
+
+fn assert_mapping_error<T: core::fmt::Debug>(result: io::Result<T>, expected: &str) {
+    let error = result.expect_err(expected);
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(error.to_string(), expected);
 }
 
 #[test]
