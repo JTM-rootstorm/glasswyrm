@@ -29,6 +29,7 @@ fn run() -> Result<(), String> {
     let context = Context {
         workspace_root: workspace_root.clone(),
         legacy_build_env: env::var_os("GW_LEGACY_BUILD_DIR").map(PathBuf::from),
+        rust_bin_dir_env: env::var_os("GW_RUST_BIN_DIR").map(PathBuf::from),
         hardware_allowed: env::var_os("GW_ALLOW_HARDWARE_TESTS").as_deref()
             == Some(std::ffi::OsStr::new("1")),
     };

@@ -8,17 +8,20 @@ pub const HELP: &str = "\
 Glasswyrm transition task runner
 
 Usage:
-  cargo xtask [--legacy-build PATH] check subsystem NAME
-  cargo xtask [--legacy-build PATH] test unit
-  cargo xtask [--legacy-build PATH] test contract
-  cargo xtask [--legacy-build PATH] test software-acceptance
-  cargo xtask [--legacy-build PATH] test headless gwcomp
-  cargo xtask [--legacy-build PATH] test checkpoint gwcomp
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] check subsystem NAME
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test unit
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test contract
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test software-acceptance
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test headless gwcomp
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test checkpoint gwcomp
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|tools|all
   cargo xtask test hardware-vrr -- HARNESS_ARGS...
 
 The legacy Meson build defaults to ./build. Set GW_LEGACY_BUILD_DIR or pass
 --legacy-build to select an already configured build directory. Meson tests
-are always run with --no-rebuild.
+are always run with --no-rebuild. Rust process binaries default to
+./build/cargo/debug and are built by the mixed gates. Set GW_RUST_BIN_DIR or
+pass --rust-bin-dir to select an already-built candidate directory instead.
 
 The hardware VRR task fails closed unless GW_ALLOW_HARDWARE_TESTS=1. Arguments
 after -- are passed to `tools/gw-hw milestone14-vrr-test`.
@@ -27,6 +30,7 @@ after -- are passed to `tools/gw-hw milestone14-vrr-test`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Cli {
     pub legacy_build: Option<PathBuf>,
+    pub rust_bin_dir: Option<PathBuf>,
     pub task: Task,
 }
 
@@ -44,6 +48,10 @@ pub enum TestTier {
     SoftwareAcceptance,
     HeadlessGwcomp,
     CheckpointGwcomp,
+    MixedLegacyRestart,
+    MixedGwm,
+    MixedTools,
+    MixedAll,
     HardwareVrr(Vec<String>),
 }
 
@@ -51,6 +59,7 @@ pub enum TestTier {
 pub struct Context {
     pub workspace_root: PathBuf,
     pub legacy_build_env: Option<PathBuf>,
+    pub rust_bin_dir_env: Option<PathBuf>,
     pub hardware_allowed: bool,
 }
 
@@ -86,6 +95,7 @@ impl Cli {
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut arguments = arguments.into_iter().peekable();
         let mut legacy_build = None;
+        let mut rust_bin_dir = None;
 
         while let Some(argument) = arguments.peek() {
             if argument == "--legacy-build" {
@@ -102,6 +112,21 @@ impl Cli {
                     return Err("--legacy-build requires a non-empty path".to_owned());
                 }
                 legacy_build = Some(PathBuf::from(path));
+                arguments.next();
+            } else if argument == "--rust-bin-dir" {
+                arguments.next();
+                let path = arguments
+                    .next()
+                    .ok_or_else(|| "--rust-bin-dir requires a path".to_owned())?;
+                if path.is_empty() {
+                    return Err("--rust-bin-dir requires a non-empty path".to_owned());
+                }
+                rust_bin_dir = Some(PathBuf::from(path));
+            } else if let Some(path) = argument.strip_prefix("--rust-bin-dir=") {
+                if path.is_empty() {
+                    return Err("--rust-bin-dir requires a non-empty path".to_owned());
+                }
+                rust_bin_dir = Some(PathBuf::from(path));
                 arguments.next();
             } else {
                 break;
@@ -133,7 +158,11 @@ impl Cli {
         if task == Task::Help {
             ensure_finished(&mut arguments)?;
         }
-        Ok(Self { legacy_build, task })
+        Ok(Self {
+            legacy_build,
+            rust_bin_dir,
+            task,
+        })
     }
 }
 
@@ -171,6 +200,21 @@ fn parse_test(arguments: &mut impl Iterator<Item = String>) -> Result<TestTier, 
             )?;
             ensure_finished(arguments)?;
             TestTier::CheckpointGwcomp
+        }
+        "mixed" => {
+            let component = arguments.next().ok_or_else(|| {
+                "test mixed requires legacy-restart, gwm, tools, or all".to_owned()
+            })?;
+            ensure_finished(arguments)?;
+            match component.as_str() {
+                "legacy-restart" => TestTier::MixedLegacyRestart,
+                "gwm" => TestTier::MixedGwm,
+                "tools" => TestTier::MixedTools,
+                "all" => TestTier::MixedAll,
+                _ => {
+                    return Err("test mixed requires legacy-restart, gwm, tools, or all".to_owned());
+                }
+            }
         }
         "hardware-vrr" => {
             let mut rest: Vec<String> = arguments.collect();
@@ -221,6 +265,13 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         .clone()
         .or_else(|| context.legacy_build_env.clone())
         .unwrap_or_else(|| PathBuf::from("build"));
+    let rust_bin_dir = cli
+        .rust_bin_dir
+        .clone()
+        .or_else(|| context.rust_bin_dir_env.clone())
+        .unwrap_or_else(|| PathBuf::from("build/cargo/debug"));
+    let build_default_rust_binaries =
+        cli.rust_bin_dir.is_none() && context.rust_bin_dir_env.is_none();
     let meson = |selectors: &[&str]| {
         let mut args = vec![OsString::from("test"), OsString::from("-C")];
         args.push(legacy_build.as_os_str().to_owned());
@@ -233,7 +284,89 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         Invocation::new("meson", args)
     };
     let gwcomp_cargo = || cargo(&["test", "-p", "gwcomp-core"]);
-    let gwcomp_headless = || meson(&["--suite", "tier3-headless-process"]);
+    let gwcomp_headless = || {
+        meson(&[
+            "gwcomp-metadata-process",
+            "gwcomp-process",
+            "gwcomp-output-inventory-process",
+            "gwcomp-golden",
+            "gwcomp-scenario-matrix",
+        ])
+    };
+    let legacy_restart = || {
+        let mut invocation = cargo(&[
+            "run",
+            "--locked",
+            "-p",
+            "gw-transition-tests",
+            "--bin",
+            "legacy-output-restart",
+            "--",
+            "--build-dir",
+        ]);
+        invocation.args.push(legacy_build.as_os_str().to_owned());
+        invocation
+    };
+    let rust_gwm = || rust_bin_dir.join("gwm");
+    let rust_gwinfo = || rust_bin_dir.join("gwinfo");
+    let rust_gwout = || rust_bin_dir.join("gwout");
+    let legacy = |path: &str| legacy_build.join(path);
+    let rust_gwm_gate = || {
+        let mut invocations = Vec::new();
+        if build_default_rust_binaries {
+            invocations.push(cargo(&["build", "--locked", "-p", "gwm", "--bin", "gwm"]));
+        }
+        invocations.extend([
+            Invocation::new(
+                legacy("tests/manifest/foundation/wm/gwm_process_test").into_os_string(),
+                [rust_gwm().into_os_string()],
+            ),
+            Invocation::new(
+                legacy("tests/manifest/foundation/wm/gwm_vrr_process_test").into_os_string(),
+                [rust_gwm().into_os_string()],
+            ),
+            Invocation::new(
+                legacy("tests/manifest/foundation/wm/gwm_scenario_matrix_test").into_os_string(),
+                [
+                    rust_gwm().into_os_string(),
+                    legacy("src/gwm_m5_producer").into_os_string(),
+                    context
+                        .workspace_root
+                        .join("tests/fixtures/m5")
+                        .into_os_string(),
+                ],
+            ),
+            Invocation::new(
+                legacy("tests/manifest/foundation/wm/gwm_robustness_test").into_os_string(),
+                [rust_gwm().into_os_string()],
+            ),
+        ]);
+        invocations
+    };
+    let rust_tools_gate = || {
+        let mut invocations = Vec::new();
+        if build_default_rust_binaries {
+            invocations.push(cargo(&["build", "--locked", "-p", "gw-tools", "--bins"]));
+        }
+        invocations.push(Invocation::new(
+            context
+                .workspace_root
+                .join("tests/tools/output_tools_test.sh")
+                .into_os_string(),
+            [
+                legacy("tests/manifest/x11_tools/output_tools_fake_server").into_os_string(),
+                rust_gwinfo().into_os_string(),
+                rust_gwout().into_os_string(),
+            ],
+        ));
+        invocations
+    };
+    let mixed_all = || {
+        let mut invocations = vec![legacy_restart()];
+        invocations.extend(rust_gwm_gate());
+        invocations.extend(rust_tools_gate());
+        invocations
+    };
 
     let invocations = match &cli.task {
         Task::Help => Vec::new(),
@@ -248,25 +381,33 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
             cargo(&["test", "--workspace", "--tests"]),
             meson(&["--suite", "tier2-contract"]),
         ],
-        Task::Test(TestTier::SoftwareAcceptance) => vec![
-            cargo(&["fmt", "--all", "--", "--check"]),
-            cargo(&[
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ]),
-            cargo(&["test", "--workspace"]),
-            meson(&["--suite", "tier4-software"]),
-        ],
+        Task::Test(TestTier::SoftwareAcceptance) => {
+            let mut invocations = vec![
+                cargo(&["fmt", "--all", "--", "--check"]),
+                cargo(&[
+                    "clippy",
+                    "--workspace",
+                    "--all-targets",
+                    "--",
+                    "-D",
+                    "warnings",
+                ]),
+                cargo(&["test", "--workspace"]),
+                meson(&["--suite", "tier4-software"]),
+            ];
+            invocations.extend(mixed_all());
+            invocations
+        }
         Task::Test(TestTier::HeadlessGwcomp) => vec![gwcomp_cargo(), gwcomp_headless()],
         Task::Test(TestTier::CheckpointGwcomp) => vec![
             gwcomp_cargo(),
             gwcomp_headless(),
             meson(&["--suite", "m14-runtime"]),
         ],
+        Task::Test(TestTier::MixedLegacyRestart) => vec![legacy_restart()],
+        Task::Test(TestTier::MixedGwm) => rust_gwm_gate(),
+        Task::Test(TestTier::MixedTools) => rust_tools_gate(),
+        Task::Test(TestTier::MixedAll) => mixed_all(),
         Task::Test(TestTier::HardwareVrr(arguments)) => {
             if !context.hardware_allowed {
                 return Err(
@@ -322,6 +463,7 @@ mod tests {
         Context {
             workspace_root: PathBuf::from("/workspace"),
             legacy_build_env: None,
+            rust_bin_dir_env: None,
             hardware_allowed: false,
         }
     }
@@ -348,6 +490,13 @@ mod tests {
                 vec!["test", "checkpoint", "gwcomp"],
                 TestTier::CheckpointGwcomp,
             ),
+            (
+                vec!["test", "mixed", "legacy-restart"],
+                TestTier::MixedLegacyRestart,
+            ),
+            (vec!["test", "mixed", "gwm"], TestTier::MixedGwm),
+            (vec!["test", "mixed", "tools"], TestTier::MixedTools),
+            (vec!["test", "mixed", "all"], TestTier::MixedAll),
         ];
         for (arguments, expected) in cases {
             let cli = Cli::parse(arguments.into_iter().map(str::to_owned)).unwrap();
@@ -400,7 +549,7 @@ mod tests {
         )
         .unwrap();
         let invocations = plan(&cli, &context()).unwrap();
-        assert_eq!(invocations.len(), 4);
+        assert_eq!(invocations.len(), 12);
         assert_eq!(strings(&invocations[0]), ["fmt", "--all", "--", "--check"]);
         assert_eq!(
             strings(&invocations[1]),
@@ -418,6 +567,12 @@ mod tests {
             strings(&invocations[3])
                 .windows(2)
                 .any(|pair| pair == ["--suite", "tier4-software"])
+        );
+        assert_eq!(invocations[4].program, "cargo");
+        assert!(strings(&invocations[4]).contains(&"legacy-output-restart".to_owned()));
+        assert_eq!(
+            invocations[11].program,
+            "/workspace/tests/tools/output_tools_test.sh"
         );
     }
 
@@ -456,12 +611,104 @@ mod tests {
         assert_eq!(strings(&invocations[0]), ["test", "-p", "gwcomp-core"]);
         let meson = strings(&invocations[1]);
         assert!(meson.windows(2).any(|pair| pair == ["-C", "legacy-out"]));
-        assert!(
-            meson
-                .windows(2)
-                .any(|pair| pair == ["--suite", "tier3-headless-process"])
-        );
+        assert!(meson.contains(&"gwcomp-process".to_owned()));
+        assert!(meson.contains(&"gwcomp-golden".to_owned()));
+        assert!(!meson.contains(&"--suite".to_owned()));
+        assert!(!meson.iter().any(|argument| argument.starts_with("gwm-")));
         assert!(!meson.iter().any(|argument| argument.contains("drm")));
+    }
+
+    #[test]
+    fn mixed_gwm_plan_uses_configurable_candidate_and_legacy_paths() {
+        let cli = Cli::parse(
+            [
+                "--legacy-build",
+                "legacy-out",
+                "--rust-bin-dir",
+                "rust-out",
+                "test",
+                "mixed",
+                "gwm",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap();
+        let invocations = plan(&cli, &context()).unwrap();
+        assert_eq!(invocations.len(), 4);
+        assert_eq!(
+            invocations[0].program,
+            "legacy-out/tests/manifest/foundation/wm/gwm_process_test"
+        );
+        assert_eq!(strings(&invocations[0]), ["rust-out/gwm"]);
+        assert_eq!(
+            invocations[2].program,
+            "legacy-out/tests/manifest/foundation/wm/gwm_scenario_matrix_test"
+        );
+        assert_eq!(
+            strings(&invocations[2]),
+            [
+                "rust-out/gwm",
+                "legacy-out/src/gwm_m5_producer",
+                "/workspace/tests/fixtures/m5"
+            ]
+        );
+        assert!(
+            invocations
+                .iter()
+                .all(|invocation| invocation.remove_hardware_authorization)
+        );
+    }
+
+    #[test]
+    fn mixed_tools_plan_runs_legacy_fake_server_against_rust_binaries() {
+        let cli = Cli::parse(["test", "mixed", "tools"].into_iter().map(str::to_owned)).unwrap();
+        let mut context = context();
+        context.legacy_build_env = Some(PathBuf::from("legacy-env"));
+        context.rust_bin_dir_env = Some(PathBuf::from("rust-env"));
+        let invocations = plan(&cli, &context).unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(
+            invocations[0].program,
+            "/workspace/tests/tools/output_tools_test.sh"
+        );
+        assert_eq!(
+            strings(&invocations[0]),
+            [
+                "legacy-env/tests/manifest/x11_tools/output_tools_fake_server",
+                "rust-env/gwinfo",
+                "rust-env/gwout"
+            ]
+        );
+    }
+
+    #[test]
+    fn mixed_legacy_restart_preserves_the_legacy_oracle_boundary() {
+        let cli = Cli::parse(
+            ["test", "mixed", "legacy-restart"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .unwrap();
+        let mut context = context();
+        context.legacy_build_env = Some(PathBuf::from("legacy-env"));
+        let invocations = plan(&cli, &context).unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].program, "cargo");
+        assert_eq!(
+            strings(&invocations[0]),
+            [
+                "run",
+                "--locked",
+                "-p",
+                "gw-transition-tests",
+                "--bin",
+                "legacy-output-restart",
+                "--",
+                "--build-dir",
+                "legacy-env"
+            ]
+        );
     }
 
     #[test]
@@ -509,7 +756,10 @@ mod tests {
             vec!["check", "subsystem"],
             vec!["check", "subsystem", "--all"],
             vec!["test", "headless", "server"],
+            vec!["test", "mixed"],
+            vec!["test", "mixed", "unknown"],
             vec!["test", "unit", "extra"],
+            vec!["--rust-bin-dir", "", "test", "mixed", "gwm"],
         ] {
             assert!(Cli::parse(arguments.into_iter().map(str::to_owned)).is_err());
         }
