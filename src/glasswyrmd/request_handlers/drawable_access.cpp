@@ -17,6 +17,8 @@ namespace glasswyrm::server::request_handlers {
 namespace {
 constexpr std::uint64_t kMaximumChildClipPixelOperations =
     4U * 1024U * 1024U;
+constexpr std::size_t kMaximumChildClipChildren = 1024;
+constexpr std::size_t kMaximumChildClipFragmentOperations = 256U * 1024U;
 }
 
 std::vector<geometry::Rectangle> rectangle_difference(
@@ -38,6 +40,34 @@ std::vector<geometry::Rectangle> rectangle_difference(
   });
   return result;
 }
+
+namespace {
+
+bool fragment_work_within_budget(
+    const geometry::Rectangle bounds,
+    const std::vector<geometry::Rectangle>& children) {
+  std::vector<geometry::Rectangle> visible{bounds};
+  std::size_t operations = 0;
+  for (const auto child : children) {
+    if (visible.size() >
+        kMaximumChildClipFragmentOperations - operations)
+      return false;
+    operations += visible.size();
+    std::vector<geometry::Rectangle> next;
+    for (const auto candidate : visible) {
+      auto pieces = rectangle_difference(candidate, child);
+      if (pieces.size() >
+          kMaximumChildClipFragmentOperations - operations)
+        return false;
+      operations += pieces.size();
+      next.insert(next.end(), pieces.begin(), pieces.end());
+    }
+    visible = std::move(next);
+  }
+  return true;
+}
+
+}  // namespace
 
 bool supported_window_drawable(const ResourceTable& resources,
                                const std::uint32_t xid) {
@@ -92,6 +122,7 @@ ClipByChildrenGuard::ClipByChildrenGuard(const ResourceTable& resources, const s
   const auto* window = resources.find_window(drawable);
   if (!window) return;
   std::uint64_t pixel_operations = 0;
+  std::vector<geometry::Rectangle> child_rectangles;
   for (const auto child_id : window->children) {
     const auto* child = resources.find_window(child_id);
     if (!child || child->window_class != WindowClass::InputOutput ||
@@ -108,24 +139,21 @@ ClipByChildrenGuard::ClipByChildrenGuard(const ResourceTable& resources, const s
     if (pixels > (kMaximumChildClipPixelOperations - pixel_operations) / 2U)
       throw std::bad_alloc{};
     pixel_operations += pixels * 2U;
+    if (child_rectangles.size() >= kMaximumChildClipChildren)
+      throw std::bad_alloc{};
+    child_rectangles.push_back(*clipped);
   }
-  for (const auto child_id : window->children) {
-    const auto* child = resources.find_window(child_id);
-    if (!child || child->window_class != WindowClass::InputOutput ||
-        child->map_state != MapState::Viewable)
-      continue;
-    const auto clipped = geometry::intersect(
-        {child->x, child->y,
-         static_cast<std::uint32_t>(child->width) + child->border_width * 2U,
-         static_cast<std::uint32_t>(child->height) + child->border_width * 2U},
-        {0, 0, storage.width(), storage.height()});
-    if (!clipped) continue;
-    Saved saved{*clipped, {}};
-    saved.pixels.reserve(static_cast<std::size_t>(clipped->width) * clipped->height);
-    for (std::uint32_t y = 0; y < clipped->height; ++y)
-      for (std::uint32_t x = 0; x < clipped->width; ++x)
-        saved.pixels.push_back(storage.at(static_cast<std::uint32_t>(clipped->x) + x,
-                                          static_cast<std::uint32_t>(clipped->y) + y));
+  if (!fragment_work_within_budget(
+          {0, 0, storage.width(), storage.height()}, child_rectangles))
+    throw std::bad_alloc{};
+  saved_.reserve(child_rectangles.size());
+  for (const auto child : child_rectangles) {
+    Saved saved{child, {}};
+    saved.pixels.reserve(static_cast<std::size_t>(child.width) * child.height);
+    for (std::uint32_t y = 0; y < child.height; ++y)
+      for (std::uint32_t x = 0; x < child.width; ++x)
+        saved.pixels.push_back(storage.at(static_cast<std::uint32_t>(child.x) + x,
+                                          static_cast<std::uint32_t>(child.y) + y));
     saved_.push_back(std::move(saved));
   }
 }

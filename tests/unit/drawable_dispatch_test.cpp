@@ -206,6 +206,76 @@ int main() {
                       std::ranges::equal(before_child_clip_limit,state.resources().find_window(base+20)->storage->pixels()),
                       "overlapping child save and restore work is bounded atomically");
 
+    WindowCreateSpec fragment_budget_parent; fragment_budget_parent.xid=base+1000;
+    fragment_budget_parent.parent=state.screen().root_window;
+    fragment_budget_parent.width=512; fragment_budget_parent.height=512;
+    fragment_budget_parent.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,fragment_budget_parent)==CreateWindowStatus::Success,
+                      "child fragment budget parent");
+    x11::ByteWriter initial_fragment_fill(order); initial_fragment_fill.write_u8(70); initial_fragment_fill.write_u8(0); initial_fragment_fill.write_u16(5);
+    initial_fragment_fill.write_u32(base+1000); initial_fragment_fill.write_u32(base+2);
+    initial_fragment_fill.write_u16(0); initial_fragment_fill.write_u16(0);
+    initial_fragment_fill.write_u16(512); initial_fragment_fill.write_u16(512);
+    result=dispatch_request(state,context,finish(std::move(initial_fragment_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&state.resources().find_window(base+1000)->storage,
+                      "child fragment budget target storage");
+    const auto before_fragment_limit = std::vector<std::uint32_t>(
+        state.resources().find_window(base+1000)->storage->pixels().begin(),
+        state.resources().find_window(base+1000)->storage->pixels().end());
+    for (std::uint32_t index=0; index<512; ++index) {
+      WindowCreateSpec sparse_child; sparse_child.xid=base+2000+index;
+      sparse_child.parent=base+1000; sparse_child.x=static_cast<std::int32_t>(index);
+      sparse_child.y=static_cast<std::int32_t>(index);
+      sparse_child.width=1; sparse_child.height=1;
+      sparse_child.window_class=WindowClass::InputOutput;
+      gw::test::require(state.resources().create_window(1,base,mask,sparse_child)==CreateWindowStatus::Success,
+                        "sparse child fragment fixture");
+      state.resources().find_window(sparse_child.xid)->map_requested=true;
+      state.resources().find_window(sparse_child.xid)->map_state=MapState::Viewable;
+    }
+    x11::ByteWriter excessive_fragments(order); excessive_fragments.write_u8(70); excessive_fragments.write_u8(0); excessive_fragments.write_u16(5);
+    excessive_fragments.write_u32(base+1000); excessive_fragments.write_u32(base+2);
+    excessive_fragments.write_u16(0); excessive_fragments.write_u16(0);
+    excessive_fragments.write_u16(512); excessive_fragments.write_u16(512);
+    result=dispatch_request(state,context,finish(std::move(excessive_fragments),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_fragment_limit,state.resources().find_window(base+1000)->storage->pixels()),
+                      "sparse child fragment rebuilding is bounded atomically");
+
+    WindowCreateSpec child_count_parent; child_count_parent.xid=base+3000;
+    child_count_parent.parent=state.screen().root_window;
+    child_count_parent.width=2; child_count_parent.height=2;
+    child_count_parent.window_class=WindowClass::InputOutput;
+    gw::test::require(state.resources().create_window(1,base,mask,child_count_parent)==CreateWindowStatus::Success,
+                      "child count budget parent");
+    x11::ByteWriter initial_child_count_fill(order); initial_child_count_fill.write_u8(70); initial_child_count_fill.write_u8(0); initial_child_count_fill.write_u16(5);
+    initial_child_count_fill.write_u32(base+3000); initial_child_count_fill.write_u32(base+2);
+    initial_child_count_fill.write_u16(0); initial_child_count_fill.write_u16(0);
+    initial_child_count_fill.write_u16(2); initial_child_count_fill.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(initial_child_count_fill),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.empty()&&state.resources().find_window(base+3000)->storage,
+                      "child count budget target storage");
+    const auto before_child_count_limit = std::vector<std::uint32_t>(
+        state.resources().find_window(base+3000)->storage->pixels().begin(),
+        state.resources().find_window(base+3000)->storage->pixels().end());
+    for (std::uint32_t index=0; index<1025; ++index) {
+      WindowCreateSpec child; child.xid=base+4000+index;
+      child.parent=base+3000; child.width=1; child.height=1;
+      child.window_class=WindowClass::InputOutput;
+      gw::test::require(state.resources().create_window(1,base,mask,child)==CreateWindowStatus::Success,
+                        "child count budget fixture");
+      state.resources().find_window(child.xid)->map_requested=true;
+      state.resources().find_window(child.xid)->map_state=MapState::Viewable;
+    }
+    x11::ByteWriter excessive_children(order); excessive_children.write_u8(70); excessive_children.write_u8(0); excessive_children.write_u16(5);
+    excessive_children.write_u32(base+3000); excessive_children.write_u32(base+2);
+    excessive_children.write_u16(0); excessive_children.write_u16(0);
+    excessive_children.write_u16(2); excessive_children.write_u16(2);
+    result=dispatch_request(state,context,finish(std::move(excessive_children),x11::CoreOpcode::PolyFillRectangle,0));
+    gw::test::require(result.output.size()==32&&result.output[1]==static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc)&&
+                      std::ranges::equal(before_child_count_limit,state.resources().find_window(base+3000)->storage->pixels()),
+                      "mapped child count is bounded atomically");
+
     x11::ByteWriter line_gc(order); line_gc.write_u8(56); line_gc.write_u8(0); line_gc.write_u16(7);
     line_gc.write_u32(base+2); line_gc.write_u32((1U<<4U)|(1U<<5U)|(1U<<6U)|(1U<<7U));
     line_gc.write_u32(0); line_gc.write_u32(0); line_gc.write_u32(1); line_gc.write_u32(0);
