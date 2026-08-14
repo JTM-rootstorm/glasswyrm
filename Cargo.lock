@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "glasswyrm-core"
+version = "0.2.0"
+
+[[package]]
 name = "glasswyrm-x11"
 version = "0.2.0"
 

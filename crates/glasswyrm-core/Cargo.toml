@@ -1,0 +1,14 @@
+[package]
+name = "glasswyrm-core"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-only"
+description = "Pure server state and resource policy for Glasswyrm"
+publish = false
+
+[dependencies]
+
+[lib]
+path = "src/lib.rs"
+
