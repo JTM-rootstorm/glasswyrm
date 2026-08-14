@@ -781,6 +781,19 @@ Rules:
 - Treat X11-compatible behavior as inherently permissive; document this honestly.
 - Do not claim Wayland-like isolation without an explicit security design.
 
+GWIPC listeners and clients authenticate local peers with `SO_PEERCRED` and
+reject a different effective UID. Descriptor-bearing buffer records validate
+the received object type, access mode, declared storage extent, and eventfd
+shape before exposing descriptors to compositor code. Filesystem endpoints and
+evidence paths must reject unsafe writable ancestors and symbolic-link
+replacement rather than relying on a path-only check followed by `open`.
+
+The transition server bounds each X11 setup handshake to five seconds and 128
+concurrent client workers. Its legacy resource model additionally caps the atom
+table at 65,536 entries and 4 MiB of atom-name bytes, and caps windows at
+32,768 per client and 65,536 globally. These are availability controls, not
+per-client X11 isolation guarantees.
+
 The first security objective is not perfect isolation. It is to avoid unnecessary old X server attack surface.
 
 ## 20. Gentoo integration

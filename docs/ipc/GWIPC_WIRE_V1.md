@@ -272,7 +272,11 @@ pixel buffer followed by a nonblocking, close-on-exec eventfd. EventFd requires
 the API 0.7 CPU-buffer-synchronization capability; the payload layout and wire
 version are unchanged. Wire 1.0 accepts linear XRGB8888 or premultiplied
 ARGB8888. Checked geometry must fit the declared storage; `fstat` must succeed
-and the pixel descriptor must be suitable for mapping.
+and the pixel descriptor must be a readable, non-`O_PATH` regular file whose
+size covers the declared storage. An EventFd synchronization descriptor must
+be an eventfd opened nonblocking and close-on-exec. These checks apply on both
+send and receive; a rejected record retains and closes all transferred
+descriptors.
 
 `BufferDetach` (`0x0121`) carries `u64 surface_id, u64 buffer_id`.
 `BufferRelease` (`0x0122`) carries `u64 buffer_id`, `u16 reason`, zero `u16`
@@ -282,6 +286,21 @@ and zero `u32` reserved fields.
 zero `u32 reserved`, then exactly that many `{ i32 x, i32 y, u32 width,
 u32 height }` records. The count and rectangle extent arithmetic are bounded;
 zero-area rectangles are rejected.
+
+The base scene-record authorization rules are:
+
+| Message | Production direction | Required capabilities | Envelope rule |
+|---|---|---|---|
+| SurfaceRemove | ProtocolServer to Compositor | SurfaceState | no flags, or exactly `SnapshotItem` in the active snapshot |
+| BufferAttach, BufferDetach | ProtocolServer to Compositor | FdPassing and MemfdBuffers | no flags, or exactly `SnapshotItem` in the active snapshot |
+| BufferRelease | Compositor to ProtocolServer | FdPassing and MemfdBuffers | no flags |
+| SurfaceDamage | ProtocolServer to Compositor | DamageRegions | no flags, or exactly `SnapshotItem` in the active snapshot |
+| FrameCommit | ProtocolServer to Compositor | FrameAcknowledgement | exactly `AckRequired`, outside a snapshot |
+| FrameAcknowledged | Compositor to ProtocolServer | FrameAcknowledgement | exactly `Reply`, correlated to FrameCommit |
+
+The retained TestProducer/TestConsumer and TestProducer/Compositor fixture
+directions mirror the corresponding submission and response directions. Other
+role pairs, extra flags, and unnegotiated capabilities are protocol errors.
 
 `FrameCommit` (`0x0140`) carries `u64 commit_id`, `u64 output_id` (zero means
 all), `u64 producer_generation`, `u32 flags`, and zero `u32 reserved`.
