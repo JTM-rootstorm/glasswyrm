@@ -20,7 +20,9 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
+#include <unistd.h>
 
 namespace glasswyrm::compositor {
 namespace {
@@ -54,6 +56,13 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
       error = "dump path exists but is not a directory";
       return false;
     }
+    struct stat native {};
+    if (::lstat(path.c_str(), &native) != 0 || native.st_uid != ::geteuid() ||
+        (native.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+      error = "dump path must be owned by the current user and not group/world "
+              "writable";
+      return false;
+    }
     return true;
   }
   status_error.clear();
@@ -65,6 +74,13 @@ bool prepare_dump_directory(const std::string& path, std::string& error) {
   if (status_error || !std::filesystem::is_directory(created) ||
       std::filesystem::is_symlink(created)) {
     error = "dump path did not resolve to a directory";
+    return false;
+  }
+  struct stat native {};
+  if (::lstat(path.c_str(), &native) != 0 || native.st_uid != ::geteuid() ||
+      (native.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+    error = "dump path must be owned by the current user and not group/world "
+            "writable";
     return false;
   }
   return true;

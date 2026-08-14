@@ -31,6 +31,10 @@ int main() {
       ("glasswyrm-frame-staging-" +
        std::to_string(static_cast<long long>(::getpid())));
   std::filesystem::remove_all(directory);
+  std::filesystem::remove_all(directory.string() + "-unsafe");
+  std::filesystem::remove_all(directory.string() + "-unsafe-ancestor");
+  std::filesystem::remove_all(directory.string() + "-oversized");
+  std::filesystem::remove(directory.string() + "-sentinel");
   FrameDumper dumper(directory);
   const std::array<std::uint32_t, 4> pixels{
       0xff112233U, 0x00445566U, 0xff778899U, 0xffaabbccU};
@@ -134,6 +138,81 @@ int main() {
       !std::filesystem::exists(
           directory / "frame-000002-output-0000000000000026.ppm"),
       "destroying a staged frame leaves no final artifact");
+
+  const auto unsafe_directory = directory.string() + "-unsafe";
+  std::filesystem::create_directory(unsafe_directory);
+  const auto sentinel = directory.string() + "-sentinel";
+  {
+    std::ofstream output(sentinel, std::ios::binary);
+    output << "sentinel";
+  }
+  std::filesystem::create_symlink(sentinel,
+                                  std::filesystem::path(unsafe_directory) /
+                                      "frames.jsonl");
+  FrameDumper unsafe(unsafe_directory);
+  StagedFrameDump unsafe_staged;
+  gw::test::require(unsafe.stage(metadata, pixels, unsafe_staged, error),
+                    "frame stages beside unsafe manifest");
+  gw::test::require(!unsafe.commit(unsafe_staged, result, error) &&
+                        read_bytes(sentinel) ==
+                            std::vector<std::uint8_t>{'s', 'e', 'n', 't', 'i',
+                                                      'n', 'e', 'l'},
+                    "symlink manifest is rejected without changing its target");
+
+  std::filesystem::remove_all(unsafe_directory);
+  std::filesystem::remove(sentinel);
+
+  const auto unsafe_ancestor = directory.string() + "-unsafe-ancestor";
+  const auto nested_dump = std::filesystem::path(unsafe_ancestor) / "private";
+  std::filesystem::create_directories(nested_dump);
+  std::filesystem::permissions(
+      unsafe_ancestor, std::filesystem::perms::owner_all |
+                           std::filesystem::perms::group_all |
+                           std::filesystem::perms::others_all);
+  FrameDumper unsafe_chain(nested_dump);
+  StagedFrameDump unsafe_chain_staged;
+  gw::test::require(
+      !unsafe_chain.stage(metadata, pixels, unsafe_chain_staged, error) &&
+          error.find("unsafe writable or unowned ancestor") !=
+              std::string::npos,
+      "private dump directory below a writable ancestor is rejected");
+  std::filesystem::remove_all(unsafe_ancestor);
+
+  const auto oversized_directory = directory.string() + "-oversized";
+  FrameDumper oversized(oversized_directory);
+  glasswyrm::output::SoftwareFrameSet oversized_frames;
+  glasswyrm::output::OutputFrameResult oversized_output;
+  gw::test::require(oversized_output.frame.configure(40, 1, 1, error), error);
+  oversized_output.frame.pixels()[0] = UINT32_C(0xff123456);
+  oversized_output.output = oversized_output.frame.spec(60'000);
+  oversized_output.logical = {0, 0, 1, 1};
+  oversized_output.damage = {{0, 0, 1, 1}};
+  gw::test::require(oversized_frames.append(std::move(oversized_output), error) &&
+                        oversized_frames.finalize(3, 40, 300, 10, 3, error),
+                    error);
+  std::vector<StagedFrameDump> oversized_staged(1);
+  const FrameDumpMetadata oversized_metadata{3, 300, 10, 40, 1, 1, 1};
+  const std::array<std::uint32_t, 1> oversized_pixel{UINT32_C(0xff123456)};
+  gw::test::require(oversized.stage(oversized_metadata, oversized_pixel,
+                                   oversized_staged[0], error),
+                    error);
+  {
+    std::ofstream manifest(std::filesystem::path(oversized_directory) /
+                           "frames.jsonl");
+    manifest << "{}";
+  }
+  std::filesystem::resize_file(
+      std::filesystem::path(oversized_directory) / "frames.jsonl",
+      64U * 1024U * 1024U + 1U);
+  std::vector<FrameDumpResult> oversized_results;
+  const bool oversized_rejected =
+      !oversized.commit_all(oversized_staged, oversized_frames.view(),
+                            oversized_results, error);
+  gw::test::require(
+      oversized_rejected && error.find("too large") != std::string::npos &&
+          oversized_results.empty(),
+      "oversized manifest is rejected before publication: " + error);
+  std::filesystem::remove_all(oversized_directory);
 
   std::filesystem::remove_all(directory);
   return 0;

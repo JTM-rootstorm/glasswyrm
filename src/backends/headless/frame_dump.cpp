@@ -7,11 +7,11 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 #include <string_view>
+#include <sys/stat.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
@@ -19,6 +19,8 @@
 
 namespace glasswyrm::headless {
 namespace {
+
+constexpr std::uint64_t kMaximumManifestBytes = 64U * 1024U * 1024U;
 
 bool write_all(const int fd, std::span<const std::uint8_t> bytes,
                std::string& error) {
@@ -155,16 +157,154 @@ std::string frame_set_manifest_line(
 bool read_text(const std::filesystem::path& path, std::string& contents,
                std::string& error) {
   contents.clear();
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    if (!std::filesystem::exists(path)) return true;
-    error = "frame-set manifest read failed";
+  const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    if (errno == ENOENT) return true;
+    error = "frame-set manifest read failed: " +
+            std::string(std::strerror(errno));
     return false;
   }
-  contents.assign(std::istreambuf_iterator<char>(input), {});
-  if (!input.bad()) return true;
-  error = "frame-set manifest read failed";
-  return false;
+  struct stat status {};
+  if (::fstat(fd, &status) != 0 || !S_ISREG(status.st_mode) ||
+      status.st_nlink != 1 || status.st_size < 0 ||
+      static_cast<std::uint64_t>(status.st_size) > kMaximumManifestBytes) {
+    error = "frame-set manifest target is unsafe or too large";
+    (void)::close(fd);
+    return false;
+  }
+  contents.resize(static_cast<std::size_t>(status.st_size));
+  std::size_t offset = 0;
+  while (offset < contents.size()) {
+    const auto count = ::read(fd, contents.data() + offset,
+                              contents.size() - offset);
+    if (count < 0) {
+      if (errno == EINTR) continue;
+      error = "frame-set manifest read failed: " +
+              std::string(std::strerror(errno));
+      (void)::close(fd);
+      return false;
+    }
+    if (count == 0) {
+      error = "frame-set manifest changed while it was read";
+      (void)::close(fd);
+      return false;
+    }
+    offset += static_cast<std::size_t>(count);
+  }
+  if (::close(fd) != 0) {
+    error = "frame-set manifest close failed: " +
+            std::string(std::strerror(errno));
+    return false;
+  }
+  return true;
+}
+
+bool validate_dump_directory(const std::filesystem::path& path,
+                             std::string& error) {
+  std::error_code filesystem_error;
+  const auto absolute = std::filesystem::absolute(path, filesystem_error)
+                            .lexically_normal();
+  if (filesystem_error || !absolute.is_absolute()) {
+    error = "cannot resolve frame dump directory";
+    return false;
+  }
+
+  int current_fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+  if (current_fd < 0) {
+    error = "cannot inspect frame dump directory root: " +
+            std::string(std::strerror(errno));
+    return false;
+  }
+  struct stat current_status {};
+  if (::fstat(current_fd, &current_status) != 0) {
+    error = "cannot inspect frame dump directory root: " +
+            std::string(std::strerror(errno));
+    (void)::close(current_fd);
+    return false;
+  }
+
+  const uid_t effective_user = ::geteuid();
+  const uid_t filesystem_root_owner = current_status.st_uid;
+  for (const auto& component : absolute.relative_path()) {
+    const std::string name = component.string();
+    const int next_fd = ::openat(current_fd, name.c_str(),
+                                 O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if (next_fd < 0) {
+      error = "frame dump directory chain must contain only real directories: " +
+              std::string(std::strerror(errno));
+      (void)::close(current_fd);
+      return false;
+    }
+    struct stat next_status {};
+    if (::fstat(next_fd, &next_status) != 0) {
+      error = "cannot inspect frame dump directory chain: " +
+              std::string(std::strerror(errno));
+      (void)::close(next_fd);
+      (void)::close(current_fd);
+      return false;
+    }
+    const bool trusted_owner = current_status.st_uid == filesystem_root_owner ||
+                               current_status.st_uid == effective_user;
+    const bool writable =
+        (current_status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+    const bool sticky_safe =
+        (current_status.st_mode & S_ISVTX) != 0 &&
+        (next_status.st_uid == filesystem_root_owner ||
+         next_status.st_uid == effective_user);
+    if (!trusted_owner || (writable && !sticky_safe)) {
+      error = "frame dump directory has an unsafe writable or unowned ancestor";
+      (void)::close(next_fd);
+      (void)::close(current_fd);
+      return false;
+    }
+    (void)::close(current_fd);
+    current_fd = next_fd;
+    current_status = next_status;
+  }
+
+  const bool safe = current_status.st_uid == effective_user &&
+                    (current_status.st_mode & (S_IWGRP | S_IWOTH)) == 0;
+  (void)::close(current_fd);
+  if (!safe) {
+    error = "frame dump directory must be owned by the current user and not "
+            "group/world writable";
+    return false;
+  }
+  return true;
+}
+
+bool append_manifest(const std::filesystem::path& path,
+                     const std::string_view line, std::string& error) {
+  const int fd = ::open(path.c_str(),
+                        O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC | O_NOFOLLOW,
+                        0644);
+  if (fd < 0) {
+    error = "frame manifest open failed: " +
+            std::string(std::strerror(errno));
+    return false;
+  }
+  struct stat status {};
+  const bool safe = ::fstat(fd, &status) == 0 && S_ISREG(status.st_mode) &&
+                    status.st_nlink == 1 && status.st_size >= 0 &&
+                    static_cast<std::uint64_t>(status.st_size) <=
+                        kMaximumManifestBytes &&
+                    line.size() <= kMaximumManifestBytes -
+                                       static_cast<std::uint64_t>(status.st_size);
+  if (!safe) {
+    error = "frame manifest target is unsafe or too large";
+    (void)::close(fd);
+    return false;
+  }
+  const bool wrote = write_all(
+      fd, std::span(reinterpret_cast<const std::uint8_t*>(line.data()),
+                    line.size()),
+      error);
+  if (::close(fd) != 0 && wrote) {
+    error = "frame manifest close failed: " +
+            std::string(std::strerror(errno));
+    return false;
+  }
+  return wrote;
 }
 
 bool stage_text(const std::filesystem::path& final_path,
@@ -272,6 +412,7 @@ bool FrameDumper::stage(const FrameDumpMetadata& metadata,
     error = "cannot create frame dump directory: " + filesystem_error.message();
     return false;
   }
+  if (!validate_dump_directory(directory_, error)) return false;
 
   const auto name = frame_name(metadata);
   const auto final_path = directory_ / name;
@@ -334,12 +475,10 @@ bool FrameDumper::commit(StagedFrameDump& staged, FrameDumpResult& result,
   }
 
   const auto manifest_path = directory_ / "frames.jsonl";
-  std::ofstream manifest(manifest_path, std::ios::binary | std::ios::app);
-  manifest << manifest_line(staged.metadata_, staged.hash_, staged.file_name_);
-  manifest.flush();
-  if (!manifest) {
-    error = "frame manifest write failed";
-    manifest.close();
+  if (!append_manifest(
+          manifest_path,
+          manifest_line(staged.metadata_, staged.hash_, staged.file_name_),
+          error)) {
     std::error_code ignored;
     std::filesystem::remove(staged.final_path_, ignored);
     staged.active_ = false;
