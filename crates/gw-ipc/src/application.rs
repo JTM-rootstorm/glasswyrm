@@ -126,13 +126,50 @@ impl ApplicationValidator {
         capabilities: Capabilities,
         maximum_queued_messages: usize,
     ) -> Self {
+        Self::with_initial_sequence(
+            local_role,
+            peer_role,
+            capabilities,
+            maximum_queued_messages,
+            1,
+        )
+    }
+
+    /// Creates validation state after the Hello/Welcome exchange has completed.
+    ///
+    /// The handshake consumes sequence 1 in both directions. Application
+    /// records therefore begin at sequence 2, and handshake-only message types
+    /// remain invalid through the normal application validation path.
+    #[must_use]
+    pub fn established(
+        local_role: Role,
+        peer_role: Role,
+        capabilities: Capabilities,
+        maximum_queued_messages: usize,
+    ) -> Self {
+        Self::with_initial_sequence(
+            local_role,
+            peer_role,
+            capabilities,
+            maximum_queued_messages,
+            2,
+        )
+    }
+
+    fn with_initial_sequence(
+        local_role: Role,
+        peer_role: Role,
+        capabilities: Capabilities,
+        maximum_queued_messages: usize,
+        initial_sequence: u64,
+    ) -> Self {
         Self {
             local_role,
             peer_role,
             capabilities,
             maximum_queued_messages,
-            next_send_sequence: 1,
-            next_receive_sequence: 1,
+            next_send_sequence: initial_sequence,
+            next_receive_sequence: initial_sequence,
             outgoing_snapshot: SnapshotState::default(),
             incoming_snapshot: SnapshotState::default(),
             pending_replies: HashSet::new(),
@@ -1198,6 +1235,55 @@ mod tests {
             synchronization: sync,
             flags: 0,
         })
+    }
+
+    #[test]
+    fn established_validation_starts_after_handshake_sequence() {
+        let payload = encode_ping(Ping { nonce: 9 });
+        let mut validator = ApplicationValidator::established(
+            Role::TestProducer,
+            Role::TestConsumer,
+            Capabilities::default(),
+            8,
+        );
+        assert_eq!(
+            validator.validate_outgoing(
+                &envelope(
+                    MessageType::PING,
+                    MessageFlags::ACK_REQUIRED,
+                    1,
+                    0,
+                    payload.len(),
+                    0,
+                ),
+                &payload,
+                0,
+            ),
+            Err(ApplicationError::OutOfOrderSequence)
+        );
+        validator
+            .validate_outgoing(
+                &envelope(
+                    MessageType::PING,
+                    MessageFlags::ACK_REQUIRED,
+                    2,
+                    0,
+                    payload.len(),
+                    0,
+                ),
+                &payload,
+                0,
+            )
+            .unwrap();
+
+        assert_eq!(
+            validator.validate_incoming(
+                &envelope(MessageType::HELLO, MessageFlags::default(), 2, 0, 0, 0,),
+                &[],
+                0,
+            ),
+            Err(ApplicationError::Protocol)
+        );
     }
 
     #[test]

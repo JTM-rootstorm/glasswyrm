@@ -5,15 +5,15 @@ use std::thread;
 use std::time::Duration;
 
 use gw_ipc::{
-    HandshakeConfig, NegotiatedPeer, ServerHandshakeResponse, Transport, TransportError,
-    TransportLimits, accept_hello,
+    ApplicationError, ApplicationValidator, EndpointListener, HandshakeConfig, NegotiatedPeer,
+    ServerHandshakeResponse, Transport, TransportError, TransportLimits, accept_hello,
 };
 use gw_types::{Capabilities, ConnectionId, MessageType, Role, Sequence};
 use gw_wire::Envelope;
 
 use crate::Options;
 use crate::policy::{DispatchError, OutgoingRecord, PeerPolicy};
-use crate::socket::{Listener, install_signal_handlers, stop_requested};
+use crate::socket::{install_signal_handlers, stop_requested};
 
 const MAXIMUM_MESSAGES_PER_TURN: usize = 64;
 const MAXIMUM_PAYLOAD_BYTES_PER_TURN: usize = 512 * 1024;
@@ -23,6 +23,7 @@ pub enum RuntimeError {
     Io(io::Error),
     Transport(TransportError),
     Handshake(gw_ipc::HandshakeError),
+    Application(ApplicationError),
 }
 
 impl fmt::Display for RuntimeError {
@@ -31,6 +32,9 @@ impl fmt::Display for RuntimeError {
             Self::Io(error) => write!(formatter, "runtime I/O failed: {error}"),
             Self::Transport(error) => write!(formatter, "GWIPC transport failed: {error}"),
             Self::Handshake(error) => write!(formatter, "GWIPC handshake failed: {error}"),
+            Self::Application(error) => {
+                write!(formatter, "GWIPC application validation failed: {error}")
+            }
         }
     }
 }
@@ -55,11 +59,17 @@ impl From<gw_ipc::HandshakeError> for RuntimeError {
     }
 }
 
+impl From<ApplicationError> for RuntimeError {
+    fn from(error: ApplicationError) -> Self {
+        Self::Application(error)
+    }
+}
+
 struct Connection {
     transport: Transport,
     negotiated: Option<NegotiatedPeer>,
+    validator: Option<ApplicationValidator>,
     policy: PeerPolicy,
-    expected_sequence: u64,
     next_sequence: u64,
 }
 
@@ -68,8 +78,8 @@ impl Connection {
         Ok(Self {
             transport: Transport::from_owned_fd(fd, TransportLimits::default())?,
             negotiated: None,
+            validator: None,
             policy: PeerPolicy::new(),
-            expected_sequence: 2,
             next_sequence: 2,
         })
     }
@@ -88,6 +98,12 @@ impl Connection {
             ServerHandshakeResponse::Accepted { record, peer } => {
                 send_with_retry(&self.transport, &record.envelope, &record.payload)?;
                 self.transport.set_limits(peer.limits)?;
+                self.validator = Some(ApplicationValidator::established(
+                    config.local_role,
+                    peer.role,
+                    peer.capabilities,
+                    MAXIMUM_MESSAGES_PER_TURN,
+                ));
                 self.negotiated = Some(peer);
                 Ok(HandshakeProgress::Accepted)
             }
@@ -118,13 +134,17 @@ impl Connection {
             };
             messages += 1;
             bytes += received.payload.len();
-            if !received.fds.is_empty()
-                || received.envelope.sequence.get() != self.expected_sequence
-            {
-                eprintln!("gwm: closing peer after descriptor or sequence violation");
+            let Some(validator) = self.validator.as_mut() else {
+                return ProcessProgress::Disconnected;
+            };
+            if let Err(error) = validator.validate_incoming(
+                &received.envelope,
+                &received.payload,
+                received.fds.len(),
+            ) {
+                eprintln!("gwm: closing peer after application violation: {error}");
                 return ProcessProgress::Disconnected;
             }
-            self.expected_sequence += 1;
             let message_type = received.envelope.message_type;
             match self
                 .policy
@@ -158,6 +178,18 @@ impl Connection {
         );
         envelope.flags = record.flags;
         envelope.reply_to = record.reply_to;
+        self.validator
+            .as_mut()
+            .ok_or_else(|| {
+                TransportError::Io(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "GWIPC application validator is not established",
+                ))
+            })?
+            .validate_outgoing(&envelope, &record.payload, 0)
+            .map_err(|error| {
+                TransportError::Io(io::Error::new(io::ErrorKind::InvalidData, error))
+            })?;
         send_with_retry(&self.transport, &envelope, &record.payload)?;
         self.next_sequence += 1;
         Ok(())
@@ -177,7 +209,7 @@ enum ProcessProgress {
 
 pub fn run(options: &Options) -> Result<(), RuntimeError> {
     install_signal_handlers()?;
-    let listener = Listener::bind(&options.ipc_socket)?;
+    let listener = EndpointListener::bind(&options.ipc_socket)?;
     eprintln!("gwm: listening socket={}", options.ipc_socket.display());
     let config = handshake_config();
     let mut connection = None;
