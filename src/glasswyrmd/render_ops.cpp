@@ -11,6 +11,9 @@ namespace {
 
 using geometry::Rectangle;
 
+constexpr std::uint64_t kMaximumRasterWorkPerRequest = 4U * 1024U * 1024U;
+constexpr std::size_t kMaximumClipRectangles = 4096;
+
 std::uint32_t bytes_per_pixel(const RenderPixelFormat format) noexcept {
   return format == RenderPixelFormat::A1 || format == RenderPixelFormat::A8
              ? 1U
@@ -134,6 +137,32 @@ bool visible(const std::span<const Rectangle> clip, const std::int32_t x,
          });
 }
 
+bool raster_work_fits(const std::uint64_t pixels,
+                      const std::span<const Rectangle> clip) noexcept {
+  if (clip.size() > kMaximumClipRectangles) return false;
+  const auto clip_checks = std::max<std::uint64_t>(clip.size(), 1U);
+  return pixels <= kMaximumRasterWorkPerRequest / clip_checks;
+}
+
+bool fill_work_fits(const RenderDestinationView& destination,
+                    const std::span<const Rectangle> rectangles,
+                    const std::span<const Rectangle> clip) noexcept {
+  if (clip.size() > kMaximumClipRectangles) return false;
+  const Rectangle bounds{0, 0, destination.width, destination.height};
+  const auto clip_checks = std::max<std::uint64_t>(clip.size(), 1U);
+  const auto maximum_pixels = kMaximumRasterWorkPerRequest / clip_checks;
+  std::uint64_t pixels = 0;
+  for (const auto rectangle : rectangles) {
+    const auto painted = geometry::intersect(rectangle, bounds);
+    if (!painted) continue;
+    const auto added =
+        static_cast<std::uint64_t>(painted->width) * painted->height;
+    if (added > maximum_pixels - pixels) return false;
+    pixels += added;
+  }
+  return true;
+}
+
 std::optional<Rectangle> union_damage(const std::optional<Rectangle> current,
                                       const Rectangle added) noexcept {
   if (added.empty()) return current;
@@ -224,6 +253,8 @@ RenderOpResult render_composite(
   if (!mapping) return {};
   const auto count = static_cast<std::uint64_t>(mapping->destination.width) *
                      mapping->destination.height;
+  if (!raster_work_fits(count, destination_clip))
+    return {RenderOpStatus::BadAlloc, {}};
   if (count > std::numeric_limits<std::size_t>::max() /
                   sizeof(PremultipliedColor))
     return {RenderOpStatus::BadAlloc, {}};
@@ -280,6 +311,8 @@ RenderOpResult render_fill(
     return {RenderOpStatus::InvalidSurface, {}};
   if (!premultiplied(color))
     return {RenderOpStatus::InvalidPremultipliedPixel, {}};
+  if (!fill_work_fits(destination, rectangles, destination_clip))
+    return {RenderOpStatus::BadAlloc, {}};
   const Rectangle bounds{0, 0, destination.width, destination.height};
   if (operation == RenderOperator::Over &&
       destination.format == RenderPixelFormat::Argb8888Premultiplied) {

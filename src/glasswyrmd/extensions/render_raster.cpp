@@ -66,6 +66,7 @@ RenderSourceView source_view(const RenderDestinationView view) {
 
 struct ClipResult {
   bool constrained{};
+  bool exhausted{};
   std::vector<geometry::Rectangle> rectangles;
 };
 
@@ -111,7 +112,13 @@ ClipResult translated_clip(const Picture& picture, const std::int64_t shift_x,
 ClipResult combine_clips(ClipResult left, ClipResult right) {
   if (!left.constrained) return right;
   if (!right.constrained) return left;
-  ClipResult result{true, {}};
+  ClipResult result{true, false, {}};
+  if (!left.rectangles.empty() &&
+      right.rectangles.size() >
+          Picture::kMaximumClipRectangles / left.rectangles.size()) {
+    result.exhausted = true;
+    return result;
+  }
   result.rectangles.reserve(left.rectangles.size() * right.rectangles.size());
   for (const auto first : left.rectangles)
     for (const auto second : right.rectangles)
@@ -205,6 +212,8 @@ DispatchResult composite(ServerState& state, const DispatchContext& context,
                       static_cast<std::int64_t>(destination_x) - source_x,
                       static_cast<std::int64_t>(destination_y) - source_y,
                       *destination_surface));
+  if (clip.exhausted)
+    return error(context, request, x11::CoreErrorCode::BadAlloc);
   if (clip.constrained && clip.rectangles.empty()) return {};
   const auto clip_span = std::span<const geometry::Rectangle>{clip.rectangles};
   RenderOpResult raster;

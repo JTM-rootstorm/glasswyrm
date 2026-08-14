@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 namespace {
 
@@ -195,6 +196,65 @@ void test_fill_formats_and_clipping() {
           "A1 fill deterministically thresholds alpha");
 }
 
+void test_full_surface_work_budget() {
+  constexpr std::uint32_t width = 2048;
+  constexpr std::uint32_t height = 2049;
+  constexpr auto count = static_cast<std::size_t>(width) * height;
+  std::vector<std::uint32_t> source(count, 0xFF010203U);
+  std::vector<std::uint32_t> destination(count, 0xFF040506U);
+  const RenderSourceView source_surface{
+      RenderPixelFormat::Xrgb8888, width, height, width * 4U,
+      std::as_bytes(std::span<const std::uint32_t>{source})};
+  const RenderDestinationView destination_surface{
+      RenderPixelFormat::Xrgb8888, width, height, width * 4U,
+      std::as_writable_bytes(std::span<std::uint32_t>{destination})};
+
+  const auto composite = render_composite(
+      destination_surface, source_surface, RenderOperator::Src, 0, 0, 0, 0,
+      width, height);
+  require(composite.status == RenderOpStatus::BadAlloc &&
+              destination.front() == 0xFF040506U &&
+              destination.back() == 0xFF040506U,
+          "full-surface composite exceeding the raster budget is atomic");
+
+  const std::array<Rectangle, 1> full{{{0, 0, width, height}}};
+  const auto fill = render_fill(destination_surface, RenderOperator::Src,
+                                {1, 2, 3, 255}, full);
+  require(fill.status == RenderOpStatus::BadAlloc &&
+              destination.front() == 0xFF040506U &&
+              destination.back() == 0xFF040506U,
+          "full-surface fill exceeding the raster budget is atomic");
+}
+
+void test_clip_work_budget() {
+  constexpr std::uint32_t width = 1025;
+  std::vector<std::uint32_t> source(width, 0xFF010203U);
+  std::vector<std::uint32_t> destination(width, 0xFF040506U);
+  const RenderSourceView source_surface{
+      RenderPixelFormat::Xrgb8888, width, 1, width * 4U,
+      std::as_bytes(std::span<const std::uint32_t>{source})};
+  const RenderDestinationView destination_surface{
+      RenderPixelFormat::Xrgb8888, width, 1, width * 4U,
+      std::as_writable_bytes(std::span<std::uint32_t>{destination})};
+  const std::vector<Rectangle> clip(4096, {0, 0, 1, 1});
+
+  const auto composite = render_composite(
+      destination_surface, source_surface, RenderOperator::Src, 0, 0, 0, 0,
+      width, 1, clip);
+  require(composite.status == RenderOpStatus::BadAlloc &&
+              destination.front() == 0xFF040506U &&
+              destination.back() == 0xFF040506U,
+          "per-pixel composite clip scans obey the raster work budget");
+
+  const std::array<Rectangle, 1> full{{{0, 0, width, 1}}};
+  const auto fill = render_fill(destination_surface, RenderOperator::Src,
+                                {1, 2, 3, 255}, full, clip);
+  require(fill.status == RenderOpStatus::BadAlloc &&
+              destination.front() == 0xFF040506U &&
+              destination.back() == 0xFF040506U,
+          "per-pixel fill clip scans obey the raster work budget");
+}
+
 }  // namespace
 
 int main() {
@@ -204,5 +264,7 @@ int main() {
   test_composite_validation_and_aliasing();
   test_destination_clipping();
   test_fill_formats_and_clipping();
+  test_full_surface_work_budget();
+  test_clip_work_budget();
   return 0;
 }

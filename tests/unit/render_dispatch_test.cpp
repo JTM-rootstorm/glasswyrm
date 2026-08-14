@@ -198,6 +198,36 @@ void test_render(const x11::ByteOrder order) {
               pixels->at(1, 0) == before,
           "invalid premultiplied fill is rejected atomically");
 
+  const std::vector<glasswyrm::geometry::Rectangle> adversarial_clip(
+      65, {0, 0, 2, 2});
+  require(state.resources()
+                  .find_picture(destination)
+                  ->set_clip_rectangles(0, 0, adversarial_clip) ==
+              PictureStatus::Success &&
+              state.resources()
+                      .find_picture(solid)
+                      ->set_clip_rectangles(0, 0, adversarial_clip) ==
+                  PictureStatus::Success,
+          "dual RENDER clips are installed within their individual bounds");
+  const std::vector<std::uint32_t> pixels_before(pixels->pixels().begin(),
+                                                 pixels->pixels().end());
+  writer = header(order, 8, 9);
+  writer.write_u8(1);
+  writer.write_padding(3);
+  writer.write_u32(solid);
+  writer.write_u32(0);
+  writer.write_u32(destination);
+  writer.write_padding(8);
+  writer.write_u16(0);
+  writer.write_u16(0);
+  writer.write_u16(2);
+  writer.write_u16(2);
+  result = dispatch_request(state, context, finish(std::move(writer), 8));
+  require(result.output[1] ==
+                  static_cast<std::uint8_t>(x11::CoreErrorCode::BadAlloc) &&
+              std::ranges::equal(pixels->pixels(), pixels_before),
+          "dual clips exceeding the combined budget are rejected atomically");
+
   require(state.resources().invariants_hold(),
           "Picture resources preserve table invariants");
   require(state.resources().free_pixmap(argb_pixmap) ==
