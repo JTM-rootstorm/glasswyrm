@@ -5,6 +5,7 @@
 mod atoms;
 mod byte_order;
 mod core;
+mod dispatch;
 mod reply;
 mod request;
 mod screen;
@@ -14,6 +15,7 @@ mod wire;
 pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAtom};
 pub use byte_order::ByteOrder;
 pub use core::{CoreErrorCode, CoreOpcode, wire_sequence};
+pub use dispatch::{InitialCoreDispatch, dispatch_initial_core_request};
 pub use reply::{
     CORE_ERROR_SIZE, CORE_REPLY_SIZE, CoreError, ReplyBuildError, ReplyBuilder, encode_core_error,
 };
