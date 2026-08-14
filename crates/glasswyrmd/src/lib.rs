@@ -18,6 +18,7 @@ pub use options::Options;
 
 const MAXIMUM_ACTIVE_CLIENTS: usize = 128;
 const MAXIMUM_ACCEPTS_PER_TURN: usize = 64;
+const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn run(options: Options) -> io::Result<()> {
     signals::install()?;
@@ -38,6 +39,7 @@ pub fn run(options: Options) -> io::Result<()> {
                         identifier,
                         Arc::clone(&resource_bases),
                         MAXIMUM_ACTIVE_CLIENTS,
+                        SETUP_TIMEOUT,
                     ) {
                         Ok(()) => {
                             eprintln!("glasswyrmd: accepted client {identifier}");
@@ -80,6 +82,7 @@ fn start_client(
     identifier: u64,
     resource_bases: Arc<Mutex<HashSet<ResourceBase>>>,
     maximum_active_clients: usize,
+    setup_timeout: Duration,
 ) -> Result<(), ClientStartError> {
     let lease =
         ResourceBaseLease::allocate(resource_bases, maximum_active_clients).map_err(|error| {
@@ -92,7 +95,7 @@ fn start_client(
         })?;
     thread::Builder::new()
         .name(format!("glasswyrmd-client-{identifier}"))
-        .spawn(move || client::serve(stream, identifier, lease))
+        .spawn(move || client::serve(stream, identifier, lease, setup_timeout))
         .map(|_| ())
         .map_err(ClientStartError::Worker)
 }
@@ -196,12 +199,12 @@ mod tests {
     fn stalled_setup_client_cannot_exceed_limit_or_stop_later_admission() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
         let (first_server, first_client) = UnixStream::pair().unwrap();
-        start_client(first_server, 1, Arc::clone(&in_use), 1).unwrap();
+        start_client(first_server, 1, Arc::clone(&in_use), 1, SETUP_TIMEOUT).unwrap();
         wait_for_active_clients(&in_use, 1);
 
         let (second_server, mut second_client) = UnixStream::pair().unwrap();
         assert!(matches!(
-            start_client(second_server, 2, Arc::clone(&in_use), 1),
+            start_client(second_server, 2, Arc::clone(&in_use), 1, SETUP_TIMEOUT),
             Err(ClientStartError::ClientLimit)
         ));
         second_client.set_nonblocking(true).unwrap();
@@ -224,9 +227,31 @@ mod tests {
         wait_for_active_clients(&in_use, 0);
 
         let (third_server, third_client) = UnixStream::pair().unwrap();
-        start_client(third_server, 3, Arc::clone(&in_use), 1).unwrap();
+        start_client(third_server, 3, Arc::clone(&in_use), 1, SETUP_TIMEOUT).unwrap();
         wait_for_active_clients(&in_use, 1);
         drop(third_client);
         wait_for_active_clients(&in_use, 0);
+    }
+
+    #[test]
+    fn stalled_setup_releases_its_slot_at_the_injected_deadline() {
+        let in_use = Arc::new(Mutex::new(HashSet::new()));
+        let (server, client) = UnixStream::pair().unwrap();
+        start_client(server, 1, Arc::clone(&in_use), 1, Duration::ZERO).unwrap();
+
+        wait_for_active_clients(&in_use, 0);
+        drop(client);
+
+        let (replacement_server, replacement_client) = UnixStream::pair().unwrap();
+        start_client(
+            replacement_server,
+            2,
+            Arc::clone(&in_use),
+            1,
+            Duration::ZERO,
+        )
+        .unwrap();
+        wait_for_active_clients(&in_use, 0);
+        drop(replacement_client);
     }
 }

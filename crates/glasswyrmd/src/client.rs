@@ -8,16 +8,39 @@ use std::io::{Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-pub(crate) fn serve(mut stream: UnixStream, identifier: u64, resource_base: ResourceBaseLease) {
+pub(crate) fn serve(
+    mut stream: UnixStream,
+    identifier: u64,
+    resource_base: ResourceBaseLease,
+    setup_timeout: Duration,
+) {
     let mut parser = SetupParser::default();
     let mut input = [0_u8; 4096];
+    let setup_deadline = SetupDeadline::new(Instant::now(), setup_timeout);
     loop {
+        let Some(remaining) = setup_deadline.remaining(Instant::now()) else {
+            eprintln!("glasswyrmd: client {identifier}: X11 setup timed out");
+            return;
+        };
+        if let Err(error) = stream.set_read_timeout(Some(remaining)) {
+            eprintln!(
+                "glasswyrmd: client {identifier}: could not configure setup deadline: {error}"
+            );
+            return;
+        }
         let count = match stream.read(&mut input) {
             Ok(0) => return,
             Ok(count) => count,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::TimedOut
+                    || error.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                eprintln!("glasswyrmd: client {identifier}: X11 setup timed out");
+                return;
+            }
             Err(error) => {
                 eprintln!("glasswyrmd: client {identifier}: setup read failed: {error}");
                 return;
@@ -65,6 +88,24 @@ pub(crate) fn serve(mut stream: UnixStream, identifier: u64, resource_base: Reso
             }
             ParseStatus::TruncatedInput => return,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SetupDeadline {
+    deadline: Instant,
+}
+
+impl SetupDeadline {
+    fn new(started_at: Instant, timeout: Duration) -> Self {
+        Self {
+            deadline: started_at.checked_add(timeout).unwrap_or(started_at),
+        }
+    }
+
+    fn remaining(self, now: Instant) -> Option<Duration> {
+        let remaining = self.deadline.checked_duration_since(now)?;
+        (!remaining.is_zero()).then_some(remaining)
     }
 }
 
@@ -177,4 +218,28 @@ fn serve_established(
         }
     }
     let _ = stream.shutdown(Shutdown::Both);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_deadline_is_absolute_across_incremental_input() {
+        let started_at = Instant::now();
+        let deadline = SetupDeadline::new(started_at, Duration::from_millis(20));
+
+        assert_eq!(
+            deadline.remaining(started_at + Duration::from_millis(5)),
+            Some(Duration::from_millis(15))
+        );
+        assert_eq!(
+            deadline.remaining(started_at + Duration::from_millis(19)),
+            Some(Duration::from_millis(1))
+        );
+        assert_eq!(
+            deadline.remaining(started_at + Duration::from_millis(20)),
+            None
+        );
+    }
 }
