@@ -2,6 +2,7 @@
 members = [
   "crates/glasswyrm-core",
   "crates/glasswyrm-x11",
+  "crates/glasswyrmd",
   "crates/gw-test-support",
   "crates/gw-transition-tests",
   "crates/gw-types",

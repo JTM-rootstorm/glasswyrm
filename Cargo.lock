@@ -11,6 +11,14 @@ name = "glasswyrm-x11"
 version = "0.2.0"
 
 [[package]]
+name = "glasswyrmd"
+version = "0.2.0"
+dependencies = [
+ "glasswyrm-core",
+ "glasswyrm-x11",
+]
+
+[[package]]
 name = "gw-ipc"
 version = "0.2.0"
 dependencies = [
