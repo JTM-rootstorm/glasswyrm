@@ -7,6 +7,7 @@ members = [
   "crates/gw-transition-tests",
   "crates/gw-types",
   "crates/gw-wire",
+  "crates/gwcomp",
   "crates/gwcomp-core",
   "crates/gw-ipc",
   "crates/gw-ipc-capi",

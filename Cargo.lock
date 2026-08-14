@@ -77,6 +77,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gwcomp"
+version = "0.2.0"
+dependencies = [
+ "gw-ipc",
+ "gw-platform-linux",
+ "gw-types",
+ "gw-wire",
+ "gwcomp-core",
+]
+
+[[package]]
 name = "gwcomp-core"
 version = "0.2.0"
 dependencies = [

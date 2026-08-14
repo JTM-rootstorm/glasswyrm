@@ -1,0 +1,25 @@
+[package]
+name = "gwcomp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Glasswyrm headless compositor process"
+publish = false
+
+[dependencies]
+gw-ipc = { path = "../gw-ipc" }
+gw-platform-linux = { path = "../gw-platform-linux" }
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+gwcomp-core = { path = "../gwcomp-core" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "gwcomp"
+path = "src/main.rs"
+
+[lints]
+workspace = true
