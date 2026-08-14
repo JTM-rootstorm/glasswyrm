@@ -161,6 +161,10 @@ CreateWindowStatus ResourceTable::create_window(
   if (spec.width == 0 || spec.height == 0) {
     return CreateWindowStatus::BadValue;
   }
+  if (total_windows_ >= limits_.maximum_total_windows ||
+      window_count_by_owner(owner) >= limits_.maximum_windows_per_client) {
+    return CreateWindowStatus::BadAlloc;
+  }
 
   WindowResource window;
   window.parent = spec.parent;

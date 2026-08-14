@@ -29,6 +29,7 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
   resources_.emplace(
       screen.root_window,
       ResourceRecord{ResourceType::Window, std::nullopt, std::move(root)});
+  total_windows_ = 1;
   resources_.emplace(
       screen.default_colormap,
       ResourceRecord{ResourceType::Colormap, std::nullopt,
@@ -41,13 +42,34 @@ ResourceTable::ResourceTable(const ScreenModel screen, ResourceLimits limits)
 void ResourceTable::insert_resource(const std::uint32_t xid,
                                     ResourceRecord resource) {
   const auto owner = resource.owner;
+  const bool is_window = resource.type == ResourceType::Window;
   resources_.emplace(xid, std::move(resource));
-  if (!owner) return;
+  if (!owner) {
+    if (is_window) ++total_windows_;
+    return;
+  }
   try {
     resources_by_owner_[*owner].push_back(xid);
   } catch (...) {
     resources_.erase(xid);
+    const auto found = resources_by_owner_.find(*owner);
+    if (found != resources_by_owner_.end() && found->second.empty())
+      resources_by_owner_.erase(found);
     throw;
+  }
+  if (is_window) {
+    try {
+      ++windows_by_owner_[*owner];
+    } catch (...) {
+      auto found = resources_by_owner_.find(*owner);
+      if (found != resources_by_owner_.end()) {
+        std::erase(found->second, xid);
+        if (found->second.empty()) resources_by_owner_.erase(found);
+      }
+      resources_.erase(xid);
+      throw;
+    }
+    ++total_windows_;
   }
 }
 
@@ -55,7 +77,17 @@ void ResourceTable::erase_resource(const std::uint32_t xid) noexcept {
   const auto resource = resources_.find(xid);
   if (resource == resources_.end()) return;
   const auto owner = resource->second.owner;
+  const bool is_window = resource->second.type == ResourceType::Window;
   resources_.erase(resource);
+  if (is_window) {
+    --total_windows_;
+    if (owner) {
+      const auto found = windows_by_owner_.find(*owner);
+      if (found != windows_by_owner_.end()) {
+        if (--found->second == 0) windows_by_owner_.erase(found);
+      }
+    }
+  }
   if (!owner) return;
   const auto found = resources_by_owner_.find(*owner);
   if (found == resources_by_owner_.end()) return;
@@ -240,8 +272,16 @@ std::size_t ResourceTable::resource_count_by_owner(
   return iterator == resources_by_owner_.end() ? 0 : iterator->second.size();
 }
 
+std::size_t ResourceTable::window_count_by_owner(
+    const ClientId owner) const noexcept {
+  const auto iterator = windows_by_owner_.find(owner);
+  return iterator == windows_by_owner_.end() ? 0 : iterator->second;
+}
+
 bool ResourceTable::create_server_proxy_window(const std::uint32_t xid) {
-  if (xid == 0 || resources_.contains(xid)) return false;
+  if (xid == 0 || resources_.contains(xid) ||
+      total_windows_ >= limits_.maximum_total_windows)
+    return false;
   WindowResource proxy;
   proxy.parent = screen_.root_window;
   proxy.width = 1;
@@ -257,6 +297,7 @@ bool ResourceTable::create_server_proxy_window(const std::uint32_t xid) {
         xid, ResourceRecord{ResourceType::Window, std::nullopt,
                             std::move(proxy)});
     find_window(screen_.root_window)->children.push_back(xid);
+    ++total_windows_;
     return true;
   } catch (...) {
     resources_.erase(xid);

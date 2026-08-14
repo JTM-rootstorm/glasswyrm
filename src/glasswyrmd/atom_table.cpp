@@ -5,12 +5,17 @@
 #include <utility>
 
 namespace glasswyrm::server {
+AtomTable::AtomTable() : AtomTable(AtomLimits{}) {}
+
 AtomTable::AtomTable(const std::uint32_t maximum_atom)
-    : maximum_atom_(maximum_atom) {
+    : AtomTable(AtomLimits{.maximum_atom_id = maximum_atom}) {}
+
+AtomTable::AtomTable(AtomLimits limits) : limits_(limits) {
   ids_by_name_.reserve(kHighestPredefinedAtom);
   names_by_id_.reserve(kHighestPredefinedAtom);
   for (const auto& predefined : gw::protocol::x11::kPredefinedAtoms) {
     std::string name(predefined.name);
+    name_bytes_ += name.size();
     ids_by_name_.emplace(name, predefined.id);
     names_by_id_.emplace(predefined.id, std::move(name));
   }
@@ -24,7 +29,11 @@ InternAtomResult AtomTable::intern(const std::string_view atom_name,
   if (only_if_exists) {
     return {};
   }
-  if (next_dynamic_atom_ == 0 || next_dynamic_atom_ > maximum_atom_) {
+  if (next_dynamic_atom_ == 0 ||
+      next_dynamic_atom_ > limits_.maximum_atom_id ||
+      names_by_id_.size() >= limits_.maximum_atoms ||
+      name_bytes_ > limits_.maximum_name_bytes ||
+      atom_name.size() > limits_.maximum_name_bytes - name_bytes_) {
     return {.status = InternAtomStatus::Exhausted};
   }
 
@@ -42,6 +51,7 @@ InternAtomResult AtomTable::intern(const std::string_view atom_name,
       ids_by_name_.erase(name_iterator);
       throw;
     }
+    name_bytes_ += atom_name.size();
     next_dynamic_atom_ =
         atom == std::numeric_limits<std::uint32_t>::max() ? 0 : atom + 1;
     return {.atom = atom};
@@ -52,7 +62,7 @@ InternAtomResult AtomTable::intern(const std::string_view atom_name,
 
 std::optional<std::uint32_t> AtomTable::find(
     const std::string_view atom_name) const {
-  const auto iterator = ids_by_name_.find(std::string(atom_name));
+  const auto iterator = ids_by_name_.find(atom_name);
   return iterator == ids_by_name_.end()
              ? std::nullopt
              : std::optional<std::uint32_t>(iterator->second);

@@ -49,5 +49,26 @@ int main() {
           InternAtomStatus::Exhausted) {
     return 5;
   }
+  const auto predefined_bytes = AtomTable{}.name_bytes();
+  AtomTable count_limited(AtomLimits{
+      .maximum_atoms = kHighestPredefinedAtom + 1,
+      .maximum_name_bytes = predefined_bytes + 1024,
+  });
+  if (count_limited.intern("one", false).status != InternAtomStatus::Success ||
+      count_limited.intern("two", false).status !=
+          InternAtomStatus::Exhausted ||
+      count_limited.intern("one", false).atom != 69) {
+    return 6;
+  }
+  AtomTable bytes_limited(AtomLimits{
+      .maximum_atoms = kHighestPredefinedAtom + 10,
+      .maximum_name_bytes = predefined_bytes + 3,
+  });
+  if (bytes_limited.intern("abc", false).status != InternAtomStatus::Success ||
+      bytes_limited.name_bytes() != predefined_bytes + 3 ||
+      bytes_limited.intern("d", false).status != InternAtomStatus::Exhausted ||
+      bytes_limited.intern("abc", false).atom != 69) {
+    return 7;
+  }
   return 0;
 }

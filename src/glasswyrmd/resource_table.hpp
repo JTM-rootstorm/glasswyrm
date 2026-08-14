@@ -167,6 +167,8 @@ struct PropertyReadResult {
 inline constexpr std::size_t kMaximumBytesPerProperty = 4U * 1024U * 1024U;
 inline constexpr std::size_t kMaximumTotalPropertyBytes = 64U * 1024U * 1024U;
 inline constexpr std::size_t kMaximumPropertiesPerWindow = 4096;
+inline constexpr std::size_t kMaximumWindowsPerClient = 32768;
+inline constexpr std::size_t kMaximumTotalWindows = 65536;
 
 struct ResourceLimits {
   std::size_t maximum_bytes_per_property{kMaximumBytesPerProperty};
@@ -187,6 +189,8 @@ struct ResourceLimits {
       kMaximumXFixesRegionRectangles};
   std::size_t maximum_damage_resources_per_client{4096};
   std::size_t maximum_pictures_per_client{8192};
+  std::size_t maximum_windows_per_client{kMaximumWindowsPerClient};
+  std::size_t maximum_total_windows{kMaximumTotalWindows};
 };
 
 class ResourceTable {
@@ -341,6 +345,10 @@ class ResourceTable {
 
   [[nodiscard]] std::size_t resource_count(ResourceType type) const noexcept;
   [[nodiscard]] std::size_t resource_count_by_owner(ClientId owner) const noexcept;
+  [[nodiscard]] std::size_t window_count_by_owner(ClientId owner) const noexcept;
+  [[nodiscard]] std::size_t total_window_count() const noexcept {
+    return total_windows_;
+  }
   [[nodiscard]] std::size_t total_property_bytes() const noexcept {
     return total_property_bytes_;
   }
@@ -365,6 +373,8 @@ class ResourceTable {
   ResourceLimits limits_;
   std::unordered_map<std::uint32_t, ResourceRecord> resources_;
   std::unordered_map<ClientId, std::vector<std::uint32_t>> resources_by_owner_;
+  std::unordered_map<ClientId, std::size_t> windows_by_owner_;
+  std::size_t total_windows_{0};
   std::size_t total_property_bytes_{0};
   std::size_t canonical_drawable_bytes_{0};
   std::size_t total_cursor_bytes_{0};

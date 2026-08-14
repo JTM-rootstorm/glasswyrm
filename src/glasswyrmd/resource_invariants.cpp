@@ -25,6 +25,8 @@ bool ResourceTable::invariants_hold() const noexcept {
   std::size_t calculated_property_bytes = 0;
   std::size_t calculated_drawable_bytes = 0;
   std::size_t calculated_cursor_bytes = 0;
+  std::size_t calculated_windows = 0;
+  std::unordered_map<ClientId, std::size_t> calculated_windows_by_owner;
   for (const auto& [xid, resource] : resources_) {
     const auto* window = std::get_if<WindowResource>(&resource.payload);
     if (window == nullptr) {
@@ -99,6 +101,8 @@ bool ResourceTable::invariants_hold() const noexcept {
       }
       continue;
     }
+    ++calculated_windows;
+    if (resource.owner) ++calculated_windows_by_owner[*resource.owner];
     if (window->attributes.cursor_inherit) {
       if (window->attributes.cursor != 0 || window->attributes.cursor_image)
         return false;
@@ -139,6 +143,14 @@ bool ResourceTable::invariants_hold() const noexcept {
   }
   if (calculated_drawable_bytes != canonical_drawable_bytes_) return false;
   if (calculated_cursor_bytes != total_cursor_bytes_) return false;
+  if (calculated_windows != total_windows_ ||
+      calculated_windows > limits_.maximum_total_windows ||
+      calculated_windows_by_owner != windows_by_owner_)
+    return false;
+  for (const auto& [owner, count] : calculated_windows_by_owner) {
+    static_cast<void>(owner);
+    if (count > limits_.maximum_windows_per_client) return false;
+  }
   for (const auto& [owner, ids] : resources_by_owner_) {
     for (const auto xid : ids) {
       const auto* resource = find(xid);

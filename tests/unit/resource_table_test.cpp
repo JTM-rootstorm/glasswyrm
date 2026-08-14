@@ -3,8 +3,10 @@
 namespace {
 
 using glasswyrm::server::CreateWindowStatus;
+using glasswyrm::server::ResourceLimits;
 using glasswyrm::server::ResourceTable;
 using glasswyrm::server::WindowCreateSpec;
+using glasswyrm::server::kScreenModel;
 
 WindowCreateSpec window(std::uint32_t xid, std::uint32_t parent = 1) {
   WindowCreateSpec result;
@@ -79,6 +81,46 @@ int main() {
   if (table.create_window(3, base_a, mask, window(base_a + 1)) !=
       CreateWindowStatus::Success) {
     return 5;
+  }
+  ResourceLimits per_client_limits;
+  per_client_limits.maximum_windows_per_client = 1;
+  per_client_limits.maximum_total_windows = 4;
+  ResourceTable per_client_bounded(kScreenModel, per_client_limits);
+  if (per_client_bounded.create_window(1, base_a, mask,
+                                       window(base_a + 10)) !=
+          CreateWindowStatus::Success ||
+      per_client_bounded.create_window(1, base_a, mask,
+                                       window(base_a + 11)) !=
+          CreateWindowStatus::BadAlloc ||
+      per_client_bounded.create_window(2, base_b, mask,
+                                       window(base_b + 10)) !=
+          CreateWindowStatus::Success ||
+      per_client_bounded.window_count_by_owner(1) != 1 ||
+      per_client_bounded.total_window_count() != 3) {
+    return 9;
+  }
+  (void)per_client_bounded.cleanup_client(1);
+  if (per_client_bounded.window_count_by_owner(1) != 0 ||
+      per_client_bounded.create_window(1, base_a, mask,
+                                       window(base_a + 12)) !=
+          CreateWindowStatus::Success ||
+      !per_client_bounded.invariants_hold()) {
+    return 10;
+  }
+
+  ResourceLimits global_limits;
+  global_limits.maximum_windows_per_client = 4;
+  global_limits.maximum_total_windows = 2;
+  ResourceTable globally_bounded(kScreenModel, global_limits);
+  if (globally_bounded.create_window(1, base_a, mask,
+                                     window(base_a + 20)) !=
+          CreateWindowStatus::Success ||
+      globally_bounded.create_window(2, base_b, mask,
+                                     window(base_b + 20)) !=
+          CreateWindowStatus::BadAlloc ||
+      globally_bounded.create_server_proxy_window(4) ||
+      !globally_bounded.invariants_hold()) {
+    return 11;
   }
   return 0;
 }
