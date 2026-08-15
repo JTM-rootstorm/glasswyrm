@@ -239,6 +239,12 @@ includes this checkpoint.
 The M14 invocation preserves the accepted fixture and validator unchanged. It
 is software-only and does not authorize DRM or physical hardware access.
 
+For ordinary long-lived use, the Rust candidate does not write frame dumps
+unless `--dump-dir` is explicit. Evidence runs cap that directory at 512 MiB
+and VRR timing retention at 4,096 samples per output without stopping frame
+acknowledgement. The candidate also expires incomplete Hello, initial-frame,
+and snapshot phases on absolute monotonic deadlines.
+
 ## Required failure artifacts
 
 A Tier 3 or higher failure should retain a bounded bundle containing:

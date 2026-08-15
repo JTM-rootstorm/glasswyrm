@@ -794,6 +794,18 @@ table at 65,536 entries and 4 MiB of atom-name bytes, and caps windows at
 32,768 per client and 65,536 globally. These are availability controls, not
 per-client X11 isolation guarantees.
 
+Legacy request processing also accounts semantic work that is not represented
+by wire size. MIT-SHM image work yields after 64 MiB per client turn, RENDER
+clip and raster work is bounded before pixel mutation, passive button grabs are
+capped at 1,024 per client and 4,096 globally, and cursor image quota remains
+charged while any server object retains the image.
+
+The Rust compositor bounds snapshots, live buffers, pending releases, frame
+evidence, and VRR timing retention. Frame dumping is opt-in for ordinary runs;
+evidence exhaustion disables further writes without terminating presentation.
+Absolute handshake, initial-frame, and snapshot deadlines prevent one stalled
+same-UID producer from retaining the compositor endpoint indefinitely.
+
 The first security objective is not perfect isolation. It is to avoid unnecessary old X server attack surface.
 
 ## 20. Gentoo integration

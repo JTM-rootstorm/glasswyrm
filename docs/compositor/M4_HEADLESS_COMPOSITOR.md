@@ -24,6 +24,12 @@ Both paths are required. The dump directory must not be a symbolic link.
 `--max-frames` requires a positive integer. `--once` exits after one accepted
 frame and `--max-frames` exits after the requested number of accepted frames.
 
+The Rust transition compositor keeps the legacy evidence command compatible,
+but makes `--dump-dir` optional for ordinary long-lived operation. When it is
+present, total frame evidence is capped at 512 MiB including existing regular
+files; reaching the cap disables further dumps without stopping presentation.
+VRR reports similarly retain at most 4,096 timing samples per output.
+
 ## Topology and lifecycle
 
 `gwcomp` listens on a local `AF_UNIX` `SOCK_SEQPACKET` endpoint as role
@@ -64,6 +70,12 @@ commits leave the prior committed scene and framebuffer unchanged.
 - maximum 4096 surfaces;
 - damage rectangle counts are bounded by the GWIPC wire contract;
 - 64 received messages and 512 KiB of payload are processed per reactor turn.
+
+The Rust transition process additionally bounds complete snapshots to 1,024
+items, live buffers to 4,096 and 512 MiB of declared storage, and pending buffer
+releases to 8,192. It applies absolute five-second Hello and ten-second initial
+frame/snapshot deadlines so a silent or trickling peer cannot monopolize the
+single producer slot.
 
 Output transforms, scaling, parent surfaces, and non-SDR metadata are outside
 this milestone.
