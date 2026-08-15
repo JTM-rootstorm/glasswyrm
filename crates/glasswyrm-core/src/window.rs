@@ -87,6 +87,24 @@ pub struct ScreenModel {
     pub root_visual: u32,
 }
 
+pub const MAXIMUM_WINDOWS_PER_CLIENT: usize = 32_768;
+pub const MAXIMUM_TOTAL_WINDOWS: usize = 65_536;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WindowLimits {
+    pub maximum_windows_per_client: usize,
+    pub maximum_total_windows: usize,
+}
+
+impl Default for WindowLimits {
+    fn default() -> Self {
+        Self {
+            maximum_windows_per_client: MAXIMUM_WINDOWS_PER_CLIENT,
+            maximum_total_windows: MAXIMUM_TOTAL_WINDOWS,
+        }
+    }
+}
+
 impl Default for ScreenModel {
     fn default() -> Self {
         Self {
@@ -238,6 +256,7 @@ impl Default for ConfigureWindow {
 pub struct WindowStore {
     screen: ScreenModel,
     server_ids: ServerOwnedIds,
+    window_limits: WindowLimits,
     property_limits: PropertyLimits,
     windows: BTreeMap<WindowId, Window>,
     ids_by_owner: BTreeMap<ClientId, BTreeSet<WindowId>>,
@@ -246,6 +265,14 @@ pub struct WindowStore {
 
 impl WindowStore {
     pub fn new(screen: ScreenModel, property_limits: PropertyLimits) -> Self {
+        Self::with_limits(screen, WindowLimits::default(), property_limits)
+    }
+
+    pub fn with_limits(
+        screen: ScreenModel,
+        window_limits: WindowLimits,
+        property_limits: PropertyLimits,
+    ) -> Self {
         let root = Window {
             owner: None,
             parent: None,
@@ -280,6 +307,7 @@ impl WindowStore {
                 default_colormap: ResourceId::new(2),
                 root_visual: ResourceId::new(screen.root_visual),
             },
+            window_limits,
             property_limits,
             windows: BTreeMap::from([(screen.root_window, root)]),
             ids_by_owner: BTreeMap::new(),
@@ -337,6 +365,11 @@ impl WindowStore {
         };
         if spec.geometry.width == 0 || spec.geometry.height == 0 {
             return CreateWindowStatus::BadValue;
+        }
+        if self.windows.len() >= self.window_limits.maximum_total_windows
+            || self.window_count_by_owner(owner) >= self.window_limits.maximum_windows_per_client
+        {
+            return CreateWindowStatus::BadAlloc;
         }
 
         let window_class = match spec.window_class {
@@ -455,6 +488,20 @@ impl WindowStore {
             destroyed: postorder,
             property_bytes_released: released,
         }
+    }
+
+    pub fn destroy_all_owned(&mut self, owner: ClientId) -> Vec<WindowId> {
+        let mut destroyed = Vec::new();
+        while let Some(xid) = self
+            .ids_by_owner
+            .get(&owner)
+            .and_then(|ids| ids.first().copied())
+        {
+            let result = self.destroy_window(xid);
+            debug_assert_eq!(result.status, DestroyWindowStatus::Success);
+            destroyed.extend(result.destroyed);
+        }
+        destroyed
     }
 
     pub fn set_map_requested(&mut self, xid: WindowId, mapped: bool) -> LifecycleStatus {
@@ -696,7 +743,12 @@ impl WindowStore {
         let Some(root) = self.window(self.screen.root_window) else {
             return false;
         };
-        if root.owner.is_some()
+        if self.windows.len() > self.window_limits.maximum_total_windows
+            || self
+                .ids_by_owner
+                .values()
+                .any(|ids| ids.len() > self.window_limits.maximum_windows_per_client)
+            || root.owner.is_some()
             || root.parent.is_some()
             || root.map_state != MapState::Viewable
             || root.geometry.width != self.screen.root_width

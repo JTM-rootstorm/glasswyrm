@@ -14,13 +14,104 @@ pub enum InternAtomOutcome {
     Exhausted,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreClient {
+    pub identifier: u64,
+    pub resource_base: u32,
+    pub resource_mask: u32,
+}
+
+impl CoreClient {
+    #[must_use]
+    pub const fn new(identifier: u64, resource_base: u32, resource_mask: u32) -> Self {
+        Self {
+            identifier,
+            resource_base,
+            resource_mask,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WindowCreateRequest {
+    pub xid: u32,
+    pub parent: u32,
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub border_width: u16,
+    pub window_class: u16,
+    pub depth: u8,
+    pub visual: u32,
+    pub attribute_mask: u32,
+    pub override_redirect: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WindowCreateOutcome {
+    Success,
+    BadIdChoice,
+    BadWindow,
+    BadValue,
+    BadMatch,
+    BadAlloc,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WindowDestroyOutcome {
+    Success,
+    BadWindow,
+    RootPreserved,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WindowGeometryReply {
+    pub root: u32,
+    pub depth: u8,
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub border_width: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowTreeReply {
+    pub root: u32,
+    pub parent: u32,
+    pub children: Vec<u32>,
+}
+
 pub trait CoreDispatchState {
     fn intern_atom(&mut self, name: &[u8], only_if_exists: bool) -> InternAtomOutcome;
     fn atom_name(&self, atom: u32) -> Option<&[u8]>;
+
+    fn create_window(
+        &mut self,
+        _client: CoreClient,
+        _request: WindowCreateRequest,
+    ) -> WindowCreateOutcome {
+        WindowCreateOutcome::Unsupported
+    }
+
+    fn destroy_window(&mut self, _window: u32) -> WindowDestroyOutcome {
+        WindowDestroyOutcome::Unsupported
+    }
+
+    fn window_geometry(&self, _window: u32) -> Option<WindowGeometryReply> {
+        None
+    }
+
+    fn window_tree(&self, _window: u32) -> Option<WindowTreeReply> {
+        None
+    }
 }
 
-/// Dispatches the state-bearing atom requests in addition to the initial
-/// stateless core profile.
+/// Dispatches the current state-bearing core requests with the default test
+/// client identity in addition to the initial stateless profile.
 #[must_use]
 pub fn dispatch_core_request(
     order: ByteOrder,
@@ -29,7 +120,40 @@ pub fn dispatch_core_request(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
+    dispatch_core_request_for_client(
+        order,
+        sequence,
+        focused_window,
+        CoreClient::new(1, 0x0040_0000, 0x001f_ffff),
+        state,
+        request,
+    )
+}
+
+/// Dispatches state-bearing core requests with the connection identity and
+/// resource range needed for new-resource validation.
+#[must_use]
+pub fn dispatch_core_request_for_client(
+    order: ByteOrder,
+    sequence: u64,
+    focused_window: u32,
+    client: CoreClient,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
     match request.opcode {
+        opcode if opcode == CoreOpcode::CreateWindow as u8 => {
+            dispatch_create_window(order, sequence, client, state, request)
+        }
+        opcode if opcode == CoreOpcode::DestroyWindow as u8 => {
+            dispatch_destroy_window(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::GetGeometry as u8 => {
+            dispatch_get_geometry(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::QueryTree as u8 => {
+            dispatch_query_tree(order, sequence, state, request)
+        }
         opcode if opcode == CoreOpcode::InternAtom as u8 => {
             dispatch_intern_atom(order, sequence, state, request)
         }
@@ -38,6 +162,239 @@ pub fn dispatch_core_request(
         }
         _ => dispatch_initial_core_request(order, sequence, focused_window, request),
     }
+}
+
+const WINDOW_ATTRIBUTE_MASK: u32 = 0x0000_7fff;
+const CORE_EVENT_MASK: u32 = 0x01ff_ffff;
+const DO_NOT_PROPAGATE_MASK: u32 = 0x0000_204f;
+
+fn dispatch_create_window(
+    order: ByteOrder,
+    sequence: u64,
+    client: CoreClient,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    if request.core_size() < 32 || request.body().len() < 28 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let body = request.body();
+    let xid = read_u32(order, body, 0);
+    let parent = read_u32(order, body, 4);
+    let window_class = read_u16(order, body, 18);
+    let attribute_mask = read_u32(order, body, 24);
+    if window_class > 2 {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadValue,
+            u32::from(window_class),
+        );
+    }
+    if attribute_mask & !WINDOW_ATTRIBUTE_MASK != 0 {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadValue,
+            attribute_mask,
+        );
+    }
+    let value_count = attribute_mask.count_ones() as usize;
+    if request.core_size() != 32 + value_count * 4 || body.len() != 28 + value_count * 4 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let override_redirect = match decode_create_attributes(order, body, attribute_mask) {
+        Ok(value) => value,
+        Err((code, value)) => {
+            return protocol_error_with_value(order, sequence, request, code, value);
+        }
+    };
+    let decoded = WindowCreateRequest {
+        xid,
+        parent,
+        x: read_u16(order, body, 8) as i16,
+        y: read_u16(order, body, 10) as i16,
+        width: read_u16(order, body, 12),
+        height: read_u16(order, body, 14),
+        border_width: read_u16(order, body, 16),
+        window_class,
+        depth: request.data,
+        visual: read_u32(order, body, 20),
+        attribute_mask,
+        override_redirect,
+    };
+    match state.create_window(client, decoded) {
+        WindowCreateOutcome::Success => InitialCoreDispatch::NoReply,
+        WindowCreateOutcome::BadIdChoice => {
+            protocol_error_with_value(order, sequence, request, CoreErrorCode::BadIdChoice, xid)
+        }
+        WindowCreateOutcome::BadWindow => {
+            protocol_error_with_value(order, sequence, request, CoreErrorCode::BadWindow, parent)
+        }
+        WindowCreateOutcome::BadValue => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadValue)
+        }
+        WindowCreateOutcome::BadMatch => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadMatch)
+        }
+        WindowCreateOutcome::BadAlloc => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadAlloc)
+        }
+        WindowCreateOutcome::Unsupported => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
+        }
+    }
+}
+
+fn decode_create_attributes(
+    order: ByteOrder,
+    body: &[u8],
+    attribute_mask: u32,
+) -> Result<bool, (CoreErrorCode, u32)> {
+    let mut offset = 28;
+    let mut override_redirect = false;
+    for bit in 0..15 {
+        if attribute_mask & (1_u32 << bit) == 0 {
+            continue;
+        }
+        let value = read_u32(order, body, offset);
+        offset += 4;
+        match bit {
+            0 if value > 1 => return Err((CoreErrorCode::BadPixmap, value)),
+            2 if value != 0 => return Err((CoreErrorCode::BadPixmap, value)),
+            4 | 5 if value > 10 => return Err((CoreErrorCode::BadValue, value)),
+            6 if value > 2 => return Err((CoreErrorCode::BadValue, value)),
+            9 | 10 if value > 1 => return Err((CoreErrorCode::BadValue, value)),
+            9 => override_redirect = value != 0,
+            11 if value & !CORE_EVENT_MASK != 0 => {
+                return Err((CoreErrorCode::BadValue, value));
+            }
+            12 if value & !DO_NOT_PROPAGATE_MASK != 0 => {
+                return Err((CoreErrorCode::BadValue, value));
+            }
+            13 if value != 0 && value != 2 => {
+                return Err((CoreErrorCode::BadColormap, value));
+            }
+            14 if value != 0 => return Err((CoreErrorCode::BadCursor, value)),
+            _ => {}
+        }
+    }
+    Ok(override_redirect)
+}
+
+fn dispatch_destroy_window(
+    order: ByteOrder,
+    sequence: u64,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let Some(window) = exact_window_request(order, request) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    match state.destroy_window(window) {
+        WindowDestroyOutcome::Success | WindowDestroyOutcome::RootPreserved => {
+            InitialCoreDispatch::NoReply
+        }
+        WindowDestroyOutcome::BadWindow => {
+            protocol_error_with_value(order, sequence, request, CoreErrorCode::BadWindow, window)
+        }
+        WindowDestroyOutcome::Unsupported => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
+        }
+    }
+}
+
+fn dispatch_get_geometry(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let Some(drawable) = exact_window_request(order, request) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    let Some(geometry) = state.window_geometry(drawable) else {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadDrawable,
+            drawable,
+        );
+    };
+    let mut reply = ReplyBuilder::new(order, sequence, geometry.depth);
+    reply
+        .write_u32(geometry.root)
+        .and_then(|()| reply.write_u16(geometry.x as u16))
+        .and_then(|()| reply.write_u16(geometry.y as u16))
+        .and_then(|()| reply.write_u16(geometry.width))
+        .and_then(|()| reply.write_u16(geometry.height))
+        .and_then(|()| reply.write_u16(geometry.border_width))
+        .and_then(|()| reply.write_padding(2))
+        .expect("GetGeometry fixed fields fit the core reply");
+    InitialCoreDispatch::Packet(
+        reply
+            .finish()
+            .expect("GetGeometry has no variable-length payload"),
+    )
+}
+
+fn dispatch_query_tree(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let Some(window) = exact_window_request(order, request) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    let Some(tree) = state.window_tree(window) else {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadWindow,
+            window,
+        );
+    };
+    let Ok(child_count) = u16::try_from(tree.children.len()) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
+    };
+    let mut reply = ReplyBuilder::new(order, sequence, 0);
+    reply
+        .write_u32(tree.root)
+        .and_then(|()| reply.write_u32(tree.parent))
+        .and_then(|()| reply.write_u16(child_count))
+        .and_then(|()| reply.write_padding(14))
+        .expect("QueryTree fixed fields fit the core reply");
+    for child in tree.children {
+        reply.write_payload_u32(child);
+    }
+    InitialCoreDispatch::Packet(
+        reply
+            .finish()
+            .expect("the bounded window table fits the reply length field"),
+    )
+}
+
+fn exact_window_request(order: ByteOrder, request: &FramedRequest) -> Option<u32> {
+    (request.core_size() == 8 && request.body().len() == 4)
+        .then(|| read_u32(order, request.body(), 0))
+}
+
+fn read_u16(order: ByteOrder, bytes: &[u8], offset: usize) -> u16 {
+    order.read_u16([bytes[offset], bytes[offset + 1]])
+}
+
+fn read_u32(order: ByteOrder, bytes: &[u8], offset: usize) -> u32 {
+    order.read_u32([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
 }
 
 /// Dispatches the deliberately small core profile used by the first Rust

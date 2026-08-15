@@ -1,8 +1,8 @@
 use crate::ResourceBaseLease;
 use crate::request_loop::{RequestLoop, RequestWorkBudget, ServerState};
 use glasswyrm_x11::{
-    ByteOrder, ParseStatus, SetupDecision, SetupParser, SetupReplyConfig, encode_setup_failure,
-    encode_setup_success, evaluate_setup_request,
+    ByteOrder, CoreClient, ParseStatus, SCREEN_MODEL, SetupDecision, SetupParser, SetupReplyConfig,
+    encode_setup_failure, encode_setup_success, evaluate_setup_request,
 };
 use std::io::{Read, Write};
 use std::net::Shutdown;
@@ -54,11 +54,16 @@ pub(crate) fn serve(
             ParseStatus::Complete => {
                 match prepare_setup(identifier, resource_base.base(), &parser) {
                     SetupCompletion::Accepted { order, reply } => {
-                        let mut request_loop = RequestLoop::new(
+                        let mut request_loop = RequestLoop::new_for_client(
                             order,
                             SetupReplyConfig::default().screen.maximum_request_length,
                             SetupReplyConfig::default().screen.root_window,
                             reply,
+                            CoreClient::new(
+                                identifier,
+                                resource_base.base().get(),
+                                SCREEN_MODEL.resource_id_mask,
+                            ),
                             server_state,
                         );
                         let pipelined = &input[result.consumed..count];

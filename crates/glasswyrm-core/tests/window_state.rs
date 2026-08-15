@@ -337,3 +337,46 @@ fn property_limits_constructor_remains_usable_with_window_state() {
     );
     assert!(store.invariants_hold());
 }
+
+#[test]
+fn window_limits_fail_atomically_and_release_after_cleanup() {
+    use glasswyrm_core::window::WindowLimits;
+
+    let mut store = WindowStore::with_limits(
+        Default::default(),
+        WindowLimits {
+            maximum_windows_per_client: 1,
+            maximum_total_windows: 3,
+        },
+        Default::default(),
+    );
+    assert_eq!(
+        store.create_window(ClientId::new(1), range(BASE_A), spec(BASE_A + 1, 1)),
+        CreateWindowStatus::Success
+    );
+    assert_eq!(
+        store.create_window(ClientId::new(1), range(BASE_A), spec(BASE_A + 2, 1)),
+        CreateWindowStatus::BadAlloc
+    );
+    assert_eq!(
+        store.create_window(
+            ClientId::new(2),
+            range(BASE_B),
+            spec(BASE_B + 1, BASE_A + 1)
+        ),
+        CreateWindowStatus::Success
+    );
+    assert_eq!(store.window_count(), 3);
+
+    assert_eq!(
+        store.destroy_all_owned(ClientId::new(1)),
+        vec![WindowId::new(BASE_B + 1), WindowId::new(BASE_A + 1)]
+    );
+    assert_eq!(store.window_count(), 1);
+    assert_eq!(store.window_count_by_owner(ClientId::new(2)), 0);
+    assert_eq!(
+        store.create_window(ClientId::new(1), range(BASE_A), spec(BASE_A + 2, 1)),
+        CreateWindowStatus::Success
+    );
+    assert!(store.invariants_hold());
+}

@@ -1,7 +1,15 @@
 use glasswyrm_core::atom::{AtomTable, InternAtomStatus};
+use glasswyrm_core::property::PropertyLimits;
+use glasswyrm_core::resource_id::{ClientResourceRange, ResourceBase, ResourceMask};
+use glasswyrm_core::window::{
+    ClientId, CreateWindowStatus, DestroyWindowStatus, ScreenModel, WindowAttributes, WindowClass,
+    WindowCreateSpec, WindowGeometry, WindowId, WindowStore,
+};
 use glasswyrm_x11::{
-    ByteOrder, CoreDispatchState, CoreError, CoreErrorCode, InitialCoreDispatch, InternAtomOutcome,
-    RequestFrameStatus, RequestFramer, dispatch_core_request, encode_core_error,
+    ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, InitialCoreDispatch,
+    InternAtomOutcome, RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome,
+    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
+    dispatch_core_request_for_client, encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -12,9 +20,36 @@ pub(crate) const MAXIMUM_REQUESTS_PER_TURN: usize = 64;
 pub(crate) const MAXIMUM_REQUEST_BYTES_PER_TURN: usize = 256 * 1024;
 pub(crate) const MAXIMUM_QUEUED_OUTPUT: usize = 1024 * 1024;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ServerState {
     atoms: AtomTable,
+    windows: WindowStore,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self {
+            atoms: AtomTable::default(),
+            windows: WindowStore::new(
+                ScreenModel {
+                    root_window: WindowId::new(SCREEN_MODEL.root_window),
+                    root_width: SCREEN_MODEL.width_pixels,
+                    root_height: SCREEN_MODEL.height_pixels,
+                    root_depth: SCREEN_MODEL.root_depth,
+                    root_visual: SCREEN_MODEL.root_visual,
+                },
+                PropertyLimits::default(),
+            ),
+        }
+    }
+}
+
+impl ServerState {
+    fn cleanup_client(&mut self, client: CoreClient) {
+        let _ = self
+            .windows
+            .destroy_all_owned(ClientId::new(client.identifier));
+    }
 }
 
 impl CoreDispatchState for ServerState {
@@ -28,6 +63,85 @@ impl CoreDispatchState for ServerState {
 
     fn atom_name(&self, atom: u32) -> Option<&[u8]> {
         self.atoms.name(atom)
+    }
+
+    fn create_window(
+        &mut self,
+        client: CoreClient,
+        request: WindowCreateRequest,
+    ) -> WindowCreateOutcome {
+        let window_class = match request.window_class {
+            0 => WindowClass::CopyFromParent,
+            1 => WindowClass::InputOutput,
+            2 => WindowClass::InputOnly,
+            _ => return WindowCreateOutcome::BadValue,
+        };
+        let status = self.windows.create_window(
+            ClientId::new(client.identifier),
+            ClientResourceRange::new(
+                ResourceBase::new(client.resource_base),
+                ResourceMask::new(client.resource_mask),
+            ),
+            WindowCreateSpec {
+                xid: WindowId::new(request.xid),
+                parent: WindowId::new(request.parent),
+                geometry: WindowGeometry {
+                    x: request.x,
+                    y: request.y,
+                    width: request.width,
+                    height: request.height,
+                    border_width: request.border_width,
+                },
+                depth: request.depth,
+                window_class,
+                visual: request.visual,
+                attribute_mask: request.attribute_mask,
+                attributes: WindowAttributes {
+                    override_redirect: request.override_redirect,
+                },
+            },
+        );
+        match status {
+            CreateWindowStatus::Success => WindowCreateOutcome::Success,
+            CreateWindowStatus::BadIdChoice => WindowCreateOutcome::BadIdChoice,
+            CreateWindowStatus::BadWindow => WindowCreateOutcome::BadWindow,
+            CreateWindowStatus::BadValue => WindowCreateOutcome::BadValue,
+            CreateWindowStatus::BadMatch => WindowCreateOutcome::BadMatch,
+            CreateWindowStatus::BadAlloc => WindowCreateOutcome::BadAlloc,
+        }
+    }
+
+    fn destroy_window(&mut self, window: u32) -> WindowDestroyOutcome {
+        match self.windows.destroy_window(WindowId::new(window)).status {
+            DestroyWindowStatus::Success => WindowDestroyOutcome::Success,
+            DestroyWindowStatus::BadWindow => WindowDestroyOutcome::BadWindow,
+            DestroyWindowStatus::RootPreserved => WindowDestroyOutcome::RootPreserved,
+        }
+    }
+
+    fn window_geometry(&self, window: u32) -> Option<WindowGeometryReply> {
+        self.windows.window(WindowId::new(window)).map(|window| {
+            let geometry = window.geometry();
+            WindowGeometryReply {
+                root: self.windows.screen().root_window.get(),
+                depth: window.depth(),
+                x: geometry.x,
+                y: geometry.y,
+                width: geometry.width,
+                height: geometry.height,
+                border_width: geometry.border_width,
+            }
+        })
+    }
+
+    fn window_tree(&self, window: u32) -> Option<WindowTreeReply> {
+        self.windows
+            .window(WindowId::new(window))
+            .map(|window| WindowTreeReply {
+                root: self.windows.screen().root_window.get(),
+                parent: window.parent().map_or(0, WindowId::get),
+                children: window.children().iter().map(|child| child.get()).collect(),
+            })
     }
 }
 
@@ -115,6 +229,7 @@ impl OutputQueue {
 
 pub(crate) struct RequestLoop {
     order: ByteOrder,
+    client: CoreClient,
     focused_window: u32,
     framer: RequestFramer,
     request_sequence: u64,
@@ -125,11 +240,30 @@ pub(crate) struct RequestLoop {
 }
 
 impl RequestLoop {
+    #[cfg(test)]
     pub(crate) fn new(
         order: ByteOrder,
         maximum_request_length: u16,
         focused_window: u32,
         setup_reply: Vec<u8>,
+        server_state: Arc<Mutex<ServerState>>,
+    ) -> Self {
+        Self::new_for_client(
+            order,
+            maximum_request_length,
+            focused_window,
+            setup_reply,
+            CoreClient::new(1, 0x0040_0000, SCREEN_MODEL.resource_id_mask),
+            server_state,
+        )
+    }
+
+    pub(crate) fn new_for_client(
+        order: ByteOrder,
+        maximum_request_length: u16,
+        focused_window: u32,
+        setup_reply: Vec<u8>,
+        client: CoreClient,
         server_state: Arc<Mutex<ServerState>>,
     ) -> Self {
         let mut output = OutputQueue::default();
@@ -139,6 +273,7 @@ impl RequestLoop {
         }
         Self {
             order,
+            client,
             focused_window,
             framer: RequestFramer::new(order, maximum_request_length)
                 .expect("the advertised setup request limit is nonzero"),
@@ -191,10 +326,11 @@ impl RequestLoop {
                             .server_state
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        dispatch_core_request(
+                        dispatch_core_request_for_client(
                             self.order,
                             self.request_sequence,
                             self.focused_window,
+                            self.client,
                             &mut *state,
                             self.framer.request(),
                         )
@@ -275,6 +411,15 @@ impl RequestLoop {
         if self.state == SessionState::DrainThenClose && self.output.is_empty() {
             self.state = SessionState::Closed;
         }
+    }
+}
+
+impl Drop for RequestLoop {
+    fn drop(&mut self) {
+        self.server_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .cleanup_client(self.client);
     }
 }
 
@@ -408,6 +553,7 @@ mod tests {
     fn atom_exhaustion_is_reported_as_bad_alloc_without_mutation() {
         let state = ServerState {
             atoms: AtomTable::new(68),
+            ..ServerState::default()
         };
         let mut loop_ = RequestLoop::new(
             ByteOrder::LittleEndian,

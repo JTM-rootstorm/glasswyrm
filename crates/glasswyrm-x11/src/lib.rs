@@ -16,8 +16,9 @@ pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAto
 pub use byte_order::ByteOrder;
 pub use core::{CoreErrorCode, CoreOpcode, wire_sequence};
 pub use dispatch::{
-    CoreDispatchState, InitialCoreDispatch, InternAtomOutcome, dispatch_core_request,
-    dispatch_initial_core_request,
+    CoreClient, CoreDispatchState, InitialCoreDispatch, InternAtomOutcome, WindowCreateOutcome,
+    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
+    dispatch_core_request, dispatch_core_request_for_client, dispatch_initial_core_request,
 };
 pub use reply::{
     CORE_ERROR_SIZE, CORE_REPLY_SIZE, CoreError, ReplyBuildError, ReplyBuilder, encode_core_error,
