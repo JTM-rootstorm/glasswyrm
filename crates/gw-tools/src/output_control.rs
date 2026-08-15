@@ -280,7 +280,9 @@ impl OutputControlClient {
             .validate_incoming(&record.envelope, &record.payload, record.fds.len())
             .map_err(|error| {
                 ControlError::detail(format!(
-                    "output control connection failed validation: {error}"
+                    "output control connection failed validation for message 0x{:04x} sequence {}: {error}",
+                    record.envelope.message_type.get(),
+                    record.envelope.sequence.get(),
                 ))
             })?;
         if record.envelope.sequence.get() != self.next_incoming_sequence {

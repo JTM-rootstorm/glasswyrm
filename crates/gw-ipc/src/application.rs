@@ -722,7 +722,7 @@ fn base_contract(message_type: MessageType) -> Result<BaseContract, ApplicationE
         MessageType::SURFACE_POLICY_UPSERT => BaseContract {
             required_capabilities: Capabilities::SURFACE_STATE.bits()
                 | Capabilities::WINDOW_LIFECYCLE.bits(),
-            roles: SceneSubmission,
+            roles: SurfaceState,
             flags: SnapshotItem,
         },
         MessageType::BUFFER_ATTACH | MessageType::BUFFER_DETACH => BaseContract {
@@ -1367,8 +1367,9 @@ mod tests {
         encode_frame_commit,
     };
     use gw_wire::{
-        Ping, Pong, SnapshotBegin, SnapshotEnd, encode_ping, encode_pong, encode_snapshot_begin,
-        encode_snapshot_end,
+        Ping, PolicyAppliedState, PolicyWindowType, Pong, SnapshotBegin, SnapshotEnd,
+        SurfacePolicyUpsert, encode_ping, encode_pong, encode_snapshot_begin, encode_snapshot_end,
+        encode_surface_policy_upsert,
     };
 
     fn capabilities(values: &[Capabilities]) -> Capabilities {
@@ -1527,6 +1528,12 @@ mod tests {
                 MessageFlags::SNAPSHOT_ITEM,
             ),
             (
+                MessageType::SURFACE_POLICY_UPSERT,
+                (Role::ProtocolServer, Role::DiagnosticTool),
+                capabilities(&[Capabilities::SURFACE_STATE, Capabilities::WINDOW_LIFECYCLE]),
+                MessageFlags::SNAPSHOT_ITEM,
+            ),
+            (
                 MessageType::BUFFER_ATTACH,
                 (Role::ProtocolServer, Role::Compositor),
                 capabilities(&[Capabilities::FD_PASSING, Capabilities::MEMFD_BUFFERS]),
@@ -1637,6 +1644,68 @@ mod tests {
             ),
             Err(ApplicationError::Protocol)
         );
+    }
+
+    #[test]
+    fn diagnostic_output_snapshot_accepts_surface_policy_items() {
+        let caps = capabilities(&[
+            Capabilities::SNAPSHOTS,
+            Capabilities::SURFACE_STATE,
+            Capabilities::WINDOW_LIFECYCLE,
+        ]);
+        let mut validator =
+            ApplicationValidator::established(Role::DiagnosticTool, Role::ProtocolServer, caps, 8);
+        let begin = encode_snapshot_begin(SnapshotBegin {
+            snapshot_id: SnapshotId::new(91),
+            generation: Generation::new(1),
+            expected_item_count: 1,
+            domain: SnapshotDomain::Outputs,
+            flags: 0,
+        });
+        validator
+            .validate_incoming(
+                &envelope(
+                    MessageType::SNAPSHOT_BEGIN,
+                    MessageFlags::default(),
+                    2,
+                    0,
+                    begin.len(),
+                    0,
+                ),
+                &begin,
+                0,
+            )
+            .unwrap();
+
+        let policy = encode_surface_policy_upsert(&SurfacePolicyUpsert {
+            surface_id: 41,
+            x11_window_id: 41,
+            workspace_id: 1,
+            window_type: PolicyWindowType::Normal,
+            applied_state: PolicyAppliedState::Fullscreen,
+            focused: true,
+            managed: true,
+            decoration_eligible: false,
+            override_redirect: false,
+            attention_requested: false,
+            fullscreen_eligible: 0,
+            direct_scanout_eligible: 0,
+            flags: 0,
+        });
+        validator
+            .validate_incoming(
+                &envelope(
+                    MessageType::SURFACE_POLICY_UPSERT,
+                    MessageFlags::SNAPSHOT_ITEM,
+                    3,
+                    0,
+                    policy.len(),
+                    0,
+                ),
+                &policy,
+                0,
+            )
+            .unwrap();
     }
 
     #[test]
