@@ -245,6 +245,21 @@ and VRR timing retention at 4,096 samples per output without stopping frame
 acknowledgement. The candidate also expires incomplete Hello, initial-frame,
 and snapshot phases on absolute monotonic deadlines.
 
+### Retained Rust `glasswyrmd` checkpoint
+
+The Rust server currently covers setup and bounded request framing, the
+NoOperation and GetInputFocus bootstrap requests, byte-exact atom handling,
+CreateWindow, DestroyWindow, GetGeometry, QueryTree, ChangeProperty,
+DeleteProperty, GetProperty, and ListProperties. Literal little- and big-endian
+packet oracles are run first against the retained native server and then
+against the Rust candidate. Process tests also cover cross-client state and
+disconnect cleanup.
+
+This is a narrow migration checkpoint, not a broad X11 compatibility claim.
+MapWindow, UnmapWindow, PropertyNotify delivery, EWMH policy mediation, and
+compositor publication remain on the legacy path until their own accepted
+fixtures and mixed-process gates exist.
+
 ## Required failure artifacts
 
 A Tier 3 or higher failure should retain a bounded bundle containing:
