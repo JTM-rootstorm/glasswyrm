@@ -1,5 +1,8 @@
 use glasswyrm_core::atom::{AtomTable, InternAtomStatus};
-use glasswyrm_core::property::PropertyLimits;
+use glasswyrm_core::property::{
+    AtomId, Property, PropertyData as CorePropertyData, PropertyLimits,
+    PropertyMode as CorePropertyMode, PropertyMutationStatus, PropertyReadStatus,
+};
 use glasswyrm_core::resource_id::{ClientResourceRange, ResourceBase, ResourceMask};
 use glasswyrm_core::window::{
     ClientId, CreateWindowStatus, DestroyWindowStatus, ScreenModel, WindowAttributes, WindowClass,
@@ -7,9 +10,11 @@ use glasswyrm_core::window::{
 };
 use glasswyrm_x11::{
     ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, InitialCoreDispatch,
-    InternAtomOutcome, RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome,
-    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
-    dispatch_core_request_for_client, encode_core_error,
+    InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData, PropertyMode,
+    PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply, PropertyReadRequest,
+    RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome, WindowCreateRequest,
+    WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply, dispatch_core_request_for_client,
+    encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -142,6 +147,98 @@ impl CoreDispatchState for ServerState {
                 parent: window.parent().map_or(0, WindowId::get),
                 children: window.children().iter().map(|child| child.get()).collect(),
             })
+    }
+
+    fn window_exists(&self, window: u32) -> bool {
+        self.windows.window(WindowId::new(window)).is_some()
+    }
+
+    fn atom_is_valid(&self, atom: u32, allow_none: bool) -> bool {
+        self.atoms.valid(atom, allow_none)
+    }
+
+    fn change_property(&mut self, request: PropertyChangeRequest) -> PropertyMutationOutcome {
+        let data = match request.data {
+            X11PropertyData::U8(values) => CorePropertyData::U8(values),
+            X11PropertyData::U16(values) => CorePropertyData::U16(values),
+            X11PropertyData::U32(values) => CorePropertyData::U32(values),
+        };
+        let mode = match request.mode {
+            PropertyMode::Replace => CorePropertyMode::Replace,
+            PropertyMode::Prepend => CorePropertyMode::Prepend,
+            PropertyMode::Append => CorePropertyMode::Append,
+        };
+        match self.windows.change_property(
+            WindowId::new(request.window),
+            AtomId::new(request.property),
+            Property {
+                property_type: AtomId::new(request.property_type),
+                data,
+            },
+            mode,
+        ) {
+            PropertyMutationStatus::Success => PropertyMutationOutcome::Success,
+            PropertyMutationStatus::BadMatch => PropertyMutationOutcome::BadMatch,
+            PropertyMutationStatus::BadAlloc => PropertyMutationOutcome::BadAlloc,
+            PropertyMutationStatus::BadWindow => PropertyMutationOutcome::Unsupported,
+        }
+    }
+
+    fn delete_property(&mut self, window: u32, property: u32) -> PropertyMutationOutcome {
+        if self
+            .windows
+            .delete_property(WindowId::new(window), AtomId::new(property))
+        {
+            PropertyMutationOutcome::Success
+        } else {
+            PropertyMutationOutcome::Unsupported
+        }
+    }
+
+    fn get_property(&mut self, request: PropertyReadRequest) -> PropertyReadOutcome {
+        let result = self.windows.get_property(
+            WindowId::new(request.window),
+            AtomId::new(request.property),
+            request.requested_type.map(AtomId::new),
+            request.delete_after_read,
+            request.long_offset,
+            request.long_length,
+        );
+        match result.status {
+            PropertyReadStatus::BadValue => PropertyReadOutcome::BadValue,
+            PropertyReadStatus::BadWindow => PropertyReadOutcome::Unsupported,
+            PropertyReadStatus::Success => {
+                let (property_type, bytes_after, data) = result.value.map_or_else(
+                    || (0, 0, X11PropertyData::U8(Vec::new())),
+                    |value| {
+                        let data = match value.data {
+                            CorePropertyData::U8(values) => X11PropertyData::U8(values),
+                            CorePropertyData::U16(values) => X11PropertyData::U16(values),
+                            CorePropertyData::U32(values) => X11PropertyData::U32(values),
+                        };
+                        (value.property_type.get(), value.bytes_after, data)
+                    },
+                );
+                PropertyReadOutcome::Success(PropertyReadReply {
+                    present: result.present,
+                    type_matched: result.type_matched,
+                    deleted: result.deleted,
+                    property_type,
+                    bytes_after,
+                    data,
+                })
+            }
+        }
+    }
+
+    fn list_properties(&self, window: u32) -> Option<Vec<u32>> {
+        self.window_exists(window).then(|| {
+            self.windows
+                .list_properties(WindowId::new(window))
+                .into_iter()
+                .map(AtomId::get)
+                .collect()
+        })
     }
 }
 

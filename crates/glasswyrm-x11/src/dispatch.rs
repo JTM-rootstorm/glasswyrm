@@ -85,6 +85,74 @@ pub struct WindowTreeReply {
     pub children: Vec<u32>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PropertyData {
+    U8(Vec<u8>),
+    U16(Vec<u16>),
+    U32(Vec<u32>),
+}
+
+impl PropertyData {
+    fn item_count(&self) -> usize {
+        match self {
+            Self::U8(values) => values.len(),
+            Self::U16(values) => values.len(),
+            Self::U32(values) => values.len(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PropertyMode {
+    Replace,
+    Prepend,
+    Append,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PropertyChangeRequest {
+    pub window: u32,
+    pub property: u32,
+    pub property_type: u32,
+    pub mode: PropertyMode,
+    pub data: PropertyData,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PropertyMutationOutcome {
+    Success,
+    BadMatch,
+    BadAlloc,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PropertyReadRequest {
+    pub window: u32,
+    pub property: u32,
+    pub requested_type: Option<u32>,
+    pub delete_after_read: bool,
+    pub long_offset: u32,
+    pub long_length: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PropertyReadReply {
+    pub present: bool,
+    pub type_matched: bool,
+    pub deleted: bool,
+    pub property_type: u32,
+    pub bytes_after: u32,
+    pub data: PropertyData,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PropertyReadOutcome {
+    Success(PropertyReadReply),
+    BadValue,
+    Unsupported,
+}
+
 pub trait CoreDispatchState {
     fn intern_atom(&mut self, name: &[u8], only_if_exists: bool) -> InternAtomOutcome;
     fn atom_name(&self, atom: u32) -> Option<&[u8]>;
@@ -106,6 +174,30 @@ pub trait CoreDispatchState {
     }
 
     fn window_tree(&self, _window: u32) -> Option<WindowTreeReply> {
+        None
+    }
+
+    fn window_exists(&self, window: u32) -> bool {
+        self.window_geometry(window).is_some()
+    }
+
+    fn atom_is_valid(&self, atom: u32, allow_none: bool) -> bool {
+        (allow_none && atom == 0) || self.atom_name(atom).is_some()
+    }
+
+    fn change_property(&mut self, _request: PropertyChangeRequest) -> PropertyMutationOutcome {
+        PropertyMutationOutcome::Unsupported
+    }
+
+    fn delete_property(&mut self, _window: u32, _property: u32) -> PropertyMutationOutcome {
+        PropertyMutationOutcome::Unsupported
+    }
+
+    fn get_property(&mut self, _request: PropertyReadRequest) -> PropertyReadOutcome {
+        PropertyReadOutcome::Unsupported
+    }
+
+    fn list_properties(&self, _window: u32) -> Option<Vec<u32>> {
         None
     }
 }
@@ -153,6 +245,18 @@ pub fn dispatch_core_request_for_client(
         }
         opcode if opcode == CoreOpcode::QueryTree as u8 => {
             dispatch_query_tree(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::ChangeProperty as u8 => {
+            dispatch_change_property(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::DeleteProperty as u8 => {
+            dispatch_delete_property(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::GetProperty as u8 => {
+            dispatch_get_property(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::ListProperties as u8 => {
+            dispatch_list_properties(order, sequence, state, request)
         }
         opcode if opcode == CoreOpcode::InternAtom as u8 => {
             dispatch_intern_atom(order, sequence, state, request)
@@ -377,6 +481,348 @@ fn dispatch_query_tree(
             .finish()
             .expect("the bounded window table fits the reply length field"),
     )
+}
+
+fn dispatch_change_property(
+    order: ByteOrder,
+    sequence: u64,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    if request.core_size() < 24 || request.body().len() < 20 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let mode = match request.data {
+        0 => PropertyMode::Replace,
+        1 => PropertyMode::Prepend,
+        2 => PropertyMode::Append,
+        value => {
+            return protocol_error_with_value(
+                order,
+                sequence,
+                request,
+                CoreErrorCode::BadValue,
+                u32::from(value),
+            );
+        }
+    };
+    let body = request.body();
+    let window = read_u32(order, body, 0);
+    let property = read_u32(order, body, 4);
+    let property_type = read_u32(order, body, 8);
+    let format = body[12];
+    let item_count = read_u32(order, body, 16);
+    if format != 8 && format != 16 && format != 32 {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadValue,
+            u32::from(format),
+        );
+    }
+    let Some(data_size) = usize::try_from(item_count)
+        .ok()
+        .and_then(|count| count.checked_mul(usize::from(format / 8)))
+    else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    let Some(padded_size) = data_size.checked_add(3).map(|size| size & !3) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    if request.core_size() != 24 + padded_size || body.len() != 20 + padded_size {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    if !state.window_exists(window) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadWindow,
+            window,
+        );
+    }
+    if !state.atom_is_valid(property, false) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadAtom,
+            property,
+        );
+    }
+    if !state.atom_is_valid(property_type, false) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadAtom,
+            property_type,
+        );
+    }
+    let Some(data) = decode_property_data(order, format, item_count, &body[20..20 + data_size])
+    else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
+    };
+    match state.change_property(PropertyChangeRequest {
+        window,
+        property,
+        property_type,
+        mode,
+        data,
+    }) {
+        PropertyMutationOutcome::Success => InitialCoreDispatch::NoReply,
+        PropertyMutationOutcome::BadMatch => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadMatch)
+        }
+        PropertyMutationOutcome::BadAlloc => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadAlloc)
+        }
+        PropertyMutationOutcome::Unsupported => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
+        }
+    }
+}
+
+fn decode_property_data(
+    order: ByteOrder,
+    format: u8,
+    item_count: u32,
+    bytes: &[u8],
+) -> Option<PropertyData> {
+    let count = usize::try_from(item_count).ok()?;
+    match format {
+        8 => {
+            let mut values = Vec::new();
+            values.try_reserve_exact(count).ok()?;
+            values.extend_from_slice(bytes);
+            Some(PropertyData::U8(values))
+        }
+        16 => {
+            let mut values = Vec::new();
+            values.try_reserve_exact(count).ok()?;
+            values.extend(
+                bytes
+                    .chunks_exact(2)
+                    .map(|value| order.read_u16([value[0], value[1]])),
+            );
+            Some(PropertyData::U16(values))
+        }
+        32 => {
+            let mut values = Vec::new();
+            values.try_reserve_exact(count).ok()?;
+            values.extend(
+                bytes
+                    .chunks_exact(4)
+                    .map(|value| order.read_u32([value[0], value[1], value[2], value[3]])),
+            );
+            Some(PropertyData::U32(values))
+        }
+        _ => None,
+    }
+}
+
+fn dispatch_delete_property(
+    order: ByteOrder,
+    sequence: u64,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    if request.core_size() != 12 || request.body().len() != 8 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let window = read_u32(order, request.body(), 0);
+    let property = read_u32(order, request.body(), 4);
+    if !state.window_exists(window) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadWindow,
+            window,
+        );
+    }
+    if !state.atom_is_valid(property, false) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadAtom,
+            property,
+        );
+    }
+    match state.delete_property(window, property) {
+        PropertyMutationOutcome::Success => InitialCoreDispatch::NoReply,
+        PropertyMutationOutcome::BadAlloc => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadAlloc)
+        }
+        PropertyMutationOutcome::BadMatch => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadMatch)
+        }
+        PropertyMutationOutcome::Unsupported => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
+        }
+    }
+}
+
+fn dispatch_get_property(
+    order: ByteOrder,
+    sequence: u64,
+    state: &mut impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    if request.core_size() != 24 || request.body().len() != 20 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    if request.data > 1 {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadValue,
+            u32::from(request.data),
+        );
+    }
+    let body = request.body();
+    let window = read_u32(order, body, 0);
+    let property = read_u32(order, body, 4);
+    let requested_type = read_u32(order, body, 8);
+    let long_offset = read_u32(order, body, 12);
+    let long_length = read_u32(order, body, 16);
+    if !state.window_exists(window) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadWindow,
+            window,
+        );
+    }
+    if !state.atom_is_valid(property, false) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadAtom,
+            property,
+        );
+    }
+    if !state.atom_is_valid(requested_type, true) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadAtom,
+            requested_type,
+        );
+    }
+    let reply = match state.get_property(PropertyReadRequest {
+        window,
+        property,
+        requested_type: (requested_type != 0).then_some(requested_type),
+        delete_after_read: request.data != 0,
+        long_offset,
+        long_length,
+    }) {
+        PropertyReadOutcome::Success(reply) => reply,
+        PropertyReadOutcome::BadValue => {
+            return protocol_error_with_value(
+                order,
+                sequence,
+                request,
+                CoreErrorCode::BadValue,
+                long_offset,
+            );
+        }
+        PropertyReadOutcome::Unsupported => {
+            return protocol_error(order, sequence, request, CoreErrorCode::BadImplementation);
+        }
+    };
+    let format = if reply.present {
+        match reply.data {
+            PropertyData::U8(_) => 8,
+            PropertyData::U16(_) => 16,
+            PropertyData::U32(_) => 32,
+        }
+    } else {
+        0
+    };
+    let item_count = if reply.present && reply.type_matched {
+        match u32::try_from(reply.data.item_count()) {
+            Ok(count) => count,
+            Err(_) => return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc),
+        }
+    } else {
+        0
+    };
+    let mut encoded = ReplyBuilder::new(order, sequence, format);
+    encoded
+        .write_u32(if reply.present {
+            reply.property_type
+        } else {
+            0
+        })
+        .and_then(|()| encoded.write_u32(if reply.present { reply.bytes_after } else { 0 }))
+        .and_then(|()| encoded.write_u32(item_count))
+        .and_then(|()| encoded.write_padding(12))
+        .expect("GetProperty fixed fields fit the core reply");
+    if reply.present && reply.type_matched {
+        match reply.data {
+            PropertyData::U8(values) => encoded.write_payload(&values),
+            PropertyData::U16(values) => {
+                for value in values {
+                    encoded.write_payload_u16(value);
+                }
+            }
+            PropertyData::U32(values) => {
+                for value in values {
+                    encoded.write_payload_u32(value);
+                }
+            }
+        }
+    }
+    match encoded.finish() {
+        Ok(packet) => InitialCoreDispatch::Packet(packet),
+        Err(_) => protocol_error(order, sequence, request, CoreErrorCode::BadAlloc),
+    }
+}
+
+fn dispatch_list_properties(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let Some(window) = exact_window_request(order, request) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    if !state.window_exists(window) {
+        return protocol_error_with_value(
+            order,
+            sequence,
+            request,
+            CoreErrorCode::BadWindow,
+            window,
+        );
+    }
+    let Some(atoms) = state.list_properties(window) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadImplementation);
+    };
+    let Ok(count) = u16::try_from(atoms.len()) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
+    };
+    let mut reply = ReplyBuilder::new(order, sequence, 0);
+    reply
+        .write_u16(count)
+        .and_then(|()| reply.write_padding(22))
+        .expect("ListProperties fixed fields fit the core reply");
+    for atom in atoms {
+        reply.write_payload_u32(atom);
+    }
+    match reply.finish() {
+        Ok(packet) => InitialCoreDispatch::Packet(packet),
+        Err(_) => protocol_error(order, sequence, request, CoreErrorCode::BadAlloc),
+    }
 }
 
 fn exact_window_request(order: ByteOrder, request: &FramedRequest) -> Option<u32> {
