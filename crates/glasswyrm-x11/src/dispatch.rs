@@ -15,6 +15,13 @@ pub enum InternAtomOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExtensionAssignment {
+    pub major_opcode: u8,
+    pub first_event: u8,
+    pub first_error: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CoreClient {
     pub identifier: u64,
     pub resource_base: u32,
@@ -157,6 +164,14 @@ pub trait CoreDispatchState {
     fn intern_atom(&mut self, name: &[u8], only_if_exists: bool) -> InternAtomOutcome;
     fn atom_name(&self, atom: u32) -> Option<&[u8]>;
 
+    fn query_extension(&self, _name: &[u8]) -> Option<ExtensionAssignment> {
+        None
+    }
+
+    fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
+        Vec::new()
+    }
+
     fn create_window(
         &mut self,
         _client: CoreClient,
@@ -263,6 +278,12 @@ pub fn dispatch_core_request_for_client(
         }
         opcode if opcode == CoreOpcode::GetAtomName as u8 => {
             dispatch_get_atom_name(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::QueryExtension as u8 => {
+            dispatch_query_extension(order, sequence, state, request)
+        }
+        opcode if opcode == CoreOpcode::ListExtensions as u8 => {
+            dispatch_list_extensions(order, sequence, state, request)
         }
         _ => dispatch_initial_core_request(order, sequence, focused_window, request),
     }
@@ -983,6 +1004,65 @@ fn dispatch_get_atom_name(
     )
 }
 
+fn dispatch_query_extension(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let body = request.body();
+    if body.len() < 4 {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let name_length = usize::from(read_u16(order, body, 0));
+    let Some(padded_name_length) = name_length.checked_add(3).map(|length| length & !3) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    };
+    if request.core_size() != 8 + padded_name_length || body.len() != 4 + padded_name_length {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let extension = state.query_extension(&body[4..4 + name_length]);
+    let mut reply = ReplyBuilder::new(order, sequence, 0);
+    reply
+        .write_u8(u8::from(extension.is_some()))
+        .and_then(|()| reply.write_u8(extension.map_or(0, |value| value.major_opcode)))
+        .and_then(|()| reply.write_u8(extension.map_or(0, |value| value.first_event)))
+        .and_then(|()| reply.write_u8(extension.map_or(0, |value| value.first_error)))
+        .expect("QueryExtension fixed fields fit the core reply");
+    InitialCoreDispatch::Packet(
+        reply
+            .finish()
+            .expect("QueryExtension has no variable-length payload"),
+    )
+}
+
+fn dispatch_list_extensions(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    if request.core_size() != 4 || !request.body().is_empty() {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    }
+    let names = state.enabled_extension_names();
+    let Ok(count) = u8::try_from(names.len()) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
+    };
+    if names.iter().any(|name| u8::try_from(name.len()).is_err()) {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
+    }
+    let mut reply = ReplyBuilder::new(order, sequence, count);
+    for name in names {
+        reply.write_payload(&[name.len() as u8]);
+        reply.write_payload(name);
+    }
+    match reply.finish() {
+        Ok(packet) => InitialCoreDispatch::Packet(packet),
+        Err(_) => protocol_error(order, sequence, request, CoreErrorCode::BadAlloc),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1029,6 +1109,108 @@ mod tests {
                 bytes[offset + 2],
                 bytes[offset + 3],
             ]),
+        }
+    }
+
+    struct DiscoveryState;
+
+    impl CoreDispatchState for DiscoveryState {
+        fn intern_atom(&mut self, _name: &[u8], _only_if_exists: bool) -> InternAtomOutcome {
+            unreachable!("extension discovery does not intern atoms")
+        }
+
+        fn atom_name(&self, _atom: u32) -> Option<&[u8]> {
+            None
+        }
+
+        fn query_extension(&self, name: &[u8]) -> Option<ExtensionAssignment> {
+            (name == b"BIG-REQUESTS").then_some(ExtensionAssignment {
+                major_opcode: 128,
+                first_event: 0,
+                first_error: 0,
+            })
+        }
+
+        fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
+            vec![b"BIG-REQUESTS", b"XFIXES"]
+        }
+    }
+
+    fn query_extension_request(order: ByteOrder, name: &[u8]) -> FramedRequest {
+        let padded_length = (name.len() + 3) & !3;
+        let mut request = request(
+            order,
+            CoreOpcode::QueryExtension as u8,
+            (2 + padded_length / 4) as u16,
+        );
+        request.bytes[4..6].copy_from_slice(&match order {
+            ByteOrder::LittleEndian => (name.len() as u16).to_le_bytes(),
+            ByteOrder::BigEndian => (name.len() as u16).to_be_bytes(),
+        });
+        request.bytes[8..8 + name.len()].copy_from_slice(name);
+        request
+    }
+
+    #[test]
+    fn extension_discovery_preserves_wire_semantics_and_bounds() {
+        for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {
+            let mut state = DiscoveryState;
+            let InitialCoreDispatch::Packet(present) = dispatch_core_request(
+                order,
+                0x1_0001,
+                1,
+                &mut state,
+                &query_extension_request(order, b"BIG-REQUESTS"),
+            ) else {
+                panic!("QueryExtension must reply");
+            };
+            assert_eq!(present.len(), 32);
+            assert_eq!(u16_at(order, &present, 2), 1);
+            assert_eq!(&present[8..12], &[1, 128, 0, 0]);
+
+            for name in [b"big-requests".as_slice(), &[b'R', 0xff][..]] {
+                let InitialCoreDispatch::Packet(absent) = dispatch_core_request(
+                    order,
+                    2,
+                    1,
+                    &mut state,
+                    &query_extension_request(order, name),
+                ) else {
+                    panic!("unknown QueryExtension must reply");
+                };
+                assert_eq!(&absent[8..12], &[0, 0, 0, 0]);
+            }
+
+            let InitialCoreDispatch::Packet(list) = dispatch_core_request(
+                order,
+                3,
+                1,
+                &mut state,
+                &request(order, CoreOpcode::ListExtensions as u8, 1),
+            ) else {
+                panic!("ListExtensions must reply");
+            };
+            assert_eq!(list[1], 2);
+            assert_eq!(u32_at(order, &list, 4), 5);
+            assert_eq!(&list[32..], b"\x0cBIG-REQUESTS\x06XFIXES");
+
+            let malformed = request(order, CoreOpcode::QueryExtension as u8, 1);
+            let InitialCoreDispatch::Packet(error) =
+                dispatch_core_request(order, 4, 1, &mut state, &malformed)
+            else {
+                panic!("malformed QueryExtension must error");
+            };
+            assert_eq!(error[1], CoreErrorCode::BadLength as u8);
+            assert_eq!(error[10], CoreOpcode::QueryExtension as u8);
+
+            let wrong_list_length = request(order, CoreOpcode::ListExtensions as u8, 2);
+            let InitialCoreDispatch::Packet(error) =
+                dispatch_core_request(order, 5, 1, &mut state, &wrong_list_length)
+            else {
+                panic!("malformed ListExtensions must error");
+            };
+            assert_eq!(error[1], CoreErrorCode::BadLength as u8);
+            assert_eq!(error[10], CoreOpcode::ListExtensions as u8);
         }
     }
 

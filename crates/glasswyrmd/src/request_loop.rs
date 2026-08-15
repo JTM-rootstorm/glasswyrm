@@ -9,12 +9,12 @@ use glasswyrm_core::window::{
     WindowCreateSpec, WindowGeometry, WindowId, WindowStore,
 };
 use glasswyrm_x11::{
-    ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, InitialCoreDispatch,
-    InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData, PropertyMode,
-    PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply, PropertyReadRequest,
-    RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome, WindowCreateRequest,
-    WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply, dispatch_core_request_for_client,
-    encode_core_error,
+    ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, ExtensionAssignment,
+    InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData,
+    PropertyMode, PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply,
+    PropertyReadRequest, RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome,
+    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
+    dispatch_core_request_for_client, encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -68,6 +68,14 @@ impl CoreDispatchState for ServerState {
 
     fn atom_name(&self, atom: u32) -> Option<&[u8]> {
         self.atoms.name(atom)
+    }
+
+    fn query_extension(&self, _name: &[u8]) -> Option<ExtensionAssignment> {
+        None
+    }
+
+    fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
+        Vec::new()
     }
 
     fn create_window(
