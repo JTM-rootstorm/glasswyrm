@@ -214,8 +214,11 @@ void require_no_dump_listener(const char* executable, const std::string& root) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  require(argc == 2, "usage: gwcomp_process_test /path/to/gwcomp");
+  require(argc == 2 ||
+              (argc == 3 && std::strcmp(argv[2], "--rust-transition") == 0),
+          "usage: gwcomp_process_test /path/to/gwcomp [--rust-transition]");
   const char* executable = argv[1];
+  const bool rust_transition = argc == 3;
 
   const auto help = command(executable, "--help");
   require(WIFEXITED(help.status) && WEXITSTATUS(help.status) == 0,
@@ -230,13 +233,16 @@ int main(int argc, char** argv) {
   const auto missing = command(executable, "--once");
   require(WIFEXITED(missing.status) && WEXITSTATUS(missing.status) == 2,
           "missing required paths exits with command-line failure");
-  require(missing.output.find("--ipc-socket is required") != std::string::npos,
+  const char* required_paths = rust_transition
+                                   ? "--ipc-socket is required"
+                                   : "--ipc-socket and --dump-dir are required";
+  require(missing.output.find(required_paths) != std::string::npos,
           "missing required paths has a useful diagnostic");
 
   char temporary[] = "/tmp/gwcomp-process-test-XXXXXX";
   require(::mkdtemp(temporary) != nullptr, "create temporary directory");
   const std::string root = temporary;
-  require_no_dump_listener(executable, root);
+  if (rust_transition) require_no_dump_listener(executable, root);
   const std::string socket = root + "/gwcomp.sock";
   const std::string dumps = root + "/dumps";
   const pid_t child = ::fork();
@@ -264,8 +270,10 @@ int main(int argc, char** argv) {
   require(std::filesystem::is_directory(dumps),
           "gwcomp prepares its dump directory");
 
-  require_idle_pre_handshake_peer_expires(socket);
-  require_valid_connection(socket);
+  if (rust_transition) {
+    require_idle_pre_handshake_peer_expires(socket);
+    require_valid_connection(socket);
+  }
   require_rejected(socket, GWIPC_ROLE_DIAGNOSTIC_TOOL, kRequiredCapabilities,
                    GWIPC_STATUS_ROLE_REJECTED,
                    "wrong-role peer is rejected");

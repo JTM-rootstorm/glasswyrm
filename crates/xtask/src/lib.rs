@@ -377,7 +377,10 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         invocations.extend([
             Invocation::new(
                 legacy("tests/manifest/graphics/headless/gwcomp_process_test").into_os_string(),
-                candidate(),
+                [
+                    rust_gwcomp().into_os_string(),
+                    OsString::from("--rust-transition"),
+                ],
             ),
             Invocation::new(
                 legacy("tests/manifest/graphics/headless/gwcomp_metadata_process_test")
@@ -771,7 +774,10 @@ mod tests {
             invocations[0].program,
             "legacy-out/tests/manifest/graphics/headless/gwcomp_process_test"
         );
-        assert_eq!(strings(&invocations[0]), ["rust-out/gwcomp"]);
+        assert_eq!(
+            strings(&invocations[0]),
+            ["rust-out/gwcomp", "--rust-transition"]
+        );
         assert_eq!(
             invocations[1].program,
             "legacy-out/tests/manifest/graphics/headless/gwcomp_metadata_process_test"
