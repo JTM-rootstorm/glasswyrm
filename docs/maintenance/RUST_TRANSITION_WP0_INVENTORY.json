@@ -1,0 +1,5123 @@
+{
+  "authority_revision": "ae96f0f13c050cf1751ab94047925e896308b262",
+  "canonical_metadata_sha256": {
+    "crates/glasswyrm-x11/src/core.rs": "698c73821ccb07d499ef5b85d86df48722854696d1fc3d99a724aa09d003a48a",
+    "crates/glasswyrm-x11/src/dispatch.rs": "c899297fffdbec1a404cf915ad6ce5e898af32d8314ba45bc54e6da61716edaa",
+    "src/glasswyrmd/extension_registry.hpp": "ec70a08c9d2644ca05466ebbd45a05454723a28e968a9433d61b02b9ffe547cb",
+    "src/glasswyrmd/request_dispatcher.cpp": "c7ddd12d92aaddb4635c625b93f8eb0519d064ecb508431663b2adf538a5846b",
+    "src/glasswyrmd/resource_id.hpp": "6491bcd2c311252573f3bd4a1fe42a22b106ce5e19941cd71b4c227c46f687a1",
+    "tests/unit/resource_id_test.cpp": "40975b2195a90a11818766d98ea69e365b2d831a7a2e7b3700bbae98df417bd2"
+  },
+  "compatibility_constants": [
+    {
+      "deletion_gate": "WP3/WP7 must either retain this as a named stable allocation or replace it with an equivalent server-resource allocator",
+      "explanation": "server-owned extension resources such as RENDER picture formats; excluded from client XID allocation",
+      "name": "server-extension-resource-xid-range",
+      "path": "src/glasswyrmd/resource_id.hpp",
+      "regression_test": "tests/unit/resource_id_test.cpp",
+      "values": [
+        "0x1FFFF100",
+        "0x1FFFF1FF"
+      ]
+    },
+    {
+      "deletion_gate": "retain through Linux v1 compatibility; removal requires WP0C/WP7 ABI disposition",
+      "explanation": "portable semantic name with exact Linux v1 compatibility alias",
+      "name": "linux-v1-handle-attachment-alias",
+      "path": "crates/gw-types/src/lib.rs",
+      "values": [
+        "HANDLE_ATTACHMENTS == FD_PASSING == bit 0"
+      ]
+    },
+    {
+      "deletion_gate": "retain through Linux v1 compatibility; removal requires WP0C/WP7 ABI disposition",
+      "explanation": "portable semantic name with exact Linux v1 compatibility alias",
+      "name": "linux-v1-shared-buffer-alias",
+      "path": "crates/gw-types/src/lib.rs",
+      "values": [
+        "SHARED_BUFFER_OBJECTS == MEMFD_BUFFERS == bit 4"
+      ]
+    }
+  ],
+  "core_requests": [
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "create_window",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreateWindow",
+      "opcode": 1,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "change_window_attributes",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/window.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ChangeWindowAttributes",
+      "opcode": 2,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_window_attributes",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/window.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetWindowAttributes",
+      "opcode": 3,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "destroy_window",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "DestroyWindow",
+      "opcode": 4,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "map_window",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "MapWindow",
+      "opcode": 8,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "map_subwindows",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "MapSubwindows",
+      "opcode": 9,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "map_window",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "UnmapWindow",
+      "opcode": 10,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "map_subwindows",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "UnmapSubwindows",
+      "opcode": 11,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "configure_window",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/lifecycle.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ConfigureWindow",
+      "opcode": 12,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_geometry",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetGeometry",
+      "opcode": 14,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire",
+        "structural-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "query_tree",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryTree",
+      "opcode": 15,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "intern_atom",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/atom.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "InternAtom",
+      "opcode": 16,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "get_atom_name",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/atom.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetAtomName",
+      "opcode": 17,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "change_property",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/property.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ChangeProperty",
+      "opcode": 18,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "delete_property",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/property.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "DeleteProperty",
+      "opcode": 19,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "get_property",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/property.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetProperty",
+      "opcode": 20,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "list_properties",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/property.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ListProperties",
+      "opcode": 21,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "set_selection_owner",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/selection.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "SetSelectionOwner",
+      "opcode": 22,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_selection_owner",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/selection.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetSelectionOwner",
+      "opcode": 23,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "convert_selection",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/selection.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ConvertSelection",
+      "opcode": 24,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "send_event",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "SendEvent",
+      "opcode": 25,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "grab_pointer",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GrabPointer",
+      "opcode": 26,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "ungrab_pointer",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "UngrabPointer",
+      "opcode": 27,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "grab_button",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GrabButton",
+      "opcode": 28,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "change_active_pointer_grab",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ChangeActivePointerGrab",
+      "opcode": 30,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "grab_keyboard",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GrabKeyboard",
+      "opcode": 31,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "ungrab_keyboard",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "UngrabKeyboard",
+      "opcode": 32,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "allow_events",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "AllowEvents",
+      "opcode": 35,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "query_pointer",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryPointer",
+      "opcode": 38,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "translate_coordinates",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "TranslateCoordinates",
+      "opcode": 40,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "warp_pointer",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "WarpPointer",
+      "opcode": 41,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "set_input_focus",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/grab.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "SetInputFocus",
+      "opcode": 42,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_input_focus",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetInputFocus",
+      "opcode": 43,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "query_keymap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryKeymap",
+      "opcode": 44,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "open_font",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/font.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "OpenFont",
+      "opcode": 45,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "close_font",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/font.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CloseFont",
+      "opcode": 46,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "query_font",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/font.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryFont",
+      "opcode": 47,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "query_text_extents",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/text.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryTextExtents",
+      "opcode": 48,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "list_fonts",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/font.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ListFonts",
+      "opcode": 49,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "create_pixmap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawable_resource.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreatePixmap",
+      "opcode": 53,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "free_pixmap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawable_resource.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FreePixmap",
+      "opcode": 54,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": null,
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawable_resource.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreateGc",
+      "opcode": 55,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": null,
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawable_resource.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ChangeGc",
+      "opcode": 56,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": null,
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawable_resource.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FreeGc",
+      "opcode": 60,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "clear_area",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ClearArea",
+      "opcode": 61,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "copy_area_request",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CopyArea",
+      "opcode": 62,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "poly_line",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PolyLine",
+      "opcode": 65,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "poly_segment",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PolySegment",
+      "opcode": 66,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "fill_poly",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FillPoly",
+      "opcode": 69,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "poly_fill_rectangle",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PolyFillRectangle",
+      "opcode": 70,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "poly_fill_arc",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PolyFillArc",
+      "opcode": 71,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "put_image",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/drawing.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PutImage",
+      "opcode": 72,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "poly_text8",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/text.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "PolyText8",
+      "opcode": 74,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "image_text8",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/text.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ImageText8",
+      "opcode": 76,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "create_colormap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/colormap.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreateColormap",
+      "opcode": 78,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "free_colormap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/colormap.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FreeColormap",
+      "opcode": 79,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "install_colormap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/colormap.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "InstallColormap",
+      "opcode": 81,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "install_colormap",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/colormap.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "UninstallColormap",
+      "opcode": 82,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "list_installed_colormaps",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/colormap.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ListInstalledColormaps",
+      "opcode": 83,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "alloc_color",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/color.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "AllocColor",
+      "opcode": 84,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "named_color",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/color.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "AllocNamedColor",
+      "opcode": 85,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "free_colors",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/color.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FreeColors",
+      "opcode": 88,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "query_colors",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/color.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryColors",
+      "opcode": 91,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "named_color",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/color.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "LookupColor",
+      "opcode": 92,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "create_cursor",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/cursor.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreateCursor",
+      "opcode": 93,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "create_glyph_cursor",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/cursor.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "CreateGlyphCursor",
+      "opcode": 94,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "free_cursor",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/cursor.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "FreeCursor",
+      "opcode": 95,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "legacy_handler": "recolor_cursor",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/cursor.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "RecolorCursor",
+      "opcode": 96,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "query_best_size",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryBestSize",
+      "opcode": 97,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "query_extension",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "QueryExtension",
+      "opcode": 98,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "list_extensions",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ListExtensions",
+      "opcode": 99,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_keyboard_mapping",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetKeyboardMapping",
+      "opcode": 101,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "change_keyboard_control",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ChangeKeyboardControl",
+      "opcode": 102,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_keyboard_control",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetKeyboardControl",
+      "opcode": 103,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "bell",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "Bell",
+      "opcode": 104,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "force_screen_saver",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "ForceScreenSaver",
+      "opcode": 115,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_pointer_mapping",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetPointerMapping",
+      "opcode": 117,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP2-WP5",
+      "fixture_profiles": [
+        "x11-wire",
+        "input-events",
+        "gwipc-contracts"
+      ],
+      "legacy_handler": "get_modifier_mapping",
+      "legacy_implementation": "src/glasswyrmd/request_handlers/query.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GetModifierMapping",
+      "opcode": 119,
+      "rust_dispatch_present": false,
+      "rust_implementation": null
+    },
+    {
+      "cutover_phase": "WP1/WP5A",
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "legacy_handler": "error",
+      "legacy_implementation": "src/glasswyrmd/request_dispatcher.cpp",
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "NoOperation",
+      "opcode": 127,
+      "rust_dispatch_present": true,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    }
+  ],
+  "extensions": [
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 0,
+      "event_count": 0,
+      "first_error": 0,
+      "first_event": 0,
+      "fixture_profiles": [
+        "x11-wire"
+      ],
+      "kind": "BigRequests",
+      "legacy_implementation": "src/glasswyrmd/extension_dispatcher.cpp",
+      "major_opcode": 128,
+      "maximum_version": [
+        1,
+        0
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "BIG-REQUESTS",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 1,
+      "event_count": 1,
+      "first_error": 128,
+      "first_event": 64,
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "kind": "MitShm",
+      "legacy_implementation": "src/glasswyrmd/extensions/mit_shm.cpp",
+      "major_opcode": 129,
+      "maximum_version": [
+        1,
+        1
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "MIT-SHM",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 1,
+      "event_count": 1,
+      "first_error": 129,
+      "first_event": 65,
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "kind": "XFixes",
+      "legacy_implementation": "src/glasswyrmd/extensions/xfixes.cpp",
+      "major_opcode": 130,
+      "maximum_version": [
+        2,
+        0
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "XFIXES",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 1,
+      "event_count": 1,
+      "first_error": 130,
+      "first_event": 66,
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "kind": "Damage",
+      "legacy_implementation": "src/glasswyrmd/extensions/damage.cpp",
+      "major_opcode": 131,
+      "maximum_version": [
+        1,
+        1
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "DAMAGE",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 5,
+      "event_count": 0,
+      "first_error": 131,
+      "first_event": 0,
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "kind": "Render",
+      "legacy_implementation": "src/glasswyrmd/extensions/render.cpp",
+      "major_opcode": 132,
+      "maximum_version": [
+        0,
+        11
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "RENDER",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 0,
+      "event_count": 0,
+      "first_error": 0,
+      "first_event": 0,
+      "fixture_profiles": [
+        "x11-wire",
+        "rendering-scenes"
+      ],
+      "kind": "Composite",
+      "legacy_implementation": "src/glasswyrmd/extensions/composite.cpp",
+      "major_opcode": 133,
+      "maximum_version": [
+        0,
+        4
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "Composite",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "GameCompat",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 3,
+      "event_count": 2,
+      "first_error": 136,
+      "first_event": 67,
+      "fixture_profiles": [
+        "x11-wire",
+        "m13-scale-output"
+      ],
+      "kind": "RandR",
+      "legacy_implementation": "src/glasswyrmd/extensions/randr.cpp",
+      "major_opcode": 134,
+      "maximum_version": [
+        1,
+        3
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "RANDR",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "ScaleProtocol",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 2,
+      "event_count": 1,
+      "first_error": 139,
+      "first_event": 69,
+      "fixture_profiles": [
+        "x11-wire",
+        "m13-scale-output"
+      ],
+      "kind": "GwScale",
+      "legacy_implementation": "src/glasswyrmd/extensions/gw_scale.cpp",
+      "major_opcode": 135,
+      "maximum_version": [
+        0,
+        1
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GW_SCALE",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    },
+    {
+      "capability": "VrrProtocol",
+      "cutover_phase": "WP3/WP5D",
+      "error_count": 2,
+      "event_count": 1,
+      "first_error": 141,
+      "first_event": 70,
+      "fixture_profiles": [
+        "x11-wire",
+        "m14-vrr"
+      ],
+      "kind": "GwVrr",
+      "legacy_implementation": "src/glasswyrmd/extensions/gw_vrr.cpp",
+      "major_opcode": 136,
+      "maximum_version": [
+        0,
+        1
+      ],
+      "mixed_stack_profiles": [
+        "legacy-server-oracle",
+        "rust-server-process-oracle",
+        "wp0c-rust-server-legacy-peers",
+        "wp0c-rust-server-rust-peers"
+      ],
+      "name": "GW_VRR",
+      "rust_discovery": true,
+      "rust_enabled_by_default": false,
+      "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
+    }
+  ],
+  "fixture_file_count": 217,
+  "fixture_files": [
+    {
+      "path": "tests/fixtures/README.md",
+      "sha256": "2b53db5aacf7c848ca40b8f5db2732274c8ddb0baff303a3af068b2eb6fe368c"
+    },
+    {
+      "path": "tests/fixtures/gwipc/README.md",
+      "sha256": "69d32f104aa6d98f62b2a7a8254f6a3462366e2af97538366681069f0c6b60b6"
+    },
+    {
+      "path": "tests/fixtures/gwipc/SHA256SUMS",
+      "sha256": "655cec8b4a141f4ff93c4e83160388f54c329af4a4c5b9fa65a02c87cc5f6dfb"
+    },
+    {
+      "path": "tests/fixtures/gwipc/buffer-attach.hex",
+      "sha256": "11e7476012e318d4adc74645db107f7165ecaed6323135bb59d92d0c5b9ef425"
+    },
+    {
+      "path": "tests/fixtures/gwipc/buffer-detach.hex",
+      "sha256": "53fbc7042aa45caa916d3c214816d3a5fa2de7983d9b3822b2f083585c133e77"
+    },
+    {
+      "path": "tests/fixtures/gwipc/buffer-release.hex",
+      "sha256": "f4a2d08a5a9d67f0f052ba1028d35b6b34beaeeb657ddd0d64bcdb534eba41f0"
+    },
+    {
+      "path": "tests/fixtures/gwipc/frame-acknowledged.hex",
+      "sha256": "a09192cacac3a92515dfea4c71989a8607165ad286d3892d79c30c8e6bd8b2b8"
+    },
+    {
+      "path": "tests/fixtures/gwipc/frame-commit.hex",
+      "sha256": "845cc4764dfe966feed1dfcdaca39e0027546415384783344b07a2dbfa6f6689"
+    },
+    {
+      "path": "tests/fixtures/gwipc/hello.hex",
+      "sha256": "e620979c3182f749f481fdc072016f5193855dd5aee5dd3440f0f572be4de6f3"
+    },
+    {
+      "path": "tests/fixtures/gwipc/malformed-envelope-magic.hex",
+      "sha256": "6fd0cdfad1ff72158532ea687b85b2707a33618b39563e63878b2828bc1d23cd"
+    },
+    {
+      "path": "tests/fixtures/gwipc/malformed-hello-truncated.hex",
+      "sha256": "199cc06ffa359c47132a11555bbf9fa856e703c4c0721cca68deb461c9bfceb4"
+    },
+    {
+      "path": "tests/fixtures/gwipc/malformed-vrr-capability-boolean.hex",
+      "sha256": "9ad975b181c53c341b53cea5933fc0217b3fc414bfab3fb173e8ca42b0603f31"
+    },
+    {
+      "path": "tests/fixtures/gwipc/manifest.tsv",
+      "sha256": "697284b8b58820787fcb8f01b84a5159ae0e1dc72c00dfd29afe025d1ea1eb2d"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-configuration-acknowledged.hex",
+      "sha256": "6c745aa5570b76ec8c4106589bbb49f4f088dabfd0150c27532d8bf20a17890f"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-configuration-commit.hex",
+      "sha256": "5f149cdf390e9640ea1f6b89c8ae8ac5518845b84bb106990f0b935b58120c2c"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-descriptor-upsert.hex",
+      "sha256": "e663b81de24ba80bd29f00cfdea2cc0e1af510413bde011a3680c50003e7b134"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-mode-upsert.hex",
+      "sha256": "de796854f6ef7b807ef11147086f57ea3dce83446e41fcf15d40048f900b4c44"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-remove.hex",
+      "sha256": "ac501550d760385ddb1f21d7f6d64f6732a71dec3f27dc6053058913211fd85b"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-state-query.hex",
+      "sha256": "b736187cfe7c1ad759ee89c48033ebc199a0016bf2a6f2b371a9a9c8fa79ed97"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-upsert.hex",
+      "sha256": "d37cb137ad2a7468c2c826e1f0827d5ce5d28c37ab7a66b88dcd5db5804e293b"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-vrr-capability-upsert.hex",
+      "sha256": "39e6198f99c1428dbf1a5e0e3b4cfd1dc92126f4f23f17dccca670302545f525"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-vrr-policy-upsert.hex",
+      "sha256": "20077dce9c91b2fd3227ef3fc00586745a758cd363473b7f60f61ad555ae0d24"
+    },
+    {
+      "path": "tests/fixtures/gwipc/output-vrr-state-upsert.hex",
+      "sha256": "b088309468d5a29c494ec8fdaac17f8043c181b8f4321672963b7f6c74d06146"
+    },
+    {
+      "path": "tests/fixtures/gwipc/ping.hex",
+      "sha256": "5ddb62ab07bc7493f009228ebffa757a749797c9dade12946f4c75cc920c5b8a"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-acknowledged.hex",
+      "sha256": "21e93466c374dafc4a6d510d0e9a07aff21fa43584cabd9e81cc3c49e4dd0b55"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-bindings-upsert.hex",
+      "sha256": "07ffa2d82d22095d3b5d72997f24a85686908b2f181643171a223ee213113e67"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-commit.hex",
+      "sha256": "081bb0f03e7108dda442df642dbd6e87a253bb98638c3247e3ab0af1cce9ccc6"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-context-upsert.hex",
+      "sha256": "55b826cab8ada76019749493a56bc58a78cff31f68ccf7777d9c28aa02a06bb4"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-lifecycle-window-upsert.hex",
+      "sha256": "668d37957a96bae4b89fae710d284d84560b060e6297d225ff6c612aabe55318"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-output-upsert.hex",
+      "sha256": "0b843bd08d9ed83a2a1754c18e48e5e87b543c344f96581832415df484d67d83"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-output-vrr-state.hex",
+      "sha256": "972846b69e418b01e1a242d129014f6490d8a7a309a6211adcb790c2d155e313"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-output-vrr-upsert.hex",
+      "sha256": "c1da5e5af06ca974aac43574e0180a20c416aa030b2824900e6e4b0b6c329c1f"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-output-hint.hex",
+      "sha256": "c0da0cb1e4a260f59ac260f4ff275dde159128a89d41c50955a4705c7444e713"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-remove.hex",
+      "sha256": "f22a6a1614109b4a0bec10e3dc540583cc6a96d1bea50877e3a257a0f7d4e0c5"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-state.hex",
+      "sha256": "6f63f73ed08789e8d6776a25761b4950a32ae0699e10d891c4df1917f8e6c098"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-upsert.hex",
+      "sha256": "da9078b126e8147ddaeedde83124c22df57f42a5f586f40cdf21a3713ce55404"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-vrr-state.hex",
+      "sha256": "865c4b92dee8c76f8811d48cc87eed669beee3203b8166dbaab51f36a4f6f763"
+    },
+    {
+      "path": "tests/fixtures/gwipc/policy-window-vrr-upsert.hex",
+      "sha256": "40f47a182b2823ef7931515d0a3eefa04b2f17398cc548f6592936c806596685"
+    },
+    {
+      "path": "tests/fixtures/gwipc/pong-record.hex",
+      "sha256": "f1bc300eb211969ef0282611f1bfa38f18efda8a1f32df8a54adb3a049e956f4"
+    },
+    {
+      "path": "tests/fixtures/gwipc/pong.hex",
+      "sha256": "07d43457bb738960e211c200377dd361c6f6905ce437884257097b456e90ca84"
+    },
+    {
+      "path": "tests/fixtures/gwipc/presentation-timing.hex",
+      "sha256": "a7cbdcba51748c3b22653e77069f5e6dfc1bc53d1a9e111e9f4e06ca3ff62b0a"
+    },
+    {
+      "path": "tests/fixtures/gwipc/protocol-error.hex",
+      "sha256": "f9bb4cb768a90a83fdfe44ac33780ba6404e9c3ff1479b731786351c4ba0de15"
+    },
+    {
+      "path": "tests/fixtures/gwipc/reject.hex",
+      "sha256": "e4ac60ac3bb5d0c481d5ddb4ebfc8253185964bf99aa61aadb9b01ba339496bf"
+    },
+    {
+      "path": "tests/fixtures/gwipc/rust-malformed-policy-vrr-reserved.hex",
+      "sha256": "9f1fad6116a07f6f4da390f34beddb868d471bad88944e89be4b28d22d8c80eb"
+    },
+    {
+      "path": "tests/fixtures/gwipc/rust-malformed-surface-output-count.hex",
+      "sha256": "69170366780b8fef13bb550f9d6498630484468b943e0eac384a2b4dd8a1feea"
+    },
+    {
+      "path": "tests/fixtures/gwipc/rust-malformed-synthetic-button-boolean.hex",
+      "sha256": "24a781d98016cf6aab8c37ea53be259c56dd528ac3e1ed399ff59243df95d68d"
+    },
+    {
+      "path": "tests/fixtures/gwipc/session-state-acknowledged.hex",
+      "sha256": "e53f4aa45cb92bf93e269151557157a8583c5a19ec0f970bad4455fc6eb4077f"
+    },
+    {
+      "path": "tests/fixtures/gwipc/session-state-change.hex",
+      "sha256": "d993cd42a9cb9b9c002bc5d7751dc43e195d6ae7dccc620a2ea965a5de8a22cf"
+    },
+    {
+      "path": "tests/fixtures/gwipc/snapshot-abort.hex",
+      "sha256": "445ecd7d872e69eb2797a41e8769487652b298cf9cbafe88d6d1f531241a5cfb"
+    },
+    {
+      "path": "tests/fixtures/gwipc/snapshot-begin.hex",
+      "sha256": "28bd40f466484aff3c2f40d9b36cc6e89008a8ecd4ff8fed56157731dc170f9a"
+    },
+    {
+      "path": "tests/fixtures/gwipc/snapshot-end.hex",
+      "sha256": "c198053b49da5b0ba70dad1febf8b03c3b14d2f9abebc8b9feaa4e250ad0a942"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-damage.hex",
+      "sha256": "771e4ca007c95dd47bfea918a9153f52988f590ccba4ee574f5821e7f9ecee34"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-output-state.hex",
+      "sha256": "6a1747748549ebc9edc30ad178b5e678f0dd6a7275aa787f92d476cb4ca924b0"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-policy-upsert.hex",
+      "sha256": "03d012b009923f408163f88792801956e9a7941042b4bdae2a270755b19e74f3"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-remove.hex",
+      "sha256": "f22a6a1614109b4a0bec10e3dc540583cc6a96d1bea50877e3a257a0f7d4e0c5"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-upsert.hex",
+      "sha256": "c1f4715af717cd97b70228d928e581dcee1a22ad888a90824800e62f8151449a"
+    },
+    {
+      "path": "tests/fixtures/gwipc/surface-vrr-state.hex",
+      "sha256": "92eeb9bbccf96219364404a89fa9892f53ff61f0d7f4987a43418f968cd499aa"
+    },
+    {
+      "path": "tests/fixtures/gwipc/synthetic-barrier.hex",
+      "sha256": "c2e40fbf6126734299523db6ca8d7ea482b6efbbf523fc7be66d8ee05eae0041"
+    },
+    {
+      "path": "tests/fixtures/gwipc/synthetic-button.hex",
+      "sha256": "83e4d9dc52f33e36ced3376aaa2fecb9500c18a9362e0fd52bb357d9ed5ef95a"
+    },
+    {
+      "path": "tests/fixtures/gwipc/synthetic-input-acknowledged.hex",
+      "sha256": "721bc021840dfc634dd5e8eeb030d0ba22fd8417f2ffa4306a506c82f60cee6c"
+    },
+    {
+      "path": "tests/fixtures/gwipc/synthetic-key.hex",
+      "sha256": "eaf202f61cca8d4c0989057c31e6dd255904e1ff56264e3e4fef712bc4c76998"
+    },
+    {
+      "path": "tests/fixtures/gwipc/synthetic-motion.hex",
+      "sha256": "7ec1fa09308977d8b208286384f9ac61486d7ac69357f2bdce8cfd4401e737a5"
+    },
+    {
+      "path": "tests/fixtures/gwipc/welcome.hex",
+      "sha256": "e0de587ae91c10316c4148f1d3a1660d58c663d249ce6f88acf48b8dfe493c85"
+    },
+    {
+      "path": "tests/fixtures/m11/README.md",
+      "sha256": "b2cbae9942053602c0c34fb4a76948262aed735c9102855925b137321ef49e1e"
+    },
+    {
+      "path": "tests/fixtures/m11/SHA256SUMS",
+      "sha256": "f6ac01a4f0096f291d90842817a43458a6ab984e96f9cda38ce36d7e1fd6cbd9"
+    },
+    {
+      "path": "tests/fixtures/m11/xterm.trace.json",
+      "sha256": "702e014eb33d67f9fa719ff0f133782b950a83a153c882394f53d8606f229834"
+    },
+    {
+      "path": "tests/fixtures/m12/README.md",
+      "sha256": "2547c51c30d920915ac18a52c560e2a8b8f0b75741854913687c9efe612b0cc6"
+    },
+    {
+      "path": "tests/fixtures/m12/SHA256SUMS",
+      "sha256": "d1ff2006d1e687c41c775733a26a31f39bcc142a686f941430b7414aad00a354"
+    },
+    {
+      "path": "tests/fixtures/m12/drm-damage-report.jsonl",
+      "sha256": "21fe250691138f0d5dfc818ee60277006fc37695ca9b398d02ee88f4e4160af5"
+    },
+    {
+      "path": "tests/fixtures/m12/extensions.json",
+      "sha256": "8431548fe13c5d0da7055f286947686bc64a3c91a71a29253668f0c9235e9ef3"
+    },
+    {
+      "path": "tests/fixtures/m12/fullscreen-gles.ppm",
+      "sha256": "5f5cc7b76f965c6e8f8d3d1aa02881575742e902bd4994fd1bf61343c1ab1c8d"
+    },
+    {
+      "path": "tests/fixtures/m12/fullscreen-software.ppm",
+      "sha256": "5f5cc7b76f965c6e8f8d3d1aa02881575742e902bd4994fd1bf61343c1ab1c8d"
+    },
+    {
+      "path": "tests/fixtures/m12/registry-big.json",
+      "sha256": "4d71ca1299ed2b0dd37c3af2acdd2e2bb03496c6f021b2a1242c62f17fd29695"
+    },
+    {
+      "path": "tests/fixtures/m12/registry-little.json",
+      "sha256": "2df51a475b8e0801f33c4d42d841ad3dfa38dd941ac48944e6eb0fa418dc0a18"
+    },
+    {
+      "path": "tests/fixtures/m12/renderer-gles.jsonl",
+      "sha256": "28662493df02198c6ce7556d27fc8f14430f05699d928865821881bcbafc30a9"
+    },
+    {
+      "path": "tests/fixtures/m12/renderer-software.jsonl",
+      "sha256": "16001e15e505bd85c1dc72309b1f730004f00c67a2a6a2dafea80921aa7fce12"
+    },
+    {
+      "path": "tests/fixtures/m12/result-contract.json",
+      "sha256": "684f9fd7b8ddb0813e75070df52132c69732101f5c05d68faa869d4fc9de2e6f"
+    },
+    {
+      "path": "tests/fixtures/m12/sdl-probe.json",
+      "sha256": "600b8b1be8cf4e5a50fc505cd541eb703a164cc611bf0a7ca1d27a0f6bb094ce"
+    },
+    {
+      "path": "tests/fixtures/m12/testdraw2.trace.json",
+      "sha256": "e3a318c8dbc4ae41c604f6968ba6161755a5a9237c843d4509a6fa1d2b5b4f9f"
+    },
+    {
+      "path": "tests/fixtures/m12/testsprite2-gles.ppm",
+      "sha256": "82e66ea15150a3bf12a7a0a54a6d27760d9e0b13f3164a4ffe9952b5b0389f56"
+    },
+    {
+      "path": "tests/fixtures/m12/testsprite2-software.ppm",
+      "sha256": "82e66ea15150a3bf12a7a0a54a6d27760d9e0b13f3164a4ffe9952b5b0389f56"
+    },
+    {
+      "path": "tests/fixtures/m12/testsprite2.trace.json",
+      "sha256": "b0dc3576a5867418a167bc5e352977a43ab06bf1465a44a03aa2ccb9f2ff85ac"
+    },
+    {
+      "path": "tests/fixtures/m13/README.md",
+      "sha256": "f233ca43e5f1990862863b8c75d62c262559e81bdb7fdb19fc5ad39ef7242284"
+    },
+    {
+      "path": "tests/fixtures/m13/SHA256SUMS",
+      "sha256": "30111a12ec594f40a8c82cb08bdcb7e42665b8f936724ba447800a383d2efbdf"
+    },
+    {
+      "path": "tests/fixtures/m13/aware-left.ppm",
+      "sha256": "a91dcc808cd7abe1b80703cb0ac58363b73b50e561a45e6ae3afcca7cb6d6f4c"
+    },
+    {
+      "path": "tests/fixtures/m13/aware-right.ppm",
+      "sha256": "d64b065ba11437c681e7ad54b12fa88a73184992ea6728734b539c6153d59132"
+    },
+    {
+      "path": "tests/fixtures/m13/flipped.ppm",
+      "sha256": "ef94de39e6cac25088d0b1a7ac1e77393d1927a9bf31d64931e550e71aaf9b3e"
+    },
+    {
+      "path": "tests/fixtures/m13/frame-sets.jsonl",
+      "sha256": "b8870ac2605d8dc401f4c25365559ea424cd5149f4597c7a95d61ab63cfb7644"
+    },
+    {
+      "path": "tests/fixtures/m13/gw-scale-big.json",
+      "sha256": "5d42ad53374c5a72fdede360f07b036239a74ba64e2ee5981c01d0e705e443b6"
+    },
+    {
+      "path": "tests/fixtures/m13/gw-scale-little.json",
+      "sha256": "703eb4e463897fd3260a068e408971d8491d7be8860cbd1c33728c08dba068c8"
+    },
+    {
+      "path": "tests/fixtures/m13/gwinfo-outputs.json",
+      "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+    },
+    {
+      "path": "tests/fixtures/m13/gwinfo-windows.json",
+      "sha256": "ac9e852542961e351028f60e4a512421836997ff63e5a9d6784300d5d4d830e1"
+    },
+    {
+      "path": "tests/fixtures/m13/gwout-result.json",
+      "sha256": "aff339af07575fbf3b06ace470e2e22d5d94c602179fc5cca0f975eaf92d13c3"
+    },
+    {
+      "path": "tests/fixtures/m13/layout-after.json",
+      "sha256": "2ac7c609acc94ca61616164f081a0881d871bce8d73c8c2c3582c24ef5b4dd96"
+    },
+    {
+      "path": "tests/fixtures/m13/layout-before.json",
+      "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+    },
+    {
+      "path": "tests/fixtures/m13/legacy-left.ppm",
+      "sha256": "77eaeae62086294d76fc963b5fa676afde08d818918345458525f1b6b3a262ab"
+    },
+    {
+      "path": "tests/fixtures/m13/legacy-right.ppm",
+      "sha256": "21661781c86c28e62dfbe8a0387b7a00d0f81b375876c6fcb3e3e2c075a02761"
+    },
+    {
+      "path": "tests/fixtures/m13/legacy-spanning-left.ppm",
+      "sha256": "e31ba59aeeb036c0a00b483a052fb9dda3afae9a5961ac531791cac783dd0251"
+    },
+    {
+      "path": "tests/fixtures/m13/legacy-spanning-right.ppm",
+      "sha256": "1c478e6586b9ca6740b029ae43ecaabf68f072d44f76bd460482bd0f2a26aa26"
+    },
+    {
+      "path": "tests/fixtures/m13/output-inventory.json",
+      "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+    },
+    {
+      "path": "tests/fixtures/m13/randr-big.json",
+      "sha256": "75fc596efdaf1e075d431f262de43f26118d1f22ecec9598d9f96f454c8c2380"
+    },
+    {
+      "path": "tests/fixtures/m13/randr-little.json",
+      "sha256": "6a1325dd83ae394130ec0f649c2e1ae33e2f0176db4ca63b5ce30a64f8611e5a"
+    },
+    {
+      "path": "tests/fixtures/m13/renderer-fractional-diff.json",
+      "sha256": "c1cf3ab23066bf57af74446c8efe4ba52ead907e40dbf2b34c99fd511c9d5c26"
+    },
+    {
+      "path": "tests/fixtures/m13/rotate90.ppm",
+      "sha256": "9d4486e8b53fa37ad8a00d703f63523390f922142c147f942b33c536b4f478ad"
+    },
+    {
+      "path": "tests/fixtures/m13/scale-client-result.json",
+      "sha256": "6b54d7d728da3b1f0f688cf66887182e1e2189f360e6836e7097b29096cb1b7a"
+    },
+    {
+      "path": "tests/fixtures/m13/scale-client-result.schema.json",
+      "sha256": "5f1947c37ae783d090e588050825a696c0652b56fd189bae340b44b5fe79c062"
+    },
+    {
+      "path": "tests/fixtures/m14/README.md",
+      "sha256": "31482dc9c2a4719e6dd99e8951fa5d34d2c84759c8f088a95c84380051e5d46b"
+    },
+    {
+      "path": "tests/fixtures/m14/SHA256SUMS",
+      "sha256": "8f6f8db107062439169e3a2239fae76909eea996eacc79b15c2ad750d7c2bf3a"
+    },
+    {
+      "path": "tests/fixtures/m14/fake-drm-vrr-report.jsonl",
+      "sha256": "307bfe2f8973c8c7f0f8db37c8ed048b21530c947cf9ab551fa1f96ade1be2bd"
+    },
+    {
+      "path": "tests/fixtures/m14/gw-vrr-big.json",
+      "sha256": "d57e8e51f7742468fe1e80cd20096c2e68b42186fb6014d75aebdb3cbf905eec"
+    },
+    {
+      "path": "tests/fixtures/m14/gw-vrr-little.json",
+      "sha256": "46190a477bfdcad6a97d046ae234232c778b061a2f81852a8d3fbfbddba9ba7b"
+    },
+    {
+      "path": "tests/fixtures/m14/gwinfo-vrr.json",
+      "sha256": "1c84d0a734cdd78d204464ba44acc991102d9170d0d87825a81c6fe70541582e"
+    },
+    {
+      "path": "tests/fixtures/m14/gwout-vrr-result.json",
+      "sha256": "7aeb1a568bc535f7564571ad16cb5c1e2c595640b2071900d5abe810bc9cd62e"
+    },
+    {
+      "path": "tests/fixtures/m14/headless-vrr-report.jsonl",
+      "sha256": "4836d883b8efe6b5f0b5e951b8360a9f9b5ce6941f7430fa712ed1b86f431a3e"
+    },
+    {
+      "path": "tests/fixtures/m14/m14-vrr-client.json",
+      "sha256": "e37009970ae69c4f38d17a7cb9551c5e2014cb6ebde01f7c88a743a33d517fe4"
+    },
+    {
+      "path": "tests/fixtures/m14/qxl-unsupported.json",
+      "sha256": "fd2ffb0e344b1db744ada2b44512fa42c6dbea4b4a94be9067e4326dc7414dfd"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-capability-headless.json",
+      "sha256": "a841d2eed361ddfc6050b9d96eb1ccd7466c6520cf8e3dae7ae28baaf0eb415f"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-reasons.json",
+      "sha256": "f90c3060dd5b485488c7bd07bd300581c75bbc82ef23a83be338c1c9c4746722"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-state-always.json",
+      "sha256": "e67a495c6c4daa23a375fbf2df6722be3dcdfb9f00e5a5009a85d9731886831a"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-state-app-requested.json",
+      "sha256": "76c90f861e809acdcdc54f5455942377e7bec3018ea5db411f3450f9e0653bba"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-state-focused.json",
+      "sha256": "fdc9b632b5d273eb5ce827476374185fe27d8970ea245f06352b4ac5849a8abb"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-state-fullscreen.json",
+      "sha256": "6244952e5d9ef13d9e6dc273335cf52773dcbcfb32fd9c8e9e0f8b7951338ba7"
+    },
+    {
+      "path": "tests/fixtures/m14/vrr-state-off.json",
+      "sha256": "7098c55b294e28b22b41e0d21a000a769829f9feef9a86059a1514f8c3d8e01d"
+    },
+    {
+      "path": "tests/fixtures/m4/README.md",
+      "sha256": "85d545ca3555ebff9bb74d4b620f7fcca4a544e1d69992478bb562dad8eaeb0b"
+    },
+    {
+      "path": "tests/fixtures/m4/SHA256SUMS",
+      "sha256": "580438abccf379083ab5bf2a5ae80392940b80cd3cf81ba0a4bcc3a7da2da28b"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000001-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000002-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000003-output-0000000000000001.ppm",
+      "sha256": "5b4bd81fe793fce7131275c26276abe0d45a056cd9e4f36ffac249aecbb62fd0"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000004-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000005-output-0000000000000001.ppm",
+      "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000006-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000007-output-0000000000000001.ppm",
+      "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000008-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000009-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000010-output-0000000000000001.ppm",
+      "sha256": "286f79e4fa7cbd49d74bffa5ce01fe3ad0bae775a28ed5e2a972faadf526b686"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000011-output-0000000000000001.ppm",
+      "sha256": "83bb584e712de6fc8432e10885eaa85866aad2cf6825fb4f03e3b9724bfdfcb9"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000012-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000013-output-0000000000000001.ppm",
+      "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000014-output-0000000000000001.ppm",
+      "sha256": "4e328ba0910ee5c8d5c3863ef7ffc990ed58a8b8d7065d7a2424707d183740f2"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000015-output-0000000000000001.ppm",
+      "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000016-output-0000000000000001.ppm",
+      "sha256": "4e328ba0910ee5c8d5c3863ef7ffc990ed58a8b8d7065d7a2424707d183740f2"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000017-output-0000000000000001.ppm",
+      "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000018-output-0000000000000001.ppm",
+      "sha256": "ca93813dc00859b3162f3458c302ceae936f4a97492c9d2753be06d4fdfe29f7"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000019-output-0000000000000001.ppm",
+      "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000020-output-0000000000000001.ppm",
+      "sha256": "498fc6af35b825a3125e21b0e91fdd6eb8cf0dfb21e0f5d68ddc4edfca2efef9"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000021-output-0000000000000001.ppm",
+      "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000022-output-0000000000000001.ppm",
+      "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+    },
+    {
+      "path": "tests/fixtures/m4/frame-000023-output-0000000000000001.ppm",
+      "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+    },
+    {
+      "path": "tests/fixtures/m4/frames.jsonl",
+      "sha256": "67b78ebfc47a1b068765d57a5907e5fefb17daa32b88081deb2628afeb1abb59"
+    },
+    {
+      "path": "tests/fixtures/m5/README.md",
+      "sha256": "d3f156cbcc41c2256f1d333f7aafb9479af45274e84223c8150005428c5aff5f"
+    },
+    {
+      "path": "tests/fixtures/m5/SHA256SUMS",
+      "sha256": "ee0f51ac696eb6f1b0c9a69501ddc7cefbd455a6d22dde1d2b9180a9bdce1d66"
+    },
+    {
+      "path": "tests/fixtures/m5/basic.json",
+      "sha256": "f800d8ba4c409d72b81beb44e22900aab8c5f427272b4d16ef006af3bf1822f4"
+    },
+    {
+      "path": "tests/fixtures/m5/focus.json",
+      "sha256": "e49366022643f774fdcccd93316609aeeeb1e6d22aa8e9fece21aa0c4c6c60e7"
+    },
+    {
+      "path": "tests/fixtures/m5/fullscreen.json",
+      "sha256": "f006253716cd714a6c0a2b0d3eb1b1b4826f324fbe4b4b77cba249967b3ba6b0"
+    },
+    {
+      "path": "tests/fixtures/m5/incremental-update.json",
+      "sha256": "660bee6171b0013ffd1f047bdcd1a5254e85af28c525a7fe4d73af4169f1f68f"
+    },
+    {
+      "path": "tests/fixtures/m5/invalid-context.json",
+      "sha256": "f2239359542fbfc0e51c99b8ddfb597659071b196ef99064ecb2adcb98c0b489"
+    },
+    {
+      "path": "tests/fixtures/m5/invalid-window.json",
+      "sha256": "5648d6b644eabe06a4d2a05779840958d35a2039e6c5c284f05400455c864756"
+    },
+    {
+      "path": "tests/fixtures/m5/maximize-minimize.json",
+      "sha256": "c18d44de974cd69cd4d14f3c95ed2405317b3813b884bc08999c2fcda2a567ef"
+    },
+    {
+      "path": "tests/fixtures/m5/override-redirect.json",
+      "sha256": "d9b6dd515058fc2a8a08eaa537179c21a590f46fc76139a32cee90897380fd1a"
+    },
+    {
+      "path": "tests/fixtures/m5/snapshot-abort.json",
+      "sha256": "fc4b1c84dc44529d841029c69f292a767316663e9ce93c95324e06e614bfe1f9"
+    },
+    {
+      "path": "tests/fixtures/m5/snapshot-order.json",
+      "sha256": "978933295d32b8af93175cb882ca305c17b56a426feee90cf57e052d3bb780f4"
+    },
+    {
+      "path": "tests/fixtures/m5/snapshot-reconnect.json",
+      "sha256": "30b1716c1b1eb00a5d1835add6e61fe6867219ee608eb33dae5a830e7d868294"
+    },
+    {
+      "path": "tests/fixtures/m5/stacking.json",
+      "sha256": "a0f1ffdc04b27963e4a137934b6bccbb0b1289dc25b958070f5272ae8eeba301"
+    },
+    {
+      "path": "tests/fixtures/m5/transient-cycle.json",
+      "sha256": "79abcdc9d253c90cea14cb97b43790d7f18a6d4b8a0ad0497db2e3573bbd359c"
+    },
+    {
+      "path": "tests/fixtures/m5/transient.json",
+      "sha256": "b413cfe8c742b241f3581339e124bdf75ab24fada9df071349bcd06f029f8b26"
+    },
+    {
+      "path": "tests/fixtures/m5/unknown-reference.json",
+      "sha256": "5dd94e603b81894d92889eee201ee489fe636e3daae9f5b303051d6a4bc7358b"
+    },
+    {
+      "path": "tests/fixtures/m6/README.md",
+      "sha256": "2960424a097c11bf5d83e61524f6607c6e3f229e5e757cd94170d5fe5f3f513d"
+    },
+    {
+      "path": "tests/fixtures/m6/SHA256SUMS",
+      "sha256": "3fcaa544b4ea6130242c86465359b96a1bc56e160cecf7166173877d988b84b7"
+    },
+    {
+      "path": "tests/fixtures/m6/restart-result.json",
+      "sha256": "fc8ada6da266f010bcfd512318ada732d078bb1942bc3e53629ce9fdbbb91390"
+    },
+    {
+      "path": "tests/fixtures/m6/scene-manifest.jsonl",
+      "sha256": "14ab8a4f87b724238d903bb73ebc4e80c653baa68b5ff783f57117c5cbd7bb76"
+    },
+    {
+      "path": "tests/fixtures/m6/structural-events.json",
+      "sha256": "52af7b3bb584c6d155c1d3065c38e331eaca4e2b4adb0b0ffc9b005050973187"
+    },
+    {
+      "path": "tests/fixtures/m6/xcb-result.schema.json",
+      "sha256": "a15604abb92c2acfc152df958279a4eb6edd138d14938a87a6874f673aa5b6a3"
+    },
+    {
+      "path": "tests/fixtures/m7/README.md",
+      "sha256": "0c65a46eedf7aca565fa1e29954707e8f81ec5f25cf04518acbfa9e082b3c31f"
+    },
+    {
+      "path": "tests/fixtures/m7/SHA256SUMS",
+      "sha256": "b1c05d21a5c389b7ca78db87520728be3e82afdb01b341f272466357781bbd5d"
+    },
+    {
+      "path": "tests/fixtures/m7/final.ppm",
+      "sha256": "3d4e105bc9aa2fa43b6e1b26174035fe6d02d9a1a4b6e6f8bc93586bde3afaf7"
+    },
+    {
+      "path": "tests/fixtures/m7/frame-hashes.json",
+      "sha256": "4655d5db92a58cd0efc6ed56a77758a1651a57623ba3c34ca10b47be264ea444"
+    },
+    {
+      "path": "tests/fixtures/m7/raw-events.json",
+      "sha256": "b6c35e3b1854d47c32e92bd963e125827c689f71828f54e1e0fdc9485ad7c7f9"
+    },
+    {
+      "path": "tests/fixtures/m7/restart-result.json",
+      "sha256": "ed46f3e26854a7dde3af49cf95efe2cf3c4cf9ba64cfda7dc2076ad85eb0f8c4"
+    },
+    {
+      "path": "tests/fixtures/m7/xcb-result.json",
+      "sha256": "e3bc2451eaee51db52aaf25797f541ac0e4449ed5961f090567cc7fc90bbd3b9"
+    },
+    {
+      "path": "tests/fixtures/m8/README.md",
+      "sha256": "eeef065b2a82135da1469294e2ad71e251c1d41a29ef2535873a5ccfaf767337"
+    },
+    {
+      "path": "tests/fixtures/m8/SHA256SUMS",
+      "sha256": "6da42bd4d2f1ef81837cca2e5325dd0610fb770fffe0b8cae2f916f9bce90b88"
+    },
+    {
+      "path": "tests/fixtures/m8/final.ppm",
+      "sha256": "74fc239f0ce1c6c0d94aada06d7790deb3fe910df0ad1c727f4059c90f87d667"
+    },
+    {
+      "path": "tests/fixtures/m8/frame-hashes.json",
+      "sha256": "47ca78dffd948aeebd40f15e3ddc280489cc9cc044405b7d7d346197c582d376"
+    },
+    {
+      "path": "tests/fixtures/m8/input-acks.json",
+      "sha256": "c6608327ac5d320070220714bb6c1009c67d10ad5e60098f4cb32a2506d72cbc"
+    },
+    {
+      "path": "tests/fixtures/m8/raw-big-events.json",
+      "sha256": "b563b389dd282673f6f66d45630f9b493390fa1c93cfc3ac14fbbd50a95fa8bb"
+    },
+    {
+      "path": "tests/fixtures/m8/raw-little-events.json",
+      "sha256": "ff2539f760e99429b1ed73c548d4bab3d42bcbf1922cce0347de53dbba868853"
+    },
+    {
+      "path": "tests/fixtures/m8/restart-result.json",
+      "sha256": "ba33e6854d12a25cae5b976a5864d9f81e79ed22641a4236421cefd333e0d701"
+    },
+    {
+      "path": "tests/fixtures/m8/scene-tail.json",
+      "sha256": "29984b64bf544f3f4c20f30d26a04a53d9cfd2ed2509ff9f3177a9e2c96e5be0"
+    },
+    {
+      "path": "tests/fixtures/m8/xcb-events.json",
+      "sha256": "01c4f3ae123b9c5c4eb47412b82da9eac371e31c4b04a342c34cfd4331a1f5da"
+    },
+    {
+      "path": "tests/fixtures/m8/xcb-result.json",
+      "sha256": "c1c4ab037027bfc75476d3aa425b35ee453283c79c5bb3a9679e8c0889c80a94"
+    },
+    {
+      "path": "tests/fixtures/m9/README.md",
+      "sha256": "4e31062cf9fe63876f9c7bd244cf70429f0a0e0a0820332272e0c97e57ccbb26"
+    },
+    {
+      "path": "tests/fixtures/m9/SHA256SUMS",
+      "sha256": "04d0d5e4705eff56a12cd5f74ee50f3f50694482df7a88ff5001001027af7bdd"
+    },
+    {
+      "path": "tests/fixtures/m9/combined.ppm",
+      "sha256": "c4427c98b1d3ea88d45427fbe014006627db09b30d7dae0f4242d888f93e191b"
+    },
+    {
+      "path": "tests/fixtures/m9/combined.trace.json",
+      "sha256": "2115fca75c4f2ad0462299cc21e6de67e80e4fc5e5eb226b851c5dd770228b28"
+    },
+    {
+      "path": "tests/fixtures/m9/frame-hashes.json",
+      "sha256": "8d5db58ed3cf9a8e5364eaf6702f00c9ff71a8918a9f168c77710804d4549941"
+    },
+    {
+      "path": "tests/fixtures/m9/xclock-analog.ppm",
+      "sha256": "3af0b5ad0521cab5c3ab51b165d3bdeaa05e15de62e93df0cab97964992abcea"
+    },
+    {
+      "path": "tests/fixtures/m9/xclock-analog.trace.json",
+      "sha256": "6afa76991cd598991891cbbda03750c4bac08e7298a8ee79fb92b2cc31bd49c7"
+    },
+    {
+      "path": "tests/fixtures/m9/xclock-digital.ppm",
+      "sha256": "8b1d93406480d0ccae59ce16abdce928b82ae1c4ed945eef865cc0cb47d5165b"
+    },
+    {
+      "path": "tests/fixtures/m9/xclock-digital.trace.json",
+      "sha256": "068d3035144be409afda695f389cdf18d54bdffd14a7af325900a7a7b7fc6720"
+    },
+    {
+      "path": "tests/fixtures/m9/xeyes-final.ppm",
+      "sha256": "efd083f7935b150a48ff326726f092d0766c0accda9622be4930d695ce321e38"
+    },
+    {
+      "path": "tests/fixtures/m9/xeyes.trace.json",
+      "sha256": "5ba257da7c78301f220f8ff54800bff6c56080d0524b5565f95bdeaec8417912"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/README.md",
+      "sha256": "3d16a9133ea16f79cd883a474618a56ebb04cf722739c6eb97856c8f802445b6"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/SHA256SUMS",
+      "sha256": "5b1b9cd1302ec11e0648f03db7b26da4c8415afb42566aec019ae8ff8acdcb5a"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/error-be.hex",
+      "sha256": "7feba0c6be176adf98dd17924296101e730172b9ae02895bc7be5129fcf9973d"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/error-le.hex",
+      "sha256": "bdb4731bde9e16c507b2965b6600b09f554983116c8564cee09fee7bca56b5cf"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/reply-be.hex",
+      "sha256": "a2c3e81cdf73aa2414b9aa4aa29201820fa9292140f4b9b8c55d9d0ddb912bf9"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/reply-le.hex",
+      "sha256": "6d47910e9b7f76ccac9677ec6b318d75ce1c19e0eb65a63a9c8f5c02f2959ec4"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/request-big-be.hex",
+      "sha256": "4c6e0dc54dc2eb18e16d8456f0b33f903e26d56a4db75236af9a826f78a8b7fc"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/request-big-le.hex",
+      "sha256": "65acd076482240ca8f07e56f77edbec118c6b6c8da4dce01642e01d9c1d6911e"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/request-ordinary-be.hex",
+      "sha256": "67df28b846136298d5fda893b261b044927dd606e3d442be6dab1fc44d75f5e1"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/request-ordinary-le.hex",
+      "sha256": "c084a101f1ebd99ee31e0afd4606fc60d8a8f9476bf0511f33ce8790c0f60617"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-failure-be.hex",
+      "sha256": "1cf928149571a7058471cdd8734767b60816bb8395b73c451e2c1ec5523a1fb2"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-failure-le.hex",
+      "sha256": "4728f233b39dfe1d72f5e7d1750cd840db369ce92fb069627e5d65445b53b764"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-request-be.hex",
+      "sha256": "763c2351a089826e0be1e97f6e6d57641a33d12b5f53168ac3f47f367f0d0fde"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-request-le.hex",
+      "sha256": "d92b147ba4aa9515a5037f8b202f4f3085b3e40e4fed492b6c101581d6a66335"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-success-be.hex",
+      "sha256": "f7650ae827c11c00f5ad608cecd47a987f64649c1472e69b5a219698a961968a"
+    },
+    {
+      "path": "tests/fixtures/x11-transition/setup-success-le.hex",
+      "sha256": "c552375f44b0827d2aeb72b7d7e3fa69d331015b9a292d1040de0d30bc0d712b"
+    }
+  ],
+  "fixture_tree_sha256": "5822005069681dda5ce0fbe3db47d5782c27506262ea5f0fa9714fb56c59c4a1",
+  "frozen_contract_profiles": {
+    "gwipc-contracts": {
+      "documents": [],
+      "file_count": 62,
+      "files": [
+        {
+          "path": "tests/fixtures/gwipc/README.md",
+          "sha256": "69d32f104aa6d98f62b2a7a8254f6a3462366e2af97538366681069f0c6b60b6"
+        },
+        {
+          "path": "tests/fixtures/gwipc/SHA256SUMS",
+          "sha256": "655cec8b4a141f4ff93c4e83160388f54c329af4a4c5b9fa65a02c87cc5f6dfb"
+        },
+        {
+          "path": "tests/fixtures/gwipc/buffer-attach.hex",
+          "sha256": "11e7476012e318d4adc74645db107f7165ecaed6323135bb59d92d0c5b9ef425"
+        },
+        {
+          "path": "tests/fixtures/gwipc/buffer-detach.hex",
+          "sha256": "53fbc7042aa45caa916d3c214816d3a5fa2de7983d9b3822b2f083585c133e77"
+        },
+        {
+          "path": "tests/fixtures/gwipc/buffer-release.hex",
+          "sha256": "f4a2d08a5a9d67f0f052ba1028d35b6b34beaeeb657ddd0d64bcdb534eba41f0"
+        },
+        {
+          "path": "tests/fixtures/gwipc/frame-acknowledged.hex",
+          "sha256": "a09192cacac3a92515dfea4c71989a8607165ad286d3892d79c30c8e6bd8b2b8"
+        },
+        {
+          "path": "tests/fixtures/gwipc/frame-commit.hex",
+          "sha256": "845cc4764dfe966feed1dfcdaca39e0027546415384783344b07a2dbfa6f6689"
+        },
+        {
+          "path": "tests/fixtures/gwipc/hello.hex",
+          "sha256": "e620979c3182f749f481fdc072016f5193855dd5aee5dd3440f0f572be4de6f3"
+        },
+        {
+          "path": "tests/fixtures/gwipc/malformed-envelope-magic.hex",
+          "sha256": "6fd0cdfad1ff72158532ea687b85b2707a33618b39563e63878b2828bc1d23cd"
+        },
+        {
+          "path": "tests/fixtures/gwipc/malformed-hello-truncated.hex",
+          "sha256": "199cc06ffa359c47132a11555bbf9fa856e703c4c0721cca68deb461c9bfceb4"
+        },
+        {
+          "path": "tests/fixtures/gwipc/malformed-vrr-capability-boolean.hex",
+          "sha256": "9ad975b181c53c341b53cea5933fc0217b3fc414bfab3fb173e8ca42b0603f31"
+        },
+        {
+          "path": "tests/fixtures/gwipc/manifest.tsv",
+          "sha256": "697284b8b58820787fcb8f01b84a5159ae0e1dc72c00dfd29afe025d1ea1eb2d"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-configuration-acknowledged.hex",
+          "sha256": "6c745aa5570b76ec8c4106589bbb49f4f088dabfd0150c27532d8bf20a17890f"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-configuration-commit.hex",
+          "sha256": "5f149cdf390e9640ea1f6b89c8ae8ac5518845b84bb106990f0b935b58120c2c"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-descriptor-upsert.hex",
+          "sha256": "e663b81de24ba80bd29f00cfdea2cc0e1af510413bde011a3680c50003e7b134"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-mode-upsert.hex",
+          "sha256": "de796854f6ef7b807ef11147086f57ea3dce83446e41fcf15d40048f900b4c44"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-remove.hex",
+          "sha256": "ac501550d760385ddb1f21d7f6d64f6732a71dec3f27dc6053058913211fd85b"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-state-query.hex",
+          "sha256": "b736187cfe7c1ad759ee89c48033ebc199a0016bf2a6f2b371a9a9c8fa79ed97"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-upsert.hex",
+          "sha256": "d37cb137ad2a7468c2c826e1f0827d5ce5d28c37ab7a66b88dcd5db5804e293b"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-vrr-capability-upsert.hex",
+          "sha256": "39e6198f99c1428dbf1a5e0e3b4cfd1dc92126f4f23f17dccca670302545f525"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-vrr-policy-upsert.hex",
+          "sha256": "20077dce9c91b2fd3227ef3fc00586745a758cd363473b7f60f61ad555ae0d24"
+        },
+        {
+          "path": "tests/fixtures/gwipc/output-vrr-state-upsert.hex",
+          "sha256": "b088309468d5a29c494ec8fdaac17f8043c181b8f4321672963b7f6c74d06146"
+        },
+        {
+          "path": "tests/fixtures/gwipc/ping.hex",
+          "sha256": "5ddb62ab07bc7493f009228ebffa757a749797c9dade12946f4c75cc920c5b8a"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-acknowledged.hex",
+          "sha256": "21e93466c374dafc4a6d510d0e9a07aff21fa43584cabd9e81cc3c49e4dd0b55"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-bindings-upsert.hex",
+          "sha256": "07ffa2d82d22095d3b5d72997f24a85686908b2f181643171a223ee213113e67"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-commit.hex",
+          "sha256": "081bb0f03e7108dda442df642dbd6e87a253bb98638c3247e3ab0af1cce9ccc6"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-context-upsert.hex",
+          "sha256": "55b826cab8ada76019749493a56bc58a78cff31f68ccf7777d9c28aa02a06bb4"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-lifecycle-window-upsert.hex",
+          "sha256": "668d37957a96bae4b89fae710d284d84560b060e6297d225ff6c612aabe55318"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-output-upsert.hex",
+          "sha256": "0b843bd08d9ed83a2a1754c18e48e5e87b543c344f96581832415df484d67d83"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-output-vrr-state.hex",
+          "sha256": "972846b69e418b01e1a242d129014f6490d8a7a309a6211adcb790c2d155e313"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-output-vrr-upsert.hex",
+          "sha256": "c1da5e5af06ca974aac43574e0180a20c416aa030b2824900e6e4b0b6c329c1f"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-output-hint.hex",
+          "sha256": "c0da0cb1e4a260f59ac260f4ff275dde159128a89d41c50955a4705c7444e713"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-remove.hex",
+          "sha256": "f22a6a1614109b4a0bec10e3dc540583cc6a96d1bea50877e3a257a0f7d4e0c5"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-state.hex",
+          "sha256": "6f63f73ed08789e8d6776a25761b4950a32ae0699e10d891c4df1917f8e6c098"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-upsert.hex",
+          "sha256": "da9078b126e8147ddaeedde83124c22df57f42a5f586f40cdf21a3713ce55404"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-vrr-state.hex",
+          "sha256": "865c4b92dee8c76f8811d48cc87eed669beee3203b8166dbaab51f36a4f6f763"
+        },
+        {
+          "path": "tests/fixtures/gwipc/policy-window-vrr-upsert.hex",
+          "sha256": "40f47a182b2823ef7931515d0a3eefa04b2f17398cc548f6592936c806596685"
+        },
+        {
+          "path": "tests/fixtures/gwipc/pong-record.hex",
+          "sha256": "f1bc300eb211969ef0282611f1bfa38f18efda8a1f32df8a54adb3a049e956f4"
+        },
+        {
+          "path": "tests/fixtures/gwipc/pong.hex",
+          "sha256": "07d43457bb738960e211c200377dd361c6f6905ce437884257097b456e90ca84"
+        },
+        {
+          "path": "tests/fixtures/gwipc/presentation-timing.hex",
+          "sha256": "a7cbdcba51748c3b22653e77069f5e6dfc1bc53d1a9e111e9f4e06ca3ff62b0a"
+        },
+        {
+          "path": "tests/fixtures/gwipc/protocol-error.hex",
+          "sha256": "f9bb4cb768a90a83fdfe44ac33780ba6404e9c3ff1479b731786351c4ba0de15"
+        },
+        {
+          "path": "tests/fixtures/gwipc/reject.hex",
+          "sha256": "e4ac60ac3bb5d0c481d5ddb4ebfc8253185964bf99aa61aadb9b01ba339496bf"
+        },
+        {
+          "path": "tests/fixtures/gwipc/rust-malformed-policy-vrr-reserved.hex",
+          "sha256": "9f1fad6116a07f6f4da390f34beddb868d471bad88944e89be4b28d22d8c80eb"
+        },
+        {
+          "path": "tests/fixtures/gwipc/rust-malformed-surface-output-count.hex",
+          "sha256": "69170366780b8fef13bb550f9d6498630484468b943e0eac384a2b4dd8a1feea"
+        },
+        {
+          "path": "tests/fixtures/gwipc/rust-malformed-synthetic-button-boolean.hex",
+          "sha256": "24a781d98016cf6aab8c37ea53be259c56dd528ac3e1ed399ff59243df95d68d"
+        },
+        {
+          "path": "tests/fixtures/gwipc/session-state-acknowledged.hex",
+          "sha256": "e53f4aa45cb92bf93e269151557157a8583c5a19ec0f970bad4455fc6eb4077f"
+        },
+        {
+          "path": "tests/fixtures/gwipc/session-state-change.hex",
+          "sha256": "d993cd42a9cb9b9c002bc5d7751dc43e195d6ae7dccc620a2ea965a5de8a22cf"
+        },
+        {
+          "path": "tests/fixtures/gwipc/snapshot-abort.hex",
+          "sha256": "445ecd7d872e69eb2797a41e8769487652b298cf9cbafe88d6d1f531241a5cfb"
+        },
+        {
+          "path": "tests/fixtures/gwipc/snapshot-begin.hex",
+          "sha256": "28bd40f466484aff3c2f40d9b36cc6e89008a8ecd4ff8fed56157731dc170f9a"
+        },
+        {
+          "path": "tests/fixtures/gwipc/snapshot-end.hex",
+          "sha256": "c198053b49da5b0ba70dad1febf8b03c3b14d2f9abebc8b9feaa4e250ad0a942"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-damage.hex",
+          "sha256": "771e4ca007c95dd47bfea918a9153f52988f590ccba4ee574f5821e7f9ecee34"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-output-state.hex",
+          "sha256": "6a1747748549ebc9edc30ad178b5e678f0dd6a7275aa787f92d476cb4ca924b0"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-policy-upsert.hex",
+          "sha256": "03d012b009923f408163f88792801956e9a7941042b4bdae2a270755b19e74f3"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-remove.hex",
+          "sha256": "f22a6a1614109b4a0bec10e3dc540583cc6a96d1bea50877e3a257a0f7d4e0c5"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-upsert.hex",
+          "sha256": "c1f4715af717cd97b70228d928e581dcee1a22ad888a90824800e62f8151449a"
+        },
+        {
+          "path": "tests/fixtures/gwipc/surface-vrr-state.hex",
+          "sha256": "92eeb9bbccf96219364404a89fa9892f53ff61f0d7f4987a43418f968cd499aa"
+        },
+        {
+          "path": "tests/fixtures/gwipc/synthetic-barrier.hex",
+          "sha256": "c2e40fbf6126734299523db6ca8d7ea482b6efbbf523fc7be66d8ee05eae0041"
+        },
+        {
+          "path": "tests/fixtures/gwipc/synthetic-button.hex",
+          "sha256": "83e4d9dc52f33e36ced3376aaa2fecb9500c18a9362e0fd52bb357d9ed5ef95a"
+        },
+        {
+          "path": "tests/fixtures/gwipc/synthetic-input-acknowledged.hex",
+          "sha256": "721bc021840dfc634dd5e8eeb030d0ba22fd8417f2ffa4306a506c82f60cee6c"
+        },
+        {
+          "path": "tests/fixtures/gwipc/synthetic-key.hex",
+          "sha256": "eaf202f61cca8d4c0989057c31e6dd255904e1ff56264e3e4fef712bc4c76998"
+        },
+        {
+          "path": "tests/fixtures/gwipc/synthetic-motion.hex",
+          "sha256": "7ec1fa09308977d8b208286384f9ac61486d7ac69357f2bdce8cfd4401e737a5"
+        },
+        {
+          "path": "tests/fixtures/gwipc/welcome.hex",
+          "sha256": "e0de587ae91c10316c4148f1d3a1660d58c663d249ce6f88acf48b8dfe493c85"
+        }
+      ],
+      "tree_sha256": "4708a4d5373b79ab5feeaba3b922c4dc159c09c913d81a8e8229ae8f9fa0e7cc"
+    },
+    "input-events": {
+      "documents": [],
+      "file_count": 18,
+      "files": [
+        {
+          "path": "tests/fixtures/m7/README.md",
+          "sha256": "0c65a46eedf7aca565fa1e29954707e8f81ec5f25cf04518acbfa9e082b3c31f"
+        },
+        {
+          "path": "tests/fixtures/m7/SHA256SUMS",
+          "sha256": "b1c05d21a5c389b7ca78db87520728be3e82afdb01b341f272466357781bbd5d"
+        },
+        {
+          "path": "tests/fixtures/m7/final.ppm",
+          "sha256": "3d4e105bc9aa2fa43b6e1b26174035fe6d02d9a1a4b6e6f8bc93586bde3afaf7"
+        },
+        {
+          "path": "tests/fixtures/m7/frame-hashes.json",
+          "sha256": "4655d5db92a58cd0efc6ed56a77758a1651a57623ba3c34ca10b47be264ea444"
+        },
+        {
+          "path": "tests/fixtures/m7/raw-events.json",
+          "sha256": "b6c35e3b1854d47c32e92bd963e125827c689f71828f54e1e0fdc9485ad7c7f9"
+        },
+        {
+          "path": "tests/fixtures/m7/restart-result.json",
+          "sha256": "ed46f3e26854a7dde3af49cf95efe2cf3c4cf9ba64cfda7dc2076ad85eb0f8c4"
+        },
+        {
+          "path": "tests/fixtures/m7/xcb-result.json",
+          "sha256": "e3bc2451eaee51db52aaf25797f541ac0e4449ed5961f090567cc7fc90bbd3b9"
+        },
+        {
+          "path": "tests/fixtures/m8/README.md",
+          "sha256": "eeef065b2a82135da1469294e2ad71e251c1d41a29ef2535873a5ccfaf767337"
+        },
+        {
+          "path": "tests/fixtures/m8/SHA256SUMS",
+          "sha256": "6da42bd4d2f1ef81837cca2e5325dd0610fb770fffe0b8cae2f916f9bce90b88"
+        },
+        {
+          "path": "tests/fixtures/m8/final.ppm",
+          "sha256": "74fc239f0ce1c6c0d94aada06d7790deb3fe910df0ad1c727f4059c90f87d667"
+        },
+        {
+          "path": "tests/fixtures/m8/frame-hashes.json",
+          "sha256": "47ca78dffd948aeebd40f15e3ddc280489cc9cc044405b7d7d346197c582d376"
+        },
+        {
+          "path": "tests/fixtures/m8/input-acks.json",
+          "sha256": "c6608327ac5d320070220714bb6c1009c67d10ad5e60098f4cb32a2506d72cbc"
+        },
+        {
+          "path": "tests/fixtures/m8/raw-big-events.json",
+          "sha256": "b563b389dd282673f6f66d45630f9b493390fa1c93cfc3ac14fbbd50a95fa8bb"
+        },
+        {
+          "path": "tests/fixtures/m8/raw-little-events.json",
+          "sha256": "ff2539f760e99429b1ed73c548d4bab3d42bcbf1922cce0347de53dbba868853"
+        },
+        {
+          "path": "tests/fixtures/m8/restart-result.json",
+          "sha256": "ba33e6854d12a25cae5b976a5864d9f81e79ed22641a4236421cefd333e0d701"
+        },
+        {
+          "path": "tests/fixtures/m8/scene-tail.json",
+          "sha256": "29984b64bf544f3f4c20f30d26a04a53d9cfd2ed2509ff9f3177a9e2c96e5be0"
+        },
+        {
+          "path": "tests/fixtures/m8/xcb-events.json",
+          "sha256": "01c4f3ae123b9c5c4eb47412b82da9eac371e31c4b04a342c34cfd4331a1f5da"
+        },
+        {
+          "path": "tests/fixtures/m8/xcb-result.json",
+          "sha256": "c1c4ab037027bfc75476d3aa425b35ee453283c79c5bb3a9679e8c0889c80a94"
+        }
+      ],
+      "tree_sha256": "f1a502ab55d75087a6ea720a7fd63204088d6918aec9bfa2451869c92d7485b3"
+    },
+    "m13-scale-output": {
+      "documents": [
+        {
+          "path": "docs/extensions/M13_GW_SCALE.md",
+          "sha256": "eed7644a3baade81e680ef82eb51519bb651cadb2807eb8edfe5cb7345db6244"
+        },
+        {
+          "path": "docs/extensions/M13_RANDR.md",
+          "sha256": "f14999045a34639c53ca668eda8d5fa03f98094bbcb4e6aeee0326b4f2e2cd1f"
+        },
+        {
+          "path": "docs/ipc/M13_OUTPUT_MANAGEMENT.md",
+          "sha256": "efd67f2f3033db2b747f8b32b1725a2e5ed62a998ac920d04804b704df1d364f"
+        }
+      ],
+      "file_count": 24,
+      "files": [
+        {
+          "path": "tests/fixtures/m13/README.md",
+          "sha256": "f233ca43e5f1990862863b8c75d62c262559e81bdb7fdb19fc5ad39ef7242284"
+        },
+        {
+          "path": "tests/fixtures/m13/SHA256SUMS",
+          "sha256": "30111a12ec594f40a8c82cb08bdcb7e42665b8f936724ba447800a383d2efbdf"
+        },
+        {
+          "path": "tests/fixtures/m13/aware-left.ppm",
+          "sha256": "a91dcc808cd7abe1b80703cb0ac58363b73b50e561a45e6ae3afcca7cb6d6f4c"
+        },
+        {
+          "path": "tests/fixtures/m13/aware-right.ppm",
+          "sha256": "d64b065ba11437c681e7ad54b12fa88a73184992ea6728734b539c6153d59132"
+        },
+        {
+          "path": "tests/fixtures/m13/flipped.ppm",
+          "sha256": "ef94de39e6cac25088d0b1a7ac1e77393d1927a9bf31d64931e550e71aaf9b3e"
+        },
+        {
+          "path": "tests/fixtures/m13/frame-sets.jsonl",
+          "sha256": "b8870ac2605d8dc401f4c25365559ea424cd5149f4597c7a95d61ab63cfb7644"
+        },
+        {
+          "path": "tests/fixtures/m13/gw-scale-big.json",
+          "sha256": "5d42ad53374c5a72fdede360f07b036239a74ba64e2ee5981c01d0e705e443b6"
+        },
+        {
+          "path": "tests/fixtures/m13/gw-scale-little.json",
+          "sha256": "703eb4e463897fd3260a068e408971d8491d7be8860cbd1c33728c08dba068c8"
+        },
+        {
+          "path": "tests/fixtures/m13/gwinfo-outputs.json",
+          "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+        },
+        {
+          "path": "tests/fixtures/m13/gwinfo-windows.json",
+          "sha256": "ac9e852542961e351028f60e4a512421836997ff63e5a9d6784300d5d4d830e1"
+        },
+        {
+          "path": "tests/fixtures/m13/gwout-result.json",
+          "sha256": "aff339af07575fbf3b06ace470e2e22d5d94c602179fc5cca0f975eaf92d13c3"
+        },
+        {
+          "path": "tests/fixtures/m13/layout-after.json",
+          "sha256": "2ac7c609acc94ca61616164f081a0881d871bce8d73c8c2c3582c24ef5b4dd96"
+        },
+        {
+          "path": "tests/fixtures/m13/layout-before.json",
+          "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+        },
+        {
+          "path": "tests/fixtures/m13/legacy-left.ppm",
+          "sha256": "77eaeae62086294d76fc963b5fa676afde08d818918345458525f1b6b3a262ab"
+        },
+        {
+          "path": "tests/fixtures/m13/legacy-right.ppm",
+          "sha256": "21661781c86c28e62dfbe8a0387b7a00d0f81b375876c6fcb3e3e2c075a02761"
+        },
+        {
+          "path": "tests/fixtures/m13/legacy-spanning-left.ppm",
+          "sha256": "e31ba59aeeb036c0a00b483a052fb9dda3afae9a5961ac531791cac783dd0251"
+        },
+        {
+          "path": "tests/fixtures/m13/legacy-spanning-right.ppm",
+          "sha256": "1c478e6586b9ca6740b029ae43ecaabf68f072d44f76bd460482bd0f2a26aa26"
+        },
+        {
+          "path": "tests/fixtures/m13/output-inventory.json",
+          "sha256": "e7f94101e3a14d79b71e9937202edaac7523cbcceac69a83c9631bae9329febb"
+        },
+        {
+          "path": "tests/fixtures/m13/randr-big.json",
+          "sha256": "75fc596efdaf1e075d431f262de43f26118d1f22ecec9598d9f96f454c8c2380"
+        },
+        {
+          "path": "tests/fixtures/m13/randr-little.json",
+          "sha256": "6a1325dd83ae394130ec0f649c2e1ae33e2f0176db4ca63b5ce30a64f8611e5a"
+        },
+        {
+          "path": "tests/fixtures/m13/renderer-fractional-diff.json",
+          "sha256": "c1cf3ab23066bf57af74446c8efe4ba52ead907e40dbf2b34c99fd511c9d5c26"
+        },
+        {
+          "path": "tests/fixtures/m13/rotate90.ppm",
+          "sha256": "9d4486e8b53fa37ad8a00d703f63523390f922142c147f942b33c536b4f478ad"
+        },
+        {
+          "path": "tests/fixtures/m13/scale-client-result.json",
+          "sha256": "6b54d7d728da3b1f0f688cf66887182e1e2189f360e6836e7097b29096cb1b7a"
+        },
+        {
+          "path": "tests/fixtures/m13/scale-client-result.schema.json",
+          "sha256": "5f1947c37ae783d090e588050825a696c0652b56fd189bae340b44b5fe79c062"
+        }
+      ],
+      "tree_sha256": "bb150b1b189dd17bbe0eadc229fce49bc9e79478c534e7cea5b3959be92d020c"
+    },
+    "m14-vrr": {
+      "documents": [
+        {
+          "path": "docs/extensions/M14_GW_VRR.md",
+          "sha256": "7a939c165f81c55fb26686403ef227197263bbadacb3e49d7c28a7ce1ec21b9c"
+        },
+        {
+          "path": "docs/ipc/M14_VRR_CONTRACT.md",
+          "sha256": "563edc5774ad3edd4e668b841ffd7285394eeb327c9fc392577c765dcab199f3"
+        },
+        {
+          "path": "docs/ipc/M14_VRR_CONTRACTS.md",
+          "sha256": "d1d886109a72d3cb494d4e4cccf9c23e46afaffa02f8af20400b02721fd2770d"
+        },
+        {
+          "path": "docs/wm/M14_VRR_POLICY.md",
+          "sha256": "bec1ee6bc1c8650d97e8076706f79ce6c1e63c84fc97b1cc3bb3bf126cf095c9"
+        },
+        {
+          "path": "docs/output/M14_VRR_CAPABILITIES.md",
+          "sha256": "2d3e768ae88e07c7ee6cc15b4f99671b853ecd036a8282ed96eccc2ed6a95b11"
+        }
+      ],
+      "file_count": 17,
+      "files": [
+        {
+          "path": "tests/fixtures/m14/README.md",
+          "sha256": "31482dc9c2a4719e6dd99e8951fa5d34d2c84759c8f088a95c84380051e5d46b"
+        },
+        {
+          "path": "tests/fixtures/m14/SHA256SUMS",
+          "sha256": "8f6f8db107062439169e3a2239fae76909eea996eacc79b15c2ad750d7c2bf3a"
+        },
+        {
+          "path": "tests/fixtures/m14/fake-drm-vrr-report.jsonl",
+          "sha256": "307bfe2f8973c8c7f0f8db37c8ed048b21530c947cf9ab551fa1f96ade1be2bd"
+        },
+        {
+          "path": "tests/fixtures/m14/gw-vrr-big.json",
+          "sha256": "d57e8e51f7742468fe1e80cd20096c2e68b42186fb6014d75aebdb3cbf905eec"
+        },
+        {
+          "path": "tests/fixtures/m14/gw-vrr-little.json",
+          "sha256": "46190a477bfdcad6a97d046ae234232c778b061a2f81852a8d3fbfbddba9ba7b"
+        },
+        {
+          "path": "tests/fixtures/m14/gwinfo-vrr.json",
+          "sha256": "1c84d0a734cdd78d204464ba44acc991102d9170d0d87825a81c6fe70541582e"
+        },
+        {
+          "path": "tests/fixtures/m14/gwout-vrr-result.json",
+          "sha256": "7aeb1a568bc535f7564571ad16cb5c1e2c595640b2071900d5abe810bc9cd62e"
+        },
+        {
+          "path": "tests/fixtures/m14/headless-vrr-report.jsonl",
+          "sha256": "4836d883b8efe6b5f0b5e951b8360a9f9b5ce6941f7430fa712ed1b86f431a3e"
+        },
+        {
+          "path": "tests/fixtures/m14/m14-vrr-client.json",
+          "sha256": "e37009970ae69c4f38d17a7cb9551c5e2014cb6ebde01f7c88a743a33d517fe4"
+        },
+        {
+          "path": "tests/fixtures/m14/qxl-unsupported.json",
+          "sha256": "fd2ffb0e344b1db744ada2b44512fa42c6dbea4b4a94be9067e4326dc7414dfd"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-capability-headless.json",
+          "sha256": "a841d2eed361ddfc6050b9d96eb1ccd7466c6520cf8e3dae7ae28baaf0eb415f"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-reasons.json",
+          "sha256": "f90c3060dd5b485488c7bd07bd300581c75bbc82ef23a83be338c1c9c4746722"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-state-always.json",
+          "sha256": "e67a495c6c4daa23a375fbf2df6722be3dcdfb9f00e5a5009a85d9731886831a"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-state-app-requested.json",
+          "sha256": "76c90f861e809acdcdc54f5455942377e7bec3018ea5db411f3450f9e0653bba"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-state-focused.json",
+          "sha256": "fdc9b632b5d273eb5ce827476374185fe27d8970ea245f06352b4ac5849a8abb"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-state-fullscreen.json",
+          "sha256": "6244952e5d9ef13d9e6dc273335cf52773dcbcfb32fd9c8e9e0f8b7951338ba7"
+        },
+        {
+          "path": "tests/fixtures/m14/vrr-state-off.json",
+          "sha256": "7098c55b294e28b22b41e0d21a000a769829f9feef9a86059a1514f8c3d8e01d"
+        }
+      ],
+      "tree_sha256": "4040601b66bfa17b7f6698c8727ad1e8cecfc1da3abd81872070d491c6676fb1"
+    },
+    "rendering-scenes": {
+      "documents": [],
+      "file_count": 53,
+      "files": [
+        {
+          "path": "tests/fixtures/m12/README.md",
+          "sha256": "2547c51c30d920915ac18a52c560e2a8b8f0b75741854913687c9efe612b0cc6"
+        },
+        {
+          "path": "tests/fixtures/m12/SHA256SUMS",
+          "sha256": "d1ff2006d1e687c41c775733a26a31f39bcc142a686f941430b7414aad00a354"
+        },
+        {
+          "path": "tests/fixtures/m12/drm-damage-report.jsonl",
+          "sha256": "21fe250691138f0d5dfc818ee60277006fc37695ca9b398d02ee88f4e4160af5"
+        },
+        {
+          "path": "tests/fixtures/m12/extensions.json",
+          "sha256": "8431548fe13c5d0da7055f286947686bc64a3c91a71a29253668f0c9235e9ef3"
+        },
+        {
+          "path": "tests/fixtures/m12/fullscreen-gles.ppm",
+          "sha256": "5f5cc7b76f965c6e8f8d3d1aa02881575742e902bd4994fd1bf61343c1ab1c8d"
+        },
+        {
+          "path": "tests/fixtures/m12/fullscreen-software.ppm",
+          "sha256": "5f5cc7b76f965c6e8f8d3d1aa02881575742e902bd4994fd1bf61343c1ab1c8d"
+        },
+        {
+          "path": "tests/fixtures/m12/registry-big.json",
+          "sha256": "4d71ca1299ed2b0dd37c3af2acdd2e2bb03496c6f021b2a1242c62f17fd29695"
+        },
+        {
+          "path": "tests/fixtures/m12/registry-little.json",
+          "sha256": "2df51a475b8e0801f33c4d42d841ad3dfa38dd941ac48944e6eb0fa418dc0a18"
+        },
+        {
+          "path": "tests/fixtures/m12/renderer-gles.jsonl",
+          "sha256": "28662493df02198c6ce7556d27fc8f14430f05699d928865821881bcbafc30a9"
+        },
+        {
+          "path": "tests/fixtures/m12/renderer-software.jsonl",
+          "sha256": "16001e15e505bd85c1dc72309b1f730004f00c67a2a6a2dafea80921aa7fce12"
+        },
+        {
+          "path": "tests/fixtures/m12/result-contract.json",
+          "sha256": "684f9fd7b8ddb0813e75070df52132c69732101f5c05d68faa869d4fc9de2e6f"
+        },
+        {
+          "path": "tests/fixtures/m12/sdl-probe.json",
+          "sha256": "600b8b1be8cf4e5a50fc505cd541eb703a164cc611bf0a7ca1d27a0f6bb094ce"
+        },
+        {
+          "path": "tests/fixtures/m12/testdraw2.trace.json",
+          "sha256": "e3a318c8dbc4ae41c604f6968ba6161755a5a9237c843d4509a6fa1d2b5b4f9f"
+        },
+        {
+          "path": "tests/fixtures/m12/testsprite2-gles.ppm",
+          "sha256": "82e66ea15150a3bf12a7a0a54a6d27760d9e0b13f3164a4ffe9952b5b0389f56"
+        },
+        {
+          "path": "tests/fixtures/m12/testsprite2-software.ppm",
+          "sha256": "82e66ea15150a3bf12a7a0a54a6d27760d9e0b13f3164a4ffe9952b5b0389f56"
+        },
+        {
+          "path": "tests/fixtures/m12/testsprite2.trace.json",
+          "sha256": "b0dc3576a5867418a167bc5e352977a43ab06bf1465a44a03aa2ccb9f2ff85ac"
+        },
+        {
+          "path": "tests/fixtures/m4/README.md",
+          "sha256": "85d545ca3555ebff9bb74d4b620f7fcca4a544e1d69992478bb562dad8eaeb0b"
+        },
+        {
+          "path": "tests/fixtures/m4/SHA256SUMS",
+          "sha256": "580438abccf379083ab5bf2a5ae80392940b80cd3cf81ba0a4bcc3a7da2da28b"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000001-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000002-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000003-output-0000000000000001.ppm",
+          "sha256": "5b4bd81fe793fce7131275c26276abe0d45a056cd9e4f36ffac249aecbb62fd0"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000004-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000005-output-0000000000000001.ppm",
+          "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000006-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000007-output-0000000000000001.ppm",
+          "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000008-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000009-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000010-output-0000000000000001.ppm",
+          "sha256": "286f79e4fa7cbd49d74bffa5ce01fe3ad0bae775a28ed5e2a972faadf526b686"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000011-output-0000000000000001.ppm",
+          "sha256": "83bb584e712de6fc8432e10885eaa85866aad2cf6825fb4f03e3b9724bfdfcb9"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000012-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000013-output-0000000000000001.ppm",
+          "sha256": "952d6bbfce0b0a68e74c30f68f04105612daf73f99b2de105fdd8041aa31d75a"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000014-output-0000000000000001.ppm",
+          "sha256": "4e328ba0910ee5c8d5c3863ef7ffc990ed58a8b8d7065d7a2424707d183740f2"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000015-output-0000000000000001.ppm",
+          "sha256": "15c3797a62b7ae00aa4aa7b5b51cb361b41d660fa6c63026e579933684fb31b6"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000016-output-0000000000000001.ppm",
+          "sha256": "4e328ba0910ee5c8d5c3863ef7ffc990ed58a8b8d7065d7a2424707d183740f2"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000017-output-0000000000000001.ppm",
+          "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000018-output-0000000000000001.ppm",
+          "sha256": "ca93813dc00859b3162f3458c302ceae936f4a97492c9d2753be06d4fdfe29f7"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000019-output-0000000000000001.ppm",
+          "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000020-output-0000000000000001.ppm",
+          "sha256": "498fc6af35b825a3125e21b0e91fdd6eb8cf0dfb21e0f5d68ddc4edfca2efef9"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000021-output-0000000000000001.ppm",
+          "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000022-output-0000000000000001.ppm",
+          "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+        },
+        {
+          "path": "tests/fixtures/m4/frame-000023-output-0000000000000001.ppm",
+          "sha256": "a684b622afc5b0405139d8e4fbf66391d73fcd017bbf00683d59a1b32a003658"
+        },
+        {
+          "path": "tests/fixtures/m4/frames.jsonl",
+          "sha256": "67b78ebfc47a1b068765d57a5907e5fefb17daa32b88081deb2628afeb1abb59"
+        },
+        {
+          "path": "tests/fixtures/m9/README.md",
+          "sha256": "4e31062cf9fe63876f9c7bd244cf70429f0a0e0a0820332272e0c97e57ccbb26"
+        },
+        {
+          "path": "tests/fixtures/m9/SHA256SUMS",
+          "sha256": "04d0d5e4705eff56a12cd5f74ee50f3f50694482df7a88ff5001001027af7bdd"
+        },
+        {
+          "path": "tests/fixtures/m9/combined.ppm",
+          "sha256": "c4427c98b1d3ea88d45427fbe014006627db09b30d7dae0f4242d888f93e191b"
+        },
+        {
+          "path": "tests/fixtures/m9/combined.trace.json",
+          "sha256": "2115fca75c4f2ad0462299cc21e6de67e80e4fc5e5eb226b851c5dd770228b28"
+        },
+        {
+          "path": "tests/fixtures/m9/frame-hashes.json",
+          "sha256": "8d5db58ed3cf9a8e5364eaf6702f00c9ff71a8918a9f168c77710804d4549941"
+        },
+        {
+          "path": "tests/fixtures/m9/xclock-analog.ppm",
+          "sha256": "3af0b5ad0521cab5c3ab51b165d3bdeaa05e15de62e93df0cab97964992abcea"
+        },
+        {
+          "path": "tests/fixtures/m9/xclock-analog.trace.json",
+          "sha256": "6afa76991cd598991891cbbda03750c4bac08e7298a8ee79fb92b2cc31bd49c7"
+        },
+        {
+          "path": "tests/fixtures/m9/xclock-digital.ppm",
+          "sha256": "8b1d93406480d0ccae59ce16abdce928b82ae1c4ed945eef865cc0cb47d5165b"
+        },
+        {
+          "path": "tests/fixtures/m9/xclock-digital.trace.json",
+          "sha256": "068d3035144be409afda695f389cdf18d54bdffd14a7af325900a7a7b7fc6720"
+        },
+        {
+          "path": "tests/fixtures/m9/xeyes-final.ppm",
+          "sha256": "efd083f7935b150a48ff326726f092d0766c0accda9622be4930d695ce321e38"
+        },
+        {
+          "path": "tests/fixtures/m9/xeyes.trace.json",
+          "sha256": "5ba257da7c78301f220f8ff54800bff6c56080d0524b5565f95bdeaec8417912"
+        }
+      ],
+      "tree_sha256": "88dc4a65810f2cd324cd83573678f407a9cd1c607de29b4bc49ace863ed2d571"
+    },
+    "structural-events": {
+      "documents": [],
+      "file_count": 6,
+      "files": [
+        {
+          "path": "tests/fixtures/m6/README.md",
+          "sha256": "2960424a097c11bf5d83e61524f6607c6e3f229e5e757cd94170d5fe5f3f513d"
+        },
+        {
+          "path": "tests/fixtures/m6/SHA256SUMS",
+          "sha256": "3fcaa544b4ea6130242c86465359b96a1bc56e160cecf7166173877d988b84b7"
+        },
+        {
+          "path": "tests/fixtures/m6/restart-result.json",
+          "sha256": "fc8ada6da266f010bcfd512318ada732d078bb1942bc3e53629ce9fdbbb91390"
+        },
+        {
+          "path": "tests/fixtures/m6/scene-manifest.jsonl",
+          "sha256": "14ab8a4f87b724238d903bb73ebc4e80c653baa68b5ff783f57117c5cbd7bb76"
+        },
+        {
+          "path": "tests/fixtures/m6/structural-events.json",
+          "sha256": "52af7b3bb584c6d155c1d3065c38e331eaca4e2b4adb0b0ffc9b005050973187"
+        },
+        {
+          "path": "tests/fixtures/m6/xcb-result.schema.json",
+          "sha256": "a15604abb92c2acfc152df958279a4eb6edd138d14938a87a6874f673aa5b6a3"
+        }
+      ],
+      "tree_sha256": "db27062c6b1e72efa14c2cb62d8a2271c73bd466e2edff14b4ac472a0a40d159"
+    },
+    "x11-wire": {
+      "documents": [],
+      "file_count": 16,
+      "files": [
+        {
+          "path": "tests/fixtures/x11-transition/README.md",
+          "sha256": "3d16a9133ea16f79cd883a474618a56ebb04cf722739c6eb97856c8f802445b6"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/SHA256SUMS",
+          "sha256": "5b1b9cd1302ec11e0648f03db7b26da4c8415afb42566aec019ae8ff8acdcb5a"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/error-be.hex",
+          "sha256": "7feba0c6be176adf98dd17924296101e730172b9ae02895bc7be5129fcf9973d"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/error-le.hex",
+          "sha256": "bdb4731bde9e16c507b2965b6600b09f554983116c8564cee09fee7bca56b5cf"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/reply-be.hex",
+          "sha256": "a2c3e81cdf73aa2414b9aa4aa29201820fa9292140f4b9b8c55d9d0ddb912bf9"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/reply-le.hex",
+          "sha256": "6d47910e9b7f76ccac9677ec6b318d75ce1c19e0eb65a63a9c8f5c02f2959ec4"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/request-big-be.hex",
+          "sha256": "4c6e0dc54dc2eb18e16d8456f0b33f903e26d56a4db75236af9a826f78a8b7fc"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/request-big-le.hex",
+          "sha256": "65acd076482240ca8f07e56f77edbec118c6b6c8da4dce01642e01d9c1d6911e"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/request-ordinary-be.hex",
+          "sha256": "67df28b846136298d5fda893b261b044927dd606e3d442be6dab1fc44d75f5e1"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/request-ordinary-le.hex",
+          "sha256": "c084a101f1ebd99ee31e0afd4606fc60d8a8f9476bf0511f33ce8790c0f60617"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-failure-be.hex",
+          "sha256": "1cf928149571a7058471cdd8734767b60816bb8395b73c451e2c1ec5523a1fb2"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-failure-le.hex",
+          "sha256": "4728f233b39dfe1d72f5e7d1750cd840db369ce92fb069627e5d65445b53b764"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-request-be.hex",
+          "sha256": "763c2351a089826e0be1e97f6e6d57641a33d12b5f53168ac3f47f367f0d0fde"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-request-le.hex",
+          "sha256": "d92b147ba4aa9515a5037f8b202f4f3085b3e40e4fed492b6c101581d6a66335"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-success-be.hex",
+          "sha256": "f7650ae827c11c00f5ad608cecd47a987f64649c1472e69b5a219698a961968a"
+        },
+        {
+          "path": "tests/fixtures/x11-transition/setup-success-le.hex",
+          "sha256": "c552375f44b0827d2aeb72b7d7e3fa69d331015b9a292d1040de0d30bc0d712b"
+        }
+      ],
+      "tree_sha256": "225207386a01aa90c096e79f5cd2aadb2c9f432495e775650a66293890203d8a"
+    }
+  },
+  "legacy_server_sources": [
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/alpha_storage.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/alpha_storage.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/atom_table.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/atom_table.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/bitmap_storage.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/bitmap_storage.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/client_connection.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/client_connection.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/client_registry.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/colormap.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/colormap_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/compatibility_trace.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/compatibility_trace.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/composite_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/composite_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_buffer_replay.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_buffer_replay.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_output_inventory.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_output_inventory.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_peer.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_peer.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/compositor_peer_submission.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/compositor_peer_vrr_response.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/content_presenter.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/content_presenter.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/cursor_presenter.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/cursor_presenter.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/cursor_resource.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/cursor_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/cursor_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/damage_resource.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/damage_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/drawable_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/event_router.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/event_router.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/ewmh.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/ewmh.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/ewmh_client_message.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/ewmh_client_message.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_dispatcher.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_dispatcher.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_event_helpers.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_event_helpers.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_registry.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_registry.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_wire.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extension_wire.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/composite.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/composite.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/damage.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/damage.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/gw_scale.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/gw_scale.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/gw_vrr.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/gw_vrr.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/mit_shm.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/mit_shm.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/randr.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/randr.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/randr_crtc.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/randr_internal.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/randr_screen.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render_internal.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render_picture.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render_query.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/render_raster.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/xfixes.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/extensions/xfixes.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/font.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/font.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/font_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/grab_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/grab_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/graphics_context.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/gw_scale_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/gw_scale_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/input_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/integrated_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/integrated_runtime_work.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/interactive_wm.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/keyboard_mapping.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_coordinator.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_coordinator.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_projection.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_projection.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_snapshot.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_snapshot.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/lifecycle_types.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/m9_raster_ops.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/m9_raster_ops.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/main.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/options.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/options.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_configuration_coordinator.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_configuration_coordinator.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/output_configuration_events.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/output_configuration_events.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_configuration_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_control_peer.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_control_peer.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_control_windows.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_control_windows.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_scene_projection.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/output_scene_projection.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/peer_transport.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/peer_transport.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/picture.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/picture.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/picture_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/pixel_storage.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/pixel_storage.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/pixmap.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/policy_peer.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/policy_peer.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/property.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/property.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/property_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/protocol_event_router.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/protocol_event_router.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/published_buffer.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/published_buffer.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/randr_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/randr_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/raster_ops.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/raster_ops.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/real_input_controller.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/real_input_controller.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/real_input_runtime.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/render_ops.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/render_ops.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_dispatcher.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_dispatcher.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/atom.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/color.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/colormap.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/common.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/common.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/request_handlers/cursor.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/request_handlers/drawable_access.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/request_handlers/drawable_access.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/request_handlers/drawable_resource.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/drawing.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/font.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/request_handlers/grab.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/keyboard_control.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/request_handlers/lifecycle.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/property.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/query.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/request_handlers/selection.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/text.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/window.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/request_handlers/window_attributes.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/resource_cleanup.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/resource_id.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/resource_invariants.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/resource_table.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/resource_table.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/runtime_bridge.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/runtime_bridge.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/screen_geometry.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/screen_geometry.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/selection_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/selection_store.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/server.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/server.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/server_reactor.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/server_runtime.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/server_shutdown.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/server_signals.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/server_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/server_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/shm_segment.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/shm_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/subtree_compositor.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP4/WP5B-WP5C",
+      "path": "src/glasswyrmd/subtree_compositor.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/synthetic_input_peer.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/synthetic_input_peer.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_events.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_events.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_policy_projection.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_policy_projection.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_session_state_cache.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_state_cache.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_state_cache.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_window_state.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/vrr_window_state.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/window.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP2/WP5A",
+      "path": "src/glasswyrmd/window_store.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP1/WP5A",
+      "path": "src/glasswyrmd/x11_listener.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/xfixes_region.cpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/xfixes_region.hpp"
+    },
+    {
+      "deletion_gate": "WP7 after matching Rust cutover",
+      "owner": "WP3/WP5D",
+      "path": "src/glasswyrmd/xfixes_region_store.cpp"
+    }
+  ],
+  "linux_security_boundaries": {
+    "buffer_geometry_stride_extents": {
+      "implementation": [
+        "crates/gwcomp/src/runtime.rs",
+        "crates/gw-wire/src/compositor.rs"
+      ],
+      "mechanism": "checked storage_size conversion, stride alignment, bounded aggregate storage, and mapping range validation",
+      "tests": [
+        "crates/gwcomp/src/runtime.rs"
+      ]
+    },
+    "endpoint_ancestry_same_euid": {
+      "implementation": "crates/gw-ipc/src/endpoint.rs",
+      "mechanism": "descriptor-relative trusted-parent validation plus SO_PEERCRED effective-UID equality",
+      "tests": [
+        "crates/gw-ipc/src/endpoint.rs"
+      ]
+    },
+    "role_capability_handshake": {
+      "implementation": "crates/gw-ipc/src/handshake.rs",
+      "mechanism": "explicit allowed-role mask, required capability intersection, negotiated limits",
+      "tests": [
+        "crates/gw-ipc/src/handshake.rs"
+      ]
+    },
+    "shared_buffer_shrink_sigbus": {
+      "implementation": "crates/gw-platform-linux/src/memory.rs",
+      "mechanism": "Mapping requires F_SEAL_SHRINK|F_SEAL_GROW before mmap and validates range/size",
+      "tests": [
+        "crates/gw-platform-linux/tests/platform.rs"
+      ]
+    },
+    "single_active_compositor_producer": {
+      "implementation": "crates/gwcomp/src/runtime.rs",
+      "mechanism": "listener accepts only while connection Option is None"
+    },
+    "single_active_policy_peer": {
+      "implementation": "crates/gwm/src/runtime.rs",
+      "mechanism": "listener accepts only while connection Option is None"
+    }
+  },
+  "mixed_stack_profiles": {
+    "legacy-server-oracle": {
+      "compositor": "legacy-or-not-applicable",
+      "gate": "retained C++ oracle and Tier-4 selectors",
+      "server": "legacy",
+      "status": "available",
+      "wm": "legacy-or-not-applicable"
+    },
+    "rust-server-process-oracle": {
+      "compositor": "not-applicable",
+      "gate": "Rust glasswyrmd process oracle tests",
+      "server": "rust",
+      "status": "available-for-current-core/discovery-subset",
+      "wm": "not-applicable"
+    },
+    "wp0c-rust-server-legacy-peers": {
+      "compositor": "legacy",
+      "gate": "WP0C topology 5",
+      "server": "rust",
+      "status": "pending-WP0C",
+      "wm": "legacy"
+    },
+    "wp0c-rust-server-rust-peers": {
+      "compositor": "rust",
+      "gate": "WP0C topology 8",
+      "server": "rust",
+      "status": "pending-WP0C",
+      "wm": "rust"
+    }
+  },
+  "schema": "glasswyrm-rust-transition-wp0-inventory-v2",
+  "semantic_boundaries": {
+    "gwipc_record": {
+      "implementation": "crates/gw-ipc/src/record.rs",
+      "meaning": "wire envelope, payload bytes, and typed semantic attachment descriptors"
+    },
+    "linux_fd_transport": {
+      "implementation": "crates/gw-ipc/src/transport.rs",
+      "meaning": "SOCK_SEQPACKET, OwnedFd, SCM_RIGHTS, and Linux descriptor validation"
+    },
+    "shared_buffer_object": {
+      "implementation": [
+        "crates/gw-types/src/lib.rs",
+        "crates/gw-platform-linux/src/memory.rs"
+      ],
+      "meaning": "portable shared-buffer semantics with Linux memfd/seal mapping as one backend"
+    },
+    "x11_client_byte_stream": {
+      "implementation": "crates/glasswyrmd/src/session.rs",
+      "meaning": "ordered client bytes and X11 framing; contains no Unix listener/credential ownership"
+    }
+  },
+  "server_tests": [
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/drm/damage_copy_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/drm/drm_runtime_selection_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/drm/m14_bounded_damage_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/drm/property_cache_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/helpers/synthetic_input_client.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/helpers/synthetic_input_client.hpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/helpers/uinput_m11_protocol.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/helpers/uinput_m11_protocol.hpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/helpers/x11_fake_client.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/helpers/x11_fake_client.hpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/helpers/x11_request_builder.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/helpers/x11_request_builder.hpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/install/gwipc_input_cpp_consumer.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/install/gwipc_lifecycle_cpp_consumer.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/integration/glasswyrmd_core_requests_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/integration/glasswyrmd_handshake_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/glasswyrmd_input_recovery_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/integration/glasswyrmd_integrated_lifecycle_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/integration/glasswyrmd_integrated_property_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/glasswyrmd_integrated_startup_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/integration/glasswyrmd_lifecycle_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/glasswyrmd_m11_isolation_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/glasswyrmd_m12_game_profile_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/integration/glasswyrmd_malformed_client_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/glasswyrmd_peer_bootstrap_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/glasswyrmd_selection_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/glasswyrmd_synthetic_cursor_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/gw_uinput_m11.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/gwinput_m8.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/server_fixture.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/server_fixture.hpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/integration/server_vrr_lifecycle_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/x11_milestone2_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/x11_milestone6_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/x11_milestone7_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/integration/x11_milestone8_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/integration/x11_setup_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/pixel/multi_output_software_scene_renderer_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/pixel/output_renderer_report_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/pixel/software_renderer_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/pixel/software_scene_renderer_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/protocol/x11_event_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/protocol/x11_exposure_event_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/protocol/x11_input_event_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/protocol/x11_lifecycle_request_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/protocol/x11_reply_atom_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/protocol/x11_request_framer_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/protocol/x11_setup_parser_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/protocol/x11_setup_reply_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/unit/atom_table_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/unit/composite_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/unit/composite_state_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/cursor_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/cursor_model_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/cursor_presenter_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/damage_add_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/drawable_core_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/drawable_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/drawable_resource_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/drm/vrr_capability_property_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/ewmh_lifecycle_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/unit/font_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP5 acceptance",
+      "path": "tests/unit/glasswyrmd_options_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/grab_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/grab_state_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/gwcomp_cursor_surface_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/input_foundation_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/ipc/input_contract_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/ipc/lifecycle_contract_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/libinput_backend_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/libinput_path_allowlist_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/lifecycle_coordinator_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/lifecycle_projection_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/local_lifecycle_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/mit_shm_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/output/output_damage_mapping_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/unit/output_control_windows_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/output_damage_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/unit/property_store_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/randr_config_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/randr_event_wire_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/randr_reporting_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/real_input_controller_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/render_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/render_ops_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/selection_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/selection_store_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP4/WP5B-WP5C",
+      "path": "tests/unit/server_lifecycle_state_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/server_vrr_projection_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/server_vrr_state_cache_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/server_vrr_transaction_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/set_input_focus_dispatch_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/uinput_m11_protocol_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP1-WP2/WP5A",
+      "path": "tests/unit/window_tree_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/xfixes_damage_limits_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/unit/xfixes_damage_test.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    },
+    {
+      "owner": "WP3/WP5D",
+      "path": "tests/xcb/m11_selection_probe.cpp",
+      "retention": "retain as oracle/fixture until replacement parity"
+    }
+  ],
+  "temporary_adapters": [
+    {
+      "deletion_gate": "WP7 after legacy glasswyrmd oracle deletion; retain the Rust-side process tests",
+      "name": "rust-server-process-oracle-override",
+      "paths": [
+        "crates/glasswyrmd/tests/extension_discovery_process.rs",
+        "crates/glasswyrmd/tests/property_process.rs",
+        "crates/glasswyrmd/tests/window_process.rs"
+      ],
+      "purpose": "run the same frozen process exchange against the Rust candidate or retained legacy oracle"
+    },
+    {
+      "deletion_gate": "WP7 once equivalent Rust-native/package acceptance replaces the legacy probes",
+      "name": "legacy-probes-rust-gwm-candidate",
+      "paths": [
+        "crates/xtask/src/lib.rs",
+        "tests/manifest/foundation/wm"
+      ],
+      "purpose": "legacy acceptance probes drive the Rust gwm candidate during migration"
+    },
+    {
+      "deletion_gate": "WP7 once equivalent Rust-native/package acceptance replaces the legacy probes",
+      "name": "legacy-probes-rust-gwcomp-candidate",
+      "paths": [
+        "crates/xtask/src/lib.rs",
+        "tests/manifest/graphics/headless"
+      ],
+      "purpose": "legacy headless/render probes drive the Rust gwcomp candidate during migration"
+    },
+    {
+      "deletion_gate": "WP7 after all-Rust server/tool package parity",
+      "name": "legacy-fake-server-rust-tools",
+      "paths": [
+        "crates/xtask/src/lib.rs",
+        "tests/tools/output_tools_test.sh"
+      ],
+      "purpose": "retained fake server validates Rust gwinfo/gwout wire compatibility"
+    },
+    {
+      "deletion_gate": "WP0C disposition plus WP7 external-consumer/package acceptance",
+      "name": "installed-gwipc-c-abi",
+      "paths": [
+        "include/glasswyrm/ipc",
+        "src/ipc"
+      ],
+      "purpose": "installed compatibility ABI, explicitly not a disposable migration bridge"
+    }
+  ],
+  "test_selector_sources": [
+    {
+      "path": "crates/xtask/src/lib.rs",
+      "sha256": "5fbad903e25e265214f5f2bbf907e7cbb54a25c24593d1e9400ddf278cf1843c"
+    },
+    {
+      "path": "crates/xtask/src/campaign.rs",
+      "sha256": "641e54ed1d24564b48b03882bae88d55be067ca524b6c1d6d4710bbbd6a8b392"
+    },
+    {
+      "path": "tests/manifest/x11_tools/meson.build",
+      "sha256": "ce9cdcb8a210b9cdbeab5865a143a864c82e62df6232d210f220c338f938b9f2"
+    },
+    {
+      "path": "tests/manifest/foundation/wm/meson.build",
+      "sha256": "ec613eb21e834c045900254d2b04daba90afe6f72c1b85edfdd60f21504411b1"
+    },
+    {
+      "path": "tests/manifest/graphics/headless/meson.build",
+      "sha256": "0c970c84930cbbf8a0a3b0a9b9927512c07238d172be4a109fc882fb5a4c640d"
+    }
+  ]
+}

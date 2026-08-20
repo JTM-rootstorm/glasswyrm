@@ -18,7 +18,6 @@ use glasswyrm_x11::{
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 
 pub(crate) const MAXIMUM_REQUESTS_PER_TURN: usize = 64;
@@ -296,7 +295,7 @@ impl OutputQueue {
         true
     }
 
-    fn write_to(&mut self, stream: &mut UnixStream) -> io::Result<bool> {
+    fn write_to(&mut self, stream: &mut impl Write) -> io::Result<bool> {
         let mut wrote_any = false;
         while let Some(packet) = self.packets.front_mut() {
             match stream.write(&packet.bytes[packet.offset..]) {
@@ -480,7 +479,7 @@ impl RequestLoop {
         }
     }
 
-    pub(crate) fn write_output(&mut self, stream: &mut UnixStream) -> io::Result<bool> {
+    pub(crate) fn write_output(&mut self, stream: &mut impl Write) -> io::Result<bool> {
         let wrote = self.output.write_to(stream)?;
         self.finish_draining();
         Ok(wrote)

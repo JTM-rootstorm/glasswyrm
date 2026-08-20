@@ -1,9 +1,12 @@
 //! Rust X11 setup and initial core-request process used while `glasswyrmd` migrates.
 
 mod client;
+#[cfg(test)]
+mod execution;
 mod listener;
 pub mod options;
 mod request_loop;
+mod session;
 mod signals;
 
 use glasswyrm_core::resource_id::{ResourceBase, first_available_resource_base};

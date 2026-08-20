@@ -336,11 +336,23 @@ impl TryFrom<u16> for Role {
 pub struct Capabilities(u64);
 
 impl Capabilities {
-    pub const FD_PASSING: Self = Self(1 << 0);
+    /// Semantic capability for transferring typed handles with a record.
+    ///
+    /// Linux GWIPC v1 names this bit `FD_PASSING`; both names deliberately
+    /// preserve the same wire value while portable code uses the semantic name.
+    pub const HANDLE_ATTACHMENTS: Self = Self(1 << 0);
+    /// Linux GWIPC v1 compatibility alias for [`Self::HANDLE_ATTACHMENTS`].
+    pub const FD_PASSING: Self = Self::HANDLE_ATTACHMENTS;
     pub const SNAPSHOTS: Self = Self(1 << 1);
     pub const OUTPUT_STATE: Self = Self(1 << 2);
     pub const SURFACE_STATE: Self = Self(1 << 3);
-    pub const MEMFD_BUFFERS: Self = Self(1 << 4);
+    /// Semantic capability for shared pixel-storage objects.
+    ///
+    /// Linux GWIPC v1 calls this bit `MEMFD_BUFFERS`; the semantic name is
+    /// transport-neutral and does not require a memfd-shaped native backend.
+    pub const SHARED_BUFFER_OBJECTS: Self = Self(1 << 4);
+    /// Linux GWIPC v1 compatibility alias for [`Self::SHARED_BUFFER_OBJECTS`].
+    pub const MEMFD_BUFFERS: Self = Self::SHARED_BUFFER_OBJECTS;
     pub const DAMAGE_REGIONS: Self = Self(1 << 5);
     pub const SCALE_METADATA: Self = Self(1 << 6);
     pub const SDR_COLOR_METADATA: Self = Self(1 << 7);
@@ -424,6 +436,15 @@ mod tests {
             .with(Capabilities::FD_PASSING)
             .with(Capabilities::VRR_POLICY);
         assert!(capabilities.contains(Capabilities::FD_PASSING));
+        assert!(capabilities.contains(Capabilities::HANDLE_ATTACHMENTS));
+        assert_eq!(
+            Capabilities::FD_PASSING.bits(),
+            Capabilities::HANDLE_ATTACHMENTS.bits()
+        );
+        assert_eq!(
+            Capabilities::MEMFD_BUFFERS.bits(),
+            Capabilities::SHARED_BUFFER_OBJECTS.bits()
+        );
         assert!(capabilities.contains(Capabilities::VRR_POLICY));
         assert!(!capabilities.contains(Capabilities::PRESENTATION_TIMING));
         assert!(Capabilities::from_bits(1 << 63).is_none());

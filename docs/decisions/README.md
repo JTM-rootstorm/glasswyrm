@@ -24,3 +24,4 @@ Current decisions:
 - [0015: Make Output Layout and Scaling Explicit](0015-output-model-and-scaling.md)
 - [0016: Split VRR Intent, Policy, and Display Authority](0016-vrr-policy-and-kms-control.md)
 - [0017: Make the Glasswyrm Runtime Rust-First](0017-rust-first-transition.md)
+- [0018: Serialize Rust Server State and Snapshot Event Recipients](0018-rust-server-execution-model.md)

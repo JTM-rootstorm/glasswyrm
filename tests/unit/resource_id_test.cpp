@@ -2,6 +2,8 @@
 
 int main() {
   using glasswyrm::server::is_server_owned_id;
+  using glasswyrm::server::kServerExtensionResourceFirst;
+  using glasswyrm::server::kServerExtensionResourceLast;
   using glasswyrm::server::resource_id_matches_client;
 
   constexpr std::uint32_t base = 0x00400000;
@@ -14,6 +16,10 @@ int main() {
   static_assert(is_server_owned_id(1));
   static_assert(is_server_owned_id(2));
   static_assert(is_server_owned_id(3));
+  static_assert(is_server_owned_id(kServerExtensionResourceFirst));
+  static_assert(is_server_owned_id(kServerExtensionResourceLast));
+  static_assert(!is_server_owned_id(kServerExtensionResourceFirst - 1));
+  static_assert(!is_server_owned_id(kServerExtensionResourceLast + 1));
   static_assert(!is_server_owned_id(base));
   return 0;
 }

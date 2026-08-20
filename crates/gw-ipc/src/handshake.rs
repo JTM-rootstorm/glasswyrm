@@ -9,7 +9,7 @@ use gw_wire::{
     decode_reject, decode_welcome, encode_hello, encode_reject, encode_welcome,
 };
 
-use crate::{HARD_MAXIMUM_FDS, HARD_MAXIMUM_PAYLOAD, ReceivedRecord, TransportLimits};
+use crate::{HARD_MAXIMUM_FDS, HARD_MAXIMUM_PAYLOAD, RecordSource, TransportLimits};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HandshakeConfig {
@@ -168,32 +168,34 @@ pub fn make_hello(config: &HandshakeConfig) -> Result<HandshakeRecord, Handshake
 }
 
 pub fn accept_hello(
-    received: &ReceivedRecord,
+    received: &impl RecordSource,
     config: &HandshakeConfig,
     connection_id: ConnectionId,
 ) -> Result<ServerHandshakeResponse, HandshakeError> {
     config.validate()?;
+    let request_envelope = received.envelope();
+    let request_payload = received.payload();
     if connection_id.get() == 0 {
         return Err(HandshakeError::InvalidConfig);
     }
-    if received.envelope.message_type != MessageType::HELLO
-        || received.envelope.flags != no_flags()
-        || received.envelope.reply_to.get() != 0
-        || received.envelope.sequence.get() != 1
-        || !received.fds.is_empty()
+    if request_envelope.message_type != MessageType::HELLO
+        || request_envelope.flags != no_flags()
+        || request_envelope.reply_to.get() != 0
+        || request_envelope.sequence.get() != 1
+        || received.attachment_count() != 0
     {
         return rejection(
-            received.envelope.sequence,
+            request_envelope.sequence,
             RejectReason::InvalidHello,
             "invalid hello",
         );
     }
 
-    let hello = match decode_hello(&received.payload) {
+    let hello = match decode_hello(request_payload) {
         Ok(hello) => hello,
         Err(_) => {
             return rejection(
-                received.envelope.sequence,
+                request_envelope.sequence,
                 RejectReason::InvalidHello,
                 "invalid hello",
             );
@@ -209,14 +211,14 @@ pub fn accept_hello(
         GWIPC_WIRE_VERSION,
     ) {
         return rejection(
-            received.envelope.sequence,
+            request_envelope.sequence,
             RejectReason::IncompatibleVersion,
             "wire version mismatch",
         );
     }
     if config.allowed_peer_roles & role_bit(hello.sender_role) == 0 {
         return rejection(
-            received.envelope.sequence,
+            request_envelope.sequence,
             RejectReason::RoleNotAllowed,
             "peer role is not allowed",
         );
@@ -231,7 +233,7 @@ pub fn accept_hello(
         || !negotiated.contains(config.required_peer_capabilities)
     {
         return rejection(
-            received.envelope.sequence,
+            request_envelope.sequence,
             RejectReason::CapabilityMismatch,
             "required capability is unavailable",
         );
@@ -254,7 +256,7 @@ pub fn accept_hello(
     let mut envelope =
         Envelope::request(MessageType::WELCOME, Sequence::new(1), payload.len() as u32);
     envelope.flags = MessageFlags::REPLY;
-    envelope.reply_to = received.envelope.sequence;
+    envelope.reply_to = request_envelope.sequence;
     Ok(ServerHandshakeResponse::Accepted {
         record: HandshakeRecord { envelope, payload },
         peer: NegotiatedPeer {
@@ -268,29 +270,31 @@ pub fn accept_hello(
 }
 
 pub fn validate_server_response(
-    received: &ReceivedRecord,
+    received: &impl RecordSource,
     config: &HandshakeConfig,
 ) -> Result<NegotiatedPeer, HandshakeError> {
     config.validate()?;
-    if received.envelope.flags != MessageFlags::REPLY
-        || received.envelope.reply_to.get() != 1
-        || received.envelope.sequence.get() != 1
-        || !received.fds.is_empty()
+    let response_envelope = received.envelope();
+    let response_payload = received.payload();
+    if response_envelope.flags != MessageFlags::REPLY
+        || response_envelope.reply_to.get() != 1
+        || response_envelope.sequence.get() != 1
+        || received.attachment_count() != 0
     {
         return Err(HandshakeError::InvalidRecord);
     }
-    if received.envelope.message_type == MessageType::REJECT {
-        let reject = decode_reject(&received.payload)?;
+    if response_envelope.message_type == MessageType::REJECT {
+        let reject = decode_reject(response_payload)?;
         return Err(HandshakeError::PeerRejected {
             reason: reject.reason,
             detail: reject.detail,
         });
     }
-    if received.envelope.message_type != MessageType::WELCOME {
+    if response_envelope.message_type != MessageType::WELCOME {
         return Err(HandshakeError::InvalidRecord);
     }
 
-    let welcome = decode_welcome(&received.payload)?;
+    let welcome = decode_welcome(response_payload)?;
     if config.allowed_peer_roles & role_bit(welcome.sender_role) == 0
         || welcome.negotiated_capabilities.bits() & !config.offered_capabilities.bits() != 0
         || !welcome
@@ -359,7 +363,7 @@ const fn no_flags() -> MessageFlags {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Transport;
+    use crate::Record;
 
     fn config(role: Role, id: u8, peer: Role) -> HandshakeConfig {
         HandshakeConfig::new(role, [id; 16], format!("{role:?}"))
@@ -368,26 +372,15 @@ mod tests {
             .require_peer(Capabilities::SNAPSHOTS)
     }
 
-    fn transfer(record: &HandshakeRecord) -> ReceivedRecord {
-        let (sender, receiver) = Transport::pair(TransportLimits::default()).unwrap();
-        sender.send(&record.envelope, &record.payload, &[]).unwrap();
-        loop {
-            match receiver.receive() {
-                Err(crate::TransportError::Io(error))
-                    if error.kind() == std::io::ErrorKind::WouldBlock =>
-                {
-                    std::thread::yield_now();
-                }
-                result => return result.unwrap(),
-            }
-        }
+    fn transfer(record: &HandshakeRecord) -> Record {
+        Record::without_attachments(record.envelope, record.payload.clone())
     }
 
     fn hello_with_versions(
         config: &HandshakeConfig,
         minimum_version: gw_types::WireVersion,
         maximum_version: gw_types::WireVersion,
-    ) -> ReceivedRecord {
+    ) -> Record {
         let mut record = make_hello(config).unwrap();
         let mut hello = decode_hello(&record.payload).unwrap();
         hello.minimum_version = minimum_version;

@@ -1,5 +1,11 @@
 //! Developer orchestration for Glasswyrm's tiered Rust transition checks.
 
+mod campaign;
+pub use campaign::{
+    CampaignOptions, ReplayOptions, campaign_steps, parse_campaign, parse_replay, run_campaign,
+    run_replay,
+};
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -15,6 +21,9 @@ Usage:
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test headless gwcomp
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test checkpoint gwcomp
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|gwcomp|tools|all
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] campaign [--list|--only STEP[,STEP...]|--from STEP] [--resume] [--rerun-failed]
+  cargo xtask replay m14-probe --report PATH --config PATH
+  cargo xtask replay m14-fixture --fixture-dir PATH --config PATH --required-base SHA --tested-commit SHA
   cargo xtask test hardware-vrr -- HARNESS_ARGS...
 
 The legacy Meson build defaults to ./build. Set GW_LEGACY_BUILD_DIR or pass
@@ -39,6 +48,8 @@ pub enum Task {
     Help,
     CheckSubsystem(String),
     Test(TestTier),
+    Campaign(CampaignOptions),
+    Replay(ReplayOptions),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -153,6 +164,8 @@ impl Cli {
                 Task::CheckSubsystem(name)
             }
             "test" => Task::Test(parse_test(&mut arguments)?),
+            "campaign" => Task::Campaign(parse_campaign(&mut arguments)?),
+            "replay" => Task::Replay(parse_replay(&mut arguments)?),
             _ => return Err(format!("unknown command `{command}`")),
         };
 
@@ -499,6 +512,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
             invocation.remove_hardware_authorization = false;
             vec![invocation]
         }
+        Task::Campaign(_) | Task::Replay(_) => Vec::new(),
     };
     Ok(invocations)
 }

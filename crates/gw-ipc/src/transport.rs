@@ -122,6 +122,20 @@ pub struct ReceivedRecord {
     pub fds: Vec<OwnedFd>,
 }
 
+impl crate::RecordSource for ReceivedRecord {
+    fn envelope(&self) -> &Envelope {
+        &self.envelope
+    }
+
+    fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+
+    fn attachment_count(&self) -> usize {
+        self.fds.len()
+    }
+}
+
 #[derive(Debug)]
 pub enum TransportError {
     Io(io::Error),

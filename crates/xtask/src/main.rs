@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use xtask::{Cli, Context, HELP, Task, execute, plan};
+use xtask::{Cli, Context, HELP, Task, execute, plan, run_campaign, run_replay};
 
 fn main() -> ExitCode {
     match run() {
@@ -33,6 +33,12 @@ fn run() -> Result<(), String> {
         hardware_allowed: env::var_os("GW_ALLOW_HARDWARE_TESTS").as_deref()
             == Some(std::ffi::OsStr::new("1")),
     };
-    let invocations = plan(&cli, &context)?;
-    execute(&invocations, &workspace_root)
+    match &cli.task {
+        Task::Campaign(options) => run_campaign(&cli, &context, options),
+        Task::Replay(options) => run_replay(&context, options),
+        _ => {
+            let invocations = plan(&cli, &context)?;
+            execute(&invocations, &workspace_root)
+        }
+    }
 }

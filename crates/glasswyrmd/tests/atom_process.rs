@@ -62,10 +62,7 @@ impl Server {
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("system clock follows the Unix epoch")
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "glasswyrmd-rust-atom-{}-{nonce}",
-            std::process::id()
-        ));
+        let directory = std::env::temp_dir().join(format!("gw-a-{}-{nonce}", std::process::id()));
         let mut directory_builder = fs::DirBuilder::new();
         directory_builder.mode(0o700);
         directory_builder

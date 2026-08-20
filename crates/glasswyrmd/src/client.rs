@@ -1,10 +1,7 @@
 use crate::ResourceBaseLease;
-use crate::request_loop::{RequestLoop, RequestWorkBudget, ServerState};
-use glasswyrm_x11::{
-    ByteOrder, CoreClient, ParseStatus, SCREEN_MODEL, SetupDecision, SetupParser, SetupReplyConfig,
-    encode_setup_failure, encode_setup_success, evaluate_setup_request,
-};
-use std::io::{Read, Write};
+use crate::request_loop::{RequestWorkBudget, ServerState};
+use crate::session::{ClientSession, SetupProgress};
+use std::io::Read;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
@@ -18,10 +15,10 @@ pub(crate) fn serve(
     setup_timeout: Duration,
     server_state: Arc<Mutex<ServerState>>,
 ) {
-    let mut parser = SetupParser::default();
+    let mut session = ClientSession::new(identifier, resource_base.base(), server_state);
     let mut input = [0_u8; 4096];
     let setup_deadline = SetupDeadline::new(Instant::now(), setup_timeout);
-    loop {
+    while session.is_setup() {
         let Some(remaining) = setup_deadline.remaining(Instant::now()) else {
             eprintln!("glasswyrmd: client {identifier}: X11 setup timed out");
             return;
@@ -48,55 +45,48 @@ pub(crate) fn serve(
                 return;
             }
         };
-        let result = parser.consume(&input[..count]);
-        match result.status {
-            ParseStatus::NeedMore => {}
-            ParseStatus::Complete => {
-                match prepare_setup(identifier, resource_base.base(), &parser) {
-                    SetupCompletion::Accepted { order, reply } => {
-                        let mut request_loop = RequestLoop::new_for_client(
-                            order,
-                            SetupReplyConfig::default().screen.maximum_request_length,
-                            SetupReplyConfig::default().screen.root_window,
-                            reply,
-                            CoreClient::new(
-                                identifier,
-                                resource_base.base().get(),
-                                SCREEN_MODEL.resource_id_mask,
-                            ),
-                            server_state,
-                        );
-                        let pipelined = &input[result.consumed..count];
-                        serve_established(&mut stream, identifier, &mut request_loop, pipelined);
-                    }
-                    SetupCompletion::Rejected { reply } => {
-                        if let Err(error) = stream.write_all(&reply) {
-                            eprintln!(
-                                "glasswyrmd: client {identifier}: setup reply failed: {error}"
-                            );
-                        }
-                        let _ = stream.shutdown(Shutdown::Both);
-                    }
+        let progress = session.feed_setup(&input[..count], &mut RequestWorkBudget::default());
+        match progress {
+            SetupProgress::NeedMore => {}
+            SetupProgress::Accepted { order } => {
+                eprintln!(
+                    "glasswyrmd: client {identifier}: X11 setup accepted byte_order={}",
+                    char::from(order.marker())
+                );
+            }
+            SetupProgress::Rejected => {
+                if let Err(error) = session.write_output(&mut stream) {
+                    eprintln!("glasswyrmd: client {identifier}: setup reply failed: {error}");
                 }
+                let _ = stream.shutdown(Shutdown::Both);
                 return;
             }
-            ParseStatus::InvalidByteOrder => {
+            SetupProgress::InvalidByteOrder => {
                 eprintln!("glasswyrmd: client {identifier}: invalid X11 byte-order marker");
                 return;
             }
-            ParseStatus::MessageTooLarge => {
+            SetupProgress::MessageTooLarge => {
                 eprintln!(
                     "glasswyrmd: client {identifier}: X11 setup message exceeds configured limit"
                 );
                 return;
             }
-            ParseStatus::LengthOverflow => {
+            SetupProgress::LengthOverflow => {
                 eprintln!("glasswyrmd: client {identifier}: X11 setup message length overflow");
                 return;
             }
-            ParseStatus::TruncatedInput => return,
+            SetupProgress::TruncatedInput => return,
         }
     }
+
+    if !session.is_established() {
+        return;
+    }
+    if let Err(error) = stream.set_read_timeout(None) {
+        eprintln!("glasswyrmd: client {identifier}: could not clear setup deadline: {error}");
+        return;
+    }
+    serve_established(&mut stream, identifier, &mut session);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -117,111 +107,50 @@ impl SetupDeadline {
     }
 }
 
-enum SetupCompletion {
-    Accepted { order: ByteOrder, reply: Vec<u8> },
-    Rejected { reply: Vec<u8> },
-}
-
-fn prepare_setup(
-    identifier: u64,
-    resource_base: glasswyrm_core::resource_id::ResourceBase,
-    parser: &SetupParser,
-) -> SetupCompletion {
-    let request = parser.request();
-    eprintln!(
-        "glasswyrmd: client {identifier}: setup byte_order={} protocol={}.{}",
-        char::from(request.byte_order.marker()),
-        request.protocol_major,
-        request.protocol_minor
-    );
-    match evaluate_setup_request(request) {
-        SetupDecision::Accepted => {
-            let config = SetupReplyConfig {
-                resource_id_base: resource_base.get(),
-                ..Default::default()
-            };
-            let reply = encode_setup_success(request.byte_order, &config)
-                .expect("the fixed setup profile fits the X11 length field");
-            eprintln!("glasswyrmd: client {identifier}: X11 setup accepted");
-            SetupCompletion::Accepted {
-                order: request.byte_order,
-                reply,
-            }
-        }
-        SetupDecision::UnsupportedVersion => SetupCompletion::Rejected {
-            reply: encode_setup_failure(request.byte_order, b"X11 protocol 11.0 required")
-                .expect("the fixed failure reason fits the X11 length field"),
-        },
-        SetupDecision::UnsupportedAuthorization => SetupCompletion::Rejected {
-            reply: encode_setup_failure(
-                request.byte_order,
-                b"authorization is not supported in Milestone 2",
-            )
-            .expect("the fixed failure reason fits the X11 length field"),
-        },
-    }
-}
-
-fn serve_established(
-    stream: &mut UnixStream,
-    identifier: u64,
-    request_loop: &mut RequestLoop,
-    pipelined: &[u8],
-) {
+fn serve_established(stream: &mut UnixStream, identifier: u64, session: &mut ClientSession) {
     if let Err(error) = stream.set_nonblocking(true) {
         eprintln!("glasswyrmd: client {identifier}: nonblocking setup failed: {error}");
         return;
     }
 
-    let mut initial_input = Some(pipelined);
-    while !request_loop.is_closed() {
+    while !session.is_closed() {
         let mut progressed = false;
         let mut budget = RequestWorkBudget::default();
-        progressed |= request_loop.process_pending(&mut budget) != 0;
+        progressed |= session.process_pending(&mut budget) != 0;
 
-        if request_loop.accepts_input() && budget.available() {
-            if let Some(bytes) = initial_input.take()
-                && !bytes.is_empty()
-            {
-                progressed = true;
-                request_loop.feed(bytes, &mut budget);
-            }
-
-            while request_loop.accepts_input()
-                && budget.available()
-                && !request_loop.has_pending_input()
-            {
+        if session.accepts_input() && budget.available() {
+            while session.accepts_input() && budget.available() && !session.has_pending_input() {
                 let mut input = [0_u8; 4096];
                 match stream.read(&mut input) {
                     Ok(0) => {
-                        request_loop.end_of_input();
+                        session.end_of_input();
                         progressed = true;
                         break;
                     }
                     Ok(count) => {
                         progressed = true;
-                        request_loop.feed(&input[..count], &mut budget);
+                        session.feed_established(&input[..count], &mut budget);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
                     Err(error) => {
                         eprintln!("glasswyrmd: client {identifier}: request read failed: {error}");
-                        request_loop.close_now();
+                        session.close_now();
                         break;
                     }
                 }
             }
         }
 
-        match request_loop.write_output(stream) {
+        match session.write_output(stream) {
             Ok(wrote) => progressed |= wrote,
             Err(error) => {
                 eprintln!("glasswyrmd: client {identifier}: response write failed: {error}");
-                request_loop.close_now();
+                session.close_now();
             }
         }
 
-        if !progressed && !request_loop.is_closed() {
+        if !progressed && !session.is_closed() {
             thread::sleep(Duration::from_millis(1));
         }
     }
