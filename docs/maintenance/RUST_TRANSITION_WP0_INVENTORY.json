@@ -1,5 +1,5 @@
 {
-  "authority_revision": "f5b791005c9de2981b5ff35fc01e741ed76a86b6",
+  "authority_revision": "8e3f00a67d79993fd5a121d34d412c6cbe60a365",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
@@ -497,8 +497,8 @@
       ],
       "name": "GrabPointer",
       "opcode": 26,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -518,8 +518,8 @@
       ],
       "name": "UngrabPointer",
       "opcode": 27,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -539,8 +539,8 @@
       ],
       "name": "GrabButton",
       "opcode": 28,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -560,8 +560,8 @@
       ],
       "name": "ChangeActivePointerGrab",
       "opcode": 30,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -581,8 +581,8 @@
       ],
       "name": "GrabKeyboard",
       "opcode": 31,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -602,8 +602,8 @@
       ],
       "name": "UngrabKeyboard",
       "opcode": 32,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -623,8 +623,8 @@
       ],
       "name": "AllowEvents",
       "opcode": 35,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/grab_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },

@@ -10,6 +10,7 @@ mod dispatch;
 mod event;
 mod event_mask;
 mod extension;
+mod grab_request;
 mod lifecycle_request;
 mod query_request;
 mod reply;
@@ -51,6 +52,13 @@ pub use event_mask::{EventMask, StateMask};
 pub use extension::{
     EXTENSION_REGISTRY, ExtensionAssignment, ExtensionDescriptor, ExtensionKind, ExtensionProfiles,
     ExtensionRegistry,
+};
+pub use grab_request::{
+    ANY_BUTTON, ANY_MODIFIER, AllowEventsMode, AllowEventsRequest, CORE_MODIFIER_MASK,
+    ChangeActivePointerGrabRequest, GrabButtonRequest, GrabKeyboardRequest, GrabMode,
+    GrabPointerRequest, decode_allow_events, decode_change_active_pointer_grab, decode_grab_button,
+    decode_grab_keyboard, decode_grab_pointer, decode_ungrab_keyboard, decode_ungrab_pointer,
+    validate_grab_button_fields,
 };
 pub use lifecycle_request::{
     CONFIGURE_BORDER_WIDTH, CONFIGURE_HEIGHT, CONFIGURE_SIBLING, CONFIGURE_STACK_MODE,

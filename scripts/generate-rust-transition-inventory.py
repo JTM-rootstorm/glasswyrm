@@ -176,6 +176,11 @@ def request_rust_decoder_file(name: str) -> str | None:
     }:
         return "crates/glasswyrm-x11/src/decode.rs"
     if name in {
+        "GrabPointer", "UngrabPointer", "GrabButton", "ChangeActivePointerGrab",
+        "GrabKeyboard", "UngrabKeyboard", "AllowEvents",
+    }:
+        return "crates/glasswyrm-x11/src/grab_request.rs"
+    if name in {
         "SetInputFocus", "QueryPointer", "TranslateCoordinates", "WarpPointer",
         "GetKeyboardMapping", "GetPointerMapping", "GetModifierMapping",
     }:
