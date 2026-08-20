@@ -1,7 +1,8 @@
 use crate::{
     ByteOrder, CoreError, CoreErrorCode, CoreOpcode, CoreRequestDecodeError, FramedRequest,
-    ReplyBuilder, decode_delete_property, decode_empty_request, decode_get_property,
-    decode_intern_atom, decode_query_extension, decode_single_u32_request, encode_core_error,
+    PropertyMode, ReplyBuilder, WindowCreateRequest, decode_change_property, decode_create_window,
+    decode_delete_property, decode_empty_request, decode_get_property, decode_intern_atom,
+    decode_query_extension, decode_single_u32_request, encode_core_error,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,22 +40,6 @@ impl CoreClient {
             resource_mask,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WindowCreateRequest {
-    pub xid: u32,
-    pub parent: u32,
-    pub x: i16,
-    pub y: i16,
-    pub width: u16,
-    pub height: u16,
-    pub border_width: u16,
-    pub window_class: u16,
-    pub depth: u8,
-    pub visual: u32,
-    pub attribute_mask: u32,
-    pub override_redirect: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,13 +94,6 @@ impl PropertyData {
             Self::U32(values) => values.len(),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PropertyMode {
-    Replace,
-    Prepend,
-    Append,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,10 +269,6 @@ pub fn dispatch_core_request_for_client(
     }
 }
 
-const WINDOW_ATTRIBUTE_MASK: u32 = 0x0000_7fff;
-const CORE_EVENT_MASK: u32 = 0x01ff_ffff;
-const DO_NOT_PROPAGATE_MASK: u32 = 0x0000_204f;
-
 fn dispatch_create_window(
     order: ByteOrder,
     sequence: u64,
@@ -302,56 +276,12 @@ fn dispatch_create_window(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() < 32 || request.body().len() < 28 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let body = request.body();
-    let xid = read_u32(order, body, 0);
-    let parent = read_u32(order, body, 4);
-    let window_class = read_u16(order, body, 18);
-    let attribute_mask = read_u32(order, body, 24);
-    if window_class > 2 {
-        return protocol_error_with_value(
-            order,
-            sequence,
-            request,
-            CoreErrorCode::BadValue,
-            u32::from(window_class),
-        );
-    }
-    if attribute_mask & !WINDOW_ATTRIBUTE_MASK != 0 {
-        return protocol_error_with_value(
-            order,
-            sequence,
-            request,
-            CoreErrorCode::BadValue,
-            attribute_mask,
-        );
-    }
-    let value_count = attribute_mask.count_ones() as usize;
-    if request.core_size() != 32 + value_count * 4 || body.len() != 28 + value_count * 4 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let override_redirect = match decode_create_attributes(order, body, attribute_mask) {
-        Ok(value) => value,
-        Err((code, value)) => {
-            return protocol_error_with_value(order, sequence, request, code, value);
-        }
+    let decoded = match decode_create_window(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
-    let decoded = WindowCreateRequest {
-        xid,
-        parent,
-        x: read_u16(order, body, 8) as i16,
-        y: read_u16(order, body, 10) as i16,
-        width: read_u16(order, body, 12),
-        height: read_u16(order, body, 14),
-        border_width: read_u16(order, body, 16),
-        window_class,
-        depth: request.data,
-        visual: read_u32(order, body, 20),
-        attribute_mask,
-        override_redirect,
-    };
+    let xid = decoded.xid;
+    let parent = decoded.parent;
     match state.create_window(client, decoded) {
         WindowCreateOutcome::Success => InitialCoreDispatch::NoReply,
         WindowCreateOutcome::BadIdChoice => {
@@ -373,42 +303,6 @@ fn dispatch_create_window(
             protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
         }
     }
-}
-
-fn decode_create_attributes(
-    order: ByteOrder,
-    body: &[u8],
-    attribute_mask: u32,
-) -> Result<bool, (CoreErrorCode, u32)> {
-    let mut offset = 28;
-    let mut override_redirect = false;
-    for bit in 0..15 {
-        if attribute_mask & (1_u32 << bit) == 0 {
-            continue;
-        }
-        let value = read_u32(order, body, offset);
-        offset += 4;
-        match bit {
-            0 if value > 1 => return Err((CoreErrorCode::BadPixmap, value)),
-            2 if value != 0 => return Err((CoreErrorCode::BadPixmap, value)),
-            4 | 5 if value > 10 => return Err((CoreErrorCode::BadValue, value)),
-            6 if value > 2 => return Err((CoreErrorCode::BadValue, value)),
-            9 | 10 if value > 1 => return Err((CoreErrorCode::BadValue, value)),
-            9 => override_redirect = value != 0,
-            11 if value & !CORE_EVENT_MASK != 0 => {
-                return Err((CoreErrorCode::BadValue, value));
-            }
-            12 if value & !DO_NOT_PROPAGATE_MASK != 0 => {
-                return Err((CoreErrorCode::BadValue, value));
-            }
-            13 if value != 0 && value != 2 => {
-                return Err((CoreErrorCode::BadColormap, value));
-            }
-            14 if value != 0 => return Err((CoreErrorCode::BadCursor, value)),
-            _ => {}
-        }
-    }
-    Ok(override_redirect)
 }
 
 fn dispatch_destroy_window(
@@ -515,86 +409,46 @@ fn dispatch_change_property(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() < 24 || request.body().len() < 20 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let mode = match request.data {
-        0 => PropertyMode::Replace,
-        1 => PropertyMode::Prepend,
-        2 => PropertyMode::Append,
-        value => {
-            return protocol_error_with_value(
-                order,
-                sequence,
-                request,
-                CoreErrorCode::BadValue,
-                u32::from(value),
-            );
-        }
+    let decoded = match decode_change_property(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
-    let body = request.body();
-    let window = read_u32(order, body, 0);
-    let property = read_u32(order, body, 4);
-    let property_type = read_u32(order, body, 8);
-    let format = body[12];
-    let item_count = read_u32(order, body, 16);
-    if format != 8 && format != 16 && format != 32 {
-        return protocol_error_with_value(
-            order,
-            sequence,
-            request,
-            CoreErrorCode::BadValue,
-            u32::from(format),
-        );
-    }
-    let Some(data_size) = usize::try_from(item_count)
-        .ok()
-        .and_then(|count| count.checked_mul(usize::from(format / 8)))
-    else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    };
-    let Some(padded_size) = data_size.checked_add(3).map(|size| size & !3) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    };
-    if request.core_size() != 24 + padded_size || body.len() != 20 + padded_size {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    if !state.window_exists(window) {
+    if !state.window_exists(decoded.window) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadWindow,
-            window,
+            decoded.window,
         );
     }
-    if !state.atom_is_valid(property, false) {
+    if !state.atom_is_valid(decoded.property, false) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadAtom,
-            property,
+            decoded.property,
         );
     }
-    if !state.atom_is_valid(property_type, false) {
+    if !state.atom_is_valid(decoded.property_type, false) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadAtom,
-            property_type,
+            decoded.property_type,
         );
     }
-    let Some(data) = decode_property_data(order, format, item_count, &body[20..20 + data_size])
+    let Some(data) = decode_property_data(order, decoded.format, decoded.item_count, decoded.data)
     else {
         return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
     };
     match state.change_property(PropertyChangeRequest {
-        window,
-        property,
-        property_type,
-        mode,
+        window: decoded.window,
+        property: decoded.property,
+        property_type: decoded.property_type,
+        mode: decoded.mode,
         data,
     }) {
         PropertyMutationOutcome::Success => InitialCoreDispatch::NoReply,
@@ -835,19 +689,6 @@ fn dispatch_list_properties(
         Ok(packet) => InitialCoreDispatch::Packet(packet),
         Err(_) => protocol_error(order, sequence, request, CoreErrorCode::BadAlloc),
     }
-}
-
-fn read_u16(order: ByteOrder, bytes: &[u8], offset: usize) -> u16 {
-    order.read_u16([bytes[offset], bytes[offset + 1]])
-}
-
-fn read_u32(order: ByteOrder, bytes: &[u8], offset: usize) -> u32 {
-    order.read_u32([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ])
 }
 
 /// Dispatches the deliberately small core profile used by the first Rust

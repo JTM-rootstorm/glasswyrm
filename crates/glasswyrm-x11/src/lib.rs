@@ -18,16 +18,18 @@ pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAto
 pub use byte_order::ByteOrder;
 pub use core::{CoreErrorCode, CoreEventType, CoreOpcode, wire_sequence};
 pub use decode::{
-    CoreRequestDecodeError, DeletePropertyRequest, GetPropertyRequest, InternAtomRequest,
-    QueryExtensionRequest, decode_delete_property, decode_empty_request, decode_get_property,
-    decode_intern_atom, decode_query_extension, decode_single_u32_request,
+    CoreRequestDecodeError, DecodedPropertyChangeRequest, DeletePropertyRequest,
+    GetPropertyRequest, InternAtomRequest, PropertyMode, QueryExtensionRequest,
+    WindowCreateRequest, decode_change_property, decode_create_window, decode_delete_property,
+    decode_empty_request, decode_get_property, decode_intern_atom, decode_query_extension,
+    decode_single_u32_request,
 };
 pub use dispatch::{
     CoreClient, CoreDispatchState, ExtensionAssignment, InitialCoreDispatch, InternAtomOutcome,
-    PropertyChangeRequest, PropertyData, PropertyMode, PropertyMutationOutcome,
-    PropertyReadOutcome, PropertyReadReply, PropertyReadRequest, WindowCreateOutcome,
-    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
-    dispatch_core_request, dispatch_core_request_for_client, dispatch_initial_core_request,
+    PropertyChangeRequest, PropertyData, PropertyMutationOutcome, PropertyReadOutcome,
+    PropertyReadReply, PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome,
+    WindowGeometryReply, WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
+    dispatch_initial_core_request,
 };
 pub use event::{
     CORE_EVENT_SIZE, ClientMessageData, ClientMessageEvent, ConfigureNotifyEvent, CrossingEvent,
