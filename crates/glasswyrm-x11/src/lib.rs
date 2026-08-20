@@ -11,6 +11,7 @@ mod event;
 mod event_mask;
 mod extension;
 mod grab_request;
+mod keyboard_request;
 mod lifecycle_request;
 mod query_request;
 mod reply;
@@ -59,6 +60,11 @@ pub use grab_request::{
     GrabPointerRequest, decode_allow_events, decode_change_active_pointer_grab, decode_grab_button,
     decode_grab_keyboard, decode_grab_pointer, decode_ungrab_keyboard, decode_ungrab_pointer,
     validate_grab_button_fields,
+};
+pub use keyboard_request::{
+    ChangeKeyboardControlRequest, KeyboardControlValues, decode_bell,
+    decode_change_keyboard_control, decode_force_screen_saver, decode_get_keyboard_control,
+    decode_keyboard_control_values, decode_query_keymap,
 };
 pub use lifecycle_request::{
     CONFIGURE_BORDER_WIDTH, CONFIGURE_HEIGHT, CONFIGURE_SIBLING, CONFIGURE_STACK_MODE,

@@ -1,5 +1,5 @@
 {
-  "authority_revision": "8e3f00a67d79993fd5a121d34d412c6cbe60a365",
+  "authority_revision": "612e48c1c1dac4c10cf981f2a5fdb72fa390ab49",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
@@ -750,8 +750,8 @@
       ],
       "name": "QueryKeymap",
       "opcode": 44,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/keyboard_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1521,8 +1521,8 @@
       ],
       "name": "ChangeKeyboardControl",
       "opcode": 102,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/keyboard_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1542,8 +1542,8 @@
       ],
       "name": "GetKeyboardControl",
       "opcode": 103,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/keyboard_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1563,8 +1563,8 @@
       ],
       "name": "Bell",
       "opcode": 104,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/keyboard_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1582,8 +1582,8 @@
       ],
       "name": "ForceScreenSaver",
       "opcode": 115,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/keyboard_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
