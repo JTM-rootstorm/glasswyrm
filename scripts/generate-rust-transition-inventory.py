@@ -175,6 +175,11 @@ def request_rust_decoder_file(name: str) -> str | None:
         "ListExtensions",
     }:
         return "crates/glasswyrm-x11/src/decode.rs"
+    if name in {
+        "SetInputFocus", "QueryPointer", "TranslateCoordinates", "WarpPointer",
+        "GetKeyboardMapping", "GetPointerMapping", "GetModifierMapping",
+    }:
+        return "crates/glasswyrm-x11/src/query_request.rs"
     if name in {"SetSelectionOwner", "GetSelectionOwner", "ConvertSelection", "SendEvent"}:
         return "crates/glasswyrm-x11/src/selection_request.rs"
     if name in {"ChangeWindowAttributes"}:

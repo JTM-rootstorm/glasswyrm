@@ -1,5 +1,5 @@
 {
-  "authority_revision": "e56ea489bddce94552bbbfeebc26af5e56c19012",
+  "authority_revision": "f5b791005c9de2981b5ff35fc01e741ed76a86b6",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
@@ -644,8 +644,8 @@
       ],
       "name": "QueryPointer",
       "opcode": 38,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -665,8 +665,8 @@
       ],
       "name": "TranslateCoordinates",
       "opcode": 40,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -686,8 +686,8 @@
       ],
       "name": "WarpPointer",
       "opcode": 41,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -707,8 +707,8 @@
       ],
       "name": "SetInputFocus",
       "opcode": 42,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1500,8 +1500,8 @@
       ],
       "name": "GetKeyboardMapping",
       "opcode": 101,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1603,8 +1603,8 @@
       ],
       "name": "GetPointerMapping",
       "opcode": 117,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1624,8 +1624,8 @@
       ],
       "name": "GetModifierMapping",
       "opcode": 119,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/query_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },

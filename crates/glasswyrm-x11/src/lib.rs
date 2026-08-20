@@ -11,6 +11,7 @@ mod event;
 mod event_mask;
 mod extension;
 mod lifecycle_request;
+mod query_request;
 mod reply;
 mod request;
 mod screen;
@@ -56,6 +57,12 @@ pub use lifecycle_request::{
     CONFIGURE_WIDTH, CONFIGURE_X, CONFIGURE_Y, ConfigureWindowRequest, CoreStackMode,
     KNOWN_CONFIGURE_MASK, LifecycleDecodeStatus, WindowLifecycleRequest, decode_configure_window,
     decode_map_subwindows, decode_map_window, decode_unmap_subwindows, decode_unmap_window,
+};
+pub use query_request::{
+    GetKeyboardMappingRequest, SetInputFocusRequest, TranslateCoordinatesRequest,
+    WarpPointerRequest, decode_get_keyboard_mapping, decode_get_modifier_mapping,
+    decode_get_pointer_mapping, decode_query_pointer, decode_set_input_focus,
+    decode_translate_coordinates, decode_warp_pointer,
 };
 pub use reply::{
     CORE_ERROR_SIZE, CORE_REPLY_SIZE, CoreError, ReplyBuildError, ReplyBuilder, encode_core_error,
