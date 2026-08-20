@@ -203,15 +203,25 @@ it cannot be the sole readiness proof.
 
 ## Differential process checkpoints
 
-| Checkpoint | Topology | Evidence |
-|---|---|---|
-| Legacy oracle | legacy `glasswyrmd` + legacy `gwm` + legacy `gwcomp` | Accepted canonical fixtures and behavior only |
-| GWM replacement | legacy `glasswyrmd` + Rust `gwm` + legacy `gwcomp` | Policy snapshots, events, disconnect, and restart/replay parity |
-| Headless compositor replacement | legacy `glasswyrmd` + Rust `gwm` + Rust headless `gwcomp` | Scene/output hashes, M13 scale, M14 policy/state, and peer recovery parity |
-| Server replacement | Rust `glasswyrmd` + Rust `gwm` + Rust `gwcomp` | Supported X11 subset, GWIPC, process, and full software acceptance |
+WP0C classifies all eight server/WM/compositor cutover combinations. A row is
+`runnable` only when the current implementation can exercise the same accepted
+contracts without weakening the oracle. A `blocked` row is an explicit current
+version decision, not an inferred pass.
 
-Add another topology only when it isolates a specific migration boundary. Do
-not build a permanent combinatorial legacy/Rust matrix.
+| # | Topology | WP0C profile / decision | State |
+|---|---|---|---|
+| 1 | legacy `glasswyrmd` + legacy `gwm` + legacy `gwcomp` | `cargo xtask test mixed legacy-restart` plus retained Meson process gates | runnable |
+| 2 | legacy `glasswyrmd` + Rust `gwm` + legacy `gwcomp` | `cargo xtask test mixed gwm` | runnable |
+| 3 | legacy `glasswyrmd` + legacy `gwm` + Rust `gwcomp` | `cargo xtask test mixed gwcomp` | runnable |
+| 4 | legacy `glasswyrmd` + Rust `gwm` + Rust `gwcomp` | `cargo xtask test mixed peers` | runnable |
+| 5 | Rust `glasswyrmd` + legacy `gwm` + legacy `gwcomp` | current Rust server exposes only the X11 listener/session shell and has no GWIPC peer/bootstrap options | blocked until WP5 |
+| 6 | Rust `glasswyrmd` + Rust `gwm` + legacy `gwcomp` | same Rust-server GWIPC peer/bootstrap gap | blocked until WP5 |
+| 7 | Rust `glasswyrmd` + legacy `gwm` + Rust `gwcomp` | same Rust-server GWIPC peer/bootstrap gap | blocked until WP5 |
+| 8 | Rust `glasswyrmd` + Rust `gwm` + Rust `gwcomp` | same Rust-server GWIPC peer/bootstrap gap; this becomes the final all-Rust process checkpoint | blocked until WP5 |
+
+The matrix is a migration ledger, not a requirement to keep eight permanent
+full-stack suites after cutover. When a blocked Rust-server row becomes
+runnable, attach it to the smallest profile that isolates that cutover edge.
 
 ### Retained Rust `gwcomp` checkpoint
 

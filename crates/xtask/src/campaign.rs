@@ -282,6 +282,15 @@ pub fn campaign_steps(cli: &Cli, context: &Context) -> Result<Vec<CampaignStep>,
         if let Some(dependency) = dependency {
             step.dependencies.push(dependency.to_owned());
         }
+        if step.name == "mixed-rust-peers" {
+            for dependency in ["gwm-build", "gwcomp-build"] {
+                if names.contains(dependency)
+                    && !step.dependencies.iter().any(|value| value == dependency)
+                {
+                    step.dependencies.push(dependency.to_owned());
+                }
+            }
+        }
     }
     Ok(steps)
 }
@@ -312,6 +321,11 @@ fn classify(invocation: &Invocation) -> Result<String, String> {
         "rust-workspace-test"
     } else if leaf == "meson" && contains("tier4-software") {
         "legacy-tier4"
+    } else if leaf == "cargo"
+        && contains("legacy-output-restart")
+        && contains("legacy-server-rust-peers")
+    {
+        "mixed-rust-peers"
     } else if leaf == "cargo" && contains("legacy-output-restart") {
         "legacy-restart"
     } else if leaf == "cargo"
@@ -398,6 +412,22 @@ fn source_inputs(name: &str) -> Vec<PathBuf> {
                 "crates/gw-types",
                 "tests/fixtures/m4",
                 "tests/compat/m14",
+            ]
+            .map(PathBuf::from),
+        );
+    } else if name == "mixed-rust-peers" {
+        result.extend(
+            [
+                "crates/gw-transition-tests",
+                "crates/gwm",
+                "crates/gwm-core",
+                "crates/gwcomp",
+                "crates/gwcomp-core",
+                "crates/gw-ipc",
+                "crates/gw-wire",
+                "crates/gw-types",
+                "tests/fixtures/m13",
+                "tests/fixtures/m14",
             ]
             .map(PathBuf::from),
         );
@@ -1441,7 +1471,7 @@ mod campaign_tests {
     #[test]
     fn campaign_graph_has_unique_inventory_and_bounded_dependency_edges() {
         let steps = campaign_steps(&cli(), &context()).unwrap();
-        assert_eq!(steps.len(), 21);
+        assert_eq!(steps.len(), 22);
         let names = steps
             .iter()
             .map(|step| step.name.as_str())
@@ -1459,5 +1489,10 @@ mod campaign_tests {
             .unwrap();
         assert!(inventory.dependencies.is_empty());
         assert!(inventory.invocation.remove_hardware_authorization);
+        let peers = steps
+            .iter()
+            .find(|step| step.name == "mixed-rust-peers")
+            .unwrap();
+        assert_eq!(peers.dependencies, ["gwm-build", "gwcomp-build"]);
     }
 }

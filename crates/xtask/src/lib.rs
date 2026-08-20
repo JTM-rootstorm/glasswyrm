@@ -20,7 +20,7 @@ Usage:
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test software-acceptance
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test headless gwcomp
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test checkpoint gwcomp
-  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|gwcomp|tools|all
+  cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] test mixed legacy-restart|gwm|gwcomp|peers|tools|all
   cargo xtask [--legacy-build PATH] [--rust-bin-dir PATH] campaign [--list|--only STEP[,STEP...]|--from STEP] [--resume] [--rerun-failed]
   cargo xtask replay m14-probe --report PATH --config PATH
   cargo xtask replay m14-fixture --fixture-dir PATH --config PATH --required-base SHA --tested-commit SHA
@@ -62,6 +62,7 @@ pub enum TestTier {
     MixedLegacyRestart,
     MixedGwm,
     MixedGwcomp,
+    MixedPeers,
     MixedTools,
     MixedAll,
     HardwareVrr(Vec<String>),
@@ -217,18 +218,20 @@ fn parse_test(arguments: &mut impl Iterator<Item = String>) -> Result<TestTier, 
         }
         "mixed" => {
             let component = arguments.next().ok_or_else(|| {
-                "test mixed requires legacy-restart, gwm, gwcomp, tools, or all".to_owned()
+                "test mixed requires legacy-restart, gwm, gwcomp, peers, tools, or all".to_owned()
             })?;
             ensure_finished(arguments)?;
             match component.as_str() {
                 "legacy-restart" => TestTier::MixedLegacyRestart,
                 "gwm" => TestTier::MixedGwm,
                 "gwcomp" => TestTier::MixedGwcomp,
+                "peers" => TestTier::MixedPeers,
                 "tools" => TestTier::MixedTools,
                 "all" => TestTier::MixedAll,
                 _ => {
                     return Err(
-                        "test mixed requires legacy-restart, gwm, gwcomp, tools, or all".to_owned(),
+                        "test mixed requires legacy-restart, gwm, gwcomp, peers, tools, or all"
+                            .to_owned(),
                     );
                 }
             }
@@ -361,6 +364,35 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         ]);
         invocations
     };
+    let rust_peers_gate = |build_candidates: bool| {
+        let mut invocations = Vec::new();
+        if build_candidates && build_default_rust_binaries {
+            invocations.push(cargo(&[
+                "build", "--locked", "-p", "gwm", "--bin", "gwm", "-p", "gwcomp", "--bin", "gwcomp",
+            ]));
+        }
+        let mut invocation = cargo(&[
+            "run",
+            "--locked",
+            "-p",
+            "gw-transition-tests",
+            "--bin",
+            "legacy-output-restart",
+            "--",
+            "--build-dir",
+        ]);
+        invocation.args.push(legacy_build.as_os_str().to_owned());
+        invocation.args.extend([
+            OsString::from("--wm-executable"),
+            rust_gwm().into_os_string(),
+            OsString::from("--compositor-executable"),
+            rust_gwcomp().into_os_string(),
+            OsString::from("--topology-label"),
+            OsString::from("legacy-server-rust-peers"),
+        ]);
+        invocations.push(invocation);
+        invocations
+    };
     let rust_tools_gate = || {
         let mut invocations = Vec::new();
         if build_default_rust_binaries {
@@ -445,6 +477,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         let mut invocations = vec![legacy_restart()];
         invocations.extend(rust_gwm_gate());
         invocations.extend(rust_gwcomp_gate());
+        invocations.extend(rust_peers_gate(false));
         invocations.extend(rust_tools_gate());
         invocations
     };
@@ -488,6 +521,7 @@ pub fn plan(cli: &Cli, context: &Context) -> Result<Vec<Invocation>, String> {
         Task::Test(TestTier::MixedLegacyRestart) => vec![legacy_restart()],
         Task::Test(TestTier::MixedGwm) => rust_gwm_gate(),
         Task::Test(TestTier::MixedGwcomp) => rust_gwcomp_gate(),
+        Task::Test(TestTier::MixedPeers) => rust_peers_gate(true),
         Task::Test(TestTier::MixedTools) => rust_tools_gate(),
         Task::Test(TestTier::MixedAll) => mixed_all(),
         Task::Test(TestTier::HardwareVrr(arguments)) => {
@@ -633,7 +667,7 @@ mod tests {
         )
         .unwrap();
         let invocations = plan(&cli, &context()).unwrap();
-        assert_eq!(invocations.len(), 19);
+        assert_eq!(invocations.len(), 20);
         assert_eq!(strings(&invocations[0]), ["fmt", "--all", "--", "--check"]);
         assert_eq!(
             strings(&invocations[1]),
@@ -654,8 +688,9 @@ mod tests {
         );
         assert_eq!(invocations[4].program, "cargo");
         assert!(strings(&invocations[4]).contains(&"legacy-output-restart".to_owned()));
+        assert!(strings(&invocations[17]).contains(&"legacy-server-rust-peers".to_owned()));
         assert_eq!(
-            invocations[18].program,
+            invocations[19].program,
             "/workspace/tests/tools/output_tools_test.sh"
         );
     }
@@ -742,6 +777,46 @@ mod tests {
                 .iter()
                 .all(|invocation| invocation.remove_hardware_authorization)
         );
+    }
+
+    #[test]
+    fn mixed_peers_runs_legacy_server_with_both_rust_peers() {
+        let cli = Cli::parse(
+            [
+                "--legacy-build",
+                "legacy-out",
+                "--rust-bin-dir",
+                "rust-out",
+                "test",
+                "mixed",
+                "peers",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )
+        .unwrap();
+        let invocations = plan(&cli, &context()).unwrap();
+        assert_eq!(invocations.len(), 1);
+        assert_eq!(invocations[0].program, "cargo");
+        let args = strings(&invocations[0]);
+        assert!(args.contains(&"legacy-output-restart".to_owned()));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--build-dir", "legacy-out"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--wm-executable", "rust-out/gwm"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--compositor-executable", "rust-out/gwcomp"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--topology-label", "legacy-server-rust-peers"])
+        );
+        assert!(invocations[0].remove_hardware_authorization);
     }
 
     #[test]

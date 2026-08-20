@@ -27,6 +27,9 @@ type AnyError = Box<dyn Error + Send + Sync>;
 #[derive(Clone, Debug)]
 struct Options {
     build_dir: PathBuf,
+    wm_executable: Option<PathBuf>,
+    compositor_executable: Option<PathBuf>,
+    topology_label: String,
     artifact_root: PathBuf,
     timeout: Duration,
     run_id: String,
@@ -35,6 +38,9 @@ struct Options {
 impl Options {
     fn parse() -> Result<Self, String> {
         let mut build_dir = std::env::var_os("GW_LEGACY_BUILD_DIR").map(PathBuf::from);
+        let mut wm_executable = None;
+        let mut compositor_executable = None;
+        let mut topology_label = "legacy-peers".to_owned();
         let mut artifact_root = std::env::var_os("GW_TRANSITION_ARTIFACT_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("artifacts/rust-transition/failures"));
@@ -46,6 +52,24 @@ impl Options {
             match value.as_ref() {
                 "--build-dir" => {
                     build_dir = Some(PathBuf::from(take_value(&mut arguments, "--build-dir")?));
+                }
+                "--wm-executable" => {
+                    wm_executable = Some(PathBuf::from(take_value(
+                        &mut arguments,
+                        "--wm-executable",
+                    )?));
+                }
+                "--compositor-executable" => {
+                    compositor_executable = Some(PathBuf::from(take_value(
+                        &mut arguments,
+                        "--compositor-executable",
+                    )?));
+                }
+                "--topology-label" => {
+                    topology_label = take_value(&mut arguments, "--topology-label")?
+                        .into_string()
+                        .map_err(|_| "--topology-label must be valid UTF-8".to_owned())?;
+                    validate_component(&topology_label)?;
                 }
                 "--artifact-root" => {
                     artifact_root = PathBuf::from(take_value(&mut arguments, "--artifact-root")?);
@@ -69,7 +93,7 @@ impl Options {
                 }
                 "--help" => {
                     println!(
-                        "Usage: legacy-output-restart --build-dir DIR [--artifact-root DIR] [--timeout-ms N] [--run-id ID]"
+                        "Usage: legacy-output-restart --build-dir DIR [--wm-executable PATH] [--compositor-executable PATH] [--topology-label LABEL] [--artifact-root DIR] [--timeout-ms N] [--run-id ID]"
                     );
                     std::process::exit(0);
                 }
@@ -80,6 +104,9 @@ impl Options {
             build_dir.ok_or_else(|| "--build-dir or GW_LEGACY_BUILD_DIR is required".to_owned())?;
         Ok(Self {
             build_dir,
+            wm_executable,
+            compositor_executable,
+            topology_label,
             artifact_root,
             timeout,
             run_id,
@@ -554,12 +581,22 @@ fn run_scenario(
     trace: &mut Trace,
 ) -> Result<(), AnyError> {
     let glasswyrmd = options.build_dir.join("src/glasswyrmd");
-    let gwm = options.build_dir.join("src/gwm");
-    let gwcomp = options.build_dir.join("src/gwcomp");
-    for executable in [&glasswyrmd, &gwm, &gwcomp] {
+    let gwm = options
+        .wm_executable
+        .clone()
+        .unwrap_or_else(|| options.build_dir.join("src/gwm"));
+    let gwcomp = options
+        .compositor_executable
+        .clone()
+        .unwrap_or_else(|| options.build_dir.join("src/gwcomp"));
+    for (role, executable) in [
+        ("legacy server", &glasswyrmd),
+        ("window manager", &gwm),
+        ("compositor", &gwcomp),
+    ] {
         require(
             executable.is_file(),
-            format!("legacy executable is missing: {}", executable.display()),
+            format!("{role} executable is missing: {}", executable.display()),
         )?;
     }
 
@@ -716,24 +753,28 @@ fn json_escape(value: &str) -> String {
 
 fn real_main() -> Result<(), AnyError> {
     let options = Options::parse().map_err(io::Error::other)?;
-    let test_id = TestId::with_seed(
-        "legacy M14 output restart",
-        deterministic_seed(options.run_id.as_bytes()),
-    );
+    // Keep the runtime slug compact enough for Linux AF_UNIX sun_path even
+    // with a project-local TMPDIR. The topology remains in structured trace data.
+    let test_id = TestId::with_seed("m14r", deterministic_seed(options.run_id.as_bytes()));
     let runtime = RuntimeDir::create(&test_id)?;
     let trace_path = runtime.fixtures_dir().join("scenario.jsonl");
     let mut trace = Trace::create(trace_path)?;
     let mut processes = Processes::new();
     trace.event(
         "scenario-start",
-        &format!("legacy build {}", options.build_dir.display()),
+        &format!(
+            "topology {} legacy build {}",
+            options.topology_label,
+            options.build_dir.display()
+        ),
     )?;
 
     match run_scenario(&options, &runtime, &mut processes, &mut trace) {
         Ok(()) => {
             processes.shutdown(options.timeout);
             println!(
-                "{{\"scenario\":\"legacy-m14-output-restart\",\"result\":\"pass\",\"configuration_601\":\"rejected-retained-generation-1\",\"configuration_602\":\"accepted-generation-2\"}}"
+                "{{\"scenario\":\"m14-output-restart\",\"topology\":\"{}\",\"result\":\"pass\",\"configuration_601\":\"rejected-retained-generation-1\",\"configuration_602\":\"accepted-generation-2\"}}",
+                json_escape(&options.topology_label)
             );
             Ok(())
         }
