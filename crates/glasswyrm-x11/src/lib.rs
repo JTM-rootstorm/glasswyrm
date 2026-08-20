@@ -5,6 +5,7 @@
 mod atoms;
 mod byte_order;
 mod core;
+mod decode;
 mod dispatch;
 mod event;
 mod reply;
@@ -16,6 +17,11 @@ mod wire;
 pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAtom};
 pub use byte_order::ByteOrder;
 pub use core::{CoreErrorCode, CoreEventType, CoreOpcode, wire_sequence};
+pub use decode::{
+    CoreRequestDecodeError, DeletePropertyRequest, GetPropertyRequest, InternAtomRequest,
+    QueryExtensionRequest, decode_delete_property, decode_empty_request, decode_get_property,
+    decode_intern_atom, decode_query_extension, decode_single_u32_request,
+};
 pub use dispatch::{
     CoreClient, CoreDispatchState, ExtensionAssignment, InitialCoreDispatch, InternAtomOutcome,
     PropertyChangeRequest, PropertyData, PropertyMode, PropertyMutationOutcome,

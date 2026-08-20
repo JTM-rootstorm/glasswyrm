@@ -1,8 +1,8 @@
 {
-  "authority_revision": "6d42e999ce684187987299c27b1b234bde10247b",
+  "authority_revision": "07b19fbca8027e16824d2aabd81bbe5991a374c9",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
-    "crates/glasswyrm-x11/src/dispatch.rs": "c899297fffdbec1a404cf915ad6ce5e898af32d8314ba45bc54e6da61716edaa",
+    "crates/glasswyrm-x11/src/dispatch.rs": "9d8741df4394c42ab5d50e3a33662fbb1d6e664823607511268b34507ecc4d60",
     "src/glasswyrmd/extension_registry.hpp": "ec70a08c9d2644ca05466ebbd45a05454723a28e968a9433d61b02b9ffe547cb",
     "src/glasswyrmd/request_dispatcher.cpp": "c7ddd12d92aaddb4635c625b93f8eb0519d064ecb508431663b2adf538a5846b",
     "src/glasswyrmd/resource_id.hpp": "6491bcd2c311252573f3bd4a1fe42a22b106ce5e19941cd71b4c227c46f687a1",

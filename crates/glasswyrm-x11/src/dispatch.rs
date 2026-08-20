@@ -1,5 +1,7 @@
 use crate::{
-    ByteOrder, CoreError, CoreErrorCode, CoreOpcode, FramedRequest, ReplyBuilder, encode_core_error,
+    ByteOrder, CoreError, CoreErrorCode, CoreOpcode, CoreRequestDecodeError, FramedRequest,
+    ReplyBuilder, decode_delete_property, decode_empty_request, decode_get_property,
+    decode_intern_atom, decode_query_extension, decode_single_u32_request, encode_core_error,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -415,8 +417,9 @@ fn dispatch_destroy_window(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    let Some(window) = exact_window_request(order, request) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let window = match decode_single_u32_request(order, request) {
+        Ok(window) => window,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
     match state.destroy_window(window) {
         WindowDestroyOutcome::Success | WindowDestroyOutcome::RootPreserved => {
@@ -437,8 +440,9 @@ fn dispatch_get_geometry(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    let Some(drawable) = exact_window_request(order, request) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let drawable = match decode_single_u32_request(order, request) {
+        Ok(drawable) => drawable,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
     let Some(geometry) = state.window_geometry(drawable) else {
         return protocol_error_with_value(
@@ -472,8 +476,9 @@ fn dispatch_query_tree(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    let Some(window) = exact_window_request(order, request) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let window = match decode_single_u32_request(order, request) {
+        Ok(window) => window,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
     let Some(tree) = state.window_tree(window) else {
         return protocol_error_with_value(
@@ -649,30 +654,29 @@ fn dispatch_delete_property(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() != 12 || request.body().len() != 8 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let window = read_u32(order, request.body(), 0);
-    let property = read_u32(order, request.body(), 4);
-    if !state.window_exists(window) {
+    let decoded = match decode_delete_property(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
+    };
+    if !state.window_exists(decoded.window) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadWindow,
-            window,
+            decoded.window,
         );
     }
-    if !state.atom_is_valid(property, false) {
+    if !state.atom_is_valid(decoded.property, false) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadAtom,
-            property,
+            decoded.property,
         );
     }
-    match state.delete_property(window, property) {
+    match state.delete_property(decoded.window, decoded.property) {
         PropertyMutationOutcome::Success => InitialCoreDispatch::NoReply,
         PropertyMutationOutcome::BadAlloc => {
             protocol_error(order, sequence, request, CoreErrorCode::BadAlloc)
@@ -692,58 +696,44 @@ fn dispatch_get_property(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() != 24 || request.body().len() != 20 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    if request.data > 1 {
-        return protocol_error_with_value(
-            order,
-            sequence,
-            request,
-            CoreErrorCode::BadValue,
-            u32::from(request.data),
-        );
-    }
-    let body = request.body();
-    let window = read_u32(order, body, 0);
-    let property = read_u32(order, body, 4);
-    let requested_type = read_u32(order, body, 8);
-    let long_offset = read_u32(order, body, 12);
-    let long_length = read_u32(order, body, 16);
-    if !state.window_exists(window) {
+    let decoded = match decode_get_property(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
+    };
+    if !state.window_exists(decoded.window) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadWindow,
-            window,
+            decoded.window,
         );
     }
-    if !state.atom_is_valid(property, false) {
+    if !state.atom_is_valid(decoded.property, false) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadAtom,
-            property,
+            decoded.property,
         );
     }
-    if !state.atom_is_valid(requested_type, true) {
+    if !state.atom_is_valid(decoded.requested_type, true) {
         return protocol_error_with_value(
             order,
             sequence,
             request,
             CoreErrorCode::BadAtom,
-            requested_type,
+            decoded.requested_type,
         );
     }
     let reply = match state.get_property(PropertyReadRequest {
-        window,
-        property,
-        requested_type: (requested_type != 0).then_some(requested_type),
-        delete_after_read: request.data != 0,
-        long_offset,
-        long_length,
+        window: decoded.window,
+        property: decoded.property,
+        requested_type: (decoded.requested_type != 0).then_some(decoded.requested_type),
+        delete_after_read: decoded.delete_after_read,
+        long_offset: decoded.long_offset,
+        long_length: decoded.long_length,
     }) {
         PropertyReadOutcome::Success(reply) => reply,
         PropertyReadOutcome::BadValue => {
@@ -752,7 +742,7 @@ fn dispatch_get_property(
                 sequence,
                 request,
                 CoreErrorCode::BadValue,
-                long_offset,
+                decoded.long_offset,
             );
         }
         PropertyReadOutcome::Unsupported => {
@@ -814,8 +804,9 @@ fn dispatch_list_properties(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    let Some(window) = exact_window_request(order, request) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let window = match decode_single_u32_request(order, request) {
+        Ok(window) => window,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
     if !state.window_exists(window) {
         return protocol_error_with_value(
@@ -846,11 +837,6 @@ fn dispatch_list_properties(
     }
 }
 
-fn exact_window_request(order: ByteOrder, request: &FramedRequest) -> Option<u32> {
-    (request.core_size() == 8 && request.body().len() == 4)
-        .then(|| read_u32(order, request.body(), 0))
-}
-
 fn read_u16(order: ByteOrder, bytes: &[u8], offset: usize) -> u16 {
     order.read_u16([bytes[offset], bytes[offset + 1]])
 }
@@ -876,8 +862,8 @@ pub fn dispatch_initial_core_request(
     match request.opcode {
         opcode if opcode == CoreOpcode::NoOperation as u8 => InitialCoreDispatch::NoReply,
         opcode if opcode == CoreOpcode::GetInputFocus as u8 => {
-            if request.core_size() != 4 {
-                return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+            if let Err(error) = decode_empty_request(request) {
+                return protocol_decode_error(order, sequence, request, error);
             }
             let mut reply = ReplyBuilder::new(order, sequence, 0);
             reply
@@ -891,6 +877,15 @@ pub fn dispatch_initial_core_request(
         }
         _ => protocol_error(order, sequence, request, CoreErrorCode::BadRequest),
     }
+}
+
+fn protocol_decode_error(
+    order: ByteOrder,
+    sequence: u64,
+    request: &FramedRequest,
+    error: CoreRequestDecodeError,
+) -> InitialCoreDispatch {
+    protocol_error_with_value(order, sequence, request, error.code, error.bad_value)
 }
 
 fn protocol_error(
@@ -931,28 +926,11 @@ fn dispatch_intern_atom(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.data > 1 {
-        return protocol_error_with_value(
-            order,
-            sequence,
-            request,
-            CoreErrorCode::BadValue,
-            u32::from(request.data),
-        );
-    }
-    let body = request.body();
-    if body.len() < 4 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let name_length = usize::from(order.read_u16([body[0], body[1]]));
-    let Some(padded_name_length) = name_length.checked_add(3).map(|value| value & !3) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let decoded = match decode_intern_atom(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
-    if request.core_size() != 8 + padded_name_length || body.len() < 4 + name_length {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let name = &body[4..4 + name_length];
-    let atom = match state.intern_atom(name, request.data != 0) {
+    let atom = match state.intern_atom(decoded.name, decoded.only_if_exists) {
         InternAtomOutcome::Success(atom) => atom,
         InternAtomOutcome::Exhausted => {
             return protocol_error(order, sequence, request, CoreErrorCode::BadAlloc);
@@ -975,14 +953,10 @@ fn dispatch_get_atom_name(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() != 8 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let body = request.body();
-    if body.len() != 4 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let atom = order.read_u32([body[0], body[1], body[2], body[3]]);
+    let atom = match decode_single_u32_request(order, request) {
+        Ok(atom) => atom,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
+    };
     let Some(name) = state.atom_name(atom) else {
         return protocol_error_with_value(order, sequence, request, CoreErrorCode::BadAtom, atom);
     };
@@ -1010,18 +984,11 @@ fn dispatch_query_extension(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    let body = request.body();
-    if body.len() < 4 {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let name_length = usize::from(read_u16(order, body, 0));
-    let Some(padded_name_length) = name_length.checked_add(3).map(|length| length & !3) else {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    let decoded = match decode_query_extension(order, request) {
+        Ok(decoded) => decoded,
+        Err(error) => return protocol_decode_error(order, sequence, request, error),
     };
-    if request.core_size() != 8 + padded_name_length || body.len() != 4 + padded_name_length {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
-    }
-    let extension = state.query_extension(&body[4..4 + name_length]);
+    let extension = state.query_extension(decoded.name);
     let mut reply = ReplyBuilder::new(order, sequence, 0);
     reply
         .write_u8(u8::from(extension.is_some()))
@@ -1042,8 +1009,8 @@ fn dispatch_list_extensions(
     state: &impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
-    if request.core_size() != 4 || !request.body().is_empty() {
-        return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+    if let Err(error) = decode_empty_request(request) {
+        return protocol_decode_error(order, sequence, request, error);
     }
     let names = state.enabled_extension_names();
     let Ok(count) = u8::try_from(names.len()) else {
