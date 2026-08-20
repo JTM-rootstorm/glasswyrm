@@ -30,6 +30,10 @@ dependencies = [
 [[package]]
 name = "gw-ipc-capi"
 version = "0.1.0"
+dependencies = [
+ "gw-types",
+ "gw-wire",
+]
 
 [[package]]
 name = "gw-platform-linux"

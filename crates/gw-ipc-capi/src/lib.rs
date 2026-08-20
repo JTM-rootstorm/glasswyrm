@@ -6,13 +6,15 @@
 
 use core::ffi::{c_char, c_void};
 use core::{mem, ptr, slice};
+use gw_types::MessageType;
+use gw_wire::compositor::{SurfaceRemove, decode_surface_remove, encode_surface_remove};
 
 const GWIPC_STATUS_OK: i32 = 0;
 const GWIPC_STATUS_INVALID_ARGUMENT: i32 = 4;
 const GWIPC_STATUS_OUT_OF_MEMORY: i32 = 6;
 const GWIPC_STATUS_PROTOCOL_ERROR: i32 = 8;
 
-const GWIPC_MESSAGE_SURFACE_REMOVE: u16 = 0x0111;
+const GWIPC_MESSAGE_SURFACE_REMOVE: u16 = MessageType::SURFACE_REMOVE.get();
 
 const STATUS_NAMES: [&[u8]; 14] = [
     b"Ok\0",
@@ -143,9 +145,13 @@ pub unsafe extern "C" fn gwipc_rust_contract_encode_surface_remove(
         return GWIPC_STATUS_INVALID_ARGUMENT;
     }
 
-    let payload = allocate(GwipcContractPayload {
-        bytes: value.surface_id.to_le_bytes(),
+    let encoded = encode_surface_remove(&SurfaceRemove {
+        surface_id: value.surface_id,
     });
+    let bytes: [u8; 8] = encoded
+        .try_into()
+        .expect("SurfaceRemove wire size is fixed by gw-wire");
+    let payload = allocate(GwipcContractPayload { bytes });
     if payload.is_null() {
         return GWIPC_STATUS_OUT_OF_MEMORY;
     }
@@ -212,24 +218,18 @@ pub unsafe extern "C" fn gwipc_rust_contract_decode_parts(
     if message_type != GWIPC_MESSAGE_SURFACE_REMOVE {
         return GWIPC_STATUS_INVALID_ARGUMENT;
     }
-    if size != 8 {
-        return GWIPC_STATUS_PROTOCOL_ERROR;
-    }
-
-    // SAFETY: caller obligations above guarantee eight readable bytes.
+    // SAFETY: caller obligations above guarantee `size` readable bytes.
     let bytes = unsafe { slice::from_raw_parts(bytes, size) };
-    let mut encoded_id = [0_u8; 8];
-    encoded_id.copy_from_slice(bytes);
-    let surface_id = u64::from_le_bytes(encoded_id);
-    if surface_id == 0 {
-        return GWIPC_STATUS_PROTOCOL_ERROR;
-    }
+    let decoded = match decode_surface_remove(bytes) {
+        Ok(value) => value,
+        Err(_) => return GWIPC_STATUS_PROTOCOL_ERROR,
+    };
 
     let contract = allocate(GwipcDecodedContract {
         message_type,
         surface_remove: GwipcSurfaceRemove {
             struct_size: mem::size_of::<GwipcSurfaceRemove>(),
-            surface_id,
+            surface_id: decoded.surface_id,
             reserved: [0; 4],
         },
     });

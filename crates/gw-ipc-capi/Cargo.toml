@@ -10,5 +10,9 @@ description = "Temporary bounded C ABI bridge for the Rust GWIPC migration"
 crate-type = ["cdylib", "staticlib"]
 path = "src/lib.rs"
 
+[dependencies]
+gw-types = { path = "../gw-types" }
+gw-wire = { path = "../gw-wire" }
+
 [lints]
 workspace = true
