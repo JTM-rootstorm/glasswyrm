@@ -9,12 +9,13 @@ use glasswyrm_core::window::{
     WindowCreateSpec, WindowGeometry, WindowId, WindowStore,
 };
 use glasswyrm_x11::{
-    ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, ExtensionAssignment,
-    ExtensionRegistry, InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest,
-    PropertyData as X11PropertyData, PropertyMode, PropertyMutationOutcome, PropertyReadOutcome,
-    PropertyReadReply, PropertyReadRequest, RequestFrameStatus, RequestFramer, SCREEN_MODEL,
-    WindowCreateOutcome, WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply,
-    WindowTreeReply, dispatch_core_request_for_client, encode_core_error,
+    ByteOrder, CoreClient, CoreDispatchAction, CoreDispatchState, CoreError, CoreErrorCode,
+    ExtensionAssignment, ExtensionDescriptor, ExtensionRegistry, InitialCoreDispatch,
+    InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData, PropertyMode,
+    PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply, PropertyReadRequest,
+    RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome, WindowCreateRequest,
+    WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply, dispatch_core_request_for_client,
+    encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -75,6 +76,10 @@ impl CoreDispatchState for ServerState {
         self.extensions
             .query(name)
             .map(|descriptor| descriptor.assignment)
+    }
+
+    fn extension_by_opcode(&self, major_opcode: u8) -> Option<ExtensionDescriptor> {
+        self.extensions.query_opcode(major_opcode).copied()
     }
 
     fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
@@ -443,11 +448,30 @@ impl RequestLoop {
                             self.framer.request(),
                         )
                     };
-                    if let InitialCoreDispatch::Packet(bytes) = packet
-                        && !self.output.enqueue(bytes)
+                    let action = match packet {
+                        InitialCoreDispatch::NoReply => None,
+                        InitialCoreDispatch::Packet(bytes) => {
+                            if !self.output.enqueue(bytes) {
+                                self.close_now();
+                                break;
+                            }
+                            None
+                        }
+                        InitialCoreDispatch::PacketWithAction { packet, action } => {
+                            if !self.output.enqueue(packet) {
+                                self.close_now();
+                                break;
+                            }
+                            Some(action)
+                        }
+                    };
+                    if let Some(CoreDispatchAction::EnableBigRequests {
+                        maximum_length_units,
+                    }) = action
                     {
-                        self.close_now();
-                        break;
+                        self.framer
+                            .enable_big_requests(maximum_length_units)
+                            .expect("dispatch actions use a valid BIG-REQUESTS limit");
                     }
                     self.framer.reset();
                 }
@@ -534,7 +558,7 @@ impl Drop for RequestLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glasswyrm_x11::CoreOpcode;
+    use glasswyrm_x11::{CoreOpcode, ExtensionProfiles};
 
     fn request(order: ByteOrder, opcode: u8, units: u16) -> Vec<u8> {
         let mut bytes = vec![opcode, 0];
@@ -544,6 +568,17 @@ mod tests {
         };
         bytes.extend_from_slice(&encoded_units);
         bytes.resize(usize::from(units) * 4, 0);
+        bytes
+    }
+
+    fn big_request(order: ByteOrder, opcode: u8, units: u32) -> Vec<u8> {
+        let mut bytes = vec![opcode, 0, 0, 0];
+        let encoded_units = match order {
+            ByteOrder::LittleEndian => units.to_le_bytes(),
+            ByteOrder::BigEndian => units.to_be_bytes(),
+        };
+        bytes.extend_from_slice(&encoded_units);
+        bytes.resize(usize::try_from(units).unwrap() * 4, 0);
         bytes
     }
 
@@ -680,6 +715,34 @@ mod tests {
             1
         );
         assert_eq!(u32_at(ByteOrder::LittleEndian, packets(&loop_)[1], 8), 0);
+    }
+
+    #[test]
+    fn big_requests_action_enables_extended_framing_for_subsequent_requests() {
+        for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {
+            let state = ServerState {
+                extensions: ExtensionRegistry::new(ExtensionProfiles::GAME_COMPAT),
+                ..ServerState::default()
+            };
+            let mut loop_ =
+                RequestLoop::new(order, u16::MAX, 1, Vec::new(), Arc::new(Mutex::new(state)));
+            assert!(!loop_.framer.big_requests_enabled());
+            assert_eq!(
+                loop_.feed(&request(order, 128, 1), &mut RequestWorkBudget::default()),
+                1
+            );
+            assert!(loop_.framer.big_requests_enabled());
+            let packets_before = packets(&loop_).len();
+            assert_eq!(
+                loop_.feed(
+                    &big_request(order, CoreOpcode::NoOperation as u8, 2),
+                    &mut RequestWorkBudget::default(),
+                ),
+                1
+            );
+            assert_eq!(packets(&loop_).len(), packets_before);
+            assert!(loop_.accepts_input());
+        }
     }
 
     #[test]

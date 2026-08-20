@@ -1,14 +1,24 @@
 use crate::{
     ByteOrder, CoreError, CoreErrorCode, CoreOpcode, CoreRequestDecodeError, ExtensionAssignment,
-    FramedRequest, PropertyMode, ReplyBuilder, WindowCreateRequest, decode_change_property,
-    decode_create_window, decode_delete_property, decode_empty_request, decode_get_property,
-    decode_intern_atom, decode_query_extension, decode_single_u32_request, encode_core_error,
+    ExtensionDescriptor, ExtensionKind, FramedRequest, MAXIMUM_BIG_REQUEST_LENGTH_UNITS,
+    PropertyMode, ReplyBuilder, WindowCreateRequest, decode_change_property, decode_create_window,
+    decode_delete_property, decode_empty_request, decode_get_property, decode_intern_atom,
+    decode_query_extension, decode_single_u32_request, encode_core_error,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreDispatchAction {
+    EnableBigRequests { maximum_length_units: u32 },
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InitialCoreDispatch {
     NoReply,
     Packet(Vec<u8>),
+    PacketWithAction {
+        packet: Vec<u8>,
+        action: CoreDispatchAction,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,6 +151,10 @@ pub trait CoreDispatchState {
         None
     }
 
+    fn extension_by_opcode(&self, _major_opcode: u8) -> Option<ExtensionDescriptor> {
+        None
+    }
+
     fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
         Vec::new()
     }
@@ -221,6 +235,9 @@ pub fn dispatch_core_request_for_client(
     state: &mut impl CoreDispatchState,
     request: &FramedRequest,
 ) -> InitialCoreDispatch {
+    if request.opcode >= 128 {
+        return dispatch_extension_request(order, sequence, state, request);
+    }
     match request.opcode {
         opcode if opcode == CoreOpcode::CreateWindow as u8 => {
             dispatch_create_window(order, sequence, client, state, request)
@@ -259,6 +276,49 @@ pub fn dispatch_core_request_for_client(
             dispatch_list_extensions(order, sequence, state, request)
         }
         _ => dispatch_initial_core_request(order, sequence, focused_window, request),
+    }
+}
+
+fn dispatch_extension_request(
+    order: ByteOrder,
+    sequence: u64,
+    state: &impl CoreDispatchState,
+    request: &FramedRequest,
+) -> InitialCoreDispatch {
+    let Some(extension) = state.extension_by_opcode(request.opcode) else {
+        return protocol_error(order, sequence, request, CoreErrorCode::BadRequest);
+    };
+    match extension.kind {
+        ExtensionKind::BigRequests => {
+            if request.data != 0 {
+                return protocol_error(order, sequence, request, CoreErrorCode::BadRequest);
+            }
+            if request.core_size() != 4 || !request.body().is_empty() {
+                return protocol_error(order, sequence, request, CoreErrorCode::BadLength);
+            }
+            let mut reply = ReplyBuilder::new(order, sequence, 0);
+            reply
+                .write_u32(MAXIMUM_BIG_REQUEST_LENGTH_UNITS)
+                .expect("BIG-REQUESTS fixed fields fit the core reply");
+            InitialCoreDispatch::PacketWithAction {
+                packet: reply
+                    .finish()
+                    .expect("BIG-REQUESTS has no variable-length payload"),
+                action: CoreDispatchAction::EnableBigRequests {
+                    maximum_length_units: MAXIMUM_BIG_REQUEST_LENGTH_UNITS,
+                },
+            }
+        }
+        ExtensionKind::MitShm
+        | ExtensionKind::XFixes
+        | ExtensionKind::Damage
+        | ExtensionKind::Render
+        | ExtensionKind::Composite
+        | ExtensionKind::RandR
+        | ExtensionKind::GwScale
+        | ExtensionKind::GwVrr => {
+            protocol_error(order, sequence, request, CoreErrorCode::BadImplementation)
+        }
     }
 }
 
@@ -932,6 +992,10 @@ mod tests {
             })
         }
 
+        fn extension_by_opcode(&self, major_opcode: u8) -> Option<ExtensionDescriptor> {
+            (major_opcode == 128).then_some(crate::EXTENSION_REGISTRY[0])
+        }
+
         fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
             vec![b"BIG-REQUESTS", b"XFIXES"]
         }
@@ -950,6 +1014,54 @@ mod tests {
         });
         request.bytes[8..8 + name.len()].copy_from_slice(name);
         request
+    }
+
+    #[test]
+    fn big_requests_dispatch_matches_legacy_framing_contract() {
+        for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {
+            let mut state = DiscoveryState;
+            let big_requests = request(order, 128, 1);
+            let InitialCoreDispatch::PacketWithAction { packet, action } =
+                dispatch_core_request(order, 0x1_0001, 1, &mut state, &big_requests)
+            else {
+                panic!("enabled BIG-REQUESTS must return reply plus framing action");
+            };
+            assert_eq!(packet.len(), 32);
+            assert_eq!(u16_at(order, &packet, 2), 1);
+            assert_eq!(u32_at(order, &packet, 8), MAXIMUM_BIG_REQUEST_LENGTH_UNITS);
+            assert_eq!(
+                action,
+                CoreDispatchAction::EnableBigRequests {
+                    maximum_length_units: MAXIMUM_BIG_REQUEST_LENGTH_UNITS,
+                }
+            );
+
+            let wrong_data = request_with_data(order, 128, 1, 1);
+            let InitialCoreDispatch::Packet(error) =
+                dispatch_core_request(order, 2, 1, &mut state, &wrong_data)
+            else {
+                panic!("BIG-REQUESTS nonzero minor opcode must fail");
+            };
+            assert_eq!(error[1], CoreErrorCode::BadRequest as u8);
+            assert_eq!(error[10], 128);
+            assert_eq!(u16_at(order, &error, 8), 1);
+
+            let wrong_length = request(order, 128, 2);
+            let InitialCoreDispatch::Packet(error) =
+                dispatch_core_request(order, 3, 1, &mut state, &wrong_length)
+            else {
+                panic!("BIG-REQUESTS wrong length must fail");
+            };
+            assert_eq!(error[1], CoreErrorCode::BadLength as u8);
+
+            let unknown = request(order, 200, 1);
+            let InitialCoreDispatch::Packet(error) =
+                dispatch_core_request(order, 4, 1, &mut state, &unknown)
+            else {
+                panic!("unknown extension opcode must fail");
+            };
+            assert_eq!(error[1], CoreErrorCode::BadRequest as u8);
+        }
     }
 
     #[test]

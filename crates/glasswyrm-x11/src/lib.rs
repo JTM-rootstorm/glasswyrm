@@ -26,10 +26,10 @@ pub use decode::{
     decode_single_u32_request,
 };
 pub use dispatch::{
-    CoreClient, CoreDispatchState, InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest,
-    PropertyData, PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply,
-    PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome, WindowGeometryReply,
-    WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
+    CoreClient, CoreDispatchAction, CoreDispatchState, InitialCoreDispatch, InternAtomOutcome,
+    PropertyChangeRequest, PropertyData, PropertyMutationOutcome, PropertyReadOutcome,
+    PropertyReadReply, PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome,
+    WindowGeometryReply, WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
     dispatch_initial_core_request,
 };
 pub use event::{
