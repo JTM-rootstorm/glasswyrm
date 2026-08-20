@@ -10,11 +10,11 @@ use glasswyrm_core::window::{
 };
 use glasswyrm_x11::{
     ByteOrder, CoreClient, CoreDispatchState, CoreError, CoreErrorCode, ExtensionAssignment,
-    InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData,
-    PropertyMode, PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply,
-    PropertyReadRequest, RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome,
-    WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply,
-    dispatch_core_request_for_client, encode_core_error,
+    ExtensionRegistry, InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest,
+    PropertyData as X11PropertyData, PropertyMode, PropertyMutationOutcome, PropertyReadOutcome,
+    PropertyReadReply, PropertyReadRequest, RequestFrameStatus, RequestFramer, SCREEN_MODEL,
+    WindowCreateOutcome, WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply,
+    WindowTreeReply, dispatch_core_request_for_client, encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -27,6 +27,7 @@ pub(crate) const MAXIMUM_QUEUED_OUTPUT: usize = 1024 * 1024;
 #[derive(Debug)]
 pub(crate) struct ServerState {
     atoms: AtomTable,
+    extensions: ExtensionRegistry,
     windows: WindowStore,
 }
 
@@ -34,6 +35,7 @@ impl Default for ServerState {
     fn default() -> Self {
         Self {
             atoms: AtomTable::default(),
+            extensions: ExtensionRegistry::default(),
             windows: WindowStore::new(
                 ScreenModel {
                     root_window: WindowId::new(SCREEN_MODEL.root_window),
@@ -69,12 +71,14 @@ impl CoreDispatchState for ServerState {
         self.atoms.name(atom)
     }
 
-    fn query_extension(&self, _name: &[u8]) -> Option<ExtensionAssignment> {
-        None
+    fn query_extension(&self, name: &[u8]) -> Option<ExtensionAssignment> {
+        self.extensions
+            .query(name)
+            .map(|descriptor| descriptor.assignment)
     }
 
     fn enabled_extension_names(&self) -> Vec<&'static [u8]> {
-        Vec::new()
+        self.extensions.enabled_names()
     }
 
     fn create_window(

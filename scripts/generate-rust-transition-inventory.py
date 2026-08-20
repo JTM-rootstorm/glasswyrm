@@ -69,8 +69,41 @@ def parse_rust_dispatch() -> set[str]:
     return set(re.findall(r"CoreOpcode::(\w+) as u8", source))
 
 
+
+def parse_rust_extensions() -> dict[str, dict[str, object]]:
+    source = text("crates/glasswyrm-x11/src/extension.rs")
+    pattern = re.compile(
+        r'ExtensionDescriptor::new\(\s*b"([^"]+)",\s*ExtensionKind::(\w+),\s*'
+        r'ExtensionProfiles::(\w+),\s*(\d+),\s*(\d+),\s*(\d+),\s*'
+        r'(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*\)', re.S,
+    )
+    rows: dict[str, dict[str, object]] = {}
+    for match in pattern.finditer(source):
+        name, kind, capability, *numbers = match.groups()
+        major, first_event, event_count, first_error, error_count, vmaj, vmin = map(int, numbers)
+        if name in rows:
+            raise RuntimeError(f"duplicate Rust extension descriptor: {name}")
+        rows[name] = {
+            "kind": kind,
+            "capability": capability,
+            "major_opcode": major,
+            "first_event": first_event,
+            "event_count": event_count,
+            "first_error": first_error,
+            "error_count": error_count,
+            "maximum_version": [vmaj, vmin],
+        }
+    return rows
+
 def parse_extensions() -> list[dict[str, object]]:
     source = text("src/glasswyrmd/extension_registry.hpp")
+    rust_rows = parse_rust_extensions()
+    capability_names = {
+        "None": "NONE",
+        "GameCompat": "GAME_COMPAT",
+        "ScaleProtocol": "SCALE_PROTOCOL",
+        "VrrProtocol": "VRR_PROTOCOL",
+    }
     pattern = re.compile(
         r'\{"([^"]+)",\s*ExtensionKind::(\w+),\s*'
         r'ExtensionCapability::(\w+),\s*(\d+),\s*(\d+),\s*(\d+),\s*'
@@ -80,7 +113,23 @@ def parse_extensions() -> list[dict[str, object]]:
     for match in pattern.finditer(source):
         name, kind, capability, *numbers = match.groups()
         major, first_event, event_count, first_error, error_count, vmaj, vmin = map(int, numbers)
-        rust_discovery = name in {"BIG-REQUESTS", "MIT-SHM", "XFIXES", "DAMAGE", "RENDER", "Composite", "RANDR", "GW_SCALE", "GW_VRR"}
+        rust = rust_rows.get(name)
+        expected_rust = {
+            "kind": kind,
+            "capability": capability_names[capability],
+            "major_opcode": major,
+            "first_event": first_event,
+            "event_count": event_count,
+            "first_error": first_error,
+            "error_count": error_count,
+            "maximum_version": [vmaj, vmin],
+        }
+        if rust != expected_rust:
+            raise RuntimeError(
+                f"Rust/legacy extension metadata drift for {name}: "
+                f"rust={rust!r} legacy={expected_rust!r}"
+            )
+        rust_discovery = rust is not None
         legacy_name = {
             "BIG-REQUESTS": None,
             "MIT-SHM": "src/glasswyrmd/extensions/mit_shm.cpp",
@@ -98,13 +147,21 @@ def parse_extensions() -> list[dict[str, object]]:
             "event_count": event_count, "first_error": first_error,
             "error_count": error_count, "maximum_version": [vmaj, vmin],
             "legacy_implementation": legacy_name or "src/glasswyrmd/extension_dispatcher.cpp",
-            "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs" if rust_discovery else None,
+            "rust_implementation": "crates/glasswyrm-x11/src/extension.rs" if rust_discovery else None,
+            "rust_discovery_implementation": "crates/glasswyrm-x11/src/dispatch.rs" if rust_discovery else None,
+            "rust_metadata_parity": rust_discovery,
             "rust_discovery": rust_discovery,
             "rust_enabled_by_default": False,
             "fixture_profiles": extension_fixture_profiles(name),
             "mixed_stack_profiles": ["legacy-server-oracle", "rust-server-process-oracle", "wp0c-rust-server-legacy-peers", "wp0c-rust-server-rust-peers"],
             "cutover_phase": "WP3/WP5D",
         })
+    legacy_names = {row["name"] for row in rows}
+    if set(rust_rows) != legacy_names:
+        raise RuntimeError(
+            f"Rust extension registry names drift from legacy: "
+            f"rust={sorted(rust_rows)} legacy={sorted(legacy_names)}"
+        )
     return rows
 
 
@@ -397,6 +454,7 @@ def build_inventory() -> dict[str, object]:
         "fixture_files": [{"path": path, "sha256": sha256_path(path)} for path in sorted(fixture_paths)],
         "canonical_metadata_sha256": {p: sha256_path(p) for p in (
             "crates/glasswyrm-x11/src/core.rs", "crates/glasswyrm-x11/src/dispatch.rs",
+            "crates/glasswyrm-x11/src/extension.rs",
             "src/glasswyrmd/request_dispatcher.cpp", "src/glasswyrmd/extension_registry.hpp",
             "src/glasswyrmd/resource_id.hpp", "tests/unit/resource_id_test.cpp",
         )},

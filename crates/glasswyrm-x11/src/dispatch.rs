@@ -1,8 +1,8 @@
 use crate::{
-    ByteOrder, CoreError, CoreErrorCode, CoreOpcode, CoreRequestDecodeError, FramedRequest,
-    PropertyMode, ReplyBuilder, WindowCreateRequest, decode_change_property, decode_create_window,
-    decode_delete_property, decode_empty_request, decode_get_property, decode_intern_atom,
-    decode_query_extension, decode_single_u32_request, encode_core_error,
+    ByteOrder, CoreError, CoreErrorCode, CoreOpcode, CoreRequestDecodeError, ExtensionAssignment,
+    FramedRequest, PropertyMode, ReplyBuilder, WindowCreateRequest, decode_change_property,
+    decode_create_window, decode_delete_property, decode_empty_request, decode_get_property,
+    decode_intern_atom, decode_query_extension, decode_single_u32_request, encode_core_error,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -15,13 +15,6 @@ pub enum InitialCoreDispatch {
 pub enum InternAtomOutcome {
     Success(u32),
     Exhausted,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ExtensionAssignment {
-    pub major_opcode: u8,
-    pub first_event: u8,
-    pub first_error: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -8,6 +8,7 @@ mod core;
 mod decode;
 mod dispatch;
 mod event;
+mod extension;
 mod reply;
 mod request;
 mod screen;
@@ -25,10 +26,10 @@ pub use decode::{
     decode_single_u32_request,
 };
 pub use dispatch::{
-    CoreClient, CoreDispatchState, ExtensionAssignment, InitialCoreDispatch, InternAtomOutcome,
-    PropertyChangeRequest, PropertyData, PropertyMutationOutcome, PropertyReadOutcome,
-    PropertyReadReply, PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome,
-    WindowGeometryReply, WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
+    CoreClient, CoreDispatchState, InitialCoreDispatch, InternAtomOutcome, PropertyChangeRequest,
+    PropertyData, PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply,
+    PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome, WindowGeometryReply,
+    WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
     dispatch_initial_core_request,
 };
 pub use event::{
@@ -40,6 +41,10 @@ pub use event::{
     encode_destroy_notify, encode_expose, encode_focus_event, encode_graphics_expose,
     encode_input_event, encode_map_notify, encode_no_expose, encode_property_notify,
     encode_selection_clear, encode_selection_notify, encode_selection_request, encode_unmap_notify,
+};
+pub use extension::{
+    EXTENSION_REGISTRY, ExtensionAssignment, ExtensionDescriptor, ExtensionKind, ExtensionProfiles,
+    ExtensionRegistry,
 };
 pub use reply::{
     CORE_ERROR_SIZE, CORE_REPLY_SIZE, CoreError, ReplyBuildError, ReplyBuilder, encode_core_error,
