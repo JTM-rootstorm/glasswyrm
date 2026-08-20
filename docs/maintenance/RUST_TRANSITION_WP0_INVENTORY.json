@@ -1,7 +1,7 @@
 {
-  "authority_revision": "ae96f0f13c050cf1751ab94047925e896308b262",
+  "authority_revision": "6d42e999ce684187987299c27b1b234bde10247b",
   "canonical_metadata_sha256": {
-    "crates/glasswyrm-x11/src/core.rs": "698c73821ccb07d499ef5b85d86df48722854696d1fc3d99a724aa09d003a48a",
+    "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "c899297fffdbec1a404cf915ad6ce5e898af32d8314ba45bc54e6da61716edaa",
     "src/glasswyrmd/extension_registry.hpp": "ec70a08c9d2644ca05466ebbd45a05454723a28e968a9433d61b02b9ffe547cb",
     "src/glasswyrmd/request_dispatcher.cpp": "c7ddd12d92aaddb4635c625b93f8eb0519d064ecb508431663b2adf538a5846b",
@@ -5101,11 +5101,11 @@
   "test_selector_sources": [
     {
       "path": "crates/xtask/src/lib.rs",
-      "sha256": "5fbad903e25e265214f5f2bbf907e7cbb54a25c24593d1e9400ddf278cf1843c"
+      "sha256": "0c4b7a793eff4de1d5eb16758359e026eb2d9ef4604ac903a61927fb5095db21"
     },
     {
       "path": "crates/xtask/src/campaign.rs",
-      "sha256": "641e54ed1d24564b48b03882bae88d55be067ca524b6c1d6d4710bbbd6a8b392"
+      "sha256": "fe067d1df13d817edad1f47760e06c17f3da1f09688915eea3bd500462003783"
     },
     {
       "path": "tests/manifest/x11_tools/meson.build",

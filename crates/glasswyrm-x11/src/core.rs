@@ -84,6 +84,32 @@ pub enum CoreOpcode {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
+pub enum CoreEventType {
+    KeyPress = 2,
+    KeyRelease = 3,
+    ButtonPress = 4,
+    ButtonRelease = 5,
+    MotionNotify = 6,
+    EnterNotify = 7,
+    LeaveNotify = 8,
+    FocusIn = 9,
+    FocusOut = 10,
+    Expose = 12,
+    GraphicsExpose = 13,
+    NoExpose = 14,
+    DestroyNotify = 17,
+    UnmapNotify = 18,
+    MapNotify = 19,
+    ConfigureNotify = 22,
+    PropertyNotify = 28,
+    SelectionClear = 29,
+    SelectionRequest = 30,
+    SelectionNotify = 31,
+    ClientMessage = 33,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub enum CoreErrorCode {
     BadRequest = 1,
     BadValue = 2,
