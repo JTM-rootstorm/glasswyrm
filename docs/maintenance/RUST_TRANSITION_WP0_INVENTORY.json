@@ -1,9 +1,10 @@
 {
-  "authority_revision": "bdf1272e1754c3cd0c4b49dfd4ff9c20835df824",
+  "authority_revision": "fb89182f213ceed6e55403ce32e9e76813eb20b7",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
     "crates/glasswyrm-x11/src/extension.rs": "a2deb06bc4b90f3d310cf7c1984027f9c5ea64797063775b6393180c27ac390f",
+    "crates/glasswyrm-x11/src/lifecycle_request.rs": "ff74a1674bd35eb2a5cf2ea7bbe35587380f02dd852ed3dec4bc29bb82354f0f",
     "src/glasswyrmd/extension_registry.hpp": "ec70a08c9d2644ca05466ebbd45a05454723a28e968a9433d61b02b9ffe547cb",
     "src/glasswyrmd/request_dispatcher.cpp": "c7ddd12d92aaddb4635c625b93f8eb0519d064ecb508431663b2adf538a5846b",
     "src/glasswyrmd/resource_id.hpp": "6491bcd2c311252573f3bd4a1fe42a22b106ce5e19941cd71b4c227c46f687a1",
@@ -58,6 +59,8 @@
       ],
       "name": "CreateWindow",
       "opcode": 1,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -77,6 +80,8 @@
       ],
       "name": "ChangeWindowAttributes",
       "opcode": 2,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -96,6 +101,8 @@
       ],
       "name": "GetWindowAttributes",
       "opcode": 3,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -116,6 +123,8 @@
       ],
       "name": "DestroyWindow",
       "opcode": 4,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -135,6 +144,8 @@
       ],
       "name": "MapWindow",
       "opcode": 8,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/lifecycle_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -154,6 +165,8 @@
       ],
       "name": "MapSubwindows",
       "opcode": 9,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/lifecycle_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -173,6 +186,8 @@
       ],
       "name": "UnmapWindow",
       "opcode": 10,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/lifecycle_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -192,6 +207,8 @@
       ],
       "name": "UnmapSubwindows",
       "opcode": 11,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/lifecycle_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -211,6 +228,8 @@
       ],
       "name": "ConfigureWindow",
       "opcode": 12,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/lifecycle_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -231,6 +250,8 @@
       ],
       "name": "GetGeometry",
       "opcode": 14,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -251,6 +272,8 @@
       ],
       "name": "QueryTree",
       "opcode": 15,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -269,6 +292,8 @@
       ],
       "name": "InternAtom",
       "opcode": 16,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -287,6 +312,8 @@
       ],
       "name": "GetAtomName",
       "opcode": 17,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -305,6 +332,8 @@
       ],
       "name": "ChangeProperty",
       "opcode": 18,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -323,6 +352,8 @@
       ],
       "name": "DeleteProperty",
       "opcode": 19,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -341,6 +372,8 @@
       ],
       "name": "GetProperty",
       "opcode": 20,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -359,6 +392,8 @@
       ],
       "name": "ListProperties",
       "opcode": 21,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -378,6 +413,8 @@
       ],
       "name": "SetSelectionOwner",
       "opcode": 22,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -397,6 +434,8 @@
       ],
       "name": "GetSelectionOwner",
       "opcode": 23,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -416,6 +455,8 @@
       ],
       "name": "ConvertSelection",
       "opcode": 24,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -435,6 +476,8 @@
       ],
       "name": "SendEvent",
       "opcode": 25,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -454,6 +497,8 @@
       ],
       "name": "GrabPointer",
       "opcode": 26,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -473,6 +518,8 @@
       ],
       "name": "UngrabPointer",
       "opcode": 27,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -492,6 +539,8 @@
       ],
       "name": "GrabButton",
       "opcode": 28,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -511,6 +560,8 @@
       ],
       "name": "ChangeActivePointerGrab",
       "opcode": 30,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -530,6 +581,8 @@
       ],
       "name": "GrabKeyboard",
       "opcode": 31,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -549,6 +602,8 @@
       ],
       "name": "UngrabKeyboard",
       "opcode": 32,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -568,6 +623,8 @@
       ],
       "name": "AllowEvents",
       "opcode": 35,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -587,6 +644,8 @@
       ],
       "name": "QueryPointer",
       "opcode": 38,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -606,6 +665,8 @@
       ],
       "name": "TranslateCoordinates",
       "opcode": 40,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -625,6 +686,8 @@
       ],
       "name": "WarpPointer",
       "opcode": 41,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -644,6 +707,8 @@
       ],
       "name": "SetInputFocus",
       "opcode": 42,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -664,6 +729,8 @@
       ],
       "name": "GetInputFocus",
       "opcode": 43,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -683,6 +750,8 @@
       ],
       "name": "QueryKeymap",
       "opcode": 44,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -701,6 +770,8 @@
       ],
       "name": "OpenFont",
       "opcode": 45,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -719,6 +790,8 @@
       ],
       "name": "CloseFont",
       "opcode": 46,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -737,6 +810,8 @@
       ],
       "name": "QueryFont",
       "opcode": 47,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -755,6 +830,8 @@
       ],
       "name": "QueryTextExtents",
       "opcode": 48,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -773,6 +850,8 @@
       ],
       "name": "ListFonts",
       "opcode": 49,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -791,6 +870,8 @@
       ],
       "name": "CreatePixmap",
       "opcode": 53,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -809,6 +890,8 @@
       ],
       "name": "FreePixmap",
       "opcode": 54,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -827,6 +910,8 @@
       ],
       "name": "CreateGc",
       "opcode": 55,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -845,6 +930,8 @@
       ],
       "name": "ChangeGc",
       "opcode": 56,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -863,6 +950,8 @@
       ],
       "name": "FreeGc",
       "opcode": 60,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -881,6 +970,8 @@
       ],
       "name": "ClearArea",
       "opcode": 61,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -899,6 +990,8 @@
       ],
       "name": "CopyArea",
       "opcode": 62,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -917,6 +1010,8 @@
       ],
       "name": "PolyLine",
       "opcode": 65,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -935,6 +1030,8 @@
       ],
       "name": "PolySegment",
       "opcode": 66,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -953,6 +1050,8 @@
       ],
       "name": "FillPoly",
       "opcode": 69,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -971,6 +1070,8 @@
       ],
       "name": "PolyFillRectangle",
       "opcode": 70,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -989,6 +1090,8 @@
       ],
       "name": "PolyFillArc",
       "opcode": 71,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1007,6 +1110,8 @@
       ],
       "name": "PutImage",
       "opcode": 72,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1025,6 +1130,8 @@
       ],
       "name": "PolyText8",
       "opcode": 74,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1043,6 +1150,8 @@
       ],
       "name": "ImageText8",
       "opcode": 76,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1060,6 +1169,8 @@
       ],
       "name": "CreateColormap",
       "opcode": 78,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1077,6 +1188,8 @@
       ],
       "name": "FreeColormap",
       "opcode": 79,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1094,6 +1207,8 @@
       ],
       "name": "InstallColormap",
       "opcode": 81,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1111,6 +1226,8 @@
       ],
       "name": "UninstallColormap",
       "opcode": 82,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1128,6 +1245,8 @@
       ],
       "name": "ListInstalledColormaps",
       "opcode": 83,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1145,6 +1264,8 @@
       ],
       "name": "AllocColor",
       "opcode": 84,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1162,6 +1283,8 @@
       ],
       "name": "AllocNamedColor",
       "opcode": 85,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1179,6 +1302,8 @@
       ],
       "name": "FreeColors",
       "opcode": 88,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1196,6 +1321,8 @@
       ],
       "name": "QueryColors",
       "opcode": 91,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1213,6 +1340,8 @@
       ],
       "name": "LookupColor",
       "opcode": 92,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1231,6 +1360,8 @@
       ],
       "name": "CreateCursor",
       "opcode": 93,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1249,6 +1380,8 @@
       ],
       "name": "CreateGlyphCursor",
       "opcode": 94,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1267,6 +1400,8 @@
       ],
       "name": "FreeCursor",
       "opcode": 95,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1285,6 +1420,8 @@
       ],
       "name": "RecolorCursor",
       "opcode": 96,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1302,6 +1439,8 @@
       ],
       "name": "QueryBestSize",
       "opcode": 97,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1320,6 +1459,8 @@
       ],
       "name": "QueryExtension",
       "opcode": 98,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -1338,6 +1479,8 @@
       ],
       "name": "ListExtensions",
       "opcode": 99,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/decode.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     },
@@ -1357,6 +1500,8 @@
       ],
       "name": "GetKeyboardMapping",
       "opcode": 101,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1376,6 +1521,8 @@
       ],
       "name": "ChangeKeyboardControl",
       "opcode": 102,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1395,6 +1542,8 @@
       ],
       "name": "GetKeyboardControl",
       "opcode": 103,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1414,6 +1563,8 @@
       ],
       "name": "Bell",
       "opcode": 104,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1431,6 +1582,8 @@
       ],
       "name": "ForceScreenSaver",
       "opcode": 115,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1450,6 +1603,8 @@
       ],
       "name": "GetPointerMapping",
       "opcode": 117,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1469,6 +1624,8 @@
       ],
       "name": "GetModifierMapping",
       "opcode": 119,
+      "rust_decoder_implementation": null,
+      "rust_decoder_present": false,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1487,6 +1644,8 @@
       ],
       "name": "NoOperation",
       "opcode": 127,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/dispatch.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": true,
       "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs"
     }

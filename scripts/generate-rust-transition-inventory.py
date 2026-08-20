@@ -166,6 +166,24 @@ def parse_extensions() -> list[dict[str, object]]:
 
 
 
+
+def request_rust_decoder_file(name: str) -> str | None:
+    if name in {
+        "CreateWindow", "DestroyWindow", "GetGeometry", "QueryTree",
+        "InternAtom", "GetAtomName", "ChangeProperty", "DeleteProperty",
+        "GetProperty", "ListProperties", "GetInputFocus", "QueryExtension",
+        "ListExtensions",
+    }:
+        return "crates/glasswyrm-x11/src/decode.rs"
+    if name in {
+        "MapWindow", "MapSubwindows", "UnmapWindow", "UnmapSubwindows",
+        "ConfigureWindow",
+    }:
+        return "crates/glasswyrm-x11/src/lifecycle_request.rs"
+    if name == "NoOperation":
+        return "crates/glasswyrm-x11/src/dispatch.rs"
+    return None
+
 def request_legacy_file(name: str) -> str:
     groups = [
         ({"CreateWindow", "DestroyWindow", "MapWindow", "MapSubwindows", "UnmapWindow", "UnmapSubwindows", "ConfigureWindow"}, "src/glasswyrmd/request_handlers/lifecycle.cpp"),
@@ -264,11 +282,14 @@ def build_inventory() -> dict[str, object]:
     core = []
     for name, opcode in parse_core_opcodes():
         rust_present = name in rust_dispatch
+        rust_decoder = request_rust_decoder_file(name)
         core.append({
             "name": name,
             "opcode": opcode,
             "legacy_handler": legacy_dispatch.get(name),
             "legacy_implementation": request_legacy_file(name),
+            "rust_decoder_present": rust_decoder is not None,
+            "rust_decoder_implementation": rust_decoder,
             "rust_dispatch_present": rust_present,
             "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs" if rust_present else None,
             "fixture_profiles": request_fixture_profiles(name),
@@ -455,6 +476,7 @@ def build_inventory() -> dict[str, object]:
         "canonical_metadata_sha256": {p: sha256_path(p) for p in (
             "crates/glasswyrm-x11/src/core.rs", "crates/glasswyrm-x11/src/dispatch.rs",
             "crates/glasswyrm-x11/src/extension.rs",
+            "crates/glasswyrm-x11/src/lifecycle_request.rs",
             "src/glasswyrmd/request_dispatcher.cpp", "src/glasswyrmd/extension_registry.hpp",
             "src/glasswyrmd/resource_id.hpp", "tests/unit/resource_id_test.cpp",
         )},

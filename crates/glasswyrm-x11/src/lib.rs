@@ -9,6 +9,7 @@ mod decode;
 mod dispatch;
 mod event;
 mod extension;
+mod lifecycle_request;
 mod reply;
 mod request;
 mod screen;
@@ -45,6 +46,12 @@ pub use event::{
 pub use extension::{
     EXTENSION_REGISTRY, ExtensionAssignment, ExtensionDescriptor, ExtensionKind, ExtensionProfiles,
     ExtensionRegistry,
+};
+pub use lifecycle_request::{
+    CONFIGURE_BORDER_WIDTH, CONFIGURE_HEIGHT, CONFIGURE_SIBLING, CONFIGURE_STACK_MODE,
+    CONFIGURE_WIDTH, CONFIGURE_X, CONFIGURE_Y, ConfigureWindowRequest, CoreStackMode,
+    KNOWN_CONFIGURE_MASK, LifecycleDecodeStatus, WindowLifecycleRequest, decode_configure_window,
+    decode_map_subwindows, decode_map_window, decode_unmap_subwindows, decode_unmap_window,
 };
 pub use reply::{
     CORE_ERROR_SIZE, CORE_REPLY_SIZE, CoreError, ReplyBuildError, ReplyBuilder, encode_core_error,
