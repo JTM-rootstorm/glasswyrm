@@ -175,6 +175,10 @@ def request_rust_decoder_file(name: str) -> str | None:
         "ListExtensions",
     }:
         return "crates/glasswyrm-x11/src/decode.rs"
+    if name in {"ChangeWindowAttributes"}:
+        return "crates/glasswyrm-x11/src/window_request.rs"
+    if name == "GetWindowAttributes":
+        return "crates/glasswyrm-x11/src/decode.rs"
     if name in {
         "MapWindow", "MapSubwindows", "UnmapWindow", "UnmapSubwindows",
         "ConfigureWindow",

@@ -15,6 +15,7 @@ mod reply;
 mod request;
 mod screen;
 mod setup;
+mod window_request;
 mod wire;
 
 pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAtom};
@@ -69,4 +70,8 @@ pub use setup::{
     DEFAULT_MAXIMUM_SETUP_SIZE, PROTOCOL_MAJOR, PROTOCOL_MINOR, ParseResult, ParseStatus,
     SETUP_REQUEST_HEADER_SIZE, SetupDecision, SetupEncodeError, SetupParser, SetupReplyConfig,
     SetupRequest, encode_setup_failure, encode_setup_success, evaluate_setup_request,
+};
+pub use window_request::{
+    ChangeWindowAttributesRequest, WINDOW_ATTRIBUTE_MASK, WindowAttributeValues,
+    decode_change_window_attributes, decode_window_attribute_values,
 };
