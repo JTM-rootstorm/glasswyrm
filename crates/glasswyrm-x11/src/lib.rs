@@ -10,6 +10,7 @@ mod dispatch;
 mod event;
 mod event_mask;
 mod extension;
+mod font_text_request;
 mod grab_request;
 mod keyboard_request;
 mod lifecycle_request;
@@ -54,6 +55,12 @@ pub use event_mask::{EventMask, StateMask};
 pub use extension::{
     EXTENSION_REGISTRY, ExtensionAssignment, ExtensionDescriptor, ExtensionKind, ExtensionProfiles,
     ExtensionRegistry,
+};
+pub use font_text_request::{
+    FontIdentity, ImageText8Request, ListFontsRequest, OpenFontRequest, PolyText8Item,
+    PolyText8Items, PolyText8Request, QueryTextExtentsRequest, QueryTextExtentsText,
+    decode_fontable_id, decode_image_text8, decode_list_fonts, decode_open_font, decode_poly_text8,
+    decode_query_text_extents, font_identity, matches_fixed_font, validate_query_text_extents_text,
 };
 pub use grab_request::{
     ANY_BUTTON, ANY_MODIFIER, AllowEventsMode, AllowEventsRequest, CORE_MODIFIER_MASK,

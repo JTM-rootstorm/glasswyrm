@@ -1,5 +1,5 @@
 {
-  "authority_revision": "3a644d9b7ed49be7df3129de61dcf87333c7d767",
+  "authority_revision": "36af906a07391411a14e62d08e3f1e1b0fd3a2bf",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
@@ -770,8 +770,8 @@
       ],
       "name": "OpenFont",
       "opcode": 45,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -790,8 +790,8 @@
       ],
       "name": "CloseFont",
       "opcode": 46,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -810,8 +810,8 @@
       ],
       "name": "QueryFont",
       "opcode": 47,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -830,8 +830,8 @@
       ],
       "name": "QueryTextExtents",
       "opcode": 48,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -850,8 +850,8 @@
       ],
       "name": "ListFonts",
       "opcode": 49,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1130,8 +1130,8 @@
       ],
       "name": "PolyText8",
       "opcode": 74,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -1150,8 +1150,8 @@
       ],
       "name": "ImageText8",
       "opcode": 76,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/font_text_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },

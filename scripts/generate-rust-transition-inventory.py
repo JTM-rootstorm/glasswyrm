@@ -176,6 +176,11 @@ def request_rust_decoder_file(name: str) -> str | None:
     }:
         return "crates/glasswyrm-x11/src/decode.rs"
     if name in {
+        "OpenFont", "CloseFont", "QueryFont", "QueryTextExtents", "ListFonts",
+        "PolyText8", "ImageText8",
+    }:
+        return "crates/glasswyrm-x11/src/font_text_request.rs"
+    if name in {
         "CreateColormap", "FreeColormap", "InstallColormap", "UninstallColormap",
         "ListInstalledColormaps", "AllocColor", "AllocNamedColor", "FreeColors",
         "QueryColors", "LookupColor", "CreateCursor", "CreateGlyphCursor",
