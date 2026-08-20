@@ -1,6 +1,6 @@
 # Rust Transition WP0C Status
 
-Status: topology lane complete; toolchain/install and public-C-ABI lanes in progress
+Status: WP0C complete
 Base implementation commit: `eb592dec5085f55a94d47f0a62257d2dc3d684ee`
 Date: 2026-08-20
 
@@ -42,10 +42,34 @@ The harness runtime slug is intentionally compact so both `gwm.sock` and
 `gwcomp.sock` remain below Linux `sun_path` limits while temporary state stays
 inside the OS-Project write boundary.
 
-## Remaining WP0C work
+## Toolchain and install smoke
 
-- prove the reproducible Rust toolchain/offline package path and empty-DESTDIR
-  install smoke for a Rust executable plus the bounded Rust C-ABI bridge;
-- detect ownership collisions against the retained Meson install surface; and
-- inventory actual GWIPC 0.9 external consumers and record the public ABI
-  preservation/deprecation disposition.
+`RUST_TOOLCHAIN_POLICY.md` records edition 2024, MSRV 1.95, and the tracked
+1.95.0 toolchain pin. The Gentoo host smoke used rustc 1.96.1, explicitly
+recorded as MSRV-compatible development validation rather than execution of the
+exact pin. Cargo built the Rust candidates with `--locked --offline`; the lock
+file contained no external source entries.
+
+`scripts/wp0c-install-smoke.py` staged the complete retained Meson install into
+an empty project-local DESTDIR using prefix `/usr` and libdir `lib64`, then
+installed a Rust `gwm` candidate plus the bounded Rust C ABI artifacts under
+transition-specific names. The manifest hashes each Rust artifact and records
+the planned `/usr/bin/gwm`, public-header, `libgwipc.so.0`, and `gwipc.pc`
+ownership collisions without overwriting the retained install.
+
+## Public C ABI disposition
+
+`GWIPC_RUST_TRANSITION_ABI_DISPOSITION.md` selects full preservation of the
+installed GWIPC 0.9 ABI. No consumers were found in the other OS-Project
+repositories, while the repository-owned staged consumer matrix covers C17 and
+C++20 clients for every API generation 0.1 through 0.9. All of those unchanged
+consumers passed against the staged native install. The bounded Rust bridge
+remains non-public until it covers the complete installed contract.
+
+## WP0C gate
+
+All eight cutover edges are classified, the missing dual-Rust-peer topology is
+green behind the legacy server, the locked/offline empty-DESTDIR package smoke
+is green, and the installed C ABI has an explicit ownership/disposition record.
+WP0C is therefore complete. Rust-server topology rows remain intentionally
+blocked until WP5 implements the peer/bootstrap surface they require.
