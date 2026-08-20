@@ -14,6 +14,7 @@ mod lifecycle_request;
 mod reply;
 mod request;
 mod screen;
+mod selection_request;
 mod setup;
 mod window_request;
 mod wire;
@@ -66,6 +67,12 @@ pub use request::{
     RequestFramerConfigError,
 };
 pub use screen::{SCREEN_MODEL, ScreenModel};
+pub use selection_request::{
+    ClientMessageWire, ConvertSelectionRequest, SelectionNotifyWire, SendEventHeader,
+    SendEventPayload, SetSelectionOwnerRequest, UnmapNotifyWire, decode_client_message_data,
+    decode_convert_selection, decode_get_selection_owner, decode_send_event_after_destination,
+    decode_send_event_header, decode_set_selection_owner,
+};
 pub use setup::{
     DEFAULT_MAXIMUM_SETUP_SIZE, PROTOCOL_MAJOR, PROTOCOL_MINOR, ParseResult, ParseStatus,
     SETUP_REQUEST_HEADER_SIZE, SetupDecision, SetupEncodeError, SetupParser, SetupReplyConfig,

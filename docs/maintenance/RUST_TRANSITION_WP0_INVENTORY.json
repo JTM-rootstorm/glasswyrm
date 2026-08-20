@@ -1,5 +1,5 @@
 {
-  "authority_revision": "42a5e6274b60627a1bbb46d96af4385a6419055d",
+  "authority_revision": "e56ea489bddce94552bbbfeebc26af5e56c19012",
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "071db69d034ff61df3f13eecc09ab3f9c6ac85a49c2ceedd9aebcc26d9d5c80d",
     "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
@@ -413,8 +413,8 @@
       ],
       "name": "SetSelectionOwner",
       "opcode": 22,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/selection_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -434,8 +434,8 @@
       ],
       "name": "GetSelectionOwner",
       "opcode": 23,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/selection_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -455,8 +455,8 @@
       ],
       "name": "ConvertSelection",
       "opcode": 24,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/selection_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
@@ -476,8 +476,8 @@
       ],
       "name": "SendEvent",
       "opcode": 25,
-      "rust_decoder_implementation": null,
-      "rust_decoder_present": false,
+      "rust_decoder_implementation": "crates/glasswyrm-x11/src/selection_request.rs",
+      "rust_decoder_present": true,
       "rust_dispatch_present": false,
       "rust_implementation": null
     },
