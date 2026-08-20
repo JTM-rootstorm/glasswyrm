@@ -16,6 +16,7 @@ mod lifecycle_request;
 mod query_request;
 mod reply;
 mod request;
+mod resource_request;
 mod screen;
 mod selection_request;
 mod setup;
@@ -86,6 +87,14 @@ pub use request::{
     MAXIMUM_BIG_REQUEST_LENGTH_UNITS, MAXIMUM_BIG_REQUEST_SIZE, MAXIMUM_CORE_REQUEST_LENGTH_UNITS,
     MAXIMUM_CORE_REQUEST_SIZE, RequestFrameResult, RequestFrameStatus, RequestFramer,
     RequestFramerConfigError,
+};
+pub use resource_request::{
+    AllocColorRequest, BestSizeClass, Color16, CreateColormapRequest, CreateCursorRequest,
+    CreateGlyphCursorRequest, FreeColorsRequest, NamedColorRequest, QueryBestSizeRequest,
+    QueryColorsRequest, RecolorCursorRequest, decode_alloc_color, decode_colormap_id,
+    decode_create_colormap, decode_create_cursor, decode_create_glyph_cursor, decode_cursor_id,
+    decode_free_colors, decode_named_color, decode_query_best_size, decode_query_colors,
+    decode_recolor_cursor, parse_color_name, validate_query_best_size_class,
 };
 pub use screen::{SCREEN_MODEL, ScreenModel};
 pub use selection_request::{

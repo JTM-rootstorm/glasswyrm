@@ -176,6 +176,13 @@ def request_rust_decoder_file(name: str) -> str | None:
     }:
         return "crates/glasswyrm-x11/src/decode.rs"
     if name in {
+        "CreateColormap", "FreeColormap", "InstallColormap", "UninstallColormap",
+        "ListInstalledColormaps", "AllocColor", "AllocNamedColor", "FreeColors",
+        "QueryColors", "LookupColor", "CreateCursor", "CreateGlyphCursor",
+        "FreeCursor", "RecolorCursor", "QueryBestSize",
+    }:
+        return "crates/glasswyrm-x11/src/resource_request.rs"
+    if name in {
         "QueryKeymap", "ChangeKeyboardControl", "GetKeyboardControl", "Bell",
         "ForceScreenSaver",
     }:
