@@ -265,6 +265,125 @@ mod tests {
         )
     }
 
+    struct ShortWouldBlockWriter {
+        bytes: Vec<u8>,
+        maximum_write: usize,
+        would_block_next: bool,
+    }
+
+    impl ShortWouldBlockWriter {
+        fn new(maximum_write: usize) -> Self {
+            Self {
+                bytes: Vec::new(),
+                maximum_write,
+                would_block_next: false,
+            }
+        }
+    }
+
+    impl Write for ShortWouldBlockWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.would_block_next {
+                self.would_block_next = false;
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            let count = self.maximum_write.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..count]);
+            self.would_block_next = true;
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn invalid_byte_order_and_incomplete_setup_close_without_output() {
+        for invalid in [0_u8, b'x', 0xff] {
+            let mut session = session();
+            assert_eq!(
+                session.feed_setup(&[invalid], &mut RequestWorkBudget::default()),
+                SetupProgress::InvalidByteOrder
+            );
+            assert!(session.is_closed());
+            let mut output = Vec::new();
+            assert!(!session.write_output(&mut output).unwrap());
+            assert!(output.is_empty());
+        }
+
+        let mut truncated = session();
+        let bytes = setup(ByteOrder::LittleEndian);
+        assert_eq!(
+            truncated.feed_setup(&bytes[..7], &mut RequestWorkBudget::default()),
+            SetupProgress::NeedMore
+        );
+        truncated.end_of_input();
+        assert!(truncated.is_closed());
+    }
+
+    #[test]
+    fn setup_rejection_and_success_survive_short_writes_and_would_block() {
+        let order = ByteOrder::BigEndian;
+        let mut rejected_bytes = setup(order);
+        rejected_bytes[2..4].copy_from_slice(&10_u16.to_be_bytes());
+        let mut rejected = session();
+        assert_eq!(
+            rejected.feed_setup(&rejected_bytes, &mut RequestWorkBudget::default()),
+            SetupProgress::Rejected
+        );
+        let expected = encode_setup_failure(order, b"X11 protocol 11.0 required").unwrap();
+        let mut writer = ShortWouldBlockWriter::new(5);
+        for _ in 0..expected.len() + 2 {
+            rejected.write_output(&mut writer).unwrap();
+            if rejected.is_closed() {
+                break;
+            }
+        }
+        assert!(rejected.is_closed());
+        assert_eq!(writer.bytes, expected);
+
+        let mut accepted = session();
+        assert_eq!(
+            accepted.feed_setup(&setup(order), &mut RequestWorkBudget::default()),
+            SetupProgress::Accepted { order }
+        );
+        let expected = encode_setup_success(
+            order,
+            &SetupReplyConfig {
+                resource_id_base: 0x0040_0000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut writer = ShortWouldBlockWriter::new(7);
+        for _ in 0..expected.len() + 2 {
+            if !accepted.write_output(&mut writer).unwrap() {
+                break;
+            }
+        }
+        assert!(accepted.is_established());
+        assert_eq!(writer.bytes, expected);
+    }
+
+    #[test]
+    fn explicit_cancellation_discards_pending_session_work() {
+        let order = ByteOrder::LittleEndian;
+        let mut session = session();
+        assert_eq!(
+            session.feed_setup(&setup(order), &mut RequestWorkBudget::default()),
+            SetupProgress::Accepted { order }
+        );
+        session.feed_established(&[43, 0, 1], &mut RequestWorkBudget::default());
+        session.close_now();
+        assert!(session.is_closed());
+        assert!(!session.accepts_input());
+        assert!(!session.has_pending_input());
+        let mut output = Vec::new();
+        assert!(!session.write_output(&mut output).unwrap());
+        assert!(output.is_empty());
+    }
+
     #[test]
     fn setup_and_established_io_are_driven_entirely_by_byte_buffers() {
         for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {

@@ -62,6 +62,18 @@ fn setup_parser_handles_every_split_padding_and_post_setup_bytes() {
             );
         }
 
+        let mut nonzero_padding = setup_request(order, 11, 0, b"abc", &[0x55, 0xaa]);
+        nonzero_padding[15] = 0xf1;
+        nonzero_padding[18] = 0xf2;
+        nonzero_padding[19] = 0xf3;
+        let mut parser = SetupParser::default();
+        assert_eq!(
+            parser.consume(&nonzero_padding).status,
+            ParseStatus::Complete
+        );
+        assert_eq!(parser.request().authorization_name, b"abc");
+        assert_eq!(parser.request().authorization_data, [0x55, 0xaa]);
+
         let bare = setup_request(order, 11, 0, b"", b"");
         let mut pipelined = bare.clone();
         pipelined.extend_from_slice(&[127, 0, 1, 0]);
