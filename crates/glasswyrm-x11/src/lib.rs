@@ -8,6 +8,7 @@ mod core;
 mod decode;
 mod dispatch;
 mod event;
+mod event_mask;
 mod extension;
 mod lifecycle_request;
 mod reply;
@@ -43,6 +44,7 @@ pub use event::{
     encode_input_event, encode_map_notify, encode_no_expose, encode_property_notify,
     encode_selection_clear, encode_selection_notify, encode_selection_request, encode_unmap_notify,
 };
+pub use event_mask::{EventMask, StateMask};
 pub use extension::{
     EXTENSION_REGISTRY, ExtensionAssignment, ExtensionDescriptor, ExtensionKind, ExtensionProfiles,
     ExtensionRegistry,

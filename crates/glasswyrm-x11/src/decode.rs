@@ -1,5 +1,5 @@
 use crate::wire::align_four;
-use crate::{ByteOrder, CoreErrorCode, FramedRequest};
+use crate::{ByteOrder, CoreErrorCode, EventMask, FramedRequest};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CoreRequestDecodeError {
@@ -26,8 +26,6 @@ impl CoreRequestDecodeError {
 }
 
 const WINDOW_ATTRIBUTE_MASK: u32 = 0x0000_7fff;
-const CORE_EVENT_MASK: u32 = 0x01ff_ffff;
-const DO_NOT_PROPAGATE_MASK: u32 = 0x0000_204f;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WindowCreateRequest {
@@ -159,10 +157,10 @@ fn decode_create_attributes(
             6 if value > 2 => return Err(CoreRequestDecodeError::bad_value(value)),
             9 | 10 if value > 1 => return Err(CoreRequestDecodeError::bad_value(value)),
             9 => override_redirect = value != 0,
-            11 if value & !CORE_EVENT_MASK != 0 => {
+            11 if value & !EventMask::ALL.bits() != 0 => {
                 return Err(CoreRequestDecodeError::bad_value(value));
             }
-            12 if value & !DO_NOT_PROPAGATE_MASK != 0 => {
+            12 if value & !EventMask::DO_NOT_PROPAGATE.bits() != 0 => {
                 return Err(CoreRequestDecodeError::bad_value(value));
             }
             13 if value != 0 && value != 2 => {
