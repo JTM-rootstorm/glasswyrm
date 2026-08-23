@@ -1,409 +1,150 @@
-# AGENTS.md
+# Glasswyrm Agent Instructions
 
-This repository is the source of truth for the Glasswyrm project.
+The workspace root `../AGENTS.md` applies here and owns coordination, worker topology, model allocation, external-write/VM boundaries, Git/commit/push policy, licensing selection, and general validation/security discipline. This file contains only Glasswyrm-specific technical doctrine.
 
-Glasswyrm is a from-scratch, local-first, X11-compatible display stack for modern Linux/Gentoo. Its runtime is Rust-first, with bounded C and selective x86_64 assembly where those are justified. C++ is migration-only legacy code. Glasswyrm is not a fork of Xorg, XLibre, Xwayland, wlroots, Weston, Mutter, KWin, or any other display server/compositor stack.
+Glasswyrm is a from-scratch, local-first, X11-compatible display stack for modern Linux/Gentoo. It is not a fork of Xorg, XLibre, Xwayland, wlroots, Weston, Mutter, KWin, or another display server/compositor stack.
 
-## Read first
+## 1. Read order and authority
 
-Before implementing, read:
+Before implementation, read:
 
 1. `docs/GLASSWYRM_SPEC.md`
-2. `AGENTS.md`
-3. Any relevant design notes under `docs/`
-4. Existing code in the subsystem being changed
+2. relevant committed design/decision documents under `docs/`
+3. the existing subsystem code/tests being changed
 
-If the spec and code disagree, prefer the current code only when it clearly reflects a newer committed design decision. Otherwise update the spec or ask for clarification before building on a contradiction.
+A clearly newer committed design decision may supersede older spec text. Otherwise do not silently choose between spec/code contradictions; update the contract in scope or report the conflict.
 
-## Project doctrine
+## 2. Architecture doctrine
 
 Glasswyrm is X11-compatible where useful, not Xorg-compatible by default.
 
-Current architecture is a traditional X11-shaped split with Glasswyrm-owned
-processes: `glasswyrmd` for protocol truth, `gwm` for window-management policy
-truth, and `gwcomp` for final display authority. Keep those boundaries
-explicit. `gwcomp` must not become an ordinary X11 client or a legacy external
-compositor that merely assembles redirected pixmaps.
+The core split is:
 
-Do not drag legacy behavior into the project without a specific compatibility target and test. Favor clean internal architecture, headless testing, and explicit compatibility tiers.
+- `glasswyrmd`: X11 protocol/resource truth
+- `gwm`: window-management policy truth
+- `gwcomp`: final composition/output authority
+
+Keep those boundaries explicit. `gwcomp` must not become an ordinary X11 client or a legacy external compositor that merely assembles redirected pixmaps.
+
+Do not import legacy behavior without a concrete compatibility target and test. Favor clean internal architecture, explicit compatibility tiers, and headless-testable policy.
 
 Primary target:
 
-- Gentoo Linux
-- x86_64
-- Local desktop sessions
+- Gentoo Linux, x86_64
+- local desktop sessions
 - DRM/KMS for real display output
 - libinput for real input
 
-## Language rules
+## 3. Language and dependency rules
 
-Allowed implementation languages:
+New runtime code is Rust-first. Allowed exceptions:
 
-- Rust (default)
-- C (bounded platform and ABI shims)
-- C++ (existing migration-only code and temporary comparison adapters)
-- x86_64 assembly (profiled optional hot paths)
+- C for bounded platform/ABI shims where it is simpler and more auditable
+- C++ only for retained migration code, temporary legacy/Rust comparison adapters, or unavoidable dependencies
+- x86_64 assembly only for isolated profiled hot paths with a correct Rust/C reference implementation
 
-Do not introduce Go, Zig, Java, C#, Python runtime components, or other implementation languages unless explicitly instructed by the user.
+Do not introduce another runtime implementation language without explicit approval. Python/shell may be used for justified build/test/generator helpers, not as Glasswyrm runtime components.
 
-### Rust rules
+Rust policy/model/wire crates should forbid unsafe code. Platform/FFI crates keep unsafe operations in narrow modules with local safety rationale. C shims expose small opaque-handle/fixed-width interfaces; Rust owns high-level lifecycle and policy.
 
-Use Rust by default for new runtime code, including server and resource state,
-X11 parsing and dispatch, window-manager policy, IPC codecs and contracts,
-compositor and output state, display policy, event and input orchestration,
-renderer orchestration, configuration, command-line tools, process supervision,
-and test infrastructure.
+Assembly is appropriate for pixel/format/scaling/color hot paths, not protocol semantics, resource lifetime, WM/compositor policy, IPC semantics, KMS state, input routing, selections/clipboard, or config parsing.
 
-Prefer:
+Recommended platform dependencies include Linux DRM/KMS APIs, `libdrm`, `libinput`, udev access, Mesa/GBM/EGL where appropriate, `xcb-proto` XML for protocol reference/code generation, narrowly justified Rust crates, and retained native libraries.
 
-- explicit ownership and typed IDs
-- small state machines and enums instead of magic constants
-- `Result`-based error propagation
-- deterministic pure functions for policy decisions
-- narrow, documented `unsafe` boundaries
-- dependency-light crates with one clear responsibility
+Do not make Xorg/XLibre server source, wlroots, Weston/Mutter/KWin internals, Wayland as a required runtime protocol stack, or a large framework that hides display-server internals into core dependencies.
 
-Pure policy and wire crates should forbid unsafe code. Platform/FFI crates must
-keep unsafe operations in explicit blocks and document the safety invariants.
+## 4. Build and migration boundaries
 
-Python, shell, or similar scripting is acceptable for build helpers,
-generators, and tests when justified, but the Glasswyrm runtime stack itself
-should remain Rust with bounded C/assembly and migration-only C++.
+Cargo is the primary Rust inner-loop interface. Meson + Ninja remain authoritative for retained legacy C/C++ and native shims during migration.
 
-### C rules
+- Keep the graphs independent: ordinary Cargo work must not build the whole Meson tree, and ordinary Meson configuration must not build every Rust test binary.
+- A developer/checkpoint orchestration command may invoke both explicitly.
+- Preserve configure/build/test health and `compile_commands.json` where practical.
+- Generated code needs a deterministic generator and documented regeneration command.
+- Do not refactor legacy C++ merely for elegance while migrating it. First preserve behavior, then replace it.
 
-Use C only for bounded platform or ABI shims where C is simpler and more
-auditable than reproducing the system boundary directly in Rust. Candidate
-boundaries include selected DRM/KMS, GBM/EGL/GLES, libinput, udev, generated
-system glue, and temporary stable C ABI exports for legacy code.
+## 5. Testing and headless-first development
 
-C shims should expose small opaque-handle APIs and plain fixed-width data. Rust
-owns high-level lifecycle and policy.
+Tests are required for new behavior unless a concrete limitation is documented. Use the cheapest tier capable of disproving the change:
 
-### C++ rules
+1. targeted compile/type checks;
+2. unit/parser/pure-policy/fake-backend tests;
+3. IPC/wire/component/cross-language fixture tests;
+4. minimal-process/headless integration;
+5. full software compatibility/sanitizer/install/VM acceptance;
+6. explicitly authorized physical DRM/KMS acceptance.
 
-C++ is allowed only for existing implementation that has not yet migrated,
-temporary adapters that compare legacy and Rust behavior, or a dependency with
-no practical C or Rust boundary. Do not add new architecture-heavy production
-C++ during the transition. Preserve explicit ownership and narrow interfaces
-while migrating; do not refactor legacy code merely to make it more elegant.
+New protocol, WM, IPC, compositor, render, and input behavior should be testable without real hardware where practical. Prefer synthetic clients, explicit IPC fixtures, and a headless `gwcomp` backend before DRM/KMS.
 
-### Assembly rules
+During the Rust transition, physical hardware is not part of the normal development loop. Hardware-capable commands must fail closed unless `GW_ALLOW_HARDWARE_TESTS=1` is set to exact value `1`; ordinary wrappers omit it. Do not acquire DRM master, stop Mike's desktop/session, or ask him to free the GPU for intermediate validation. Physical re-acceptance is a bounded final gate after software acceptance and explicit authorization, with explicit rollback/recovery notes for real DRM/KMS changes.
 
-Assembly is allowed only when it is isolated, tested, and has a correct Rust or
-C reference implementation.
+When porting behavior, do not migrate implementation and expected output together. Prove the fixture against the accepted legacy oracle first, then run the same fixture against the Rust replacement. Retire legacy code only after its compatibility gate passes.
 
-Do not implement a new feature only in assembly. First implement a Rust or C
-reference path, then add the assembly optimization behind runtime CPU feature
-detection and build flags.
+Harness/parser/timeout/readiness/fixture defects are first-class bugs. Add focused regression coverage before rerunning broader or physical gates.
 
-Assembly is appropriate for:
+## 6. Compatibility and modern display features
 
-- pixel blending
-- format conversion
-- scaling blits
-- color conversion
-- carefully isolated hot paths
+Do not claim broad X11 compatibility without tests. For protocol compatibility, record supported request/reply/event behavior, motivating clients, proving tests, and intentionally unsupported behavior. Follow the compatibility tiers in `docs/GLASSWYRM_SPEC.md`.
 
-Assembly is not appropriate for:
+HDR, VRR, and per-output scaling are core goals but must not destabilize the foundation. Milestone-15 feature work remains frozen until the Rust-first transition acceptance gate passes, except for correctness fixes.
 
-- protocol semantics
-- window/resource lifetime
-- window manager policy
-- compositor policy
-- IPC contract semantics
-- KMS state management
-- input routing
-- selections/clipboard
-- configuration parsing
+Preserved architecture order:
 
-## Dependency rules
+1. protocol/server core and `libgwipc` contract;
+2. headless `gwcomp` and minimal `gwm` policy;
+3. software renderer and simple X clients;
+4. DRM/KMS backend;
+5. per-output metadata/scaling, then VRR, then HDR/color prototypes;
+6. accelerated/fullscreen paths.
 
-Allowed/recommended dependencies include:
+## 7. Security and runtime scope
 
-- Linux DRM/KMS APIs
-- `libdrm`
-- `libinput`
-- `libudev` or equivalent udev access
-- Mesa/GBM/EGL where appropriate
-- Vulkan later if explicitly useful
-- `xcb-proto` XML for protocol reference/code generation
-- the Rust standard library and narrowly justified Rust crates
-- standard C/C++ libraries required by retained native code
-- test libraries when justified
+Early Glasswyrm is local-only. Do not add TCP listening by default, setuid requirements, or claims of Wayland-like client isolation. Document current limitations accurately.
 
-Do not depend on:
+Keep protocol/resource/input/config/image/IPC parsing bounded and fail closed at malformed boundaries. Runtime authority stays explicit between `glasswyrmd`, `gwm`, and `gwcomp`.
 
-- Xorg server source
-- XLibre server source
-- wlroots
-- Weston/Mutter/KWin internals
-- Wayland as a required runtime protocol stack
-- large frameworks that hide display-server internals
-
-## Build expectations
-
-Cargo is the primary Rust inner-loop build and test interface. Meson + Ninja
-remain authoritative for the legacy C/C++ graph and retained native shims
-during the transition. Keep the graphs independent: ordinary `cargo check`
-must not build the whole Meson tree, and ordinary Meson configuration must not
-build every Rust test binary. A developer orchestration command may invoke
-both explicitly for checkpoint and acceptance suites.
+## 8. Documentation and local plans
 
-Every meaningful implementation should preserve:
+Update durable documentation when changing architecture, server/WM/compositor IPC, public tool behavior, protocol behavior, compatibility tiers, build/dependency assumptions, test workflow, Gentoo packaging, HDR/VRR/scaling policy, or security boundaries.
 
-- configure success
-- build success
-- test execution
-- `compile_commands.json` generation where possible
+Use `docs/decisions/` for choices likely to evolve.
 
-Do not add generated code without also documenting the generator and regeneration command.
+`Plans/` is local planning state:
 
-## Testing rules
+- keep it untracked and visible in `git status`;
+- do not add it to `.gitignore` or `.git/info/exclude`;
+- never stage/commit a plan unless Mike explicitly requests that specific plan.
 
-Tests are mandatory for new behavior unless there is a documented reason they are not yet possible.
+## 9. Gentoo packaging
 
-Preferred test order:
+Preserve a split runtime/package model rather than one monolith:
 
-1. Tier 0: targeted `cargo check` or compile/type feedback
-2. Tier 1: unit, parser, pure-policy, and fake-backend tests
-3. Tier 2: IPC, wire, component, fixture, and cross-language contract tests
-4. Tier 3: minimal-process and headless integration tests
-5. Tier 4: full software acceptance, compatibility, sanitizer, install, and VM tests
-6. Tier 5: explicitly authorized physical DRM/KMS acceptance
+- `x11-base/glasswyrm` — metapackage/session bundle
+- `x11-base/glasswyrmd` — protocol server
+- `x11-wm/gwm` — WM policy
+- `x11-base/gwcomp` — compositor/display authority
+- `x11-apps/gw-tools` — developer/runtime tools
+- `gui-libs/libgwipc` — shared IPC contracts
+- `gui-libs/libgwproto` — protocol helpers when separately installed
+- `gui-libs/libgwrender` — renderer helpers when separately installed
 
-Run the cheapest tier capable of disproving a change first. A harness, parser,
-timeout, readiness, fixture, or expected-value defect is a first-class bug:
-add a focused harness regression, run it alone, then run the smallest affected
-subsystem and software checkpoint. Do not repeat physical validation merely
-because harness interpretation changed.
+Split packages should reduce rebuild/install scope. Prefer shared release sources, shared `DISTDIR`, or an intentional local cache/mirror rather than redundant downloads. Pin live-ebuild commits for reproducible VM validation unless testing latest intentionally.
 
-Do not migrate implementation and expected behavior together. First prove the
-ported test against the legacy oracle, preserve the accepted fixture, then run
-the same test against the Rust replacement. Retire legacy code only after that
-replacement passes its compatibility gate.
+Maintain the local overlay under `packaging/gentoo/overlay/` once packaging work is active. It should include `profiles/repo_name`, package categories/metadata/ebuilds, and any experimental package.mask/package.use guidance needed by the split. A fresh Gentoo validation should exercise Portage dependency resolution, USE flags, build options, install paths, session/service files, and uninstall behavior rather than merely copying runtime binaries.
 
-Do not make real hardware access required for normal development tests.
+VM/package validation remains subject to the workspace VM/external-write rules. Do not invent a new VM, host share, network transport, privileged mount, or package-install authority in this file. When an explicitly authorized/designated VM is used, record the exact overlay/source revision and effective package graph.
 
-Before completing a task, run the relevant build and test commands. If commands cannot be run in the environment, state exactly what could not be run and why.
+For narrow updates, check pretend output before install. A `gwm`-only revision should not rebuild `gwcomp` or `glasswyrmd` unless a shared library/IPC ABI change requires it. Express shared ABI rebuild relationships explicitly rather than relying on drift.
 
-## Headless-first rule
+## 10. Completion checks
 
-New protocol, window-manager, IPC, compositor, render, and input behavior should
-be testable without real hardware whenever possible.
+Before claiming Glasswyrm work complete:
 
-Prefer synthetic clients, a headless `gwcomp` backend, and explicit IPC fixtures
-before touching DRM/KMS. Real hardware work must include rollback/recovery notes when appropriate.
+- relevant build/test tiers pass or exact blockers are reported;
+- new behavior has focused tests or a documented limitation;
+- architecture/process ownership and compatibility claims remain accurate;
+- no unrelated formatting/user changes are included;
+- docs are updated where contracts/workflow changed;
+- physical-hardware claims are made only from explicitly authorized physical tests.
 
-During the Rust transition, physical hardware execution is not part of the
-development loop. Hardware-capable commands must fail closed unless
-`GW_ALLOW_HARDWARE_TESTS=1` is set to the exact value `1`, and ordinary test
-wrappers must omit it.
-Do not acquire DRM master, stop Mike's desktop/session, or ask him to free the
-GPU for intermediate migration validation. Use the Glasswyrm VM for applicable
-software, packaging, and non-real-hardware gates. Physical M14 re-acceptance is
-a bounded final stage after Tier 4 is green and Mike explicitly authorizes it.
-
-## Commit workflow
-
-Commit often. Multiple commits per implementation are encouraged.
-
-Rules:
-
-- Make small, coherent commits.
-- Split commits by subsystem when practical.
-- If a task touches unrelated areas, use separate commits.
-- Keep build fixes separate from feature commits when practical.
-- Keep documentation updates near the code they explain.
-- Co-author every AI-assisted commit so it shows both Mike and the assistant as authors.
-- Use Mike's configured Git identity as the primary author unless he explicitly asks otherwise.
-- Add `Co-authored-by: Codex <codex@openai.com>` to every Codex-assisted commit unless Mike explicitly requests a different assistant identity.
-- Do not squash away useful history unless explicitly instructed.
-- Do not rewrite history unless explicitly instructed.
-- Do not force-push unless explicitly instructed.
-- Push in bulk only after the task is complete and validated.
-
-Commit message format:
-
-```text
-area: short imperative summary
-
-Optional body explaining why and how.
-```
-
-Examples:
-
-```text
-protocol: add setup handshake parser
-core: add resource table ownership checks
-wm: add initial focus policy
-ipc: define surface metadata messages
-compositor: add headless framebuffer target
-render: add ARGB over XRGB reference blend path
-docs: record initial compatibility tiers
-```
-
-## Branch and push policy
-
-Unless the user gives different instructions:
-
-- Work on a task branch.
-- Commit locally throughout the task.
-- Push all task commits together only once the task is complete.
-- Do not push broken intermediate states.
-- Do not commit directly to `main` unless explicitly instructed.
-
-If operating through a tool that cannot create local commits, produce patch files or clearly describe the intended commit split.
-
-## Documentation policy
-
-Update documentation when changing:
-
-- architecture
-- server/WM/compositor IPC contracts
-- public tool behavior
-- protocol behavior
-- compatibility tiers
-- build options
-- dependencies
-- test workflow
-- Gentoo packaging assumptions
-- HDR/VRR/scaling policy
-
-Prefer design notes under `docs/decisions/` for choices that could plausibly change later.
-
-## Local plans
-
-Keep `Plans/` and everything under it untracked. Do not add `Plans/` to
-`.gitignore`, `.git/info/exclude`, or any other Git exclusion mechanism; it
-should remain visible in `git status`. Never stage or commit its contents unless
-Mike explicitly requests that for a specific plan.
-
-## Compatibility policy
-
-Do not claim broad X11 compatibility without tests.
-
-When implementing protocol features, record:
-
-- which request/reply/event behavior is supported
-- which clients motivated the support
-- which tests prove it
-- which behavior is intentionally unsupported
-
-Compatibility targets should progress by tiers described in `docs/GLASSWYRM_SPEC.md`.
-
-## Modern display feature policy
-
-HDR, VRR, and per-output scaling are core goals, but they should not destabilize the foundation.
-
-Milestone 15 feature work is frozen until the Rust-first transition acceptance
-gate passes. Critical correctness fixes are allowed, but new HDR/color
-architecture must not accumulate in the C++ tree merely to be migrated later.
-
-The preserved architectural order remains:
-
-1. core protocol/server
-2. `libgwipc` contract skeleton
-3. headless `gwcomp` compositor
-4. minimal `gwm` placement/focus policy
-5. software renderer
-6. simple X clients
-7. DRM/KMS backend
-8. per-output metadata/scaling prototypes
-9. VRR policy prototypes
-10. HDR/color metadata prototypes
-11. accelerated and fullscreen paths
-
-Do not start with HDR or VRR before the server, window manager, compositor, and IPC foundation can be tested.
-
-## Security policy
-
-Early Glasswyrm is local-only.
-
-Do not add TCP listening by default. Do not add setuid requirements. Do not claim Wayland-like client isolation. Document security limitations honestly.
-
-## Gentoo packaging and VM validation
-
-When touching packaging, preserve both the component split and the fresh-VM test
-path. The expected runtime split is:
-
-```text
-x11-base/glasswyrm       # metapackage or session bundle
-x11-base/glasswyrmd      # protocol/server process
-x11-wm/gwm               # window-manager policy process
-x11-base/gwcomp          # compositor/display authority process
-x11-apps/gw-tools        # developer and runtime tools
-gui-libs/libgwipc        # shared IPC contracts
-gui-libs/libgwproto      # protocol helpers, if installed separately
-gui-libs/libgwrender     # renderer helpers, if installed separately
-```
-
-Split packages should reduce rebuild and install scope. They do not, by
-themselves, guarantee that Portage fetches less source. Prefer a shared release
-tarball, shared `DISTDIR`, or an intentional local git cache/mirror for multiple
-ebuilds that consume the same upstream tree. Live ebuilds should pin a commit
-for reproducible VM tests unless the test is explicitly about latest `main`.
-
-Maintain a local Gentoo overlay under `packaging/gentoo/overlay/` once packaging
-begins. The overlay should be usable by a fresh Gentoo VM without editing the
-upstream checkout. At minimum it should contain `profiles/repo_name`, package
-categories, ebuilds, metadata, and any package.mask/package.use guidance needed
-for experimental features.
-
-For VM validation, Codex should provide the VM with the overlay through a shared
-folder, tarball, rsync, or scp, then register it through repos.conf. A typical
-manual shape is:
-
-```sh
-mkdir -p /etc/portage/repos.conf
-cat >/etc/portage/repos.conf/glasswyrm-local.conf <<'EOF'
-[glasswyrm-local]
-location = /mnt/shared/glasswyrm-overlay
-masters = gentoo
-auto-sync = no
-EOF
-emerge --metadata
-emerge --pretend --verbose --tree x11-base/glasswyrm
-emerge -av x11-base/glasswyrm
-```
-
-Shared directories are useful for the overlay, distfiles, logs, and binary
-packages. Do not use copied runtime artifacts as the only packaging test. The
-fresh VM should exercise Portage dependency resolution, USE flags, Meson options,
-install paths, service/session files, and uninstall behavior.
-
-When testing narrow updates, verify the pretend output before emerging. A `gwm`
-revision bump should not rebuild `gwcomp` or `glasswyrmd` unless a shared library
-or IPC ABI change requires it. If `libgwipc` changes ABI, prefer explicit
-same-version dependencies or subslot-driven rebuilds rather than silent drift.
-
-## Code review checklist
-
-Before considering a task complete, verify:
-
-- The project still builds.
-- Relevant tests pass.
-- New behavior is tested or the missing test is justified.
-- Logs/errors are useful enough to debug failures.
-- No unrelated formatting churn is included.
-- Documentation is updated where needed.
-- The commit split is coherent.
-- The final branch state is ready to push in bulk.
-
-## When unsure
-
-Prefer:
-
-- smaller changes
-- headless tests
-- explicit TODOs with context
-- documenting the decision
-- preserving rollback ability
-
-Avoid:
-
-- broad rewrites
-- silent behavior changes
-- untested compatibility claims
-- adding dependencies casually
-- hiding uncertainty in code comments or commit messages
+Git/commit/branch/push workflow comes exclusively from the root `AGENTS.md`; this file does not override it.
