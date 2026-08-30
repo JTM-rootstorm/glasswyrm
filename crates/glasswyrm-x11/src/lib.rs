@@ -7,6 +7,7 @@ mod byte_order;
 mod core;
 mod decode;
 mod dispatch;
+mod drawing_request;
 mod event;
 mod event_mask;
 mod extension;
@@ -26,7 +27,10 @@ mod wire;
 
 pub use atoms::{LAST_PREDEFINED_ATOM, NONE_ATOM, PREDEFINED_ATOMS, PredefinedAtom};
 pub use byte_order::ByteOrder;
-pub use core::{CoreErrorCode, CoreEventType, CoreOpcode, wire_sequence};
+pub use core::{
+    CORE_REQUEST_METADATA, CoreErrorCode, CoreEventType, CoreOpcode, CoreRequestCoverage,
+    CoreRequestMetadata, core_request_metadata, wire_sequence,
+};
 pub use decode::{
     CoreRequestDecodeError, DecodedPropertyChangeRequest, DeletePropertyRequest,
     GetPropertyRequest, InternAtomRequest, PropertyMode, QueryExtensionRequest,
@@ -40,6 +44,16 @@ pub use dispatch::{
     PropertyReadReply, PropertyReadRequest, WindowCreateOutcome, WindowDestroyOutcome,
     WindowGeometryReply, WindowTreeReply, dispatch_core_request, dispatch_core_request_for_client,
     dispatch_initial_core_request,
+};
+pub use drawing_request::{
+    Arc, Arcs, ChangeGcRequest, ClearAreaRequest, CoordinateMode, CopyAreaRequest, CreateGcRequest,
+    CreatePixmapRequest, FillPolyRequest, GC_VALUE_MASK, GcValue, GcValues, ImageFormat, Point,
+    Points, PolyFillArcRequest, PolyFillRectangleRequest, PolyLineRequest, PolySegmentRequest,
+    PolygonShape, PutImageRequest, Rectangle, Rectangles, ResolvedPoint, ResolvedPoints, Segment,
+    Segments, decode_change_gc, decode_clear_area, decode_copy_area, decode_create_gc,
+    decode_create_pixmap, decode_fill_poly, decode_gc_id, decode_pixmap_id, decode_poly_fill_arc,
+    decode_poly_fill_rectangle, decode_poly_line, decode_poly_segment, decode_put_image,
+    validate_gc_value_mask, validate_poly_fill_arc_extents,
 };
 pub use event::{
     CORE_EVENT_SIZE, ClientMessageData, ClientMessageEvent, ConfigureNotifyEvent, CrossingEvent,

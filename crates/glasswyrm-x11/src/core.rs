@@ -83,6 +83,122 @@ pub enum CoreOpcode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CoreRequestCoverage {
+    Decoded,
+    Dispatched,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreRequestMetadata {
+    pub opcode: CoreOpcode,
+    pub name: &'static str,
+    pub coverage: CoreRequestCoverage,
+}
+
+macro_rules! core_request {
+    ($coverage:ident, $opcode:ident) => {
+        CoreRequestMetadata {
+            opcode: CoreOpcode::$opcode,
+            name: stringify!($opcode),
+            coverage: CoreRequestCoverage::$coverage,
+        }
+    };
+}
+
+/// Canonical WP1 coverage for every core request implemented by the retained
+/// Glasswyrm server. `Decoded` means the wire shape is available without
+/// claiming stateful server behavior; `Dispatched` means the Rust session also
+/// implements the request's current state/reply behavior.
+pub const CORE_REQUEST_METADATA: [CoreRequestMetadata; 79] = [
+    core_request!(Dispatched, CreateWindow),
+    core_request!(Decoded, ChangeWindowAttributes),
+    core_request!(Decoded, GetWindowAttributes),
+    core_request!(Dispatched, DestroyWindow),
+    core_request!(Decoded, MapWindow),
+    core_request!(Decoded, MapSubwindows),
+    core_request!(Decoded, UnmapWindow),
+    core_request!(Decoded, UnmapSubwindows),
+    core_request!(Decoded, ConfigureWindow),
+    core_request!(Dispatched, GetGeometry),
+    core_request!(Dispatched, QueryTree),
+    core_request!(Dispatched, InternAtom),
+    core_request!(Dispatched, GetAtomName),
+    core_request!(Dispatched, ChangeProperty),
+    core_request!(Dispatched, DeleteProperty),
+    core_request!(Dispatched, GetProperty),
+    core_request!(Dispatched, ListProperties),
+    core_request!(Decoded, SetSelectionOwner),
+    core_request!(Decoded, GetSelectionOwner),
+    core_request!(Decoded, ConvertSelection),
+    core_request!(Decoded, SendEvent),
+    core_request!(Decoded, GrabPointer),
+    core_request!(Decoded, UngrabPointer),
+    core_request!(Decoded, GrabButton),
+    core_request!(Decoded, ChangeActivePointerGrab),
+    core_request!(Decoded, GrabKeyboard),
+    core_request!(Decoded, UngrabKeyboard),
+    core_request!(Decoded, AllowEvents),
+    core_request!(Decoded, QueryPointer),
+    core_request!(Decoded, TranslateCoordinates),
+    core_request!(Decoded, WarpPointer),
+    core_request!(Decoded, SetInputFocus),
+    core_request!(Dispatched, GetInputFocus),
+    core_request!(Decoded, QueryKeymap),
+    core_request!(Decoded, OpenFont),
+    core_request!(Decoded, CloseFont),
+    core_request!(Decoded, QueryFont),
+    core_request!(Decoded, QueryTextExtents),
+    core_request!(Decoded, ListFonts),
+    core_request!(Decoded, CreatePixmap),
+    core_request!(Decoded, FreePixmap),
+    core_request!(Decoded, CreateGc),
+    core_request!(Decoded, ChangeGc),
+    core_request!(Decoded, FreeGc),
+    core_request!(Decoded, ClearArea),
+    core_request!(Decoded, CopyArea),
+    core_request!(Decoded, PolyLine),
+    core_request!(Decoded, PolySegment),
+    core_request!(Decoded, FillPoly),
+    core_request!(Decoded, PolyFillRectangle),
+    core_request!(Decoded, PolyFillArc),
+    core_request!(Decoded, PutImage),
+    core_request!(Decoded, PolyText8),
+    core_request!(Decoded, ImageText8),
+    core_request!(Decoded, CreateColormap),
+    core_request!(Decoded, FreeColormap),
+    core_request!(Decoded, InstallColormap),
+    core_request!(Decoded, UninstallColormap),
+    core_request!(Decoded, ListInstalledColormaps),
+    core_request!(Decoded, AllocColor),
+    core_request!(Decoded, AllocNamedColor),
+    core_request!(Decoded, FreeColors),
+    core_request!(Decoded, QueryColors),
+    core_request!(Decoded, LookupColor),
+    core_request!(Decoded, CreateCursor),
+    core_request!(Decoded, CreateGlyphCursor),
+    core_request!(Decoded, FreeCursor),
+    core_request!(Decoded, RecolorCursor),
+    core_request!(Decoded, QueryBestSize),
+    core_request!(Dispatched, QueryExtension),
+    core_request!(Dispatched, ListExtensions),
+    core_request!(Decoded, GetKeyboardMapping),
+    core_request!(Decoded, ChangeKeyboardControl),
+    core_request!(Decoded, GetKeyboardControl),
+    core_request!(Decoded, Bell),
+    core_request!(Decoded, ForceScreenSaver),
+    core_request!(Decoded, GetPointerMapping),
+    core_request!(Decoded, GetModifierMapping),
+    core_request!(Dispatched, NoOperation),
+];
+
+#[must_use]
+pub fn core_request_metadata(opcode: u8) -> Option<&'static CoreRequestMetadata> {
+    CORE_REQUEST_METADATA
+        .iter()
+        .find(|metadata| metadata.opcode as u8 == opcode)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
 pub enum CoreEventType {
     KeyPress = 2,
@@ -133,4 +249,55 @@ pub enum CoreErrorCode {
 #[must_use]
 pub const fn wire_sequence(sequence: u64) -> u16 {
     (sequence & 0xffff) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn core_request_metadata_is_complete_ordered_and_unique() {
+        assert_eq!(CORE_REQUEST_METADATA.len(), 79);
+        assert!(
+            CORE_REQUEST_METADATA
+                .windows(2)
+                .all(|pair| (pair[0].opcode as u8) < pair[1].opcode as u8)
+        );
+        for metadata in CORE_REQUEST_METADATA {
+            assert_eq!(
+                core_request_metadata(metadata.opcode as u8),
+                Some(&metadata)
+            );
+        }
+        assert_eq!(core_request_metadata(0), None);
+        assert_eq!(core_request_metadata(128), None);
+    }
+
+    #[test]
+    fn core_request_metadata_tracks_the_exact_wp1_dispatch_subset() {
+        let dispatched: Vec<_> = CORE_REQUEST_METADATA
+            .iter()
+            .filter(|metadata| metadata.coverage == CoreRequestCoverage::Dispatched)
+            .map(|metadata| metadata.name)
+            .collect();
+        assert_eq!(
+            dispatched,
+            [
+                "CreateWindow",
+                "DestroyWindow",
+                "GetGeometry",
+                "QueryTree",
+                "InternAtom",
+                "GetAtomName",
+                "ChangeProperty",
+                "DeleteProperty",
+                "GetProperty",
+                "ListProperties",
+                "GetInputFocus",
+                "QueryExtension",
+                "ListExtensions",
+                "NoOperation",
+            ]
+        );
+    }
 }

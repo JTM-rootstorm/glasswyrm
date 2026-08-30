@@ -69,6 +69,28 @@ def parse_rust_dispatch() -> set[str]:
     return set(re.findall(r"CoreOpcode::(\w+) as u8", source))
 
 
+def parse_rust_core_metadata() -> dict[str, str]:
+    source = text("crates/glasswyrm-x11/src/core.rs")
+    match = re.search(
+        r"pub const CORE_REQUEST_METADATA:.*?=\s*\[(.*?)\n\];",
+        source,
+        re.S,
+    )
+    if match is None:
+        raise RuntimeError("CORE_REQUEST_METADATA table not found")
+    rows = re.findall(
+        r"core_request!\((Decoded|Dispatched),\s*(\w+)\)",
+        match.group(1),
+    )
+    metadata = {name: coverage for coverage, name in rows}
+    if len(metadata) != len(rows):
+        raise RuntimeError("duplicate Rust core-request metadata row")
+    opcode_names = [name for name, _ in parse_core_opcodes()]
+    if [name for _, name in rows] != opcode_names:
+        raise RuntimeError("Rust core-request metadata does not match CoreOpcode order")
+    return metadata
+
+
 
 def parse_rust_extensions() -> dict[str, dict[str, object]]:
     source = text("crates/glasswyrm-x11/src/extension.rs")
@@ -213,9 +235,110 @@ def request_rust_decoder_file(name: str) -> str | None:
         "ConfigureWindow",
     }:
         return "crates/glasswyrm-x11/src/lifecycle_request.rs"
+    if name in {
+        "CreatePixmap", "FreePixmap", "CreateGc", "ChangeGc", "FreeGc",
+        "ClearArea", "CopyArea", "PolyLine", "PolySegment", "FillPoly",
+        "PolyFillRectangle", "PolyFillArc", "PutImage",
+    }:
+        return "crates/glasswyrm-x11/src/drawing_request.rs"
     if name == "NoOperation":
-        return "crates/glasswyrm-x11/src/dispatch.rs"
+        return "crates/glasswyrm-x11/src/decode.rs"
     return None
+
+
+def request_rust_decoder_function(name: str) -> str | None:
+    explicit = {
+        "CreateWindow": "decode_create_window",
+        "ChangeWindowAttributes": "decode_change_window_attributes",
+        "MapWindow": "decode_map_window",
+        "MapSubwindows": "decode_map_subwindows",
+        "UnmapWindow": "decode_unmap_window",
+        "UnmapSubwindows": "decode_unmap_subwindows",
+        "ConfigureWindow": "decode_configure_window",
+        "InternAtom": "decode_intern_atom",
+        "ChangeProperty": "decode_change_property",
+        "DeleteProperty": "decode_delete_property",
+        "GetProperty": "decode_get_property",
+        "SetSelectionOwner": "decode_set_selection_owner",
+        "GetSelectionOwner": "decode_get_selection_owner",
+        "ConvertSelection": "decode_convert_selection",
+        "SendEvent": "decode_send_event_header",
+        "GrabPointer": "decode_grab_pointer",
+        "UngrabPointer": "decode_ungrab_pointer",
+        "GrabButton": "decode_grab_button",
+        "ChangeActivePointerGrab": "decode_change_active_pointer_grab",
+        "GrabKeyboard": "decode_grab_keyboard",
+        "UngrabKeyboard": "decode_ungrab_keyboard",
+        "AllowEvents": "decode_allow_events",
+        "QueryPointer": "decode_query_pointer",
+        "TranslateCoordinates": "decode_translate_coordinates",
+        "WarpPointer": "decode_warp_pointer",
+        "SetInputFocus": "decode_set_input_focus",
+        "QueryKeymap": "decode_query_keymap",
+        "OpenFont": "decode_open_font",
+        "QueryTextExtents": "decode_query_text_extents",
+        "ListFonts": "decode_list_fonts",
+        "CreatePixmap": "decode_create_pixmap",
+        "CreateGc": "decode_create_gc",
+        "ChangeGc": "decode_change_gc",
+        "ClearArea": "decode_clear_area",
+        "CopyArea": "decode_copy_area",
+        "PolyLine": "decode_poly_line",
+        "PolySegment": "decode_poly_segment",
+        "FillPoly": "decode_fill_poly",
+        "PolyFillRectangle": "decode_poly_fill_rectangle",
+        "PolyFillArc": "decode_poly_fill_arc",
+        "PutImage": "decode_put_image",
+        "PolyText8": "decode_poly_text8",
+        "ImageText8": "decode_image_text8",
+        "CreateColormap": "decode_create_colormap",
+        "AllocColor": "decode_alloc_color",
+        "AllocNamedColor": "decode_named_color",
+        "FreeColors": "decode_free_colors",
+        "QueryColors": "decode_query_colors",
+        "LookupColor": "decode_named_color",
+        "CreateCursor": "decode_create_cursor",
+        "CreateGlyphCursor": "decode_create_glyph_cursor",
+        "RecolorCursor": "decode_recolor_cursor",
+        "QueryBestSize": "decode_query_best_size",
+        "QueryExtension": "decode_query_extension",
+        "GetKeyboardMapping": "decode_get_keyboard_mapping",
+        "ChangeKeyboardControl": "decode_change_keyboard_control",
+        "GetKeyboardControl": "decode_get_keyboard_control",
+        "Bell": "decode_bell",
+        "ForceScreenSaver": "decode_force_screen_saver",
+        "GetPointerMapping": "decode_get_pointer_mapping",
+        "GetModifierMapping": "decode_get_modifier_mapping",
+    }
+    if name in explicit:
+        return explicit[name]
+    if name in {
+        "GetWindowAttributes", "DestroyWindow", "GetGeometry", "QueryTree",
+        "GetAtomName", "ListProperties",
+    }:
+        return "decode_single_u32_request"
+    if name in {"GetInputFocus", "ListExtensions", "NoOperation"}:
+        return "decode_empty_request"
+    if name in {"CloseFont", "QueryFont"}:
+        return "decode_fontable_id"
+    if name in {"FreePixmap"}:
+        return "decode_pixmap_id"
+    if name in {"FreeGc"}:
+        return "decode_gc_id"
+    if name in {
+        "FreeColormap", "InstallColormap", "UninstallColormap",
+        "ListInstalledColormaps",
+    }:
+        return "decode_colormap_id"
+    if name == "FreeCursor":
+        return "decode_cursor_id"
+    return None
+
+
+def rust_decoder_is_defined(path: str | None, function: str | None) -> bool:
+    if path is None or function is None:
+        return False
+    return re.search(rf"^pub fn {re.escape(function)}(?:<|\()", text(path), re.M) is not None
 
 def request_legacy_file(name: str) -> str:
     groups = [
@@ -311,18 +434,30 @@ def phase_for_test(path: str) -> str:
 
 def build_inventory() -> dict[str, object]:
     legacy_dispatch = parse_legacy_dispatch()
-    rust_dispatch = parse_rust_dispatch()
+    rust_metadata = parse_rust_core_metadata()
+    rust_dispatch = {
+        name for name, coverage in rust_metadata.items() if coverage == "Dispatched"
+    }
+    source_dispatch = parse_rust_dispatch()
+    if source_dispatch != rust_dispatch:
+        raise RuntimeError(
+            "Rust core dispatch metadata drift: "
+            f"metadata={sorted(rust_dispatch)} source={sorted(source_dispatch)}"
+        )
     core = []
     for name, opcode in parse_core_opcodes():
         rust_present = name in rust_dispatch
         rust_decoder = request_rust_decoder_file(name)
+        rust_decoder_function = request_rust_decoder_function(name)
+        rust_decoder_present = rust_decoder_is_defined(rust_decoder, rust_decoder_function)
         core.append({
             "name": name,
             "opcode": opcode,
             "legacy_handler": legacy_dispatch.get(name),
             "legacy_implementation": request_legacy_file(name),
-            "rust_decoder_present": rust_decoder is not None,
+            "rust_decoder_present": rust_decoder_present,
             "rust_decoder_implementation": rust_decoder,
+            "rust_decoder_function": rust_decoder_function,
             "rust_dispatch_present": rust_present,
             "rust_implementation": "crates/glasswyrm-x11/src/dispatch.rs" if rust_present else None,
             "fixture_profiles": request_fixture_profiles(name),
@@ -487,9 +622,25 @@ def build_inventory() -> dict[str, object]:
         "tests/manifest/foundation/wm/meson.build",
         "tests/manifest/graphics/headless/meson.build",
     ]
+    authority_paths = sorted(set([
+        "scripts/generate-rust-transition-inventory.py",
+        *files_under(["crates/glasswyrm-x11/src", "crates/glasswyrmd/src"]),
+        *legacy_sources,
+        *server_tests,
+        *fixture_paths,
+        *vocabulary_docs,
+        *selector_sources,
+        "src/glasswyrmd/extension_registry.hpp",
+        "src/glasswyrmd/resource_id.hpp",
+        "tests/unit/resource_id_test.cpp",
+    ]))
     return {
-        "schema": "glasswyrm-rust-transition-wp0-inventory-v2",
-        "authority_revision": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip(),
+        "schema": "glasswyrm-rust-transition-wp0-inventory-v3",
+        "authority": {
+            "kind": "declared-input-closure-v1",
+            "file_count": len(authority_paths),
+            "tree_sha256": tree_sha256(authority_paths),
+        },
         "core_requests": core,
         "extensions": parse_extensions(),
         "mixed_stack_profiles": mixed_profiles,
@@ -535,6 +686,16 @@ def validate_inventory(inventory: dict[str, object]) -> None:
         "x11_client_byte_stream", "gwipc_record", "linux_fd_transport", "shared_buffer_object"
     }:
         raise RuntimeError("semantic transport boundary inventory is incomplete")
+    core = inventory["core_requests"]
+    if len(core) != 79 or not all(item["rust_decoder_present"] for item in core):
+        raise RuntimeError("WP1 requires decoder coverage for all 79 supported core requests")
+    if sum(bool(item["rust_dispatch_present"]) for item in core) != 14:
+        raise RuntimeError("WP1 dispatch metadata must retain the exact 14-request subset")
+    authority = inventory.get("authority")
+    if not isinstance(authority, dict) or authority.get("kind") != "declared-input-closure-v1":
+        raise RuntimeError("inventory authority must use the declared input closure")
+    if not authority.get("file_count") or not authority.get("tree_sha256"):
+        raise RuntimeError("inventory authority closure is incomplete")
 
 
 def main() -> int:

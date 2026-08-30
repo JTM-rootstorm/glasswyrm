@@ -1,6 +1,6 @@
-use crate::ResourceBaseLease;
 use crate::request_loop::{RequestWorkBudget, ServerState};
 use crate::session::{ClientSession, SetupProgress};
+use crate::{ResourceBaseLease, StopCheck};
 use std::io::Read;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -8,22 +8,30 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
 pub(crate) fn serve(
     mut stream: UnixStream,
     identifier: u64,
     resource_base: ResourceBaseLease,
     setup_timeout: Duration,
     server_state: Arc<Mutex<ServerState>>,
+    stop: StopCheck,
 ) {
     let mut session = ClientSession::new(identifier, resource_base.base(), server_state);
     let mut input = [0_u8; 4096];
     let setup_deadline = SetupDeadline::new(Instant::now(), setup_timeout);
     while session.is_setup() {
+        if stop() {
+            session.close_now();
+            return;
+        }
         let Some(remaining) = setup_deadline.remaining(Instant::now()) else {
             eprintln!("glasswyrmd: client {identifier}: X11 setup timed out");
             return;
         };
-        if let Err(error) = stream.set_read_timeout(Some(remaining)) {
+        if let Err(error) = stream.set_read_timeout(Some(remaining.min(CANCELLATION_POLL_INTERVAL)))
+        {
             eprintln!(
                 "glasswyrmd: client {identifier}: could not configure setup deadline: {error}"
             );
@@ -37,8 +45,7 @@ pub(crate) fn serve(
                 if error.kind() == std::io::ErrorKind::TimedOut
                     || error.kind() == std::io::ErrorKind::WouldBlock =>
             {
-                eprintln!("glasswyrmd: client {identifier}: X11 setup timed out");
-                return;
+                continue;
             }
             Err(error) => {
                 eprintln!("glasswyrmd: client {identifier}: setup read failed: {error}");
@@ -86,7 +93,7 @@ pub(crate) fn serve(
         eprintln!("glasswyrmd: client {identifier}: could not clear setup deadline: {error}");
         return;
     }
-    serve_established(&mut stream, identifier, &mut session);
+    serve_established(&mut stream, identifier, &mut session, &stop);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -107,13 +114,22 @@ impl SetupDeadline {
     }
 }
 
-fn serve_established(stream: &mut UnixStream, identifier: u64, session: &mut ClientSession) {
+fn serve_established(
+    stream: &mut UnixStream,
+    identifier: u64,
+    session: &mut ClientSession,
+    stop: &StopCheck,
+) {
     if let Err(error) = stream.set_nonblocking(true) {
         eprintln!("glasswyrmd: client {identifier}: nonblocking setup failed: {error}");
         return;
     }
 
     while !session.is_closed() {
+        if stop() {
+            session.close_now();
+            break;
+        }
         let mut progressed = false;
         let mut budget = RequestWorkBudget::default();
         progressed |= session.process_pending(&mut budget) != 0;

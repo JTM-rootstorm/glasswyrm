@@ -1,4 +1,4 @@
-use crate::{ByteOrder, CORE_REQUEST_HEADER_SIZE, CoreOpcode, FramedRequest};
+use crate::{ByteOrder, CoreOpcode, FramedRequest};
 
 pub const CONFIGURE_X: u16 = 1 << 0;
 pub const CONFIGURE_Y: u16 = 1 << 1;
@@ -91,9 +91,7 @@ fn decode_window(
     order: ByteOrder,
     expected_opcode: CoreOpcode,
 ) -> Result<WindowLifecycleRequest, LifecycleDecodeStatus> {
-    if request.header_size != CORE_REQUEST_HEADER_SIZE
-        || request.opcode != expected_opcode as u8
-        || request.length_units != 2
+    if request.opcode != expected_opcode as u8
         || request.core_size() != 8
         || request.body().len() != 4
     {
@@ -108,8 +106,7 @@ pub fn decode_configure_window(
     request: &FramedRequest,
     order: ByteOrder,
 ) -> Result<ConfigureWindowRequest, LifecycleDecodeStatus> {
-    if request.header_size != CORE_REQUEST_HEADER_SIZE
-        || request.opcode != CoreOpcode::ConfigureWindow as u8
+    if request.opcode != CoreOpcode::ConfigureWindow as u8
         || request.core_size() < 12
         || request.body().len() < 8
     {
@@ -129,10 +126,7 @@ pub fn decode_configure_window(
         .ok()
         .and_then(|units| units.checked_mul(4))
         .ok_or(LifecycleDecodeStatus::BadLength)?;
-    if request.length_units != expected_units
-        || request.core_size() != expected_size
-        || body.len() != 8 + value_count * 4
-    {
+    if request.core_size() != expected_size || body.len() != 8 + value_count * 4 {
         return Err(LifecycleDecodeStatus::BadLength);
     }
 
@@ -236,6 +230,20 @@ mod tests {
         }
     }
 
+    fn as_big_request(order: ByteOrder, request: &FramedRequest) -> FramedRequest {
+        let mut bytes = request.bytes[..2].to_vec();
+        bytes.extend_from_slice(&[0, 0]);
+        bytes.extend_from_slice(&order.u32_bytes(request.length_units + 1));
+        bytes.extend_from_slice(request.body());
+        FramedRequest {
+            opcode: request.opcode,
+            data: request.data,
+            length_units: request.length_units + 1,
+            header_size: 8,
+            bytes,
+        }
+    }
+
     #[test]
     fn simple_lifecycle_requests_match_legacy_decoder() {
         for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {
@@ -280,6 +288,25 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_decoders_accept_big_requests_normalized_to_the_core_shape() {
+        for order in [ByteOrder::LittleEndian, ByteOrder::BigEndian] {
+            let simple = simple(order, CoreOpcode::MapWindow, 0x1234_5678);
+            assert_eq!(
+                decode_map_window(&as_big_request(order, &simple), order),
+                Ok(WindowLifecycleRequest {
+                    window: 0x1234_5678
+                })
+            );
+
+            let configure = configure(order, CONFIGURE_X | CONFIGURE_Y, &[7, 9]);
+            assert_eq!(
+                decode_configure_window(&as_big_request(order, &configure), order),
+                decode_configure_window(&configure, order)
+            );
+        }
+    }
+
+    #[test]
     fn configure_window_matches_legacy_order_and_negative_matrix() {
         let mask = CONFIGURE_X
             | CONFIGURE_Y
@@ -315,6 +342,13 @@ mod tests {
         assert_eq!(
             decode_configure_window(&configure(order, CONFIGURE_STACK_MODE, &[5]), order),
             Err(LifecycleDecodeStatus::BadValue)
+        );
+        let mut wrong_opcode = configure(order, CONFIGURE_WIDTH, &[640]);
+        wrong_opcode.opcode = CoreOpcode::MapWindow as u8;
+        wrong_opcode.bytes[0] = CoreOpcode::MapWindow as u8;
+        assert_eq!(
+            decode_configure_window(&wrong_opcode, order),
+            Err(LifecycleDecodeStatus::BadLength)
         );
         assert_eq!(
             decode_configure_window(

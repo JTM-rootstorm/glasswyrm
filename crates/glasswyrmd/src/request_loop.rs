@@ -11,11 +11,11 @@ use glasswyrm_core::window::{
 use glasswyrm_x11::{
     ByteOrder, CoreClient, CoreDispatchAction, CoreDispatchState, CoreError, CoreErrorCode,
     ExtensionAssignment, ExtensionDescriptor, ExtensionRegistry, InitialCoreDispatch,
-    InternAtomOutcome, PropertyChangeRequest, PropertyData as X11PropertyData, PropertyMode,
-    PropertyMutationOutcome, PropertyReadOutcome, PropertyReadReply, PropertyReadRequest,
-    RequestFrameStatus, RequestFramer, SCREEN_MODEL, WindowCreateOutcome, WindowCreateRequest,
-    WindowDestroyOutcome, WindowGeometryReply, WindowTreeReply, dispatch_core_request_for_client,
-    encode_core_error,
+    InternAtomOutcome, MAXIMUM_BIG_REQUEST_SIZE, PropertyChangeRequest,
+    PropertyData as X11PropertyData, PropertyMode, PropertyMutationOutcome, PropertyReadOutcome,
+    PropertyReadReply, PropertyReadRequest, RequestFrameStatus, RequestFramer, SCREEN_MODEL,
+    WindowCreateOutcome, WindowCreateRequest, WindowDestroyOutcome, WindowGeometryReply,
+    WindowTreeReply, dispatch_core_request_for_client, encode_core_error,
 };
 use std::collections::VecDeque;
 use std::io::{self, Write};
@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) const MAXIMUM_REQUESTS_PER_TURN: usize = 64;
 pub(crate) const MAXIMUM_REQUEST_BYTES_PER_TURN: usize = 256 * 1024;
+pub(crate) const MAXIMUM_PENDING_INPUT: usize = MAXIMUM_REQUEST_BYTES_PER_TURN * 4;
 pub(crate) const MAXIMUM_QUEUED_OUTPUT: usize = 1024 * 1024;
 
 #[derive(Debug)]
@@ -265,11 +266,15 @@ pub(crate) struct RequestWorkBudget {
 }
 
 impl RequestWorkBudget {
+    /// Returns whether another request may begin in this scheduling turn.
+    /// One already-framed request may cross the byte target atomically, but it
+    /// remains bounded by the advertised 16 MiB BIG-REQUESTS maximum.
     pub(crate) fn available(&self) -> bool {
         self.requests < MAXIMUM_REQUESTS_PER_TURN && self.bytes < MAXIMUM_REQUEST_BYTES_PER_TURN
     }
 
     fn record(&mut self, bytes: usize) {
+        debug_assert!(bytes <= MAXIMUM_BIG_REQUEST_SIZE);
         self.requests += 1;
         self.bytes += bytes;
     }
@@ -296,7 +301,10 @@ struct OutputQueue {
 
 impl OutputQueue {
     fn enqueue(&mut self, bytes: Vec<u8>) -> bool {
-        if bytes.len() > MAXIMUM_QUEUED_OUTPUT - self.queued_bytes {
+        let Some(remaining) = MAXIMUM_QUEUED_OUTPUT.checked_sub(self.queued_bytes) else {
+            return false;
+        };
+        if bytes.len() > remaining {
             return false;
         }
         self.queued_bytes += bytes.len();
@@ -412,6 +420,14 @@ impl RequestLoop {
 
     pub(crate) fn feed(&mut self, input: &[u8], budget: &mut RequestWorkBudget) -> usize {
         if !self.accepts_input() {
+            return 0;
+        }
+        let Some(pending_size) = self.pending_input.len().checked_add(input.len()) else {
+            self.close_now();
+            return 0;
+        };
+        if pending_size > MAXIMUM_PENDING_INPUT {
+            self.close_now();
             return 0;
         }
         self.pending_input.extend_from_slice(input);
@@ -802,6 +818,72 @@ mod tests {
         assert_eq!(loop_.feed(&large, &mut bytes), 2);
         assert_eq!(bytes.bytes, MAXIMUM_REQUEST_BYTES_PER_TURN);
         assert!(loop_.has_pending_input());
+    }
+
+    #[test]
+    fn direct_input_chunks_are_bounded_before_they_are_copied() {
+        let mut exact = session(ByteOrder::LittleEndian);
+        let mut maximum = Vec::with_capacity(MAXIMUM_PENDING_INPUT);
+        while maximum.len() < MAXIMUM_PENDING_INPUT {
+            maximum.extend_from_slice(&request(
+                ByteOrder::LittleEndian,
+                CoreOpcode::NoOperation as u8,
+                1,
+            ));
+        }
+        let mut first_budget = RequestWorkBudget::default();
+        assert_eq!(
+            exact.feed(&maximum, &mut first_budget),
+            MAXIMUM_REQUESTS_PER_TURN
+        );
+        let first_pending = exact.pending_input.len();
+        assert!(first_pending < MAXIMUM_PENDING_INPUT);
+        assert!(exact.accepts_input());
+        assert_eq!(
+            exact.process_pending(&mut RequestWorkBudget::default()),
+            MAXIMUM_REQUESTS_PER_TURN
+        );
+        assert!(exact.pending_input.len() < first_pending);
+
+        let mut loop_ = session(ByteOrder::LittleEndian);
+        assert_eq!(
+            loop_.feed(
+                &vec![0; MAXIMUM_PENDING_INPUT + 1],
+                &mut RequestWorkBudget::default(),
+            ),
+            0
+        );
+        assert!(loop_.is_closed());
+        assert!(loop_.pending_input.is_empty());
+        assert!(loop_.output.is_empty());
+    }
+
+    #[test]
+    fn one_big_request_may_cross_the_turn_target_but_stays_protocol_bounded() {
+        let order = ByteOrder::LittleEndian;
+        let state = ServerState {
+            extensions: ExtensionRegistry::new(ExtensionProfiles::GAME_COMPAT),
+            ..ServerState::default()
+        };
+        let mut loop_ =
+            RequestLoop::new(order, u16::MAX, 1, Vec::new(), Arc::new(Mutex::new(state)));
+        assert_eq!(
+            loop_.feed(&request(order, 128, 1), &mut RequestWorkBudget::default()),
+            1
+        );
+
+        let units = u32::try_from(MAXIMUM_BIG_REQUEST_SIZE / 4).unwrap();
+        let request = big_request(order, CoreOpcode::NoOperation as u8, units);
+        let mut budget = RequestWorkBudget::default();
+        let mut completed = 0;
+        for chunk in request.chunks(4096) {
+            completed += loop_.feed(chunk, &mut budget);
+        }
+        assert_eq!(completed, 1);
+        assert_eq!(budget.requests, 1);
+        assert_eq!(budget.bytes, MAXIMUM_BIG_REQUEST_SIZE);
+        assert!(!budget.available());
+        assert!(loop_.accepts_input());
     }
 
     #[test]

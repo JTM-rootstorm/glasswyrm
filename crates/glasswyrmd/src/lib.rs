@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::io;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 pub use options::Options;
@@ -24,8 +25,11 @@ const MAXIMUM_ACTIVE_CLIENTS: usize = 128;
 const MAXIMUM_ACCEPTS_PER_TURN: usize = 64;
 const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 
+pub(crate) type StopCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
 pub fn run(options: Options) -> io::Result<()> {
     signals::install()?;
+    let stop: StopCheck = Arc::new(signals::stop_requested);
     let socket_path = options.socket_path();
     let listener = OwnedListener::bind(&socket_path)?;
     eprintln!("glasswyrmd: listening on {}", socket_path.display());
@@ -33,8 +37,13 @@ pub fn run(options: Options) -> io::Result<()> {
     let resource_bases = Arc::new(Mutex::new(HashSet::new()));
     let server_state = Arc::new(Mutex::new(ServerState::default()));
     let mut next_client_identifier = 1_u64;
-    while !signals::stop_requested() {
+    let mut workers = Vec::new();
+    while !stop() {
+        reap_finished_workers(&mut workers);
         for _ in 0..MAXIMUM_ACCEPTS_PER_TURN {
+            if stop() {
+                break;
+            }
             match listener.accept() {
                 Ok(Some(stream)) => {
                     let identifier = next_client_identifier;
@@ -46,8 +55,10 @@ pub fn run(options: Options) -> io::Result<()> {
                         Arc::clone(&server_state),
                         MAXIMUM_ACTIVE_CLIENTS,
                         SETUP_TIMEOUT,
+                        Arc::clone(&stop),
                     ) {
-                        Ok(()) => {
+                        Ok(worker) => {
+                            workers.push(worker);
                             eprintln!("glasswyrmd: accepted client {identifier}");
                         }
                         Err(ClientStartError::ClientLimit) => {
@@ -73,7 +84,30 @@ pub fn run(options: Options) -> io::Result<()> {
         thread::sleep(Duration::from_millis(1));
     }
     drop(listener);
+    join_workers(workers);
     Ok(())
+}
+
+fn reap_finished_workers(workers: &mut Vec<JoinHandle<()>>) {
+    let mut index = 0;
+    while index < workers.len() {
+        if workers[index].is_finished() {
+            let worker = workers.swap_remove(index);
+            if worker.join().is_err() {
+                eprintln!("glasswyrmd: client worker panicked");
+            }
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn join_workers(workers: Vec<JoinHandle<()>>) {
+    for worker in workers {
+        if worker.join().is_err() {
+            eprintln!("glasswyrmd: client worker panicked during shutdown");
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -90,7 +124,8 @@ fn start_client(
     server_state: Arc<Mutex<ServerState>>,
     maximum_active_clients: usize,
     setup_timeout: Duration,
-) -> Result<(), ClientStartError> {
+    stop: StopCheck,
+) -> Result<JoinHandle<()>, ClientStartError> {
     let lease =
         ResourceBaseLease::allocate(resource_bases, maximum_active_clients).map_err(|error| {
             match error {
@@ -102,8 +137,7 @@ fn start_client(
         })?;
     thread::Builder::new()
         .name(format!("glasswyrmd-client-{identifier}"))
-        .spawn(move || client::serve(stream, identifier, lease, setup_timeout, server_state))
-        .map(|_| ())
+        .spawn(move || client::serve(stream, identifier, lease, setup_timeout, server_state, stop))
         .map_err(ClientStartError::Worker)
 }
 
@@ -153,8 +187,9 @@ impl Drop for ResourceBaseLease {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     fn wait_for_active_clients(in_use: &Mutex<HashSet<ResourceBase>>, expected: usize) {
@@ -177,6 +212,10 @@ mod tests {
 
     fn server_state() -> Arc<Mutex<ServerState>> {
         Arc::new(Mutex::new(ServerState::default()))
+    }
+
+    fn never_stop() -> StopCheck {
+        Arc::new(|| false)
     }
 
     #[test]
@@ -210,13 +249,14 @@ mod tests {
     fn stalled_setup_client_cannot_exceed_limit_or_stop_later_admission() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
         let (first_server, first_client) = UnixStream::pair().unwrap();
-        start_client(
+        let first_worker = start_client(
             first_server,
             1,
             Arc::clone(&in_use),
             server_state(),
             1,
             SETUP_TIMEOUT,
+            never_stop(),
         )
         .unwrap();
         wait_for_active_clients(&in_use, 1);
@@ -230,6 +270,7 @@ mod tests {
                 server_state(),
                 1,
                 SETUP_TIMEOUT,
+                never_stop(),
             ),
             Err(ClientStartError::ClientLimit)
         ));
@@ -251,50 +292,138 @@ mod tests {
 
         drop(first_client);
         wait_for_active_clients(&in_use, 0);
+        first_worker.join().unwrap();
 
         let (third_server, third_client) = UnixStream::pair().unwrap();
-        start_client(
+        let third_worker = start_client(
             third_server,
             3,
             Arc::clone(&in_use),
             server_state(),
             1,
             SETUP_TIMEOUT,
+            never_stop(),
         )
         .unwrap();
         wait_for_active_clients(&in_use, 1);
         drop(third_client);
         wait_for_active_clients(&in_use, 0);
+        third_worker.join().unwrap();
     }
 
     #[test]
     fn stalled_setup_releases_its_slot_at_the_injected_deadline() {
         let in_use = Arc::new(Mutex::new(HashSet::new()));
         let (server, client) = UnixStream::pair().unwrap();
-        start_client(
+        let worker = start_client(
             server,
             1,
             Arc::clone(&in_use),
             server_state(),
             1,
             Duration::ZERO,
+            never_stop(),
         )
         .unwrap();
 
         wait_for_active_clients(&in_use, 0);
+        worker.join().unwrap();
         drop(client);
 
         let (replacement_server, replacement_client) = UnixStream::pair().unwrap();
-        start_client(
+        let replacement_worker = start_client(
             replacement_server,
             2,
             Arc::clone(&in_use),
             server_state(),
             1,
             Duration::ZERO,
+            never_stop(),
         )
         .unwrap();
         wait_for_active_clients(&in_use, 0);
+        replacement_worker.join().unwrap();
         drop(replacement_client);
+    }
+
+    #[test]
+    fn cancellation_closes_an_established_partial_request_and_releases_its_slot() {
+        let in_use = Arc::new(Mutex::new(HashSet::new()));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let stop: StopCheck = {
+            let stop_requested = Arc::clone(&stop_requested);
+            Arc::new(move || stop_requested.load(Ordering::Relaxed))
+        };
+        let (server, mut peer) = UnixStream::pair().unwrap();
+        let worker = start_client(
+            server,
+            7,
+            Arc::clone(&in_use),
+            server_state(),
+            1,
+            SETUP_TIMEOUT,
+            stop,
+        )
+        .unwrap();
+
+        let setup = [b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        peer.write_all(&setup).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let mut first_reply_byte = [0_u8; 1];
+        peer.read_exact(&mut first_reply_byte).unwrap();
+        assert_eq!(first_reply_byte[0], 1);
+        peer.write_all(&[43, 0]).unwrap();
+
+        stop_requested.store(true, Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !worker.is_finished() {
+            assert!(Instant::now() < deadline, "cancelled worker did not stop");
+            thread::sleep(Duration::from_millis(1));
+        }
+        worker.join().unwrap();
+        wait_for_active_clients(&in_use, 0);
+
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let mut remaining = Vec::new();
+        match peer.read_to_end(&mut remaining) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => {}
+            Err(error) => panic!("unexpected cancelled-peer read failure: {error}"),
+        }
+    }
+
+    #[test]
+    fn cancellation_interrupts_partial_setup_and_releases_its_slot() {
+        let in_use = Arc::new(Mutex::new(HashSet::new()));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        let stop: StopCheck = {
+            let stop_requested = Arc::clone(&stop_requested);
+            Arc::new(move || stop_requested.load(Ordering::Relaxed))
+        };
+        let (server, mut peer) = UnixStream::pair().unwrap();
+        let worker = start_client(
+            server,
+            8,
+            Arc::clone(&in_use),
+            server_state(),
+            1,
+            SETUP_TIMEOUT,
+            stop,
+        )
+        .unwrap();
+        peer.write_all(&[b'l', 0, 11]).unwrap();
+        wait_for_active_clients(&in_use, 1);
+
+        stop_requested.store(true, Ordering::Relaxed);
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !worker.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "setup-phase cancellation did not stop the worker"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        worker.join().unwrap();
+        wait_for_active_clients(&in_use, 0);
     }
 }
