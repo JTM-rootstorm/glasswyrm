@@ -762,10 +762,10 @@ if [[ $script == *'rust-transition-stage=complete'* ]]; then
   fi
   printf '%s\n' \
     'rust-transition-stage=toolchain' \
-    'rust-transition-tool-rustc=rustc 1.95.0 (test)' \
-    'rust-transition-tool-cargo=cargo 1.95.0 (test)' \
-    'rust-transition-tool-rustfmt=rustfmt 1.8.0-stable (test)' \
-    'rust-transition-tool-clippy=clippy 0.1.95 (test)' \
+    'rust-transition-tool-rustc=rustc 1.97.1 (test)' \
+    'rust-transition-tool-cargo=cargo 1.97.1 (test)' \
+    'rust-transition-tool-rustfmt=rustfmt 1.9.0-stable (test)' \
+    'rust-transition-tool-clippy=clippy 0.1.97 (test)' \
     'rust-transition-stage=fmt' \
     'rust-transition-stage=check' \
     'rust-transition-stage=test' \
@@ -1203,13 +1203,13 @@ assert_contains "$artifact_dir/rust-transition-software-test.json" \
   '"tested_commit": "86dab3c000000000000000000000000000000000"'
 assert_contains "$artifact_dir/rust-transition-software-test.json" '"timestamp_utc":'
 assert_contains "$artifact_dir/rust-transition-software-test.json" \
-  '"rustc": "rustc 1.95.0 (test)"'
+  '"rustc": "rustc 1.97.1 (test)"'
 assert_contains "$artifact_dir/rust-transition-software-test.json" \
-  '"cargo": "cargo 1.95.0 (test)"'
+  '"cargo": "cargo 1.97.1 (test)"'
 assert_contains "$artifact_dir/rust-transition-software-test.json" \
-  '"rustfmt": "rustfmt 1.8.0-stable (test)"'
+  '"rustfmt": "rustfmt 1.9.0-stable (test)"'
 assert_contains "$artifact_dir/rust-transition-software-test.json" \
-  '"clippy": "clippy 0.1.95 (test)"'
+  '"clippy": "clippy 0.1.97 (test)"'
 
 : >"$command_log"
 run_failure "$work_dir/rust-transition-dirty-source.out" \

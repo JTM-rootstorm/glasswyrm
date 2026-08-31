@@ -2,7 +2,7 @@
 name = "glasswyrm-core"
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97.1"
 license = "GPL-3.0-only"
 description = "Pure server state and resource policy for Glasswyrm"
 publish = false
@@ -11,4 +11,3 @@ publish = false
 
 [lib]
 path = "src/lib.rs"
-

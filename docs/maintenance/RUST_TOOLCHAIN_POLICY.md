@@ -1,18 +1,22 @@
 # Rust Toolchain Policy
 
-Status: WP0C accepted policy
-Date: 2026-08-20
+Status: active policy; WP0C baseline superseded by the 1.97.1 repin
+Date: 2026-08-30
 
-Glasswyrm Rust crates use edition 2024 and declare an MSRV of Rust 1.95.
-`rust-toolchain.toml` is tracked and pins `1.95.0` with the minimal profile,
-Clippy, and rustfmt. That tracked file is the reproducible project toolchain
-identity; do not replace it with an unrecorded host-default compiler.
+Glasswyrm Rust crates use edition 2024 and declare an exact minimum of Rust
+1.97.1. `rust-toolchain.toml` is tracked and pins `1.97.1` with the minimal
+profile, Clippy, and rustfmt. That tracked file is the portable project
+toolchain identity; do not replace it with an unrecorded host-default compiler.
 
-The Gentoo development host used for WP0C currently provides system
-`rustc 1.96.1` without rustup. It satisfies the declared MSRV and is acceptable
-for ordinary development and compatibility validation, but a successful build
-with 1.96.1 is not evidence that the exact 1.95.0 pin was executed. Acceptance
-records must state both the tracked pin and the active compiler.
+The canonical host toolchain for this pin is the installed Gentoo
+`rust-bin-1.97.1` tree at `/opt/rust-bin-1.97.1`. Exact-pin validation invokes
+its `cargo`, `rustc`, `rustfmt`, and `clippy-driver` binaries and records their
+reported identities. A successful build with another host-default or compatible
+compiler is not evidence that the exact 1.97.1 pin was executed.
+
+The original WP0C smoke used system `rustc 1.96.1` while the tracked project
+pin was 1.95.0. That result remains historical evidence for its exact revision;
+it does not establish the current 1.97.1 toolchain gate.
 
 Cargo transition/package checks use `--locked --offline`. At the WP0C smoke
 revision, `Cargo.lock` contains no external `source =` entries, so the current
@@ -21,7 +25,8 @@ network or registry fetch during the smoke. If a registry, git, build-script,
 or proc-macro dependency is added later, the package policy must explicitly
 pin and vendor/cache it before the offline gate can remain accepted.
 
-Gentoo packaging may use the distribution Rust toolchain when it satisfies the
-MSRV, but it must preserve the tracked toolchain identity in provenance and
-must not silently lower the minimum or advance language assumptions beyond the
-pin. Final ebuild dependency/version policy is a WP7 packaging decision.
+Gentoo packaging may use the distribution Rust toolchain only when it satisfies
+the 1.97.1 minimum, but it must preserve the tracked toolchain identity in
+provenance and must not silently lower the minimum or advance language
+assumptions beyond the pin. Final ebuild dependency/version policy is a WP7
+packaging decision.

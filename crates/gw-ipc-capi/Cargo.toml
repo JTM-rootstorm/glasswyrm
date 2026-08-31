@@ -2,7 +2,7 @@
 name = "gw-ipc-capi"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.97.1"
 license = "GPL-3.0-only"
 description = "Temporary bounded C ABI bridge for the Rust GWIPC migration"
 
