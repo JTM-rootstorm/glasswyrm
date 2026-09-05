@@ -2,7 +2,9 @@ use gw_wire::*;
 
 fn hex(text: &str) -> Vec<u8> {
     text.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|digits| {
             let high = (digits[0] as char).to_digit(16).unwrap() as u8;
             let low = (digits[1] as char).to_digit(16).unwrap() as u8;

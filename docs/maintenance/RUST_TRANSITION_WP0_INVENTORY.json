@@ -2,11 +2,11 @@
   "authority": {
     "file_count": 556,
     "kind": "declared-input-closure-v1",
-    "tree_sha256": "7bdc94fa9c8cc08a2a7c77a6aab42d252873ade92ab5c396cc5338f354f00c73"
+    "tree_sha256": "ea22780c4c6236fc839a569a872fbc32d56ff528de63c3586523e970d52d7afa"
   },
   "canonical_metadata_sha256": {
     "crates/glasswyrm-x11/src/core.rs": "0c142b526c0e551388ceafa2ce50bfc08eb23a75070d648dd15983cc1dcac288",
-    "crates/glasswyrm-x11/src/dispatch.rs": "0a8eea76bb608bdc198276f4e8a0eac21874101dbcf24cf5640f2803e3426a1d",
+    "crates/glasswyrm-x11/src/dispatch.rs": "ce966123d49595322cdf3e69563f489611776f4259101b5e11383e21c04d27bc",
     "crates/glasswyrm-x11/src/extension.rs": "a2deb06bc4b90f3d310cf7c1984027f9c5ea64797063775b6393180c27ac390f",
     "crates/glasswyrm-x11/src/lifecycle_request.rs": "a5f15abafd928699f1c64fb54382f75d6f42528efe6a3a6ba94fe1a6c6d9b997",
     "src/glasswyrmd/extension_registry.hpp": "ec70a08c9d2644ca05466ebbd45a05454723a28e968a9433d61b02b9ffe547cb",

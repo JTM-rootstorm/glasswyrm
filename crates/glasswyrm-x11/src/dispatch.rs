@@ -536,7 +536,9 @@ fn decode_property_data(
             values.try_reserve_exact(count).ok()?;
             values.extend(
                 bytes
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|value| order.read_u16([value[0], value[1]])),
             );
             Some(PropertyData::U16(values))
@@ -546,7 +548,9 @@ fn decode_property_data(
             values.try_reserve_exact(count).ok()?;
             values.extend(
                 bytes
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|value| order.read_u32([value[0], value[1], value[2], value[3]])),
             );
             Some(PropertyData::U32(values))

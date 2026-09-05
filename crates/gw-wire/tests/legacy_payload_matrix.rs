@@ -37,7 +37,9 @@ fn read_hex(file: &str) -> Vec<u8> {
     let text = fs::read_to_string(fixture_root().join(file)).unwrap();
     let hex = text.strip_suffix('\n').unwrap_or(&text).as_bytes();
     assert!(!hex.is_empty() && hex.len().is_multiple_of(2));
-    hex.chunks_exact(2)
+    hex.as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let digit = |byte| match byte {
                 b'0'..=b'9' => byte - b'0',

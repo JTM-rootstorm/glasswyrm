@@ -192,7 +192,7 @@ pub fn validate_query_text_extents_text(
     }
     let characters = bytes.len() / 2 - usize::from(request_data != 0);
     let text_size = characters * 2;
-    for pair in bytes[..text_size].chunks_exact(2) {
+    for pair in bytes[..text_size].as_chunks::<2>().0 {
         if pair[0] != 0 {
             return Err(error(CoreErrorCode::BadImplementation, 0));
         }

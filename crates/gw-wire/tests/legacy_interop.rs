@@ -22,7 +22,9 @@ fn fixture(name: &str) -> Vec<u8> {
     };
     let hex = text.trim().as_bytes();
     assert!(hex.len().is_multiple_of(2));
-    hex.chunks_exact(2)
+    hex.as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| {
             let digit = |byte: u8| match byte {
                 b'0'..=b'9' => byte - b'0',
