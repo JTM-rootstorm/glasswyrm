@@ -1,8 +1,8 @@
 # Glasswyrm Agent Instructions
 
-The workspace `../AGENTS.md` applies and owns coordination, authorization,
+The workspace `../CLAUDE.md` applies and owns coordination, authorization,
 external/VM effects, Git/commit/push policy, licensing, and security-review
-model selection. This file adds only Glasswyrm technical doctrine.
+recording. This file adds only Glasswyrm technical doctrine.
 
 Glasswyrm is a from-scratch, local-first X11-compatible display stack for
 Gentoo Linux on x86_64. It is not a fork of Xorg, XLibre, Xwayland, wlroots,
@@ -161,5 +161,5 @@ ownership, and compatibility claims remain accurate; docs match changed
 contracts/workflows; unrelated formatting/user changes are excluded; and physical claims
 come only from explicitly authorized physical evidence.
 
-Git/commit/branch/push workflow comes exclusively from the root `AGENTS.md`;
+Git/commit/branch/push workflow comes exclusively from the root `CLAUDE.md`;
 this file does not override it.
